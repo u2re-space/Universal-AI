@@ -13,6 +13,10 @@ export function isProtectedFileName(name) {
   return PROTECTED_FILES.test(name);
 }
 
+export function isForbiddenDirName(name) {
+  return FORBIDDEN_DIRS.test(name);
+}
+
 export function toPosix(relative) {
   return relative.split(path.sep).join('/');
 }

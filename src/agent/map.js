@@ -4,7 +4,7 @@
  */
 import path from 'node:path';
 import { readdir, readFile, writeFile, mkdir, stat, open } from 'node:fs/promises';
-import { NOISY_DIRS, isProtectedFileName } from './paths.js';
+import { NOISY_DIRS, isProtectedFileName, isForbiddenDirName } from './paths.js';
 
 const TEXT_CACHE_BYTES = 32 * 1024 * 1024;
 const MAX_INDEX_BYTES = 1024 * 1024;
@@ -39,6 +39,10 @@ const RS_SYMBOLS = [
 const cache = new Map();
 /** @type {WeakMap<object, { lru: Map<string, { text: string, bytes: number }>, bytes: number }>} */
 const textCaches = new WeakMap();
+/** @type {WeakMap<object, Map<string, unknown[]>>} */
+const importSpecsByEntry = new WeakMap();
+/** @type {WeakMap<object, string>} */
+const rootsByEntry = new WeakMap();
 
 export function projectMapFile(root) {
   return path.join(root, '.ai', 'map.json');
@@ -166,11 +170,20 @@ async function hasNulByte(abs, size) {
   }
 }
 
+function isSkippedDir(name) {
+  return name === '.ai' || NOISY_DIRS.test(name) || isForbiddenDirName(name);
+}
+
+function mayHaveImports(rel) {
+  const ext = path.posix.extname(rel).toLowerCase();
+  return JS_EXTS.has(ext) || ext === '.py';
+}
+
 function skippedRel(rel) {
   const segments = rel.split('/');
   const name = segments.at(-1);
   if (!name || isProtectedFileName(name)) return true;
-  return segments.slice(0, -1).some((segment) => segment === '.ai' || NOISY_DIRS.test(segment));
+  return segments.slice(0, -1).some((segment) => isSkippedDir(segment));
 }
 
 async function indexFile(root, rel) {
@@ -199,7 +212,7 @@ async function walk(root, dirRel, collected) {
   entries.sort((a, b) => a.name.localeCompare(b.name));
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      if (entry.name === '.ai' || NOISY_DIRS.test(entry.name)) continue;
+      if (isSkippedDir(entry.name)) continue;
       const child = dirRel ? `${dirRel}/${entry.name}` : entry.name;
       try {
         await walk(root, child, collected);
@@ -265,7 +278,7 @@ async function readCachedText(root, entry, rel) {
   return text;
 }
 
-function install(root, map, mtimeMs) {
+function install(root, map, mtimeMs, importSpecs = new Map()) {
   const files = new Map();
   const rels = Object.keys(map.files ?? {}).sort();
   for (const rel of rels) {
@@ -284,6 +297,8 @@ function install(root, map, mtimeMs) {
   };
   entry.symbols = symbolTable(files);
   textCaches.set(entry, { lru: new Map(), bytes: 0 });
+  importSpecsByEntry.set(entry, importSpecs);
+  rootsByEntry.set(entry, root);
   cache.set(root, entry);
   return entry;
 }
@@ -299,6 +314,7 @@ export async function buildProjectMap(root) {
   const collected = [];
   await walk(root, '', collected);
   const keys = new Set(collected.map((item) => item.rel));
+  const importSpecs = new Map(collected.map((item) => [item.rel, item.importSpecs]));
   const files = {};
   for (const item of collected.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))) {
     files[item.rel] = {
@@ -310,7 +326,7 @@ export async function buildProjectMap(root) {
   }
   const map = { version: 1, builtAt: new Date().toISOString(), files };
   const info = await writeMap(root, map);
-  return install(root, map, info.mtimeMs);
+  return install(root, map, info.mtimeMs, importSpecs);
 }
 
 export async function loadProjectMap(root, { rebuild = false } = {}) {
@@ -359,23 +375,32 @@ export async function updateProjectMapPath(root, rel) {
   if (!posix) return;
   const map = structuredClone(current.map);
   if (!map.files || typeof map.files !== 'object' || Array.isArray(map.files)) map.files = {};
+  const specs = new Map(importSpecsByEntry.get(current) ?? []);
   const indexed = await indexFile(root, posix);
   if (!indexed) {
     delete map.files[posix];
+    specs.delete(posix);
   } else {
-    const keys = new Set(Object.keys(map.files));
-    keys.add(posix);
+    specs.set(posix, indexed.importSpecs);
     map.files[posix] = {
       bytes: indexed.bytes,
       mtimeMs: indexed.mtimeMs,
-      imports: resolveImports(posix, indexed.importSpecs, keys),
+      imports: [],
       symbols: indexed.symbols,
     };
+  }
+  const keys = new Set(Object.keys(map.files));
+  for (const fileRel of keys) {
+    if (!specs.has(fileRel) && mayHaveImports(fileRel)) {
+      const reread = await indexFile(root, fileRel);
+      specs.set(fileRel, reread?.importSpecs ?? []);
+    }
+    map.files[fileRel].imports = resolveImports(fileRel, specs.get(fileRel) ?? [], keys);
   }
   map.version = 1;
   map.builtAt = new Date().toISOString();
   const info = await writeMap(root, map);
-  install(root, map, info.mtimeMs);
+  install(root, map, info.mtimeMs, specs);
 }
 
 export function countProjectMap(projectMap) {
@@ -442,7 +467,17 @@ export async function searchMapped(projectMap, { query, dir = '.', scope = 'all'
     let stop = false;
     for (const rel of contentFiles) {
       if (stop) break;
-      const text = await projectMap.readText(rel);
+      let text;
+      try {
+        const root = rootsByEntry.get(projectMap);
+        if (root) {
+          const info = await stat(path.join(root, ...rel.split('/'))).catch(() => null);
+          if (!info?.isFile() || info.size > MAX_INDEX_BYTES) continue;
+        }
+        text = await projectMap.readText(rel);
+      } catch {
+        continue;
+      }
       const fileLines = text.split(/\r?\n/);
       for (let index = 0; index < fileLines.length; index++) {
         const line = fileLines[index];

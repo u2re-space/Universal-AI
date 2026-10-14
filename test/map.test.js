@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, mkdir, writeFile, rm, stat, utimes } from 'node:fs/promises';
-import { buildProjectMap, loadProjectMap, updateProjectMapPath, projectMapFile } from '../src/agent/map.js';
+import { buildProjectMap, loadProjectMap, updateProjectMapPath, projectMapFile, searchMapped } from '../src/agent/map.js';
 
 test('project map', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'ai-map-'));
@@ -46,5 +46,30 @@ test('project map', async (t) => {
     assert.ok(loaded.files.get('lib.js').symbols.some((symbol) => symbol.name === 'goodbye'));
     assert.equal(loaded.files.get('lib.js').symbols.some((symbol) => symbol.name === 'hello'), false);
     assert.equal(loaded.files.has('widget.py'), true);
+  });
+
+  await t.test('deleting an imported file removes it from other files\' imports', async () => {
+    await rm(path.join(root, 'util', 'text.js'));
+    await updateProjectMapPath(root, 'util/text.js');
+    const loaded = await loadProjectMap(root);
+    assert.equal(loaded.files.has('util/text.js'), false);
+    assert.equal(loaded.files.get('lib.js').imports.includes('util/text.js'), false);
+    for (const record of loaded.files.values()) {
+      for (const imported of record.imports) assert.equal(loaded.files.has(imported), true);
+    }
+  });
+
+  await t.test('a content search skips a map path whose file is gone and still returns other hits', async () => {
+    await rm(path.join(root, 'widget.py'));
+    const projectMap = await loadProjectMap(root);
+    const result = await searchMapped(projectMap, { query: 'goodbye', scope: 'content' });
+    assert.match(result.text, /lib\.js:\d+:/);
+  });
+
+  await t.test('a file under .ssh is not indexed', async () => {
+    await mkdir(path.join(root, '.ssh'), { recursive: true });
+    await writeFile(path.join(root, '.ssh', 'config'), 'Host example\n');
+    const built = await buildProjectMap(root);
+    assert.equal(built.files.has('.ssh/config'), false);
   });
 });
