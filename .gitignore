@@ -150,6 +150,7 @@ vite.config.ts.timestamp-*
 
 node_modules/
 .ai-agent/
+.ai/
 *.log
 ai-image-*.png
 ai-image-*.jpg

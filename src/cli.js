@@ -15,6 +15,7 @@ import { image } from './commands/image.js';
 import { jobs } from './commands/jobs.js';
 import { memoryCommand } from './commands/memory.js';
 import { resume, cancel, models, configCommand } from './commands/misc.js';
+import { mapCommand } from './commands/map.js';
 
 const pkg = createRequire(import.meta.url)('../package.json');
 
@@ -31,6 +32,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai memory [list|search|add|forget|clear|tasks|stats|path] …   долговременная память (SQLite)
   ai models [фильтр]                список доступных моделей
   ai config [show|init|path]        конфигурация (~/.ai-agent/config.json)
+  ai map [path]                     карта проекта .ai/map.json (файлы и символы). Черновик read/edit/scan подтверждает planner; запись вне edit выполняется и помечается
 
 Ввод:
   --image <путь|url>     приложить изображение (можно несколько)   --detail auto|low|high|original
@@ -51,6 +53,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 
 Инструменты и автономность:
   --tools fs,shell,fetch  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
+  search_files scope=path|symbol|content|all читает карту проекта.
   --web                  поиск в интернете (web_search)       --images   генерация картинок в ответах
   --approve ask|read|write|all   политика подтверждений (по умолчанию: ask в терминале, read без него)
   --yes, -y              = --approve all (без вопросов; осторожно)
@@ -60,7 +63,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 
 Роли и память (run):
   --role <роль=модель[:effort]>  модель для роли: planner, collector, worker, reviewer, vision, summarizer, default, all
-                         (например: --role planner=gpt-5.5:high --role worker=gpt-5.4-mini --role vision=gpt-5.4-mini)
+                         (например: --role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
   --team / --single      команда ролей (план → сбор контекста → исполнение → ревью → память) / один агент
   --no-memory            не использовать долговременную память (SQLite в ~/.ai-agent/memory.db)
   --global               memory: работать с глобальными записями   --kind <вид>  --tags a,b
@@ -104,7 +107,7 @@ const OPTIONS = {
   memory: { type: 'boolean', default: true }, global: { type: 'boolean', default: false }, kind: { type: 'string' }, tags: { type: 'string' },
 };
 
-const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand };
+const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand, map: mapCommand };
 const NEEDS_API_KEY = new Set(['ask', 'chat', 'run', 'image', 'resume', 'cancel', 'models']);
 const DETACHABLE = new Set(['ask', 'run', 'image']);
 

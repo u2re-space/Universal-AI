@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
 import { createJobManager } from '../src/jobs/manager.js';
@@ -178,7 +178,7 @@ test('--detach starts a job that can be inspected with jobs status/result', asyn
 });
 
 test('run (team mode): roles use their own models; memory command sees what was saved', async () => {
-  const roleOf = (body) => body.text?.format?.name ?? (body.model === 'gpt-5.4-nano' ? 'summarizer-file' : 'worker');
+  const roleOf = (body) => body.text?.format?.name ?? (body.model === 'gpt-6-luna-nano' ? 'summarizer-file' : 'worker');
   const models = {};
   script = (body) => {
     const role = roleOf(body);
@@ -189,13 +189,13 @@ test('run (team mode): roles use their own models; memory command sees what was 
     if (!outputs.length) return { calls: [{ name: 'write_file', arguments: { path: 'note.txt', content: 'привет\n', overwrite: true } }] };
     return { text: 'Файл note.txt создан.' };
   };
-  const { code, stdout, stderr } = await runCli(['run', 'создай note.txt', '--approve', 'write', '--role', 'planner=gpt-5.5:high', '--role', 'worker=gpt-5.4-mini', '--role', 'summarizer=gpt-5.4-nano']);
+  const { code, stdout, stderr } = await runCli(['run', 'создай note.txt', '--approve', 'write', '--role', 'planner=gpt-6.1-sol:high', '--role', 'worker=gpt-6-luna', '--role', 'summarizer=gpt-6-luna-nano']);
   assert.equal(code, 0, stderr);
-  assert.equal(models.plan, 'gpt-5.5');
-  assert.equal(models.worker, 'gpt-5.4-mini');
-  assert.equal(models.memory_update, 'gpt-5.4-nano');
+  assert.equal(models.plan, 'gpt-6.1-sol');
+  assert.equal(models.worker, 'gpt-6-luna');
+  assert.equal(models.memory_update, 'gpt-6-luna-nano');
   assert.match(stdout, /note\.txt создан/);
-  assert.match(stderr, /этап «план» — planner · gpt-5\.5/);
+  assert.match(stderr, /этап «план» — planner · gpt-6\.1-sol/);
   assert.match(stderr, /шаг 1\/1/);
   assert.match(stderr, /память: сохранено 1/);
   assert.match(stderr, /по ролям/);
@@ -220,7 +220,7 @@ test('run (team mode): roles use their own models; memory command sees what was 
 test('models and config commands work', async () => {
   const models = await runCli(['models', 'gpt']);
   assert.equal(models.code, 0);
-  assert.match(models.stdout, /gpt-5\.5/);
+  assert.match(models.stdout, /gpt-6\.1-sol/);
   const config = await runCli(['config', 'show', '--json']);
   const data = jsonLines(config.stdout).find((l) => l.type === 'config');
   assert.equal(data.config.model, 'mock-model');
@@ -229,4 +229,17 @@ test('models and config commands work', async () => {
 
 test('stripDetach removes the flag from raw argv including short groups', () => {
   assert.deepEqual(stripDetach(['run', 'x', '--detach', '-dv', '-d', '--yes']), ['run', 'x', '-v', '--yes']);
+});
+
+test('map writes .ai/map.json without an API key', async () => {
+  for (const name of await readdir(work)) await rm(path.join(work, name), { recursive: true, force: true });
+  await writeFile(path.join(work, 'a.js'), 'export function hello() {}\n');
+  const built = await runCli(['map'], { env: { OPENAI_API_KEY: '' } });
+  assert.equal(built.code, 0, built.stderr);
+  const shown = await runCli(['map', 'path'], { env: { OPENAI_API_KEY: '' } });
+  assert.equal(shown.code, 0, shown.stderr);
+  assert.match(shown.stdout, /\.ai[/\\]map\.json/);
+  assert.match(shown.stdout, /файлов: 1/);
+  const unknown = await runCli(['map', 'nope'], { env: { OPENAI_API_KEY: '' } });
+  assert.equal(unknown.code, 2);
 });

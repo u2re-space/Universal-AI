@@ -17,7 +17,7 @@
 | Картинки | `ai image "кот-космонавт" --size 1024x1024 --quality high` (инструмент `image_generation`, черновики пишутся по мере генерации) |
 | Изображения и файлы во входе | `ai --image screenshot.png "что не так на экране?"`, `ai -f spec.pdf "сделай план"` |
 | Автономные задачи | `ai run "добавь тесты для src/utils.js и прогони их"` — инструменты: файлы, команды, URL, web-поиск, картинки |
-| Разные модели под роли | старшая модель планирует и проверяет, младшие собирают контекст и генерируют вызовы инструментов, отдельная модель читает картинки: `--role planner=gpt-5.5:high --role worker=gpt-5.4-mini --role vision=gpt-5.4-mini` |
+| Разные модели под роли | старшая модель планирует и проверяет, младшие собирают контекст и генерируют вызовы инструментов, отдельная модель читает картинки: `--role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna` |
 | Память и общий контекст | долговременная память в SQLite (факты, соглашения, решения — по проекту и глобально), заметки проекта `AGENTS.md`, история задач, кеш сводок файлов; один общий контекст для всех ролей |
 | Фон | `--background` (сервер считает, можно переподключиться `ai resume`) и `--detach` (локальная фоновая задача, `ai jobs …`) |
 | Что происходит | строка статуса: роль и модель, фаза («думает», «выполняется read_file», «генерирует изображение»), время, токены ↑↓, стоимость; краткие рассуждения модели; журнал этапов, шагов и действий; итоговая сводка с расходом по ролям и моделям |
@@ -31,7 +31,7 @@ export OPENAI_API_KEY=sk-...   # PowerShell: $env:OPENAI_API_KEY = "sk-..."
 ai config init         # создаст ~/.ai-agent/config.json
 ```
 
-Модель по умолчанию — `gpt-5.5`; меняется флагом `--model`, переменной `AI_MODEL` или в конфигурации.
+Модель по умолчанию — `gpt-6.1-sol`; меняется флагом `--model`, переменной `AI_MODEL` или в конфигурации.
 `ai models` покажет доступные ключу модели.
 
 ## Команды
@@ -47,9 +47,18 @@ ai jobs list|status|log|result|wait|cancel|rm [id]    локальные фон�
 ai memory list|search|add|forget|clear|tasks|stats|path   долговременная память
 ai models [фильтр]           список моделей
 ai config show|init|path     конфигурация
+ai map [path]                индекс файлов и символов (.ai/map.json)
 ```
 
 Полный список флагов — `ai --help`.
+
+### Карта проекта
+
+`ai map` строит `.ai/map.json`: пути, время изменения и символы. Повторный поиск читает эту карту из памяти процесса. `ai map path` печатает путь и число файлов и символов.
+
+`search_files` принимает `scope`: `path`, `symbol`, `content` или `all`.
+
+В `ai run` правила намечают файлы как `read`, `edit` или `scan`. Planner подтверждает список. Запись в файл вне `edit` выполняется, а ответ инструмента начинается с пометки, что пути не было в карте правок.
 
 ### Примеры
 
@@ -73,8 +82,8 @@ ai image --image logo.png "сделай фон прозрачным" --image-bac
 ai run "исправь падающий тест в test/"
 
 # свои модели под роли: старшая планирует и ревьюит, младшая делает, самая дешёвая пишет сводки и память
-ai run --role planner=gpt-5.5:high --role reviewer=gpt-5.5 --role worker=gpt-5.4-mini \
-       --role collector=gpt-5.4-mini --role summarizer=gpt-5.4-nano "добавь кеширование в src/api.js"
+ai run --role planner=gpt-6.1-sol:high --role reviewer=gpt-6.1-sol --role worker=gpt-6-luna \
+       --role collector=gpt-6-luna --role summarizer=gpt-6-luna "добавь кеширование в src/api.js"
 
 # один агент вместо команды (как раньше), без долговременной памяти
 ai run --single --no-memory "переименуй getCwd в getCurrentWorkingDirectory"
@@ -146,11 +155,11 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 В терминале (stderr) идёт строка статуса, обновляемая несколько раз в секунду:
 
 ```
-⠹ [worker · gpt-5.4-mini] выполняется read_file… · 12.3 s · ↑ 14,210 ↓ 1,082 +~120 · $0.031 · ход 3/25
+⠹ [worker · gpt-6-luna] выполняется read_file… · 12.3 s · ↑ 14,210 ↓ 1,082 +~120 · $0.031 · ход 3/25
 ```
 
 роль и модель · фаза · время · токены (вход/выход по завершённым запросам, `+~N` — оценка текущего ответа) · стоимость · ход агента.
-В журнале видны этапы (`этап «план» — planner · gpt-5.5`), план, шаги, вердикт ревью, найденные и сохранённые записи памяти;
+В журнале видны этапы (`этап «план» — planner · gpt-6.1-sol`), план, шаги, вердикт ревью, найденные и сохранённые записи памяти;
 итоговая сводка показывает расход токенов по ролям и по моделям.
 Выше — журнал: `∙` краткие рассуждения модели (`--no-reasoning` скрывает), `▸`/`✓`/`✗` вызовы инструментов,
 `▣` сохранённые изображения, `≡` usage каждого ответа. Ответ модели идёт в stdout, поэтому его можно
@@ -158,7 +167,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 управляющих кодов; `--json` — поток событий JSON Lines; `--quiet` — только ответ.
 
 Стоимость считается по ценам из конфигурации (`prices`, USD за 1M токенов; поддерживаются шаблоны вида
-`"gpt-5.4*"`). Встроенных таблиц цен нет — они устаревают. Токены показываются всегда; плата за
+`"gpt-6.1-sol*"`). Встроенных таблиц цен нет — они устаревают. Токены показываются всегда; плата за
 встроенные инструменты (генерация картинок, web-поиск) в сумму не входит.
 
 ## Конфигурация
@@ -168,7 +177,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 
 ```json
 {
-  "model": "gpt-5.5",
+  "model": "gpt-6.1-sol",
   "imageModel": null,
   "reasoning": { "effort": "medium", "summary": "auto" },
   "store": false,
@@ -177,18 +186,18 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
   "tools": { "fs": true, "shell": true, "fetch": true, "web": false, "images": false, "askUser": true },
   "limits": { "maxTurns": 60, "budgetUsd": null, "budgetTokens": null, "commandTimeoutMs": 180000 },
   "roles": {
-    "planner":    { "model": "gpt-5.5", "effort": "high" },
-    "reviewer":   { "model": "gpt-5.5", "effort": "medium" },
-    "collector":  { "model": "gpt-5.4-mini", "effort": "low" },
-    "worker":     { "model": "gpt-5.4-mini", "effort": "medium" },
-    "vision":     { "model": "gpt-5.4-mini" },
-    "summarizer": { "model": "gpt-5.4-nano", "summary": "none" }
+    "planner":    { "model": "gpt-6.1-sol", "effort": "high" },
+    "reviewer":   { "model": "gpt-6.1-sol", "effort": "medium" },
+    "collector":  { "model": "gpt-6-luna", "effort": "low" },
+    "worker":     { "model": "gpt-6-luna", "effort": "medium" },
+    "vision":     { "model": "gpt-6-luna" },
+    "summarizer": { "model": "gpt-6-luna", "summary": "none" }
   },
   "agent": { "mode": "team", "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": 98304, "visionDelegate": "auto" },
   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
   "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": "." },
   "compaction": { "auto": false, "afterInputTokens": 200000 },
-  "prices": { "gpt-5.5": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-5.4-mini*": { "input": 0.25, "output": 2 } },
+  "prices": { "gpt-6.1-sol": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-6-luna*": { "input": 0.25, "output": 2 } },
   "instructions": "Отвечай кратко."
 }
 ```
