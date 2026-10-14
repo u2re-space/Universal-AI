@@ -1,3 +1,4 @@
+import { ensureProjectMap } from '../agent/map.js';
 import { createToolset, enabledToolNames } from '../agent/tools.js';
 import { createRoleRunner } from '../agent/roles.js';
 import { runTeam } from '../agent/team.js';
@@ -38,6 +39,8 @@ export async function run(ctx) {
   if (level === 'read' && !interactive) renderer.line('warn', 'Неинтерактивный режим без --approve write|all: агент сможет только читать файлы.');
 
   try {
+    const ensured = await ensureProjectMap(ctx.cwd);
+    if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
     if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra });
     return await runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra });
   } finally {

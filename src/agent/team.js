@@ -12,6 +12,8 @@ import { describeChangeSet } from './diff.js';
 import { createRoleRunner } from './roles.js';
 import { builtinTools } from './loop.js';
 import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA } from './schemas.js';
+import { ensureProjectMap, loadProjectMap } from './map.js';
+import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
 
 const HARD_STOP = new Set(['cancelled', 'budget']);
 
@@ -54,7 +56,9 @@ export async function runTeam({
   const readNames = allNames.filter((n) => READ_ONLY_TOOLS.includes(n));
   const reviewerNames = allNames.filter((n) => READ_ONLY_TOOLS.includes(n) || n === 'run_command');
   const vision = (role) => (roles.shouldDelegateVision(role) ? roles.describeImage : null);
-  const workerTools = createToolset({ ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker') });
+  const taskMarks = { edit: null };
+  let marks = [];
+  const workerTools = createToolset({ ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker'), editPaths: () => taskMarks.edit });
   const collectorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('collector') });
   const reviewerTools = createToolset({ ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer') });
   const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images });
@@ -89,16 +93,28 @@ export async function runTeam({
     const tree = await listFiles({ root, dir: '.', depth: 2, maxEntries: 150 }).catch(() => null);
     if (tree) ctx.set('tree', 'Directory listing (depth 2)', tree.text, { priority: 3 });
 
+    let projectMap = await loadProjectMap(root);
+    if (!projectMap) {
+      const ensured = await ensureProjectMap(root);
+      projectMap = ensured?.error ? null : ensured;
+    }
+    const draft = formatDraft(draftTaskMap(task, projectMap));
+
     // 1. Planner.
     notify({ type: 'stage.start', stage: 'plan', role: 'planner', model: roles.resolve('planner').model });
     const planned = await roles.run('planner', {
-      text: `${ctx.render({ maxBytes })}\n\n# Task\n${task}`, parts,
+      text: `${ctx.render({ maxBytes })}\n\n${draft}\n\n# Task\n${task}`, parts,
       instructions: ROLE_INSTRUCTIONS.planner.replace('{maxSteps}', String(config.agent.maxSteps)), schema: PLAN_SCHEMA, schemaName: 'plan',
     });
     if (planned.status !== 'completed') return stop(planned, 'план');
     const plan = planned.data;
     plan.steps = plan.steps.slice(0, config.agent.maxSteps);
     if (!plan.steps.length) plan.steps = [{ goal: task, details: 'Complete the task as described.', verify: 'Re-read the result.' }];
+    marks = filterTaskMap(plan.taskMap, projectMap);
+    taskMarks.edit = new Set(marks.filter((item) => item.role === 'edit').map((item) => item.path));
+    ctx.set('taskMap', 'Task map', formatMarks(marks), { priority: 8 });
+    const scan = formatScan(projectMap, marks);
+    if (scan) ctx.set('scan', 'Symbols (scan)', scan, { priority: 4 });
     result.plan = plan;
     ctx.set('plan', 'Plan', renderPlan(plan), { priority: 8 });
     if (plan.imageNotes) ctx.set('images', 'Attached images (planner notes)', plan.imageNotes, { priority: 7 });
@@ -107,10 +123,14 @@ export async function runTeam({
     notify({ type: 'stage.done', stage: 'plan', status: 'completed' });
 
     // 2. Collector (cheap model, read-only).
-    const wantsContext = plan.complexity !== 'trivial' && (plan.filesOfInterest.length || plan.searchQueries.length || plan.questionsForCollector.length);
+    const wantsContext = plan.complexity !== 'trivial' && (
+      plan.filesOfInterest.length || plan.searchQueries.length || plan.questionsForCollector.length
+      || marks.some((item) => item.role === 'read' || item.role === 'edit')
+    );
     if (wantsContext && readNames.length) {
       notify({ type: 'stage.start', stage: 'collect', role: 'collector', model: roles.resolve('collector').model });
-      const brief = `# Collector brief\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`;
+      const focus = marks.filter((item) => item.role === 'read' || item.role === 'edit').map((item) => `${item.role} ${item.path} — ${item.reason}`);
+      const brief = `# Collector brief\nTask map (read/edit):\n${bullets(focus)}\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`;
       const collected = await roles.run('collector', {
         text: `${ctx.render({ maxBytes })}\n\n${brief}`, instructions: ROLE_INSTRUCTIONS.collector, toolset: collectorTools,
         schema: COLLECTOR_SCHEMA, schemaName: 'context_report', maxTurns: config.agent.collectorMaxTurns,

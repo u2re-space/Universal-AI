@@ -2,7 +2,7 @@ import { test, after, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createClient } from '../src/openai/client.js';
 import { createLedger } from '../src/core/usage.js';
 import { defaults, resolveRole } from '../src/core/config.js';
@@ -25,9 +25,9 @@ beforeEach(() => server.reset());
 after(async () => { await server.close(); await rm(root, { recursive: true, force: true }); });
 
 const baseConfig = () => structuredClone({
-  ...defaults, model: 'gpt-5.5', home: root, baseURL: server.baseURL,
-  roles: { ...defaults.roles, worker: { ...defaults.roles.worker, model: 'gpt-5.4-mini' }, collector: { ...defaults.roles.collector, model: 'gpt-5.4-mini' },
-    vision: { ...defaults.roles.vision, model: 'gpt-5.4-mini-vision' }, summarizer: { ...defaults.roles.summarizer, model: 'gpt-5.4-nano' } },
+  ...defaults, model: 'gpt-6.1-sol', home: root, baseURL: server.baseURL,
+  roles: { ...defaults.roles, worker: { ...defaults.roles.worker, model: 'gpt-6-luna' }, collector: { ...defaults.roles.collector, model: 'gpt-6-luna' },
+    vision: { ...defaults.roles.vision, model: 'gpt-6-luna-vision' }, summarizer: { ...defaults.roles.summarizer, model: 'gpt-6-luna-nano' } },
   memory: { ...defaults.memory, dbFile: ':memory:' },
 });
 const client = () => createClient({ apiKey: 'sk-test', baseURL: server.baseURL });
@@ -40,7 +40,7 @@ function roleOf(body) {
   if (format === 'review') return 'reviewer';
   if (format === 'memory_update') return 'summarizer';
   if (body.input.some((i) => i.type === 'message' && i.content?.some?.((c) => c.type === 'input_image'))) return 'vision';
-  if (body.model === 'gpt-5.4-nano') return 'summarizer-file';
+  if (body.model === 'gpt-6-luna-nano') return 'summarizer-file';
   return 'worker';
 }
 
@@ -49,11 +49,11 @@ test('resolveRole merges role, default role and top-level settings; --role flags
   cfg.roles.default = { ...cfg.roles.default, model: 'default-model' };
   assert.equal(resolveRole(cfg, 'planner').model, 'default-model');
   assert.equal(resolveRole(cfg, 'planner').effort, 'high');
-  assert.equal(resolveRole(cfg, 'worker').model, 'gpt-5.4-mini');
+  assert.equal(resolveRole(cfg, 'worker').model, 'gpt-6-luna');
   assert.equal(resolveRole(cfg, 'default').config.model, 'default-model');
   assert.equal(resolveRole(cfg, 'summarizer').config.reasoning.summary, 'none');
-  const overrides = overridesFrom({ role: ['planner=gpt-5.5:high', 'worker=gpt-5.4-mini'], single: true, memory: false });
-  assert.deepEqual(overrides.roles, { planner: { model: 'gpt-5.5', effort: 'high' }, worker: { model: 'gpt-5.4-mini' } });
+  const overrides = overridesFrom({ role: ['planner=gpt-6.1-sol:high', 'worker=gpt-6-luna'], single: true, memory: false });
+  assert.deepEqual(overrides.roles, { planner: { model: 'gpt-6.1-sol', effort: 'high' }, worker: { model: 'gpt-6-luna' } });
   assert.deepEqual(overrides.agent, { mode: 'single' });
   assert.deepEqual(overrides.memory, { enabled: false });
   assert.throws(() => overridesFrom({ role: ['nobody=x'] }), /неизвестная роль/);
@@ -76,7 +76,7 @@ test('memory store: remember / recall (FTS) / list / forget / tasks / file summa
   assert.equal(memory.list({ project }).length, 2);
   assert.ok(memory.forget(a.id));
   assert.equal(memory.list({ project }).length, 1);
-  memory.putFileSummary(project, 'src/a.js', 'sha1', 'summary text', 'gpt-5.4-nano');
+  memory.putFileSummary(project, 'src/a.js', 'sha1', 'summary text', 'gpt-6-luna');
   assert.equal(memory.getFileSummary(project, 'src/a.js', 'sha1').summary, 'summary text');
   assert.equal(memory.getFileSummary(project, 'src/a.js', 'sha2'), null, 'stale hash misses');
   memory.recordTask({ project, projectName: 'demo', task: 'do x', status: 'completed', summary: 'done', changes: ['a.js'] });
@@ -163,7 +163,7 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
   const memory = openMemory({ file: ':memory:' });
   const key = projectKey(root);
   memory.remember({ scope: 'project', project: key, kind: 'fact', content: 'Тесты в проекте пишутся на node:test; функции экспортируются как ESM', tags: ['esm'] });
-  const ledger = createLedger({ prices: { 'gpt-5.5': { input: 10, output: 30 }, 'gpt-5.4-mini': { input: 1, output: 2 }, 'gpt-5.4-nano': { input: 0.1, output: 0.4 } } });
+  const ledger = createLedger({ prices: { 'gpt-6.1-sol': { input: 10, output: 30 }, 'gpt-6-luna': { input: 1, output: 2 }, 'gpt-6-luna-nano': { input: 0.1, output: 0.4 } } });
   const events = [];
   const result = await runTeam({ client: client(), config, ledger, task: 'Добавь функцию sum с тестом', root, approvalLevel: 'all', memory, projectKey: key,
     projectName: 'demo', emit: (e) => events.push(e) });
@@ -179,11 +179,11 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
   assert.equal(result.recalled.length, 1);
   // Every role used its own model and effort.
   const planner = seen.find((s) => s.role === 'planner');
-  assert.equal(planner.model, 'gpt-5.5');
+  assert.equal(planner.model, 'gpt-6.1-sol');
   assert.equal(planner.effort, 'high');
-  assert.ok(seen.filter((s) => s.role === 'worker').every((s) => s.model === 'gpt-5.4-mini' && s.effort === 'medium'));
-  assert.equal(seen.find((s) => s.role === 'collector').model, 'gpt-5.4-mini');
-  assert.equal(seen.find((s) => s.role === 'summarizer').model, 'gpt-5.4-nano');
+  assert.ok(seen.filter((s) => s.role === 'worker').every((s) => s.model === 'gpt-6-luna' && s.effort === 'medium'));
+  assert.equal(seen.find((s) => s.role === 'collector').model, 'gpt-6-luna');
+  assert.equal(seen.find((s) => s.role === 'summarizer').model, 'gpt-6-luna-nano');
   const stages = events.filter((e) => e.type === 'stage.start').map((e) => e.stage);
   assert.deepEqual(stages, ['plan', 'collect', 'work', 'review', 'fix', 'review', 'memory']);
   assert.ok(events.some((e) => e.type === 'plan.ready' && e.steps.length === 2));
@@ -225,7 +225,7 @@ test('role runner: vision delegation and file summaries with cache', async () =>
   let visionCalls = 0, summaryCalls = 0;
   script = (body) => {
     const role = roleOf(body);
-    if (role === 'vision') { visionCalls++; assert.equal(body.model, 'gpt-5.4-mini-vision'); return { text: 'Красная точка 1×1.' }; }
+    if (role === 'vision') { visionCalls++; assert.equal(body.model, 'gpt-6-luna-vision'); return { text: 'Красная точка 1×1.' }; }
     if (role === 'summarizer-file') { summaryCalls++; return { text: 'Файл экспортирует функцию a.' }; }
     const outputs = body.input.filter((i) => i.type === 'function_call_output');
     if (outputs.length === 0) return { calls: [{ name: 'view_image', arguments: { path: 'pic.png', detail: 'auto', question: 'что на картинке?' } }, { name: 'summarize_file', arguments: { path: 'big.js', focus: null } }] };
@@ -252,4 +252,23 @@ test('role runner: vision delegation and file summaries with cache', async () =>
   assert.equal(summaryCalls, 1, 'second summary served from cache');
   assert.equal(memory.stats().fileSummaries, 1);
   memory.close();
+});
+
+test('team run puts the confirmed read file in the collector brief', async () => {
+  await mkdir(path.join(root, 'src'), { recursive: true });
+  await writeFile(path.join(root, 'src', 'sum.js'), 'export function sum(a, b) { return a + b; }\n');
+  const seen = [];
+  script = (body) => {
+    const role = roleOf(body);
+    seen.push(body);
+    if (role === 'planner') return { text: JSON.stringify({ summary: 's', complexity: 'normal', steps: [{ goal: 'прочитать', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [], taskMap: [{ path: 'src/sum.js', role: 'read', reason: 'функция sum' }, { path: 'missing.js', role: 'edit', reason: 'нет файла' }] }) };
+    if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
+    if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
+    return { text: 'ok' };
+  };
+  const result = await runTeam({ client: client(), config: baseConfig(), ledger: createLedger(), task: 'sum', root, approvalLevel: 'read', emit() {} });
+  assert.equal(result.status, 'completed', result.error?.message);
+  const collector = seen.find((body) => roleOf(body) === 'collector');
+  assert.match(collector.input[0].content[0].text, /src\/sum\.js/);
+  assert.equal(/missing\.js/.test(collector.input[0].content[0].text), false);
 });

@@ -178,7 +178,7 @@ function htmlToText(html) {
 export function createToolset({
   root = process.cwd(), config, names, approvalLevel = 'read', approve = async () => 'no', askUser = null,
   backupDir = null, signal, emit = () => {}, memory = null, projectKey = null, projectName = null,
-  describeImage = null, summarizeFile = null,
+  describeImage = null, summarizeFile = null, editPaths = () => null,
 }) {
   const limits = config.limits;
   const allowed = new Set(names);
@@ -219,6 +219,12 @@ export function createToolset({
     }
   }
 
+  function labelOutsideEdit(rel, output) {
+    const allowed = typeof editPaths === 'function' ? editPaths() : editPaths;
+    if (allowed && !allowed.has(rel)) return `Не в карте правок (${rel}): ${output}`;
+    return output;
+  }
+
   const handlers = {
     async list_files(args) {
       const result = await listFiles({ root, dir: args.path || '.', depth: Math.min(6, Math.max(1, args.depth ?? 2)),
@@ -246,7 +252,8 @@ export function createToolset({
       stats.changes.push({ op: result.created ? 'create' : 'overwrite', path: result.rel, backupPath: result.backupPath });
       try { await updateProjectMapPath(root, result.rel); }
       catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
-      return { output: `${result.created ? 'Создан' : 'Перезаписан'} ${result.rel} (${formatBytes(result.bytes)}).`, summary: `${result.created ? '+' : '~'} ${result.rel}` };
+      const output = labelOutsideEdit(result.rel, `${result.created ? 'Создан' : 'Перезаписан'} ${result.rel} (${formatBytes(result.bytes)}).`);
+      return { output, summary: `${result.created ? '+' : '~'} ${result.rel}` };
     },
     async replace_text(args) {
       const result = await replaceInFile({ root, file: args.path, search: args.search, replacement: args.replacement, all: Boolean(args.all),
@@ -254,14 +261,16 @@ export function createToolset({
       stats.changes.push({ op: 'edit', path: result.rel, backupPath: result.backupPath });
       try { await updateProjectMapPath(root, result.rel); }
       catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
-      return { output: `Изменён ${result.rel}: замен ${result.replacements}.`, summary: `~ ${result.rel}` };
+      const output = labelOutsideEdit(result.rel, `Изменён ${result.rel}: замен ${result.replacements}.`);
+      return { output, summary: `~ ${result.rel}` };
     },
     async delete_file(args) {
       const result = await deleteFile({ root, file: args.path, backupDir });
       stats.changes.push({ op: 'delete', path: result.rel, backupPath: result.backupPath });
       try { await updateProjectMapPath(root, result.rel); }
       catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
-      return { output: `Удалён ${result.rel}.`, summary: `- ${result.rel}` };
+      const output = labelOutsideEdit(result.rel, `Удалён ${result.rel}.`);
+      return { output, summary: `- ${result.rel}` };
     },
     async make_dir(args) {
       const result = await makeDirectory({ root, dir: args.path });

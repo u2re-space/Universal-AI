@@ -22,6 +22,15 @@ export const PLAN_SCHEMA = object({
   needsReview: { type: 'boolean', description: 'Whether an independent review of the result is worth its cost.' },
   imageNotes: { ...nullableString, description: 'What the attached images show that matters for the task (null if none).' },
   risks: strings,
+  taskMap: {
+    type: 'array',
+    description: 'Final read/edit/scan marks. Empty array when nothing applies.',
+    items: object({
+      path: string,
+      role: { type: 'string', enum: ['read', 'edit', 'scan'] },
+      reason: { ...string, description: 'Why this file has this role.' },
+    }),
+  },
 });
 
 export const COLLECTOR_SCHEMA = object({

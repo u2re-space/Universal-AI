@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, mkdir, writeFile, rm, stat, utimes } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, stat, utimes } from 'node:fs/promises';
 import { buildProjectMap, loadProjectMap, updateProjectMapPath, projectMapFile, searchMapped } from '../src/agent/map.js';
 import { createToolset } from '../src/agent/tools.js';
 
@@ -103,5 +103,15 @@ test('project map', async (t) => {
     assert.ok(loaded.files.get('fresh.js').symbols.some((symbol) => symbol.name === 'fresh'));
     assert.equal(loaded.files.has('widget.py'), true);
     assert.equal(events.some((event) => event.type === 'warning'), false);
+  });
+
+  await t.test('a write outside the edit set is labeled and still writes', async () => {
+    const toolset = createToolset({
+      root, config: { limits: { maxFileWriteBytes: 1024 * 1024, maxFileReadBytes: 1024, maxSearchResults: 20, maxListEntries: 50, maxCommandOutputBytes: 1000, commandTimeoutMs: 1000, maxFetchBytes: 1000, maxImageBytes: 1000 }, tools: { fs: true }, shell: null, image: {} },
+      names: ['write_file'], approvalLevel: 'all', editPaths: () => new Set(['widget.py']),
+    });
+    const written = await toolset.execute({ name: 'write_file', arguments: JSON.stringify({ path: 'extra.js', content: 'export const extra = 1;\n', overwrite: true }) });
+    assert.match(written.output, /^Не в карте правок \(extra\.js\): /);
+    assert.equal(await readFile(path.join(root, 'extra.js'), 'utf8'), 'export const extra = 1;\n');
   });
 });
