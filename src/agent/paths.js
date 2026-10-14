@@ -9,6 +9,10 @@ const FORBIDDEN_DIRS = /^(?:\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.docker)$/i;
 export const NOISY_DIRS = /^(?:\.git|node_modules|\.hg|\.svn|dist|build|coverage|\.next|\.nuxt|\.cache|\.venv|venv|__pycache__|target|\.ai-agent)$/i;
 const READ_ONLY_DIRS = /^(?:\.git|node_modules)$/i;
 
+export function isProtectedFileName(name) {
+  return PROTECTED_FILES.test(name);
+}
+
 export function toPosix(relative) {
   return relative.split(path.sep).join('/');
 }
