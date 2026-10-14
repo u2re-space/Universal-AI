@@ -17,14 +17,14 @@ export const IMAGE_DETAILS = ['auto', 'low', 'high', 'original'];
  * AI_MODEL, AI_AGENT_HOME) and finally CLI flags.
  */
 export const defaults = Object.freeze({
-  model: 'gpt-5.5',
+  model: 'gpt-6.1-sol',
   imageModel: null,                 // null → let the image_generation tool use its default model
-  baseURL: null,                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
+  baseURL: "https://api.proxyapi.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
   apiKey: null,                     // prefer the OPENAI_API_KEY environment variable
   organization: null,
   project: null,
   instructions: null,               // extra system instructions appended to the built-in ones
-  reasoning: { effort: null, summary: 'auto' },
+  reasoning: { effort: "low", summary: 'auto' },
   verbosity: null,                  // low | medium | high (GPT-5 family)
   temperature: null,
   maxOutputTokens: null,
@@ -99,7 +99,7 @@ export const defaults = Object.freeze({
     notesFile: 'AGENTS.md',         // project notes file included in the context when present
     dbFile: null,                   // null → <home>/memory.db
   },
-  /** Prices in USD per 1M tokens, e.g. { "gpt-5.5": { "input": 1.25, "cachedInput": 0.125, "output": 10 } }. */
+  /** Prices in USD per 1M tokens, e.g. { "gpt-6.1-sol": { "input": 1.25, "cachedInput": 0.125, "output": 10 } }. */
   prices: {},
   home: null,
 });

@@ -28,7 +28,7 @@ const client = () => createClient({ apiKey: 'sk-test', baseURL: server.baseURL }
 function setup({ approvalLevel = 'all', prompt = 'do it', cfg = config() } = {}) {
   const session = createSession({ store: false, model: 'mock-model' });
   session.addUserMessage(buildUserMessage({ text: prompt }));
-  const ledger = createLedger({ prices: { 'mock-model': { input: 1, cachedInput: 0.5, output: 10 }, 'gpt-5.5': { input: 1, cachedInput: 0.5, output: 10 } } });
+  const ledger = createLedger({ prices: { 'mock-model': { input: 1, cachedInput: 0.5, output: 10 }, 'gpt-6.1-sol': { input: 1, cachedInput: 0.5, output: 10 } } });
   const toolset = createToolset({ root, config: cfg, names: enabledToolNames(cfg.tools), approvalLevel, signal: undefined });
   const events = [];
   return { session, ledger, toolset, events, emit: (e) => events.push(e), cfg };
@@ -49,7 +49,7 @@ test('tool loop: write_file → read_file → final answer; history stays replay
     assert.deepEqual(body.include, ['reasoning.encrypted_content']);
     return { text: 'Файл создан и проверен.' };
   };
-  const { session, ledger, toolset, events, emit, cfg } = setup({ cfg: { ...config(), model: 'gpt-5.5' } });
+  const { session, ledger, toolset, events, emit, cfg } = setup({ cfg: { ...config(), model: 'gpt-6.1-sol' } });
   const result = await runTurn({ client: client(), config: cfg, session, ledger, toolset, emit });
   assert.equal(result.status, 'completed', result.error?.message);
   assert.equal(result.turns, 3);
@@ -158,7 +158,7 @@ test('background mode without streaming polls until completion', async () => {
 
 test('buildRequestBody respects model capabilities and configuration', () => {
   const cfg = { ...config(), temperature: 0.3, verbosity: 'low', reasoning: { effort: 'high', summary: 'detailed' }, maxOutputTokens: 500, serviceTier: 'flex' };
-  const reasoning = buildRequestBody({ config: cfg, model: 'gpt-5.5', input: [], tools: [{ type: 'web_search' }] });
+  const reasoning = buildRequestBody({ config: cfg, model: 'gpt-6.1-sol', input: [], tools: [{ type: 'web_search' }] });
   assert.deepEqual(reasoning.reasoning, { effort: 'high', summary: 'detailed' });
   assert.equal(reasoning.temperature, undefined);
   assert.deepEqual(reasoning.text, { verbosity: 'low' });
@@ -170,7 +170,7 @@ test('buildRequestBody respects model capabilities and configuration', () => {
   assert.equal(classic.reasoning, undefined);
   assert.equal(classic.temperature, 0.3);
   assert.equal(classic.text, undefined);
-  const stored = buildRequestBody({ config: { ...cfg, store: true }, model: 'gpt-5.5', input: [], previousResponseId: 'resp_1' });
+  const stored = buildRequestBody({ config: { ...cfg, store: true }, model: 'gpt-6.1-sol', input: [], previousResponseId: 'resp_1' });
   assert.equal(stored.previous_response_id, 'resp_1');
   assert.equal(stored.include, undefined);
 });

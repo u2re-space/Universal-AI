@@ -95,9 +95,9 @@ export async function configCommand(ctx) {
     };
     await writeFile(file, `${JSON.stringify(template, null, 2)}\n`, { mode: 0o600 });
     renderer.write(`Создан ${file}\n` +
-      `Роли: укажите модели в roles.* (null = общая model). Например: "planner": { "model": "${defaults.model}", "effort": "high" }, "worker": { "model": "gpt-5.4-mini" }.\n` +
+      `Роли: укажите модели в roles.* (null = общая model). Например: "planner": { "model": "${defaults.model}", "effort": "high" }, "worker": { "model": "gpt-6-luna" }.\n` +
       `Чтобы видеть стоимость, добавьте актуальные цены (USD за 1M токенов), например:\n` +
-      `  "prices": { "${defaults.model}": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-5.4-mini*": { "input": 0.25, "output": 2 } }\n`);
+      `  "prices": { "${defaults.model}": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-6-luna*": { "input": 0.25, "output": 2 } }\n`);
     return 0;
   }
   if (sub !== 'show') throw new UsageError('Доступно: ai config show | init | path');

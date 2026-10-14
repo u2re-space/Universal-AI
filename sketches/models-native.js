@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
  */
 const MiB = 1024 * 1024;
 const defaults = Object.freeze({
-  baseURL: 'https://api.openai.com/v1/',
+  baseURL: 'https://api.proxyapi.ru/v1',
   timeoutMs: 180_000,
   maxRequestBytes: 512 * 1024,
   maxResponseBytes: 16 * MiB,

@@ -49,19 +49,19 @@ test('session: save and load round trip', async () => {
 });
 
 test('ledger: price matching, cost and budgets', () => {
-  const prices = { 'gpt-5.5': { input: 1.25, cachedInput: 0.125, output: 10 }, 'gpt-5*': { input: 2, output: 20 } };
-  assert.equal(priceFor(prices, 'gpt-5.5').input, 1.25);
-  assert.equal(priceFor(prices, 'gpt-5.4-mini').input, 2);
+  const prices = { 'gpt-6.1-sol': { input: 1.25, cachedInput: 0.125, output: 10 }, 'gpt-6*': { input: 2, output: 20 } };
+  assert.equal(priceFor(prices, 'gpt-6.1-sol').input, 1.25);
+  assert.equal(priceFor(prices, 'gpt-6-luna').input, 2);
   assert.equal(priceFor(prices, 'o3'), null);
   const usage = normalizeUsage({ input_tokens: 1_000_000, input_tokens_details: { cached_tokens: 200_000 }, output_tokens: 100_000, output_tokens_details: { reasoning_tokens: 50_000 }, total_tokens: 1_100_000 });
-  assert.equal(costOf(prices['gpt-5.5'], usage), 800_000 * 1.25 / 1e6 + 200_000 * 0.125 / 1e6 + 100_000 * 10 / 1e6);
+  assert.equal(costOf(prices['gpt-6.1-sol'], usage), 800_000 * 1.25 / 1e6 + 200_000 * 0.125 / 1e6 + 100_000 * 10 / 1e6);
   const ledger = createLedger({ prices, budgetUsd: 1.5 });
-  ledger.record({ model: 'gpt-5.5', usage: { input_tokens: 400_000, output_tokens: 50_000 } }); // $1.00
+  ledger.record({ model: 'gpt-6.1-sol', usage: { input_tokens: 400_000, output_tokens: 50_000 } }); // $1.00
   assert.ok(ledger.snapshot().costKnown);
   assert.equal(ledger.snapshot().costUsd, 1);
-  assert.doesNotThrow(() => ledger.assertBudget({ estimatedTokens: 1000, model: 'gpt-5.5' }));
-  ledger.record({ model: 'gpt-5.5', usage: { input_tokens: 400_000, output_tokens: 50_000 } }); // $2.00 > $1.50
-  assert.throws(() => ledger.assertBudget({ model: 'gpt-5.5' }), /бюджет/);
+  assert.doesNotThrow(() => ledger.assertBudget({ estimatedTokens: 1000, model: 'gpt-6.1-sol' }));
+  ledger.record({ model: 'gpt-6.1-sol', usage: { input_tokens: 400_000, output_tokens: 50_000 } }); // $2.00 > $1.50
+  assert.throws(() => ledger.assertBudget({ model: 'gpt-6.1-sol' }), /бюджет/);
   const unknown = createLedger({ prices: {}, budgetUsd: 1 });
   unknown.record({ model: 'o3', usage: { input_tokens: 1, output_tokens: 1 } });
   assert.throws(() => unknown.assertBudget({ model: 'o3' }), /цены/);
