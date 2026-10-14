@@ -6,6 +6,7 @@ import { detectImageMime } from '../core/attachments.js';
 import { errorMessage, formatBytes, truncate, clipMiddle } from '../util/text.js';
 import { resolveInside } from './paths.js';
 import { listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory } from './fs-tools.js';
+import { loadProjectMap, searchMapped } from './map.js';
 import { runCommand } from './shell.js';
 
 const str = (description) => ({ type: 'string', description });
@@ -39,11 +40,12 @@ export const TOOL_SPECS = {
   },
   search_files: {
     category: 'read', group: 'fs',
-    description: 'Search text files for a literal string (or a regular expression). Returns "path:line: text" matches.',
+    description: 'Search text files for a literal string (or a regular expression) using the project map when .ai/map.json is present. Returns "path:line: text" matches.',
     parameters: schema({
       query: str('Literal text (case-insensitive) or a JavaScript regular expression when regex=true.'),
       path: nullableStr('Directory to search in, relative to the working directory. Null = whole working directory.'),
       regex: bool('Interpret query as a regular expression.'),
+      scope: { type: 'string', enum: ['path', 'symbol', 'content', 'all'], description: 'path and symbol read the map only. content reads file text. all (use this unless a narrower scope is enough) returns path, then symbol, then content.' },
     }),
   },
   write_file: {
@@ -228,8 +230,15 @@ export function createToolset({
       return { output: result.text, summary: `${args.path}: строки ${result.from}-${result.to}/${result.totalLines}` };
     },
     async search_files(args) {
+      const scope = args.scope ?? 'all';
+      if (!['path', 'symbol', 'content', 'all'].includes(scope)) throw new Error('scope: path, symbol, content или all.');
+      const projectMap = await loadProjectMap(root);
+      if (projectMap) {
+        const result = await searchMapped(projectMap, { query: args.query, dir: args.path || '.', scope, regex: Boolean(args.regex), maxResults: limits.maxSearchResults });
+        return { output: result.text, summary: `${result.count} совпадений` };
+      }
       const result = await searchFiles({ root, query: args.query, dir: args.path || '.', regex: Boolean(args.regex), maxResults: limits.maxSearchResults });
-      return { output: result.text, summary: `${result.count} совпадений` };
+      return { output: `Карта проекта недоступна; поиск по дереву.\n${result.text}`, summary: `${result.count} совпадений` };
     },
     async write_file(args) {
       const result = await writeTextFile({ root, file: args.path, content: args.content, overwrite: args.overwrite !== false,

@@ -72,4 +72,16 @@ test('project map', async (t) => {
     const built = await buildProjectMap(root);
     assert.equal(built.files.has('.ssh/config'), false);
   });
+
+  await t.test('searchMapped answers path and symbol from RAM and content from the file', async () => {
+    const projectMap = await loadProjectMap(root);
+    const byPath = await searchMapped(projectMap, { query: 'lib.js', scope: 'path' });
+    assert.match(byPath.text, /^lib\.js$/m);
+    const bySymbol = await searchMapped(projectMap, { query: 'goodbye', scope: 'symbol' });
+    assert.match(bySymbol.text, /lib\.js:\d+: export goodbye/);
+    const byContent = await searchMapped(projectMap, { query: 'clip', scope: 'content' });
+    assert.match(byContent.text, /lib\.js:\d+:/);
+    const again = await searchMapped(projectMap, { query: 'clip', scope: 'content' });
+    assert.equal(again.text, byContent.text);
+  });
 });
