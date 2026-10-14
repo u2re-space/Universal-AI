@@ -1,0 +1,31 @@
+{
+  "name": "ai-agent-cli",
+  "version": "1.0.0",
+  "description": "CLI-агент на OpenAI Responses API: промптинг, генерация кода/документов/картинок, автономные задачи, фоновые job'ы. Node.js 26, ESM, без SDK.",
+  "type": "module",
+  "main": "./index.js",
+  "bin": {
+    "ai": "./bin/ai.js"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "scripts": {
+    "start": "node bin/ai.js",
+    "test": "node --test --test-timeout=60000 \"test/*.test.js\""
+  },
+  "files": [
+    "bin",
+    "src",
+    "index.js",
+    "README.md"
+  ],
+  "keywords": [
+    "openai",
+    "responses-api",
+    "cli",
+    "agent",
+    "image-generation"
+  ],
+  "license": "MIT"
+}

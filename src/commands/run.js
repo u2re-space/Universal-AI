@@ -1,0 +1,120 @@
+import { createToolset, enabledToolNames } from '../agent/tools.js';
+import { createRoleRunner } from '../agent/roles.js';
+import { runTeam } from '../agent/team.js';
+import { resolveRole, ROLE_NAMES } from '../core/config.js';
+import { formatBytes, truncate } from '../util/text.js';
+import { agentBase } from './instructions.js';
+import { runOnce } from './flow.js';
+import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstructions, approvalLevel, backupDirFor, openMemoryFor,
+  describeRoles, usageRow, usageBreakdownRows, describeChanges, createClientFor, createLedgerFor, writeOutput, exitCodeFor, STATUS_LABELS } from './shared.js';
+
+const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло результат', incomplete: 'шаги выполнены не полностью' };
+
+/**
+ * `ai run <task>` — autonomous agent in the working directory.
+ *   team   (default): planner → collector → worker steps → reviewer (+fix rounds) → summarizer/memory,
+ *                     each role with its own model (config.roles / --role).
+ *   single (--single): one model, one tool loop (plus memory tools).
+ */
+export async function run(ctx) {
+  const { config, renderer, values, positionals } = ctx;
+  const stdinText = await readStdin({ maxBytes: config.limits.maxStdinBytes });
+  let task = positionals.join(' ').trim();
+  if (task.startsWith('@') && positionals.length === 1) task = (await resolveTextArg(task, { cwd: ctx.cwd, what: 'задачу' })).trim();
+  if (!task && stdinText) task = stdinText;
+  if (!task) throw new UsageError('Укажите задачу: ai run "описание задачи" (или @file, или через stdin).');
+  const parts = await loadAttachments({ images: values.image ?? [], files: values.file ?? [], detail: values.detail ?? 'auto', cwd: ctx.cwd, config, renderer });
+  if (stdinText && task !== stdinText) parts.push({ type: 'input_text', text: `--- stdin ---\n${stdinText}\n--- конец stdin ---` });
+
+  const interactive = renderer.interactive;
+  const level = approvalLevel(config, interactive);
+  const store = openMemoryFor(config, ctx.cwd, renderer);
+  const names = enabledToolNames(config.tools, { interactive, memory: Boolean(store), summarize: true });
+  if (!names.length && !config.tools.web && !config.tools.images) {
+    throw new UsageError('Все инструменты отключены; для run нужен хотя бы один (fs, shell, fetch, web, images).');
+  }
+  ctx.backupDir = backupDirFor(config);
+  const extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
+  if (level === 'read' && !interactive) renderer.line('warn', 'Неинтерактивный режим без --approve write|all: агент сможет только читать файлы.');
+
+  try {
+    if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra });
+    return await runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra });
+  } finally {
+    store?.memory.close();
+  }
+}
+
+async function runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra }) {
+  const { config, renderer, signal, emit } = ctx;
+  const role = resolveRole(config, 'default');
+  const client = createClientFor(config);
+  const ledger = createLedgerFor(config);
+  const roles = createRoleRunner({ client, config, ledger, emit, signal });
+  const toolset = createToolset({
+    root: ctx.cwd, config, names, approvalLevel: level,
+    approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
+    backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
+    describeImage: roles.shouldDelegateVision('default') ? roles.describeImage : null, summarizeFile: roles.summarizeFile,
+  });
+  const instructions = composeInstructions(agentBase({ root: ctx.cwd, approvalLevel: level, toolNames: toolset.names(), interactive, shell: config.shell ?? null }), config, extra);
+  renderer.line('info', `Агент (single): ${role.model}${role.effort ? `:${role.effort}` : ''} · каталог ${ctx.cwd} · доступ: ${level} · инструменты: ${toolset.names().join(', ')}${config.tools.web ? ' + web_search' : ''}${config.tools.images ? ' + image_generation' : ''}${store ? ' · память включена' : ''}`, { dim: true });
+  ctx.client = client;
+  ctx.ledger = ledger;
+  return runOnce({ ...ctx, config: role.config }, { prompt: task, parts, instructions, toolset, maxTurns: config.limits.maxTurns, summaryTitle: 'итог задачи',
+    extraRows: () => [...usageBreakdownRows(ledger), ...(toolset.stats().memories.length ? [['память', `сохранено ${toolset.stats().memories.length}`]] : [])] });
+}
+
+async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra }) {
+  const { config, renderer, values, signal, emit } = ctx;
+  const client = createClientFor(config);
+  const ledger = createLedgerFor(config);
+  renderer.line('info', `Команда агентов · каталог ${ctx.cwd} · доступ: ${level} · роли: ${describeRoles(config, ROLE_NAMES.filter((n) => n !== 'default'))}${store ? ' · память включена' : ' · память выключена'}`, { dim: true });
+  renderer.begin();
+  renderer.ledger = ledger.snapshot();
+  const result = await runTeam({
+    client, config, ledger, task, parts, root: ctx.cwd, approvalLevel: level, interactive,
+    approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
+    memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
+    backupDir: ctx.backupDir, extraInstructions: extra, emit, signal,
+  });
+  renderer.idle();
+  renderer.ensureNewline();
+  if (!config.stream && result.finalNote) renderer.text(`${result.finalNote}\n`);
+  if (result.error && ['failed', 'budget'].includes(result.status)) renderer.line('fail', result.error.message);
+  if (result.status === 'cancelled') renderer.line('warn', 'Отменено.');
+
+  let outFile = null;
+  if (values.out && result.text) {
+    outFile = await writeOutput(values.out, result.text, { cwd: ctx.cwd });
+    renderer.line('ok', `Отчёт сохранён: ${outFile} (${formatBytes(Buffer.byteLength(result.text))})`);
+  }
+  const worker = result.stats?.worker;
+  const toolCalls = result.stats ? Object.values(result.stats).reduce((sum, s) => sum + s.calls, 0) : 0;
+  renderer.summary({
+    title: 'итог задачи',
+    rows: [
+      ['статус', TEAM_STATUS[result.status] ?? result.status],
+      ...(result.plan ? [['план', `${result.plan.complexity} · ${truncate(result.plan.summary, 200)}`]] : []),
+      ['шагов', result.steps.length ? `${result.steps.length} (${result.steps.map((s) => `${s.index}: ${s.status}`).join(', ')})` : '0'],
+      ...(result.review ? [['ревью', `${result.review.verdict === 'accept' ? 'принято' : 'правки'} после ${result.reviewRounds} раунд(а/ов) · ${truncate(result.review.summary, 200)}`]] : []),
+      ['вызовов инструментов', toolCalls ? `${toolCalls} (worker ${worker.calls}, collector ${result.stats.collector.calls}, reviewer ${result.stats.reviewer.calls})${worker.denied ? `, отклонено ${worker.denied}` : ''}` : '0'],
+      ...(result.changes.length ? [['изменения', describeChanges({ changes: result.changes })], ['резервные копии', ctx.backupDir]] : []),
+      ...(worker?.commands?.length ? [['команды', worker.commands.map((c) => `${c.command} → ${c.exitCode ?? '?'}`).join('; ')]] : []),
+      ...(result.images.length ? [['изображения', result.images.join(', ')]] : []),
+      ...(store ? [['память', `найдено ${result.recalled.length}, сохранено ${result.memoriesSaved.length}`]] : []),
+      ['токены', usageRow(ledger)],
+      ...usageBreakdownRows(ledger),
+    ],
+  });
+  const summary = {
+    type: 'result', status: result.status, text: result.text, plan: result.plan, review: result.review, steps: result.steps,
+    images: result.images, changes: result.changes, memoriesSaved: result.memoriesSaved.map((m) => ({ id: m.id, scope: m.scope, kind: m.kind, content: m.content })),
+    outFile, usage: ledger.snapshot(), tools: result.stats, error: result.error ? { message: result.error.message, code: result.error.code ?? null } : null,
+  };
+  renderer.json(summary);
+  const code = exitCodeFor(result.status);
+  await ctx.reporter?.finish(summary, code);
+  client.close();
+  return code;
+}

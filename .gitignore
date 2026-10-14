@@ -147,3 +147,10 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+node_modules/
+.ai-agent/
+*.log
+ai-image-*.png
+ai-image-*.jpg
+ai-image-*.webp
