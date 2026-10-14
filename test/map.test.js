@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, mkdir, writeFile, rm, stat, utimes } from 'node:fs/promises';
 import { buildProjectMap, loadProjectMap, updateProjectMapPath, projectMapFile, searchMapped } from '../src/agent/map.js';
+import { createToolset } from '../src/agent/tools.js';
 
 test('project map', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'ai-map-'));
@@ -83,5 +84,24 @@ test('project map', async (t) => {
     assert.match(byContent.text, /lib\.js:\d+:/);
     const again = await searchMapped(projectMap, { query: 'clip', scope: 'content' });
     assert.equal(again.text, byContent.text);
+  });
+
+  await t.test('write_file updates the map entry for that path only', async () => {
+    const prior = await loadProjectMap(root);
+    if (!prior?.files.has('widget.py')) {
+      await writeFile(path.join(root, 'widget.py'), 'class Widget:\n    pass\n');
+      await updateProjectMapPath(root, 'widget.py');
+    }
+    const events = [];
+    const toolset = createToolset({
+      root, config: { limits: { maxFileWriteBytes: 1024 * 1024, maxFileReadBytes: 1024 * 1024, maxSearchResults: 20, maxListEntries: 50, maxCommandOutputBytes: 1000, commandTimeoutMs: 1000, maxFetchBytes: 1000, maxImageBytes: 1000 }, tools: { fs: true }, shell: null, image: {} },
+      names: ['write_file'], approvalLevel: 'all', emit: (event) => events.push(event),
+    });
+    const written = await toolset.execute({ name: 'write_file', arguments: JSON.stringify({ path: 'fresh.js', content: 'export function fresh() {}\n', overwrite: true }) });
+    assert.equal(written.ok !== false, true);
+    const loaded = await loadProjectMap(root);
+    assert.ok(loaded.files.get('fresh.js').symbols.some((symbol) => symbol.name === 'fresh'));
+    assert.equal(loaded.files.has('widget.py'), true);
+    assert.equal(events.some((event) => event.type === 'warning'), false);
   });
 });

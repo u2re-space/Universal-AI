@@ -6,7 +6,7 @@ import { detectImageMime } from '../core/attachments.js';
 import { errorMessage, formatBytes, truncate, clipMiddle } from '../util/text.js';
 import { resolveInside } from './paths.js';
 import { listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory } from './fs-tools.js';
-import { loadProjectMap, searchMapped } from './map.js';
+import { loadProjectMap, searchMapped, updateProjectMapPath } from './map.js';
 import { runCommand } from './shell.js';
 
 const str = (description) => ({ type: 'string', description });
@@ -244,17 +244,23 @@ export function createToolset({
       const result = await writeTextFile({ root, file: args.path, content: args.content, overwrite: args.overwrite !== false,
         maxBytes: limits.maxFileWriteBytes, backupDir });
       stats.changes.push({ op: result.created ? 'create' : 'overwrite', path: result.rel, backupPath: result.backupPath });
+      try { await updateProjectMapPath(root, result.rel); }
+      catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
       return { output: `${result.created ? 'Создан' : 'Перезаписан'} ${result.rel} (${formatBytes(result.bytes)}).`, summary: `${result.created ? '+' : '~'} ${result.rel}` };
     },
     async replace_text(args) {
       const result = await replaceInFile({ root, file: args.path, search: args.search, replacement: args.replacement, all: Boolean(args.all),
         maxBytes: limits.maxFileWriteBytes, backupDir });
       stats.changes.push({ op: 'edit', path: result.rel, backupPath: result.backupPath });
+      try { await updateProjectMapPath(root, result.rel); }
+      catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
       return { output: `Изменён ${result.rel}: замен ${result.replacements}.`, summary: `~ ${result.rel}` };
     },
     async delete_file(args) {
       const result = await deleteFile({ root, file: args.path, backupDir });
       stats.changes.push({ op: 'delete', path: result.rel, backupPath: result.backupPath });
+      try { await updateProjectMapPath(root, result.rel); }
+      catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
       return { output: `Удалён ${result.rel}.`, summary: `- ${result.rel}` };
     },
     async make_dir(args) {
