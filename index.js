@@ -23,3 +23,4 @@ export { runTeam } from './src/agent/team.js';
 export { createRenderer } from './src/ui/renderer.js';
 export { createJobManager } from './src/jobs/manager.js';
 export { loadProjectMap } from './src/agent/map.js';
+export { draftTaskMap } from './src/agent/task-map.js';
