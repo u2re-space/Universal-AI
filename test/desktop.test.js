@@ -23,3 +23,29 @@ test('type, title, and image bodies', () => {
   assert.match(scriptFor({ ...base, mode: 'title', title: 'Note"pad', x: null, y: null }), /WinActivate\("Note`"pad"\)/);
   assert.match(scriptFor({ ...base, mode: 'image', image: 'C:\\btn.png' }), /ImageSearch\(/);
 });
+
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { findAhk, performAction } from '../src/interact/filesystem.js';
+
+const fakeAhk = fileURLToPath(new URL('./helpers/fake-ahk.js', import.meta.url));
+
+test('findAhk uses an explicit path and rejects a missing file', async () => {
+  await assert.rejects(findAhk({ ahkPath: path.join(os.tmpdir(), 'missing-ahk.exe'), env: {}, exists: async () => false }), /AutoHotkey v2/);
+});
+
+test('performAction runs the fake executable and records a screenshot', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'ai-desktop-'));
+  try {
+    const outcome = await performAction({
+      root, executable: process.execPath, prefixArgs: [fakeAhk], shotAfterAction: true, timeoutMs: 10000,
+      action: { type: 'click', mode: 'coord', x: 1, y: 2, button: 'Left', clicks: 1, text: null, title: null, control: null, image: null, script: null },
+    });
+    assert.equal(outcome.message, 'ok');
+    assert.match(outcome.screenshotRel, /^\.ai\/desktop\/.+\.png$/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
