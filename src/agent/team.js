@@ -28,6 +28,7 @@ import { builtinTools } from './loop.js';
 import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA } from './schemas.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
+import { SHELL_TOOL_NAMES } from './tool-specs.js';
 
 import { bullets, renderFindings, renderPlan } from './team-text.js';
 const HARD_STOP = new Set(['cancelled', 'budget']);
@@ -39,7 +40,7 @@ const HARD_STOP = new Set(['cancelled', 'budget']);
 export function toolNamesForRole(allNames, role) {
     if (role === 'collector') return allNames.filter((name) => READ_ONLY_TOOLS.includes(name));
     if (role === 'reviewer') {
-        return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || name === 'run_command' || DESKTOP_TOOL_NAMES.includes(name));
+        return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name));
     }
     return allNames;
 }

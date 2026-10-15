@@ -50,7 +50,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --approve ask|read|write|all   политика подтверждений (по умолчанию: ask в терминале, read без него)
   --yes, -y              = --approve all (без вопросов; осторожно)
   --cwd, -C <каталог>    рабочий каталог для инструментов (по умолчанию текущий)
-  --max-turns <n>        лимит ходов агента          --shell powershell|pwsh|bash|sh|cmd
+  --max-turns <n>        лимит ходов агента          --shell powershell|pwsh|bash|sh|zsh|cmd
+  При tools.shell агент может: run_command (оболочка на вызов), run_script (.ps1 .cmd .bat .sh .bash), ssh (команда или файл, scp put/get).
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 
 Роли и память (run):

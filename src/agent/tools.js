@@ -7,7 +7,7 @@
  * @exports TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory, createToolset, relativeToRoot
  * @ai.tags tools, approval
  * @ai.hint hot
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-15 Handlers for run_script and ssh.
  */
 
 import path from 'node:path';
@@ -19,7 +19,7 @@ import { errorMessage, formatBytes, truncate, clipMiddle } from '../util/text.js
 import { resolveInside } from './paths.js';
 import { listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory } from './fs-tools.js';
 import { loadProjectMap, searchMapped, updateProjectMapPath } from './map.js';
-import { runCommand } from './shell.js';
+import { SHELLS, runCommand, runProgram, scriptLaunch, sshPlan } from './shell.js';
 import { DESKTOP_TOOL_NAMES, createDesktopHandlers } from './desktop.js';
 
 import {
@@ -84,6 +84,47 @@ function batchSource(args) {
 }
 
 /**
+ * Named shell, or the fallback when the model left the field empty.
+ * @param {string|null|undefined} value
+ * @param {string|null} fallback
+ * @returns {string|null}
+ * @ai.hint pure
+ */
+function chosenShell(value, fallback) {
+    if (value == null || value === '') return fallback ?? null;
+    if (!SHELLS.includes(value)) throw new Error(`shell: ${SHELLS.join(' | ')}`);
+    return value;
+}
+
+/**
+ * Command timeout in milliseconds, capped at 900 seconds.
+ * @param {{ timeout_seconds?: number|null }} args
+ * @param {{ commandTimeoutMs: number }} limits
+ * @returns {number}
+ * @ai.hint pure
+ */
+function commandTimeout(args, limits) {
+    return Math.min(900, Math.max(1, args.timeout_seconds ?? Math.round(limits.commandTimeoutMs / 1000))) * 1000;
+}
+
+/**
+ * Status block shared by run_command, run_script, and ssh.
+ * @param {object} result Result from runCommand or runProgram.
+ * @param {number} timeoutMs
+ * @param {{ maxCommandOutputBytes: number }} limits
+ * @returns {{ output: string, summary: string, ok: boolean }}
+ * @ai.hint pure
+ */
+function commandReport(result, timeoutMs, limits) {
+    const status = result.cancelled ? 'отменена' : result.timedOut ? `таймаут ${timeoutMs / 1000} с` : result.error ? `ошибка запуска: ${result.error}` : `exit code ${result.exitCode}`;
+    const body = [`status: ${status}`, `duration_ms: ${result.durationMs}`];
+    if (result.stdout) body.push(`--- stdout ---\n${clipMiddle(result.stdout, limits.maxCommandOutputBytes)}`);
+    if (result.stderr) body.push(`--- stderr ---\n${clipMiddle(result.stderr, limits.maxCommandOutputBytes)}`);
+    if (result.truncated) body.push('(вывод усечён)');
+    return { output: body.join('\n'), summary: status, ok: result.exitCode === 0 };
+}
+
+/**
  * Create the executable toolset for one agent run.
  *
  * approvalLevel: 'ask' | 'read' | 'write' | 'all'.
@@ -137,7 +178,9 @@ export function createToolset({
                 return `Изменить ${args.path}${args.all ? ' (все вхождения)' : ''}\n--- было ---\n${truncate(args.search, 400, { singleLine: false })}\n--- станет ---\n${truncate(args.replacement, 400, { singleLine: false })}`;
             case 'delete_file': return `Удалить файл ${args.path} (копия сохранится в резервном каталоге)`;
             case 'make_dir': return `Создать каталог ${args.path}`;
-            case 'run_command': return `Команда: ${args.command}\nКаталог: ${args.cwd ?? '.'}\nПричина: ${args.reason ?? '—'}`;
+            case 'run_command': return `Команда (${args.shell || 'по умолчанию'}): ${args.command}\nКаталог: ${args.cwd ?? '.'}\nПричина: ${args.reason ?? '—'}`;
+            case 'run_script': return `Скрипт (${args.shell || 'по расширению'}): ${args.path}\nАргументы: ${(args.args ?? []).join(' ') || '—'}\nПричина: ${args.reason ?? '—'}`;
+            case 'ssh': return `SSH ${args.mode} ${args.host}${args.command ? `: ${args.command}` : ''}${args.local_path ? `\nФайл: ${args.local_path}` : ''}${args.remote_path ? `\nУдалённый путь: ${args.remote_path}` : ''}\nПричина: ${args.reason ?? '—'}`;
             case 'fetch_url': return `Загрузить ${args.url}`;
             case 'click': return `Клик: ${truncate(clickTarget(args), 400)}`;
             case 'type': return `Ввод: ${truncate(args.text ?? '', 400)}`;
@@ -216,15 +259,52 @@ export function createToolset({
         async run_command(args) {
             if (typeof args.command !== 'string' || !args.command.trim()) throw new Error('Пустая команда.');
             const cwd = args.cwd ? (await resolveInside(root, args.cwd)).abs : root;
-            const timeoutMs = Math.min(900, Math.max(1, args.timeout_seconds ?? Math.round(limits.commandTimeoutMs / 1000))) * 1000;
-            const result = await runCommand({ command: args.command, cwd, timeoutMs, maxOutputBytes: limits.maxCommandOutputBytes, signal, shell: config.shell ?? null });
+            const timeoutMs = commandTimeout(args, limits);
+            const shell = chosenShell(args.shell, config.shell ?? null);
+            const result = await runCommand({ command: args.command, cwd, timeoutMs, maxOutputBytes: limits.maxCommandOutputBytes, signal, shell });
             stats.commands.push({ command: args.command, exitCode: result.exitCode, durationMs: result.durationMs });
-            const status = result.cancelled ? 'отменена' : result.timedOut ? `таймаут ${timeoutMs / 1000} с` : result.error ? `ошибка запуска: ${result.error}` : `exit code ${result.exitCode}`;
-            const body = [`status: ${status}`, `duration_ms: ${result.durationMs}`];
-            if (result.stdout) body.push(`--- stdout ---\n${clipMiddle(result.stdout, limits.maxCommandOutputBytes)}`);
-            if (result.stderr) body.push(`--- stderr ---\n${clipMiddle(result.stderr, limits.maxCommandOutputBytes)}`);
-            if (result.truncated) body.push('(вывод усечён)');
-            return { output: body.join('\n'), summary: status, ok: result.exitCode === 0 };
+            return commandReport(result, timeoutMs, limits);
+        },
+        /** Run a .ps1, .cmd, .bat, .sh, or .bash file inside the working directory. */
+        async run_script(args) {
+            if (typeof args.path !== 'string' || !args.path.trim()) throw new Error('Укажите путь к скрипту.');
+            const { abs } = await resolveInside(root, args.path, { allowRoot: false });
+            const info = await stat(abs).catch(() => null);
+            if (!info?.isFile()) throw new Error(`Файл не найден: ${args.path}`);
+            const cwd = args.cwd ? (await resolveInside(root, args.cwd)).abs : root;
+            const timeoutMs = commandTimeout(args, limits);
+            const launched = scriptLaunch(abs, { shell: chosenShell(args.shell, null), args: Array.isArray(args.args) ? args.args : [] });
+            const result = await runProgram({ ...launched, cwd, timeoutMs, maxOutputBytes: limits.maxCommandOutputBytes, signal });
+            stats.commands.push({ command: args.path, exitCode: result.exitCode, durationMs: result.durationMs });
+            return commandReport(result, timeoutMs, limits);
+        },
+        /** Remote command or one-file copy through the system ssh/scp client. */
+        async ssh(args) {
+            const timeoutMs = commandTimeout(args, limits);
+            const port = args.port == null ? null : Math.min(65535, Math.max(1, args.port));
+            let identity = null;
+            if (typeof args.identity === 'string' && args.identity.trim()) {
+                identity = (await resolveInside(root, args.identity, { allowRoot: false })).abs;
+            }
+            let localPath = null;
+            if (typeof args.local_path === 'string' && args.local_path.trim()) {
+                localPath = (await resolveInside(root, args.local_path, { allowRoot: false, forWrite: args.mode === 'get' })).abs;
+            }
+            const plan = sshPlan({
+                mode: args.mode, host: args.host, command: args.command ?? '', port, identity, localPath,
+                remotePath: args.remote_path ?? '', shell: chosenShell(args.shell, null),
+            });
+            let input = null;
+            if (plan.sendFile) {
+                const info = await stat(localPath).catch(() => null);
+                if (!info?.isFile()) throw new Error(`Файл не найден: ${args.local_path}`);
+                if (info.size > limits.maxFileReadBytes) throw new Error(`Скрипт больше лимита ${formatBytes(limits.maxFileReadBytes)}.`);
+                input = await readFile(localPath);
+            }
+            const result = await runProgram({ file: plan.file, args: plan.args, cwd: root, input, timeoutMs, maxOutputBytes: limits.maxCommandOutputBytes, signal });
+            const label = `${plan.file} ${args.host}`;
+            stats.commands.push({ command: label, exitCode: result.exitCode, durationMs: result.durationMs });
+            return commandReport(result, timeoutMs, limits);
         },
         /** GET an http(s) URL and return text, reducing HTML with `htmlToText`. */
         async fetch_url(args) {

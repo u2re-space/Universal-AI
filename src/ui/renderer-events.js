@@ -224,7 +224,9 @@ function describeArgs(name, args) {
         case 'replace_text': return `${args.path}`;
         case 'search_files': return `"${truncate(args.query, 60)}"${args.path && args.path !== '.' ? ` в ${args.path}` : ''}`;
         case 'list_files': return args.path || '.';
-        case 'run_command': return truncate(args.command, 100);
+        case 'run_command': return truncate(`${args.shell ? `${args.shell}: ` : ''}${args.command}`, 100);
+        case 'run_script': return truncate(args.path, 100);
+        case 'ssh': return truncate(`${args.mode} ${args.host}`, 100);
         case 'fetch_url': return truncate(args.url, 100);
         case 'ask_user': return truncate(args.question, 100);
         default: return truncate(JSON.stringify(args), 100);

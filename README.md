@@ -263,7 +263,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 ## Инструменты агента и безопасность
 
 Локальные инструменты (строгие function tools): `list_files`, `read_file`, `search_files`, `write_file`,
-`replace_text`, `delete_file`, `make_dir`, `view_image`, `summarize_file`, `run_command`, `fetch_url`,
+`replace_text`, `delete_file`, `make_dir`, `view_image`, `summarize_file`, `run_command`, `run_script`, `ssh`, `fetch_url`,
 `recall`, `remember`, `ask_user`; с `--desktop` у worker и reviewer — `screenshot`, `click`, `type`, `run_ahk`, `run_batch`, `delegate_role`; встроенные инструменты API: `web_search` (`--web`), `image_generation` (`--images`).
 
 Политика подтверждений `--approve`:
@@ -275,14 +275,17 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 | `write` | да | да | нет | нет |
 | `all` / `--yes` | да | да | да | да |
 
-Коллектор всегда работает в режиме только чтения; ревьюер — чтение плюс `run_command` по той же политике.
+Коллектор всегда работает в режиме только чтения; ревьюер — чтение плюс `run_command`, `run_script` и `ssh` по той же политике.
 `--approve ask` подтверждает каждое действие рабочего стола. `--approve read` и `--approve write` рабочий стол не разрешают. `--approve all` разрешает.
 
 Инструменты работают только внутри `--cwd` (по умолчанию текущий каталог): выход за его пределы,
 в том числе через символические ссылки, запрещён; `.env*`, ключи и сертификаты, `.ssh`, `.aws` и т. п.
 недоступны; запись в `.git` и `node_modules` запрещена. Перед перезаписью и удалением файл копируется в
-`~/.ai-agent/backups/<дата>/`. Команды выполняются через cmd.exe (Windows) или /bin/sh с таймаутом и
-ограничением вывода, дерево процессов завершается принудительно; из окружения вырезаются переменные,
+`~/.ai-agent/backups/<дата>/`. `run_command` выбирает оболочку на вызов: cmd, powershell, pwsh, bash, sh или zsh
+(пусто — cmd.exe в Windows и /bin/sh в остальных системах). `run_script` запускает файл `.ps1`, `.cmd`, `.bat`, `.sh` или `.bash`.
+`ssh` вызывает системные `ssh` и `scp`: удалённая команда, скрипт `.ps1`/`.sh` на stdin, либо один файл (`put` / `get`).
+Пароль ввести нельзя (`BatchMode`); пустой `identity` — ключ ssh по умолчанию. Таймаут и лимит вывода те же,
+дерево процессов завершается принудительно; из окружения вырезаются переменные,
 похожие на секреты (`*KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`). Весь текст модели перед выводом
 очищается от управляющих последовательностей терминала.
 

@@ -46,6 +46,7 @@ export function agentBase({ root, approvalLevel, toolNames, interactive, shell }
 Working directory: ${root}
 Platform: ${platform}; shell for run_command: ${shellName}; current date: ${new Date().toISOString().slice(0, 10)}
 Available tools: ${toolNames.join(', ')}
+${toolNames.includes('run_script') ? 'run_command may set shell to cmd, powershell, pwsh, bash, sh, or zsh (empty = the default above). run_script executes a .ps1, .cmd, .bat, .sh, or .bash file in the working directory. ssh uses the system ssh and scp clients: mode exec runs a remote command or sends a .ps1/.sh/.bash file on stdin; put and get copy one file. BatchMode is on, so a password cannot be typed; an empty identity uses the default key.' : ''}
 Access policy: ${policy}
 ${interactive ? 'A human operator is present: use ask_user for genuinely blocking questions only.' : 'No human is available during this run: make sensible assumptions and state them in the final answer.'}
 

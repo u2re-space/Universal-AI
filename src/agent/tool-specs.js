@@ -4,10 +4,10 @@
  * @purpose JSON schemas and enablement rules for the local function tools.
  * @depends agent/desktop
  * @usedBy agent/tools
- * @exports TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory
+ * @exports TOOL_SPECS, READ_ONLY_TOOLS, SHELL_TOOL_NAMES, toolDefinitions, enabledToolNames, describeTool, toolCategory
  * @ai.tags tools, schema
  * @ai.hint pure
- * @changed 2026-10-15 Split from agent/tools.js so the runtime file can stay smaller.
+ * @changed 2026-10-15 run_script and ssh next to run_command.
  */
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
 
@@ -112,12 +112,41 @@ export const TOOL_SPECS = {
     },
     run_command: {
         category: 'exec', group: 'shell',
-        description: 'Run a shell command in the working directory (cmd.exe on Windows, /bin/sh elsewhere) and return exit code with captured stdout/stderr. Non-interactive only; output is truncated to a size limit.',
+        description: 'Run one command in the working directory and return the exit code with captured stdout/stderr. Set shell to cmd, powershell, pwsh, bash, sh, or zsh; an empty shell uses the configured default (cmd.exe on Windows, /bin/sh elsewhere). Non-interactive only; output is truncated.',
         parameters: schema({
             command: str('The command line to execute.'),
+            shell: { type: 'string', enum: ['', 'powershell', 'pwsh', 'cmd', 'bash', 'sh', 'zsh'], description: 'Interpreter for this command. Empty string = configured default.' },
             cwd: nullableStr('Subdirectory (relative to the working directory) to run in. Null = working directory.'),
             timeout_seconds: nullableInt('Time limit in seconds (max 900). Null = default.'),
             reason: str('One sentence: why this command is needed (shown to the user for approval).'),
+        }),
+    },
+    run_script: {
+        category: 'exec', group: 'shell',
+        description: 'Run a script file inside the working directory. .ps1 uses PowerShell -File, .cmd and .bat use cmd, .sh and .bash use bash. Set shell to override the extension. Arguments are passed as argv, not through a shell string.',
+        parameters: schema({
+            path: str('Script path relative to the working directory.'),
+            args: { type: 'array', items: { type: 'string' }, description: 'Arguments for the script. Empty array when there are none.' },
+            shell: { type: 'string', enum: ['', 'powershell', 'pwsh', 'cmd', 'bash', 'sh', 'zsh'], description: 'Override the interpreter. Empty string = choose from the file extension.' },
+            cwd: nullableStr('Subdirectory to run in. Null = the script\'s directory is not changed; the working directory is used.'),
+            timeout_seconds: nullableInt('Time limit in seconds (max 900). Null = default.'),
+            reason: str('One sentence: why this script is needed (shown to the user for approval).'),
+        }),
+    },
+    ssh: {
+        category: 'exec', group: 'shell',
+        description: 'Run a remote command or copy one file with the system ssh and scp clients. mode exec runs command, or sends a local .ps1/.sh/.bash file to the remote interpreter on stdin when command is empty. mode put uploads local_path to remote_path. mode get downloads remote_path into local_path. BatchMode is on, so a password prompt cannot be answered; use a key or agent. An empty identity uses the default ssh key. Paths stay inside the working directory.',
+        parameters: schema({
+            host: str('Hostname or user@host. No spaces and no leading dash.'),
+            command: str('Remote command for mode exec. Empty string when running a script file or copying.'),
+            mode: { type: 'string', enum: ['exec', 'put', 'get'], description: 'exec runs a command or script. put uploads a file. get downloads a file.' },
+            local_path: str('Workspace file. Empty string when unused.'),
+            remote_path: str('Path on the remote host. Empty string when unused.'),
+            shell: { type: 'string', enum: ['', 'powershell', 'pwsh', 'bash', 'sh', 'zsh'], description: 'Remote interpreter when exec sends a script file. Empty string = choose from the extension.' },
+            port: nullableInt('TCP port. Null = 22.'),
+            identity: str('Private key path relative to the working directory. Empty string = the default ssh identity.'),
+            timeout_seconds: nullableInt('Time limit in seconds (max 900). Null = default.'),
+            reason: str('One sentence: why this SSH call is needed (shown to the user for approval).'),
         }),
     },
     fetch_url: {
@@ -220,6 +249,9 @@ export const TOOL_SPECS = {
 
 export const READ_ONLY_TOOLS = ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall'];
 
+/** Shell tools enabled together by tools.shell. Reviewer may run these; collector may not. */
+export const SHELL_TOOL_NAMES = ['run_command', 'run_script', 'ssh'];
+
 /**
  * Strict function-tool definitions for names that exist in `TOOL_SPECS`.
  * `createToolset` returns these from `definitions()`.
@@ -239,7 +271,7 @@ export function enabledToolNames(tools, { interactive = false, memory = false, s
     const names = [];
     if (tools.fs) names.push('list_files', 'read_file', 'search_files', 'write_file', 'replace_text', 'delete_file', 'make_dir', 'view_image');
     if (tools.fs && summarize) names.push('summarize_file');
-    if (tools.shell) names.push('run_command');
+    if (tools.shell) names.push(...SHELL_TOOL_NAMES);
     if (tools.fetch) names.push('fetch_url');
     if (tools.desktop) names.push(...DESKTOP_TOOL_NAMES);
     if (memory) names.push('recall', 'remember');
