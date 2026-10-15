@@ -101,12 +101,16 @@ export function createClient({
      */
     async function apiErrorFrom(res, clientRequestId) {
         const raw = await readBody(res.body, maxErrorBytes, { truncate: true }).catch(() => Buffer.alloc(0));
+        const text = raw.toString('utf8').trim();
         let parsed = null;
-        try { parsed = JSON.parse(raw.toString('utf8'))?.error ?? null; } catch { /* not JSON */ }
-        const message = parsed?.message ? String(parsed.message).slice(0, 2000) : `HTTP ${res.status}`;
+        try { parsed = JSON.parse(text); } catch { /* not JSON */ }
+        const err = parsed && typeof parsed === 'object' ? (parsed.error ?? parsed) : null;
+        const details = err && typeof err === 'object' ? err : {};
+        const fromBody = typeof err === 'string' ? err : (typeof details.message === 'string' ? details.message : '');
+        const message = (fromBody || text).slice(0, 2000) || `HTTP ${res.status}`;
         return new ApiError(`OpenAI API: ${message}`, {
-            code: 'HTTP_ERROR', status: res.status, apiCode: parsed?.code ?? null, apiType: parsed?.type ?? null,
-            param: parsed?.param ?? null, requestId: res.headers['x-request-id'] ?? null, clientRequestId,
+            code: 'HTTP_ERROR', status: res.status, apiCode: details.code ?? null, apiType: details.type ?? null,
+            param: details.param ?? null, requestId: res.headers['x-request-id'] ?? null, clientRequestId,
             retryAfter: res.headers['retry-after'] ?? null, retryable: RETRYABLE_STATUS.has(res.status),
         });
     }

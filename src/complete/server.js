@@ -212,7 +212,26 @@ export function createCompletionBridge({ tokens = [], handle = null, structure =
         if (signal.aborted) stop();
         else signal.addEventListener('abort', stop, { once: true });
     }
-    const run = (request) => handle(request, controller.signal);
+    const COMPLETE_GAP_MS = 1000;
+    let lastCompleteAt = 0;
+    let completeBusy = false;
+    /**
+     * Allow one model completion per second. A faster repeat returns no insertion.
+     * @returns {boolean}
+     * @ai.hint pure
+     */
+    const beginComplete = () => {
+        const now = Date.now();
+        if (completeBusy || now - lastCompleteAt < COMPLETE_GAP_MS) return false;
+        completeBusy = true;
+        lastCompleteAt = now;
+        return true;
+    };
+    const run = async (request) => {
+        if (typeof handle !== 'function' || !beginComplete()) return { text: '' };
+        try { return await handle(request, controller.signal); }
+        finally { completeBusy = false; }
+    };
     const runStructure = (request) => structure(request, controller.signal);
 
     /**

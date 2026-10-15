@@ -171,6 +171,29 @@ function visibleLine(line, startLine) {
     return line.bytes > 0 ? `[line ${absolute} omitted, ${line.bytes} bytes]` : `[line ${absolute} omitted]`;
 }
 
+function clipPlain(text) {
+    if (text.length <= 180) return text;
+    return `[long line, ${text.length} chars]`;
+}
+
+/**
+ * Keep the cursor visible and drop the opaque tails of a very long line.
+ * @param {string} text
+ * @param {number} at
+ * @returns {string}
+ * @ai.hint pure
+ */
+function clipCursor(text, at) {
+    const character = Math.min(Math.max(at, 0), text.length);
+    const marked = text.slice(0, character) + '|' + text.slice(character);
+    if (marked.length <= 180) return marked;
+    const start = Math.max(0, character - 80);
+    const end = Math.min(text.length, character + 80);
+    const head = start > 0 ? '…' : '';
+    const tail = end < text.length ? '…' : '';
+    return head + text.slice(start, character) + '|' + text.slice(character, end) + tail;
+}
+
 /**
  * Nearest lines around the cursor, with `|` at the insertion point.
  * @param {object[]} lines
@@ -188,9 +211,9 @@ function renderFocus(lines, cursor, neighborLines, startLine) {
         let below = cursorLine + 1;
         while (below < lines.length && lines[below].omitted) below++;
         const rows = [];
-        if (above >= 0) rows.push(lines[above].text);
+        if (above >= 0) rows.push(clipPlain(lines[above].text));
         rows.push('|');
-        if (below < lines.length) rows.push(lines[below].text);
+        if (below < lines.length) rows.push(clipPlain(lines[below].text));
         return {
             focus: rows.join('\n'),
             focusStart: above >= 0 ? above : cursorLine,
@@ -202,10 +225,8 @@ function renderFocus(lines, cursor, neighborLines, startLine) {
     const rows = [];
     for (let i = focusStart; i <= focusEnd; i++) {
         if (lines[i].omitted) rows.push(visibleLine(lines[i], startLine));
-        else if (i === cursorLine) {
-            const at = Math.min(cursor.character, lines[i].text.length);
-            rows.push(lines[i].text.slice(0, at) + '|' + lines[i].text.slice(at));
-        } else rows.push(lines[i].text);
+        else if (i === cursorLine) rows.push(clipCursor(lines[i].text, cursor.character));
+        else rows.push(clipPlain(lines[i].text));
     }
     return { focus: rows.join('\n'), focusStart, focusEnd };
 }
@@ -245,7 +266,7 @@ function renderPrompt(built) {
         const clip = built.replaced.length > 200 ? `${built.replaced.slice(0, 200)}…` : built.replaced;
         rows.push(`Replace this selection: ${clip}`);
     }
-    rows.push('', 'Focus (| is the cursor):', built.focus);
+    rows.push('', 'Editor buffer. Complete the code at | only.', 'Focus:', built.focus);
     return rows.join('\n');
 }
 
@@ -260,7 +281,7 @@ function renderPrompt(built) {
  */
 export function buildCompletionContext(input = {}) {
     const maxLineBytes = input.maxLineBytes ?? MAX_LINE_BYTES;
-    const neighborLines = input.neighborLines ?? 2;
+    const neighborLines = input.neighborLines ?? 16;
     const startLine = input.startLine ?? 0;
     const { text, cursor, replaced } = resolveText({ ...input, maxLineBytes });
     const lines = classifyLines(text, maxLineBytes, input.omitLines ?? []);

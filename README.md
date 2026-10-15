@@ -99,7 +99,7 @@ ai run "добавь тест" --serve ws://127.0.0.1:8765
 
 ### Дополнение для редактора
 
-`ai complete` возвращает текст, который нужно вставить в месте курсора. Модель по умолчанию — `gpt-5.3-codex-spark`, уровень рассуждений — `low`. Один запрос — JSON в stdin. Для IDE тот же JSON принимается по HTTP и WebSocket:
+`ai complete` возвращает текст, который нужно вставить в месте курсора. Модель по умолчанию — `gpt-6-luna`, уровень рассуждений — `none`. Один запрос — JSON в stdin. Для IDE тот же JSON принимается по HTTP и WebSocket:
 
 ```bash
 ai complete --json
@@ -353,7 +353,7 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   "agent": { "mode": "team", "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": 98304, "visionDelegate": "auto" },
   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
   "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": "." },
-  "completion": { "model": "gpt-5.3-codex-spark", "effort": "low", "maxLineBytes": 524288, "maxContextBytes": 24576 },
+  "completion": { "model": "gpt-6-luna", "effort": "none", "maxLineBytes": 524288, "maxContextBytes": 24576 },
   "compaction": { "auto": false, "afterInputTokens": 200000 },
   "decisions": { "model": "openai/gpt-6-luna-decisions", "reviewAt": 0.5, "blockAt": 0.9 },
   "moderation": { "mode": "auto", "model": "omni-moderation-latest", "preset": "community", "guardReplies": false },
@@ -462,7 +462,7 @@ src/interact/ahk-script.js  текст программы AutoHotkey v2
 src/commands/flags.js     флаги CLI → поля конфигурации
 src/jobs/manager.js       локальные фоновые задачи
 src/complete/context.js   курсор, сокращение файла, пропуск строк длиннее 0.5 МиБ
-src/complete/complete.js  запрос к быстрой модели (по умолчанию gpt-5.3-codex-spark, effort low)
+src/complete/complete.js  запрос к быстрой модели (по умолчанию gpt-6-luna, effort none)
 src/complete/server.js    POST /v1/complete и WebSocket на 127.0.0.1
 src/complete/ws.js        кадры WebSocket поверх node:http
 src/channels/             решения, модерация, черновики, HTTP и WebSocket /v1/channels

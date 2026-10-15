@@ -23,7 +23,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai models [фильтр]                список доступных моделей
   ai config [show|init|path]        конфигурация (~/.ai-agent/config.json)
   ai map [path]                     карта проекта .ai/map.json (файлы и символы). Черновик read/edit/scan подтверждает planner; запись вне edit выполняется и помечается
-  ai complete                       вставка в месте курсора (JSON из stdin). Модель gpt-5.3-codex-spark, effort low
+  ai complete                       вставка в месте курсора (JSON из stdin). Модель gpt-6-luna, effort none
   ai complete --listen [--port n]   HTTP POST и WebSocket /v1/complete на 127.0.0.1 (для редактора)
   ai mcp [list|add|remove|probe]    пользовательские MCP-серверы (stdio)
   ai decide [набор] "текст"         вероятности Decisions API (community, support, smm, guard, route)

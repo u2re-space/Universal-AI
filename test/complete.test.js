@@ -83,6 +83,31 @@ test('prefix and suffix meet at the cursor', () => {
     assert.match(built.focus, /const a = \|;/);
 });
 
+test('the default window includes code a dozen lines from the cursor', () => {
+    const lines = [];
+    for (let i = 0; i < 40; i++) lines.push(`const near${String(i).padStart(2, '0')} = ${i};`);
+    lines[20] = 'const cursor = |;';
+    const built = buildCompletionContext({ content: lines.join('\n') });
+    assert.match(built.focus, /const cursor = \|/);
+    assert.match(built.focus, /near08/);
+    assert.match(built.focus, /near32/);
+    assert.equal(built.prompt.includes('near00'), false);
+    assert.equal(built.prompt.includes('near39'), false);
+});
+
+test('a long opaque line near the cursor is not sent whole', () => {
+    const blob = `M${'A'.repeat(400)}`;
+    const built = buildCompletionContext({
+        content: `const icon = "${blob}";\nconst cursor = ;\n`,
+        cursor: { line: 1, character: 15 },
+        neighborLines: 2,
+    });
+    assert.equal(built.prompt.includes(blob), false);
+    assert.match(built.focus, /long line/);
+    assert.match(built.focus, /const cursor = \|/);
+    assert.match(built.prompt, /Editor buffer/);
+});
+
 test('a longer file does not add lines outside the cursor window', () => {
     const around = 'const left = 1;\nconst cursor = |;\nconst right = 2;\n';
     const short = buildCompletionContext({ content: around, neighborLines: 1 });
@@ -165,8 +190,8 @@ test('masked client frames decode and unmasked frames are rejected', () => {
 
 test('completeCode calls the fast model at low effort and returns the insertion', async () => {
     script = (body) => {
-        assert.equal(body.model, 'gpt-5.3-codex-spark');
-        assert.equal(body.reasoning.effort, 'low');
+        assert.equal(body.model, 'gpt-6-luna');
+        assert.equal(body.reasoning.effort, 'none');
         assert.equal(body.stream, false);
         assert.equal(body.store, false);
         assert.equal(body.tools, undefined);
@@ -184,7 +209,7 @@ test('completeCode calls the fast model at low effort and returns the insertion'
             request: { content: `const a = |\n${'SECRET_BASE64'}${'D'.repeat(40)}`, maxLineBytes: 16, neighborLines: 0 },
         });
         assert.equal(result.text, '1;');
-        assert.equal(result.model, 'gpt-5.3-codex-spark');
+        assert.equal(result.model, 'gpt-6-luna');
         assert.equal(result.cursorLineOmitted, false);
     } finally { http.close(); }
 });
@@ -217,10 +242,31 @@ test('HTTP completion requires the token and returns the insertion', async () =>
     assert.equal(accepted.status, 200);
     assert.equal(body.id, 'req-1');
     assert.equal(body.text, 'next');
-    assert.equal(body.model, 'gpt-5.3-codex-spark');
+    assert.equal(body.model, 'gpt-6-luna');
+});
+
+test('a second completion within one second does not call the model', async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    let calls = 0;
+    script = () => {
+        calls += 1;
+        return { text: 'once' };
+    };
+    const post = (id) => fetch(endpoint.httpURL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
+        body: JSON.stringify({ id, content: 'const a = |' }),
+    });
+    const first = await (await post('gap-1')).json();
+    const second = await (await post('gap-2')).json();
+    assert.equal(calls, 1);
+    assert.equal(first.text, 'once');
+    assert.equal(second.text, '');
+    assert.equal(second.id, 'gap-2');
 });
 
 test('WebSocket completion and ping use the same request', async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1100));
     script = (body) => {
         assert.match(body.input, /return \|/);
         return { text: ' items.length' };
@@ -261,8 +307,8 @@ function runCli(args, { input = null, env = {} } = {}) {
 
 test('ai complete --json prints the insertion from stdin', async () => {
     script = (body) => {
-        assert.equal(body.model, 'gpt-5.3-codex-spark');
-        assert.equal(body.reasoning.effort, 'low');
+        assert.equal(body.model, 'gpt-6-luna');
+        assert.equal(body.reasoning.effort, 'none');
         assert.match(body.input, /alpha \|/);
         return { text: 'beta' };
     };
@@ -270,7 +316,7 @@ test('ai complete --json prints the insertion from stdin', async () => {
     assert.equal(code, 0);
     const result = stdout.trim().split('\n').map((line) => JSON.parse(line)).find((line) => line.type === 'completion');
     assert.equal(result.text, 'beta');
-    assert.equal(result.model, 'gpt-5.3-codex-spark');
+    assert.equal(result.model, 'gpt-6-luna');
 });
 
 test('ai complete --listen serves health on 127.0.0.1 and then stops', async () => {

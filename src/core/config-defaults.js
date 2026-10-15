@@ -168,17 +168,20 @@ export const defaults = Object.freeze({
     },
     /**
      * Inline completion for editors (`ai complete`, HTTP and WebSocket).
-     * A fast model and low effort. Only the lines around the cursor are sent;
-     * the rest of the file is not added on the next request. A line over
+     * A fast model at effort none so a ghost text can arrive before the next key.
+     * Set completion.effort to low when the insertion should be more careful.
+     * Sixteen lines on each side of the cursor are sent, so a change a dozen
+     * lines away is still visible. The rest of the file is not added on the
+     * next request. A line over
      * maxLineBytes (0.5 MiB, typical of base64) is left out.
      */
     completion: {
-        model: 'gpt-5.3-codex-spark',
-        effort: 'low',
+        model: 'gpt-6-luna',
+        effort: 'none',
         maxOutputTokens: 160,
         maxLineBytes: 512 * 1024,
         maxContextBytes: 24 * 1024,
-        neighborLines: 2,
+        neighborLines: 16,
         token: null,
     },
     /** Prices in USD per 1M tokens, e.g. { "gpt-6.1-sol": { "input": 1.25, "cachedInput": 0.125, "output": 10 } }. */
