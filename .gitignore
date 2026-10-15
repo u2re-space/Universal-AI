@@ -149,6 +149,7 @@ vite.config.ts.timestamp-*
 .turbo
 
 node_modules/
+.worktrees/
 .ai-agent/
 .ai/
 *.log
