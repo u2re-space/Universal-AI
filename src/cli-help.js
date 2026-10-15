@@ -6,7 +6,7 @@
  * @exports HELP
  * @ai.tags cli
  * @ai.hint pure
- * @changed 2026-10-15 Split from cli.js.
+ * @changed 2026-10-15 Help for ai complete.
  */
 export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
 
@@ -22,6 +22,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai models [фильтр]                список доступных моделей
   ai config [show|init|path]        конфигурация (~/.ai-agent/config.json)
   ai map [path]                     карта проекта .ai/map.json (файлы и символы). Черновик read/edit/scan подтверждает planner; запись вне edit выполняется и помечается
+  ai complete                       вставка в месте курсора (JSON из stdin). Модель gpt-5.3-codex-spark, effort low
+  ai complete --listen [--port n]   HTTP POST и WebSocket /v1/complete на 127.0.0.1 (для редактора)
 
 Ввод:
   --image <путь|url>     приложить изображение (можно несколько)   --detail auto|low|high|original
@@ -67,6 +69,12 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 Изображения (image / --images):
   --size WxH|auto  --quality low|medium|high|xhigh|max|auto  --format png|webp|jpeg
   --image-background transparent|opaque|auto  --partials 0..3  --image-model <id>  --count, -n <n>
+
+Дополнение кода (complete):
+  JSON: content и/или prefix+suffix, cursor или selection (line/character с нуля, как в LSP), либо символ | в тексте.
+  --file, --line, --character, --language   файл и курсор, если JSON не передан
+  --listen    сервер только на 127.0.0.1. Токен: --token или AI_COMPLETE_TOKEN (Bearer или ?token=)
+  Строка длиннее 0.5 МиБ в модель не попадает; берутся ближайшие обычные строки. Контекст файла сокращается.
 
 Прочее:
   --json                 события и результат в формате JSON Lines     --quiet, -q   только ответ

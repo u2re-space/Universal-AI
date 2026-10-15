@@ -6,7 +6,7 @@
  * @exports defaults, ROLE_NAMES, REASONING_EFFORTS, REASONING_SUMMARIES, APPROVAL_LEVELS, IMAGE_DETAILS
  * @ai.tags config
  * @ai.hint pure
- * @changed 2026-10-15 Split from core/config.js.
+ * @changed 2026-10-15 Completion defaults for editor autocomplete.
  */
 const KiB = 1024;
 const MiB = KiB * KiB;
@@ -117,6 +117,20 @@ export const defaults = Object.freeze({
         maxRecall: 8,                   // memories injected into the shared context
         notesFile: 'AGENTS.md',         // project notes file included in the context when present
         dbFile: null,                   // null → <home>/memory.db
+    },
+    /**
+     * Inline completion for editors (`ai complete`, HTTP and WebSocket).
+     * A fast model and low effort; the file context is shortened, and a line
+     * over maxLineBytes (0.5 MiB, typical of base64) is left out.
+     */
+    completion: {
+        model: 'gpt-5.3-codex-spark',
+        effort: 'low',
+        maxOutputTokens: 160,
+        maxLineBytes: 512 * 1024,
+        maxContextBytes: 24 * 1024,
+        neighborLines: 2,
+        token: null,
     },
     /** Prices in USD per 1M tokens, e.g. { "gpt-6.1-sol": { "input": 1.25, "cachedInput": 0.125, "output": 10 } }. */
     prices: {},

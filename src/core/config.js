@@ -7,7 +7,7 @@
  * @exports APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, defaults, resolveRole, defaultHome, loadConfig, isReasoningModel, supportsVerbosity, redactConfig
  * @ai.tags config
  * @ai.hint io
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-15 Validate completion settings.
  */
 import os from 'node:os';
 import path from 'node:path';
@@ -210,6 +210,21 @@ function validateConfig(c) {
     }
     if (c.serviceTier !== null && !['auto', 'default', 'flex', 'priority', 'fast', 'ultrafast'].includes(c.serviceTier)) {
         fail('serviceTier: auto | default | flex | priority | fast | ultrafast');
+    }
+    if (!isRecord(c.completion)) fail('completion должен быть объектом');
+    for (const key of Object.keys(c.completion)) {
+        if (!(key in defaults.completion)) fail(`неизвестный параметр completion.${key}`);
+    }
+    if (typeof c.completion.model !== 'string' || !c.completion.model.trim()) fail('completion.model должен быть строкой');
+    if (!REASONING_EFFORTS.includes(c.completion.effort)) fail(`completion.effort: ${REASONING_EFFORTS.join(' | ')}`);
+    if (!Number.isSafeInteger(c.completion.maxOutputTokens) || c.completion.maxOutputTokens < 16) fail('completion.maxOutputTokens ≥ 16');
+    if (!Number.isSafeInteger(c.completion.maxLineBytes) || c.completion.maxLineBytes < 1024) fail('completion.maxLineBytes ≥ 1024');
+    if (!Number.isSafeInteger(c.completion.maxContextBytes) || c.completion.maxContextBytes < 256) fail('completion.maxContextBytes ≥ 256');
+    if (!Number.isSafeInteger(c.completion.neighborLines) || c.completion.neighborLines < 0 || c.completion.neighborLines > 20) {
+        fail('completion.neighborLines: 0..20');
+    }
+    if (c.completion.token !== null && (typeof c.completion.token !== 'string' || c.completion.token.length < 8 || /[\r\n]/.test(c.completion.token))) {
+        fail('completion.token: null или строка от 8 символов без перевода строки');
     }
 }
 

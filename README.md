@@ -50,6 +50,8 @@ ai memory list|search|add|forget|clear|tasks|stats|path   долговремен
 ai models [фильтр]           список моделей
 ai config show|init|path     конфигурация
 ai map [path]                индекс файлов и символов (.ai/map.json)
+ai complete                  вставка в месте курсора (редактор, быстрая модель)
+ai complete --listen [--port n]   HTTP и WebSocket для IDE на 127.0.0.1
 ```
 
 Полный список флагов — `ai --help`.
@@ -63,6 +65,23 @@ ai map [path]                индекс файлов и символов (.ai/
 Исходники в `src/` с отступом в 4 пробела. Карточка модуля (`@file`, `@purpose`, `@exports`, `@depends`, `@usedBy`) и типы функций (`@param`, `@returns`) описаны в `docs/jsdoc/TAGS.md`. Сборка карты кладёт их в `.ai/map.json`: у файла поле `doc`, у символа `purpose`, `params`, `returns`, `hint`, `tags`.
 
 В `ai run` правила намечают файлы как `read`, `edit` или `scan`. Planner подтверждает список. Запись в файл вне `edit` выполняется, а ответ инструмента начинается с пометки, что пути не было в карте правок.
+
+### Дополнение для редактора
+
+`ai complete` возвращает текст, который нужно вставить в месте курсора. Модель по умолчанию — `gpt-5.3-codex-spark`, уровень рассуждений — `low`. Один запрос — JSON в stdin. Для IDE тот же JSON принимается по HTTP и WebSocket:
+
+```bash
+ai complete --json
+# stdin: {"path":"src/app.js","language":"javascript","content":"function total(items) {\n  return |\n}\n","cursor":{"line":1,"character":9}}
+
+ai complete --listen --port 8765
+# POST http://127.0.0.1:8765/v1/complete
+# WS   ws://127.0.0.1:8765/v1/complete
+```
+
+Курсор задаётся полем `cursor` или диапазоном `selection` (номера строк и `character` с нуля, как в LSP). Если координат нет, курсор — первый символ `|` в `content`, либо граница `prefix` и `suffix`. Файл можно не присылать целиком: достаточно `path` внутри рабочего каталога, контекст будет сокращён. Строка длиннее 0.5 МиБ (часто это base64) в модель не отправляется — рядом с курсором остаются ближайшие обычные строки.
+
+Сервер слушает только `127.0.0.1`. Секрет `--token` или `AI_COMPLETE_TOKEN` (либо `completion.token` в конфигурации) передаётся заголовком `Authorization: Bearer` или параметром `?token=`.
 
 ### Примеры
 
@@ -220,6 +239,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
   "agent": { "mode": "team", "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": 98304, "visionDelegate": "auto" },
   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
   "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": "." },
+  "completion": { "model": "gpt-5.3-codex-spark", "effort": "low", "maxLineBytes": 524288, "maxContextBytes": 24576 },
   "compaction": { "auto": false, "afterInputTokens": 200000 },
   "prices": { "gpt-6.1-sol": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-6-luna*": { "input": 0.25, "output": 2 } },
   "instructions": "Отвечай кратко."
@@ -319,12 +339,17 @@ src/util/toon.js          фасад кодека TOON (encode / decode в со�
 src/interact/ahk-script.js  текст программы AutoHotkey v2
 src/commands/flags.js     флаги CLI → поля конфигурации
 src/jobs/manager.js       локальные фоновые задачи
-src/commands/*.js         ask, chat, run, image, jobs, memory, resume/cancel/models/config
+src/complete/context.js   курсор, сокращение файла, пропуск строк длиннее 0.5 МиБ
+src/complete/complete.js  запрос к быстрой модели (по умолчанию gpt-5.3-codex-spark, effort low)
+src/complete/server.js    POST /v1/complete и WebSocket на 127.0.0.1
+src/complete/ws.js        кадры WebSocket поверх node:http
+src/commands/*.js         ask, chat, run, image, jobs, memory, complete, resume/cancel/models/config
 ```
 
 Программный интерфейс (`index.js`): `createClient`, `createSession`, `createLedger`, `createToolset`,
 `runTurn`, `createRoleRunner`, `runTeam`, `openMemory`, `createSharedContext`, `resolveRole`,
-`buildUserMessage`, `createRenderer`, `createJobManager`.
+`buildUserMessage`, `createRenderer`, `createJobManager`, `buildCompletionContext`,
+`completeCode`, `startCompletionServer`.
 
 ## Тесты
 

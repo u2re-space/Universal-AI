@@ -2,12 +2,12 @@
  * @file src/cli.js
  * @module cli
  * @purpose Parse argv, dispatch one command, and map failures to process exit codes.
- * @depends node:path, node:util, node:fs/promises, node:url, node:module, core/config, ui/renderer, jobs/manager, openai/errors, commands/shared, commands/ask, commands/chat, commands/run, commands/image, commands/jobs, commands/memory, commands/misc, commands/map, cli-help
+ * @depends node:path, node:util, node:fs/promises, node:url, node:module, core/config, ui/renderer, jobs/manager, openai/errors, commands/shared, commands/ask, commands/chat, commands/run, commands/image, commands/jobs, commands/memory, commands/misc, commands/map, commands/complete, cli-help
  * @usedBy bin/ai
  * @exports HELP, stripDetach, main
  * @ai.tags cli, dispatch
  * @ai.hint keep
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-15 Register the complete command.
  */
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -27,6 +27,7 @@ import { jobs } from './commands/jobs.js';
 import { memoryCommand } from './commands/memory.js';
 import { resume, cancel, models, configCommand } from './commands/misc.js';
 import { mapCommand } from './commands/map.js';
+import { complete } from './commands/complete.js';
 
 const pkg = createRequire(import.meta.url)('../package.json');
 
@@ -50,9 +51,11 @@ const OPTIONS = {
     follow: { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h', default: false }, version: { type: 'boolean', short: 'V', default: false },
     role: { type: 'string', multiple: true }, single: { type: 'boolean', default: false }, team: { type: 'boolean', default: false },
     memory: { type: 'boolean', default: true }, global: { type: 'boolean', default: false }, kind: { type: 'string' }, tags: { type: 'string' },
+    listen: { type: 'boolean', default: false }, port: { type: 'string' }, line: { type: 'string' }, character: { type: 'string' },
+    language: { type: 'string' }, token: { type: 'string' },
 };
 
-const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand, map: mapCommand };
+const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand, map: mapCommand, complete };
 const NEEDS_API_KEY = new Set(['ask', 'chat', 'run', 'image', 'resume', 'cancel', 'models']);
 const DETACHABLE = new Set(['ask', 'run', 'image']);
 

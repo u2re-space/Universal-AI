@@ -1,0 +1,462 @@
+/**
+ * @file src/complete/context.js
+ * @module complete/context
+ * @purpose Build a short completion prompt from a file, a cursor, and the nearest lines.
+ * @depends node:fs, complete/errors
+ * @usedBy complete/complete, test/complete.test.js
+ * @exports MAX_LINE_BYTES, buildCompletionContext, readCompletionWindow
+ * @ai.tags complete, context
+ * @ai.hint pure
+ * @changed 2026-10-15 Cursor context with oversized lines left out.
+ */
+
+import { createReadStream } from 'node:fs';
+import { CompletionError } from './errors.js';
+
+/** 0.5 MiB. A longer line (often base64) is not sent to the model. */
+export const MAX_LINE_BYTES = 512 * 1024;
+
+/**
+ * Drop a leading BOM and turn CR LF / CR into LF.
+ * @param {string} text
+ * @returns {string}
+ * @ai.hint pure
+ */
+function normalize(text) {
+    return String(text ?? '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+/**
+ * Cursor position as 0-based UTF-16 indexes, matching an LSP Position.
+ * @param {object|null|undefined} value
+ * @param {string} what Name used in the error.
+ * @returns {{ line: number, character: number }|null}
+ * @ai.hint pure
+ */
+function readPosition(value, what) {
+    if (value == null) return null;
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        throw new CompletionError(`${what} должен быть объектом { line, character }.`);
+    }
+    const line = value.line;
+    const character = value.character ?? value.column ?? 0;
+    if (!Number.isSafeInteger(line) || line < 0) throw new CompletionError(`${what}.line — целое ≥ 0.`);
+    if (!Number.isSafeInteger(character) || character < 0) throw new CompletionError(`${what}.character — целое ≥ 0.`);
+    return { line, character };
+}
+
+/**
+ * LSP range. An inverted range is swapped so the start is the insertion point.
+ * @param {object|null|undefined} value
+ * @returns {{ start: { line: number, character: number }, end: { line: number, character: number } }|null}
+ * @ai.hint pure
+ */
+function readSelection(value) {
+    if (value == null) return null;
+    const start = readPosition(value.start, 'selection.start');
+    const end = readPosition(value.end, 'selection.end');
+    if (!start || !end) throw new CompletionError('selection.start и selection.end обязательны.');
+    const endFirst = end.line < start.line || (end.line === start.line && end.character < start.character);
+    return endFirst ? { start: end, end: start } : { start, end };
+}
+
+/**
+ * Byte offset of a position. The position is clamped to the text.
+ * @param {string} text Normalized text.
+ * @param {{ line: number, character: number }} position
+ * @returns {number}
+ * @ai.hint pure
+ */
+function positionToOffset(text, position) {
+    const lines = text.split('\n');
+    const line = Math.min(Math.max(position.line, 0), lines.length - 1);
+    let offset = 0;
+    for (let i = 0; i < line; i++) offset += lines[i].length + 1;
+    const character = Math.min(Math.max(position.character, 0), lines[line].length);
+    return offset + character;
+}
+
+/**
+ * Position of a byte-free string offset (UTF-16), clamped to the text.
+ * @param {string} text
+ * @param {number} offset
+ * @returns {{ line: number, character: number }}
+ * @ai.hint pure
+ */
+function offsetToPosition(text, offset) {
+    const clamped = Math.max(0, Math.min(offset, text.length));
+    let line = 0;
+    let character = 0;
+    for (let i = 0; i < clamped; i++) {
+        if (text[i] === '\n') { line++; character = 0; }
+        else character++;
+    }
+    return { line, character };
+}
+
+/**
+ * Clamp a cursor so it lands on an existing line.
+ * @param {string} text
+ * @param {{ line: number, character: number }} cursor
+ * @returns {{ line: number, character: number }}
+ * @ai.hint pure
+ */
+function clampCursor(text, cursor) {
+    return offsetToPosition(text, positionToOffset(text, cursor));
+}
+
+/**
+ * Turn source text into the string the model sees, with the cursor on that string.
+ * Prefix/suffix win over coordinates. Coordinates win over a `|` marker.
+ * @param {object} input
+ * @returns {{ text: string, cursor: { line: number, character: number }, replaced: string|null }}
+ * @ai.hint pure
+ */
+function resolveText(input) {
+    const prefix = typeof input.prefix === 'string' ? input.prefix : null;
+    const suffix = typeof input.suffix === 'string' ? input.suffix : null;
+    if (prefix !== null || suffix !== null) {
+        const head = normalize(prefix ?? '');
+        const tail = normalize(suffix ?? '');
+        return { text: head + tail, cursor: offsetToPosition(head, head.length), replaced: null };
+    }
+    const content = typeof input.content === 'string' ? normalize(input.content) : null;
+    if (content === null) throw new CompletionError('Нужен content, prefix или path к файлу.');
+    const selection = readSelection(input.selection);
+    if (selection) {
+        const start = positionToOffset(content, selection.start);
+        const end = positionToOffset(content, selection.end);
+        const selected = content.slice(start, end);
+        const text = content.slice(0, start) + content.slice(end);
+        const replaced = selected && Buffer.byteLength(selected, 'utf8') <= (input.maxLineBytes ?? MAX_LINE_BYTES) ? selected : null;
+        return { text, cursor: clampCursor(text, selection.start), replaced: replaced && replaced.length ? replaced : null };
+    }
+    const cursor = readPosition(input.cursor, 'cursor');
+    if (cursor) return { text: content, cursor: clampCursor(content, cursor), replaced: null };
+    const at = content.indexOf('|');
+    if (at >= 0) {
+        const head = content.slice(0, at);
+        return { text: head + content.slice(at + 1), cursor: offsetToPosition(head, head.length), replaced: null };
+    }
+    return { text: content, cursor: offsetToPosition(content, content.length), replaced: null };
+}
+
+/**
+ * Split text into lines. A line over the byte cap, or listed in omitLines, is not kept.
+ * @param {string} text
+ * @param {number} maxLineBytes
+ * @param {number[]} [omitLines] Indexes in this text whose original bytes were already discarded.
+ * @returns {{ number: number, text: string, bytes: number, omitted: boolean }[]}
+ * @ai.hint pure
+ */
+function classifyLines(text, maxLineBytes, omitLines = []) {
+    const omit = new Set(omitLines);
+    return text.split('\n').map((line, number) => {
+        const bytes = Buffer.byteLength(line, 'utf8');
+        if (omit.has(number) || bytes > maxLineBytes) return { number, text: '', bytes, omitted: true };
+        return { number, text: line, bytes, omitted: false };
+    });
+}
+
+/**
+ * One visible line, or a short stand-in when the source line was too large.
+ * @param {{ number: number, text: string, bytes: number, omitted: boolean }} line
+ * @param {number} startLine Absolute index of line 0 in this window.
+ * @returns {string}
+ * @ai.hint pure
+ */
+function visibleLine(line, startLine) {
+    if (!line.omitted) return line.text;
+    const absolute = line.number + startLine + 1;
+    return line.bytes > 0 ? `[line ${absolute} omitted, ${line.bytes} bytes]` : `[line ${absolute} omitted]`;
+}
+
+/**
+ * Nearest lines around the cursor, with `|` at the insertion point.
+ * @param {object[]} lines
+ * @param {{ line: number, character: number }} cursor
+ * @param {number} neighborLines
+ * @param {number} startLine
+ * @returns {{ focus: string, focusStart: number, focusEnd: number }}
+ * @ai.hint pure
+ */
+function renderFocus(lines, cursor, neighborLines, startLine) {
+    const cursorLine = Math.min(cursor.line, Math.max(0, lines.length - 1));
+    if (lines[cursorLine]?.omitted) {
+        let above = cursorLine - 1;
+        while (above >= 0 && lines[above].omitted) above--;
+        let below = cursorLine + 1;
+        while (below < lines.length && lines[below].omitted) below++;
+        const rows = [];
+        if (above >= 0) rows.push(lines[above].text);
+        rows.push('|');
+        if (below < lines.length) rows.push(lines[below].text);
+        return {
+            focus: rows.join('\n'),
+            focusStart: above >= 0 ? above : cursorLine,
+            focusEnd: below < lines.length ? below : cursorLine,
+        };
+    }
+    const focusStart = Math.max(0, cursorLine - neighborLines);
+    const focusEnd = Math.min(lines.length - 1, cursorLine + neighborLines);
+    const rows = [];
+    for (let i = focusStart; i <= focusEnd; i++) {
+        if (lines[i].omitted) rows.push(visibleLine(lines[i], startLine));
+        else if (i === cursorLine) {
+            const at = Math.min(cursor.character, lines[i].text.length);
+            rows.push(lines[i].text.slice(0, at) + '|' + lines[i].text.slice(at));
+        } else rows.push(lines[i].text);
+    }
+    return { focus: rows.join('\n'), focusStart, focusEnd };
+}
+
+/**
+ * File text outside the focus window, cut to a byte budget. Lines are kept whole.
+ * @param {object[]} lines
+ * @param {number} focusStart
+ * @param {number} focusEnd
+ * @param {number} maxContextBytes
+ * @param {number} startLine
+ * @returns {{ excerpt: string, truncated: boolean }}
+ * @ai.hint pure
+ */
+function renderExcerpt(lines, focusStart, focusEnd, maxContextBytes, startLine) {
+    const beforeBudget = Math.floor(maxContextBytes * 0.7);
+    const before = [];
+    let beforeBytes = 0;
+    let skipped = false;
+    for (let i = focusStart - 1; i >= 0; i--) {
+        const piece = visibleLine(lines[i], startLine);
+        const size = Buffer.byteLength(piece, 'utf8') + 1;
+        if (beforeBytes + size > beforeBudget && before.length) { skipped = true; break; }
+        if (size > beforeBudget && before.length === 0 && !lines[i].omitted) { skipped = true; break; }
+        before.push(piece);
+        beforeBytes += size;
+    }
+    before.reverse();
+    const after = [];
+    let afterBytes = 0;
+    const afterBudget = Math.max(0, maxContextBytes - beforeBytes);
+    for (let i = focusEnd + 1; i < lines.length; i++) {
+        const piece = visibleLine(lines[i], startLine);
+        const size = Buffer.byteLength(piece, 'utf8') + 1;
+        if ((afterBytes + size > afterBudget && after.length) || (size > afterBudget && after.length === 0 && !lines[i].omitted)) {
+            skipped = true;
+            break;
+        }
+        after.push(piece);
+        afterBytes += size;
+    }
+    const outside = focusStart + Math.max(0, lines.length - 1 - focusEnd);
+    const included = before.length + after.length;
+    return { excerpt: [...before, ...after].join('\n'), truncated: skipped || included < outside };
+}
+
+/**
+ * Instructions-facing prompt. The model is told to answer with the insertion only.
+ * @param {object} built
+ * @returns {string}
+ * @ai.hint pure
+ */
+function renderPrompt(built) {
+    const rows = [];
+    if (built.path) rows.push(`File: ${built.path}`);
+    if (built.language) rows.push(`Language: ${built.language}`);
+    rows.push(`Cursor: line ${built.cursorLine + 1}, character ${built.cursorCharacter + 1}.`);
+    if (built.cursorLineOmitted) rows.push('The cursor line is omitted because it is larger than 0.5 MiB. Insert at the | between the nearest lines.');
+    if (built.truncated) rows.push('File context is shortened.');
+    if (built.omittedLines.length) {
+        const shown = built.omittedLines.slice(0, 20).map((n) => n + 1).join(', ');
+        const more = built.omittedLines.length > 20 ? ` (+${built.omittedLines.length - 20} more)` : '';
+        rows.push(`Oversized lines omitted: ${shown}${more}.`);
+    }
+    if (built.replaced) {
+        const clip = built.replaced.length > 200 ? `${built.replaced.slice(0, 200)}…` : built.replaced;
+        rows.push(`Replace this selection: ${clip}`);
+    }
+    rows.push('', 'Focus (| is the cursor):', built.focus);
+    if (built.excerpt) rows.push('', 'Other context:', built.excerpt);
+    return rows.join('\n');
+}
+
+/**
+ * Shorten a file around the cursor and mark the insertion point with `|`.
+ * Positions are 0-based. A line over maxLineBytes is omitted; the nearest kept lines stay.
+ * @param {object} input content or prefix/suffix, optional cursor, selection, path, language, and limits.
+ * @returns {object} Prompt fields: focus, excerpt, prompt, omittedLines, truncated, cursorLineOmitted.
+ * @exports
+ * @ai.hint pure
+ */
+export function buildCompletionContext(input = {}) {
+    const maxLineBytes = input.maxLineBytes ?? MAX_LINE_BYTES;
+    const maxContextBytes = input.maxContextBytes ?? 24 * 1024;
+    const neighborLines = input.neighborLines ?? 2;
+    const startLine = input.startLine ?? 0;
+    const { text, cursor, replaced } = resolveText({ ...input, maxLineBytes });
+    const lines = classifyLines(text, maxLineBytes, input.omitLines ?? []);
+    const cursorLine = Math.min(cursor.line, Math.max(0, lines.length - 1));
+    const { focus, focusStart, focusEnd } = renderFocus(lines, { ...cursor, line: cursorLine }, neighborLines, startLine);
+    const { excerpt, truncated } = renderExcerpt(lines, focusStart, focusEnd, maxContextBytes, startLine);
+    const omittedLines = lines.filter((line) => line.omitted).map((line) => line.number + startLine);
+    const built = {
+        path: typeof input.path === 'string' && input.path.trim() ? input.path : null,
+        language: typeof input.language === 'string' && input.language.trim() ? input.language : null,
+        focus,
+        excerpt,
+        omittedLines,
+        truncated,
+        cursorLineOmitted: Boolean(lines[cursorLine]?.omitted),
+        cursorLine: cursorLine + startLine,
+        cursorCharacter: cursor.character,
+        replaced,
+        startLine,
+    };
+    built.prompt = renderPrompt(built);
+    return built;
+}
+
+/**
+ * Walk a file line by line. A line over maxLineBytes is discarded as soon as it exceeds the cap.
+ * `onLine(text, omitted)` returns false to stop.
+ * @param {string} abs Absolute path.
+ * @param {number} maxLineBytes
+ * @param {(text: string|null, omitted: boolean) => boolean|void} onLine
+ * @returns {Promise<void>}
+ * @ai.hint io
+ */
+function forEachFileLine(abs, maxLineBytes, onLine) {
+    return new Promise((resolve, reject) => {
+        const stream = createReadStream(abs);
+        let acc = Buffer.alloc(0);
+        let skipping = false;
+        let trailingNewline = false;
+        let settled = false;
+        let stop = false;
+
+        /**
+         * Resolve once. After a requested stop, a destroy error is ignored.
+         * @param {Error|undefined} error
+         * @returns {void}
+         * @ai.hint io
+         */
+        const finish = (error) => {
+            if (settled) return;
+            settled = true;
+            if (error && !stop) reject(error);
+            else resolve();
+        };
+        /**
+         * Hand one line to the caller. False stops the stream.
+         * @param {string|null} text Null when the line was too large to keep.
+         * @param {boolean} omitted
+         * @returns {void}
+         * @ai.hint io
+         */
+        const emit = (text, omitted) => {
+            if (stop) return;
+            if (onLine(text, omitted) === false) {
+                stop = true;
+                stream.destroy();
+            }
+        };
+        /**
+         * Pull complete lines out of the accumulator. A remainder over the cap starts a skip.
+         * @returns {void}
+         * @ai.hint io
+         */
+        const takeLines = () => {
+            let nl = acc.indexOf(0x0a);
+            while (nl !== -1) {
+                let row = acc.subarray(0, nl);
+                acc = acc.subarray(nl + 1);
+                if (row.length && row[row.length - 1] === 0x0d) row = row.subarray(0, row.length - 1);
+                trailingNewline = true;
+                if (skipping || row.length > maxLineBytes) emit(null, true);
+                else emit(row.toString('utf8'), false);
+                skipping = false;
+                if (stop) return;
+                nl = acc.indexOf(0x0a);
+            }
+            if (acc.length > 0) trailingNewline = false;
+            if (stop) return;
+            if (skipping) { acc = Buffer.alloc(0); return; }
+            if (acc.length > maxLineBytes) { skipping = true; acc = Buffer.alloc(0); }
+        };
+
+        stream.on('data', (chunk) => {
+            if (stop) return;
+            if (skipping) {
+                const nl = chunk.indexOf(0x0a);
+                if (nl === -1) return;
+                skipping = false;
+                trailingNewline = true;
+                emit(null, true);
+                if (stop) return;
+                const rest = chunk.subarray(nl + 1);
+                acc = rest.length ? Buffer.from(rest) : Buffer.alloc(0);
+                takeLines();
+                return;
+            }
+            acc = acc.length ? Buffer.concat([acc, chunk]) : Buffer.from(chunk);
+            takeLines();
+        });
+        stream.on('end', () => {
+            if (stop) return finish();
+            if (skipping || acc.length > maxLineBytes) emit(null, true);
+            else if (acc.length > 0) emit(acc.toString('utf8'), false);
+            else emit('', false);
+            finish();
+        });
+        stream.on('error', (error) => finish(stop ? undefined : error));
+        stream.on('close', () => { if (stop) finish(); });
+    });
+}
+
+/**
+ * Read a window around `cursorLine` from a large file without keeping an oversized line.
+ * @param {string} abs Absolute file path.
+ * @param {{ cursorLine?: number, maxLineBytes: number, maxContextBytes: number }} options
+ * @returns {Promise<{ text: string, omittedLines: number[], startLine: number, cursorLine: number }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function readCompletionWindow(abs, { cursorLine = 0, maxLineBytes, maxContextBytes }) {
+    const budget = Math.max(256, maxContextBytes);
+    const before = [];
+    let beforeBytes = 0;
+    let lineNo = 0;
+    /** @type {{ line: number, text: string, omitted: boolean }|null} */
+    let cursorEntry = null;
+    const after = [];
+    let afterBytes = 0;
+
+    await forEachFileLine(abs, maxLineBytes, (text, omitted) => {
+        const entry = { line: lineNo, text: omitted ? '' : text, omitted, keepBytes: omitted ? 24 : Buffer.byteLength(text ?? '', 'utf8') + 1 };
+        if (lineNo < cursorLine) {
+            before.push(entry);
+            beforeBytes += entry.keepBytes;
+            while (before.length > 1 && beforeBytes > budget) {
+                beforeBytes -= before[0].keepBytes;
+                before.shift();
+            }
+        } else if (lineNo === cursorLine) cursorEntry = entry;
+        else {
+            if (after.length > 0 && afterBytes + entry.keepBytes > budget) return false;
+            after.push(entry);
+            afterBytes += entry.keepBytes;
+            if (after.length >= 80) return false;
+        }
+        lineNo++;
+        return true;
+    });
+
+    if (!cursorEntry) cursorEntry = before.pop() ?? { line: 0, text: '', omitted: false };
+    const entries = [...before, cursorEntry, ...after];
+    const startLine = entries[0]?.line ?? 0;
+    return {
+        text: entries.map((entry) => entry.text).join('\n'),
+        omittedLines: entries.filter((entry) => entry.omitted).map((entry) => entry.line - startLine),
+        startLine,
+        cursorLine: cursorEntry.line - startLine,
+    };
+}
