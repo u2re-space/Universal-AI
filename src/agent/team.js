@@ -2,12 +2,12 @@
  * @file src/agent/team.js
  * @module agent/team
  * @purpose Run planner, collector, worker, reviewer, and summarizer over one shared context.
- * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, mcp/session
+ * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, mcp/session, channels/decide, channels/questions, channels/verdict
  * @usedBy commands/run, index.js
  * @exports toolNamesForRole, runTeam
  * @ai.tags team, roles
  * @ai.hint keep
- * @changed 2026-10-15 MCP tools on the worker, and read-only MCP tools on collector and reviewer.
+ * @changed 2026-10-15 Optional decisions route after the first answer.
  */
 
 import path from 'node:path';
@@ -34,6 +34,9 @@ import { openMcpSources } from '../mcp/session.js';
 import { ANSWER_INSTRUCTIONS, chooseRoute, openHandoff, readDirectory, saveHandoff, seedDirectory, seedTextFile, spillAnswer } from './handoff.js';
 import { CommandBatchError, executeFileCommands, FILE_COMMANDS_SCHEMA } from './file-commands.js';
 import { fileInstructions } from '../roles/encoder.js';
+import { requestDecision } from '../channels/decide.js';
+import { questionsFor } from '../channels/questions.js';
+import { routeFlag } from '../channels/verdict.js';
 
 import { bullets, renderFindings, renderPlan } from './team-text.js';
 const HARD_STOP = new Set(['cancelled', 'budget']);
@@ -69,7 +72,7 @@ export async function runTeam({
     const result = { status: 'failed', text: '', plan: null, review: null, steps: [], images: [], changes: [], stats: null,
         recalled: [], memoriesSaved: [], reviewRounds: 0, error: null };
 
-    const toolBase = { root, config, client, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile };
+    const toolBase = { root, config, client, ledger, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile };
     const mcp = await openMcpSources(config, { signal, notify });
     const mcpRead = mcp.extras.filter((extra) => extra.category === 'read');
     const imageApi = imageTransport(config) === 'images';
@@ -198,8 +201,25 @@ export async function runTeam({
             });
             if (answered.status !== 'completed') return stop(answered, 'ответ');
             const spilled = await spillAnswer(root, handoff, answered.text);
+            let routeChoice = config.agent.route;
+            if (routeChoice === 'decisions') {
+                routeChoice = null;
+                try {
+                    const raw = await requestDecision(client, {
+                        model: config.decisions?.model ?? 'openai/gpt-6-luna-decisions',
+                        state: { task, answer: handoff.text },
+                        questions: questionsFor('route'),
+                        signal,
+                    });
+                    ledger.record({ model: raw.model, usage: raw.usage, kind: 'decision', responseId: raw.id });
+                    routeChoice = routeFlag(raw.answers, { blockAt: config.decisions?.blockAt ?? 0.9 });
+                    notify({ type: 'decision.route', choice: raw.answers?.next?.choice ?? null, flag: routeChoice });
+                } catch (error) {
+                    notify({ type: 'decision.route', error: error.message });
+                }
+            }
             const route = chooseRoute({
-                flag: config.agent.route, label: spilled.label, text: handoff.text,
+                flag: routeChoice, label: spilled.label, text: handoff.text,
                 artifacts: handoff.artifacts.filter((item) => item.origin == null),
             });
             handoff.route = route;

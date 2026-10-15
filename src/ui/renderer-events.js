@@ -204,6 +204,10 @@ export function handleRendererEvent(event, api) {
             line('info', `память: сохранено ${event.count}`, { dim: true });
             for (const item of event.items ?? []) line('info', `  + [${item.scope}/${item.kind}] ${truncate(item.content, 200)}`, { dim: true });
             break;
+        case 'decision.route':
+            if (event.error) line('warn', `маршрут decisions: ${event.error}`);
+            else line('info', `маршрут decisions: ${event.flag ?? event.choice ?? '—'}`, { dim: true });
+            break;
         default:
             if (verbose && event.type) line('info', event.type, { dim: true });
     }

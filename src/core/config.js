@@ -2,7 +2,7 @@
  * @file src/core/config.js
  * @module core/config
  * @purpose Load, validate, and redact configuration, and resolve per-role settings.
- * @depends node:os, node:path, node:fs/promises, util/text, core/config-defaults, generate/platform, mcp/servers
+ * @depends node:os, node:path, node:fs/promises, util/text, core/config-defaults, generate/platform, mcp/servers, channels/questions
  * @usedBy cli, commands/shared, commands/flags, commands/ask, commands/run, commands/chat, commands/misc, agent/loop, agent/roles
  * @exports APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, defaults, resolveRole, defaultHome, loadConfig, isReasoningModel, supportsVerbosity, redactConfig
  * @ai.tags config
@@ -15,6 +15,7 @@ import { readFile, mkdir } from 'node:fs/promises';
 import { deepMerge, isRecord } from '../util/text.js';
 import { PLATFORMS } from '../generate/platform.js';
 import { normalizeMcpServer } from '../mcp/servers.js';
+import { PRESET_NAMES } from '../channels/questions.js';
 import {
     APPROVAL_LEVELS,
     IMAGE_DETAILS,
@@ -115,6 +116,10 @@ function fromEnv(env) {
     if (env.OPENAI_ORG_ID) result.organization = env.OPENAI_ORG_ID;
     if (env.OPENAI_PROJECT_ID) result.project = env.OPENAI_PROJECT_ID;
     if (env.AI_POLL_MS && Number.isSafeInteger(Number(env.AI_POLL_MS))) result.limits = { pollIntervalMs: Number(env.AI_POLL_MS) };
+    if (env.AI_DECISION_MODEL) result.decisions = { model: env.AI_DECISION_MODEL };
+    if (env.AI_MODERATION_MODE) result.moderation = { mode: env.AI_MODERATION_MODE };
+    if (env.TELEGRAM_BOT_TOKEN) result.telegram = { token: env.TELEGRAM_BOT_TOKEN };
+    if (env.AI_CHANNELS_TOKEN) result.channels = { token: env.AI_CHANNELS_TOKEN };
     return result;
 }
 
@@ -204,7 +209,7 @@ function validateConfig(c) {
     }
     if (!['auto', 'always', 'never'].includes(c.agent.visionDelegate)) fail('agent.visionDelegate: auto | always | never');
     if (typeof c.agent.chain !== 'boolean') fail('agent.chain: true | false');
-    if (c.agent.route !== null && c.agent.route !== 'encoder' && c.agent.route !== 'planner') fail('agent.route: encoder | planner');
+    if (c.agent.route !== null && !['encoder', 'planner', 'decisions'].includes(c.agent.route)) fail('agent.route: encoder | planner | decisions');
     for (const key of ['enabled', 'autoSave']) if (typeof c.memory[key] !== 'boolean') fail(`memory.${key}: true | false`);
     if (!Number.isSafeInteger(c.memory.maxRecall) || c.memory.maxRecall < 0 || c.memory.maxRecall > 50) fail('memory.maxRecall: 0..50');
     if (c.memory.notesFile !== null && (typeof c.memory.notesFile !== 'string' || !c.memory.notesFile.trim())) fail('memory.notesFile: имя файла или null');
@@ -248,6 +253,36 @@ function validateConfig(c) {
     }
     if (!Array.isArray(c.mcp.servers)) fail('mcp.servers должен быть массивом');
     c.mcp.servers = c.mcp.servers.map((entry) => normalizeMcpServer(entry));
+    if (!isRecord(c.decisions)) fail('decisions должен быть объектом');
+    for (const key of Object.keys(c.decisions)) if (!(key in defaults.decisions)) fail(`неизвестный параметр decisions.${key}`);
+    if (typeof c.decisions.model !== 'string' || !c.decisions.model.trim()) fail('decisions.model должен быть строкой');
+    for (const key of ['reviewAt', 'blockAt']) {
+        if (!(typeof c.decisions[key] === 'number' && c.decisions[key] >= 0 && c.decisions[key] <= 1)) fail(`decisions.${key}: число 0..1`);
+    }
+    if (c.decisions.blockAt < c.decisions.reviewAt) fail('decisions.blockAt не меньше decisions.reviewAt');
+    if (!isRecord(c.moderation)) fail('moderation должен быть объектом');
+    for (const key of Object.keys(c.moderation)) if (!(key in defaults.moderation)) fail(`неизвестный параметр moderation.${key}`);
+    if (!['auto', 'decisions', 'moderations'].includes(c.moderation.mode)) fail('moderation.mode: auto | decisions | moderations');
+    if (typeof c.moderation.model !== 'string' || !c.moderation.model.trim()) fail('moderation.model должен быть строкой');
+    if (!PRESET_NAMES.includes(c.moderation.preset)) fail(`moderation.preset: ${PRESET_NAMES.join(' | ')}`);
+    if (typeof c.moderation.guardReplies !== 'boolean') fail('moderation.guardReplies: true | false');
+    if (!isRecord(c.telegram)) fail('telegram должен быть объектом');
+    for (const key of Object.keys(c.telegram)) if (!(key in defaults.telegram)) fail(`неизвестный параметр telegram.${key}`);
+    if (c.telegram.token !== null && (typeof c.telegram.token !== 'string' || !c.telegram.token.trim() || /[\r\n\s]/.test(c.telegram.token))) {
+        fail('telegram.token: null или токен без пробелов');
+    }
+    try { new URL(c.telegram.baseURL); } catch { fail('telegram.baseURL должен быть URL'); }
+    if (typeof c.telegram.reply !== 'boolean') fail('telegram.reply: true | false');
+    if (typeof c.telegram.moderate !== 'boolean') fail('telegram.moderate: true | false');
+    if (!['none', 'delete'].includes(c.telegram.enforce)) fail('telegram.enforce: none | delete');
+    if (!isRecord(c.channels)) fail('channels должен быть объектом');
+    for (const key of Object.keys(c.channels)) if (!(key in defaults.channels)) fail(`неизвестный параметр channels.${key}`);
+    if (!['127.0.0.1', 'localhost', '::1', '0.0.0.0'].includes(c.channels.host)) fail('channels.host: 127.0.0.1 | localhost | ::1 | 0.0.0.0');
+    if (!Number.isSafeInteger(c.channels.port) || c.channels.port < 0 || c.channels.port > 65535) fail('channels.port: 0..65535');
+    if (c.channels.token !== null && (typeof c.channels.token !== 'string' || c.channels.token.length < 8 || /[\r\n]/.test(c.channels.token))) {
+        fail('channels.token: null или строка от 8 символов без перевода строки');
+    }
+    if (c.channels.host === '0.0.0.0' && !c.channels.token) fail('channels.host 0.0.0.0 требует channels.token');
 }
 
 /** Heuristic: does this model accept the `reasoning` parameter? */
@@ -264,6 +299,8 @@ export function supportsVerbosity(model) {
 export function redactConfig(config) {
     const copy = structuredClone(config);
     if (copy.apiKey) copy.apiKey = `${copy.apiKey.slice(0, 7)}…${copy.apiKey.slice(-4)}`;
+    if (copy.telegram?.token) copy.telegram.token = '…';
+    if (copy.channels?.token) copy.channels.token = '…';
     if (Array.isArray(copy.mcp?.servers)) {
         for (const server of copy.mcp.servers) {
             if (server.env && typeof server.env === 'object') {

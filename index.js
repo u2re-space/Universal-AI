@@ -2,12 +2,12 @@
  * @file index.js
  * @module index
  * @purpose Public programmatic API: client, session, ledger, tools, and one-turn runs.
- * @depends openai/client, core/session, core/usage, core/config, core/attachments, core/memory, core/context, agent/tools, agent/loop, agent/roles, agent/team, ui/renderer, jobs/manager, agent/map, agent/task-map, complete/complete, complete/server, complete/context
+ * @depends openai/client, core/session, core/usage, core/config, core/attachments, core/memory, core/context, agent/tools, agent/loop, agent/roles, agent/team, ui/renderer, jobs/manager, agent/map, agent/task-map, complete/complete, complete/server, complete/context, channels/decide, channels/moderate, channels/reply, channels/handle, channels/server, telegram/client, telegram/update
  * @usedBy external
- * @exports createClient, ApiError, createSession, createLedger, loadConfig, configDefaults, resolveRole, buildUserMessage, loadImageAttachment, loadFileAttachment, openMemory, projectKey, createSharedContext, createToolset, runTurn, createRoleRunner, runTeam, createRenderer, createJobManager, loadProjectMap, draftTaskMap, buildCompletionContext, completeCode, startCompletionServer, structureText, structureCode, STRUCTURE_TASKS, buildGenerationBrief, resolvePlatform, connectMcp, openMcpSources
+ * @exports createClient, ApiError, createSession, createLedger, loadConfig, configDefaults, resolveRole, buildUserMessage, loadImageAttachment, loadFileAttachment, openMemory, projectKey, createSharedContext, createToolset, runTurn, createRoleRunner, runTeam, createRenderer, createJobManager, loadProjectMap, draftTaskMap, buildCompletionContext, completeCode, startCompletionServer, structureText, structureCode, STRUCTURE_TASKS, buildGenerationBrief, resolvePlatform, connectMcp, openMcpSources, requestDecision, moderateText, draftReply, handleInbound, startChannelServer, createTelegram, normalizeUpdate
  * @ai.tags api, exports
  * @ai.hint keep
- * @changed 2026-10-15 Export generation and MCP.
+ * @changed 2026-10-15 Export decisions, moderation, channels, and Telegram.
  *
  * Public programmatic API (Node.js 26+, ESM).
  *
@@ -42,3 +42,10 @@ export { buildGenerationBrief } from './src/generate/brief.js';
 export { resolvePlatform } from './src/generate/platform.js';
 export { connectMcp } from './src/mcp/client.js';
 export { openMcpSources } from './src/mcp/session.js';
+export { requestDecision } from './src/channels/decide.js';
+export { moderateText } from './src/channels/moderate.js';
+export { draftReply } from './src/channels/reply.js';
+export { handleInbound } from './src/channels/handle.js';
+export { startChannelServer } from './src/channels/server.js';
+export { createTelegram } from './src/telegram/client.js';
+export { normalizeUpdate } from './src/telegram/update.js';

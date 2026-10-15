@@ -100,7 +100,7 @@ export function overridesFrom(values) {
     if (values.team) (o.agent ??= {}).mode = 'team';
     if (values['no-chain']) (o.agent ??= {}).chain = false;
     if (values.route) {
-        if (values.route !== 'encoder' && values.route !== 'planner') throw new UsageError('--route: encoder | planner');
+        if (!['encoder', 'planner', 'decisions'].includes(values.route)) throw new UsageError('--route: encoder | planner | decisions');
         (o.agent ??= {}).route = values.route;
     }
     if (values.memory === false) o.memory = { enabled: false };
@@ -109,17 +109,17 @@ export function overridesFrom(values) {
     if (values.desktop) o.tools.desktop = true;
     if (values.tools !== undefined) {
         const list = values.tools.split(',').map((s) => s.trim()).filter(Boolean);
-        const all = { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false };
+        const all = { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false, channels: false };
         if (!(list.length === 1 && list[0] === 'none')) {
             for (const name of list) {
-                if (!(name in all)) throw new UsageError(`--tools: неизвестный инструмент "${name}" (fs, shell, fetch, web, images, askUser, desktop, mcp, none)`);
+                if (!(name in all)) throw new UsageError(`--tools: неизвестный инструмент "${name}" (fs, shell, fetch, web, images, askUser, desktop, mcp, channels, none)`);
                 all[name] = true;
             }
             if (list.length) all.askUser = true;
         }
         Object.assign(o.tools, all);
     }
-    if (values['no-tools']) Object.assign(o.tools, { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false });
+    if (values['no-tools']) Object.assign(o.tools, { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false, channels: false });
     if (values.detail && !IMAGE_DETAILS.includes(values.detail)) throw new UsageError(`--detail: ${IMAGE_DETAILS.join(' | ')}`);
     if (values.fidelity !== undefined || values.creativity !== undefined || values.platform) o.generate = {};
     if (values.fidelity !== undefined) {

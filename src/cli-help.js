@@ -6,7 +6,7 @@
  * @exports HELP
  * @ai.tags cli
  * @ai.hint pure
- * @changed 2026-10-15 Help for gen and mcp.
+ * @changed 2026-10-15 Help for decisions, moderation, channels, and Telegram.
  */
 export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
 
@@ -26,6 +26,11 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai complete                       вставка в месте курсора (JSON из stdin). Модель gpt-5.3-codex-spark, effort low
   ai complete --listen [--port n]   HTTP POST и WebSocket /v1/complete на 127.0.0.1 (для редактора)
   ai mcp [list|add|remove|probe]    пользовательские MCP-серверы (stdio)
+  ai decide [набор] "текст"         вероятности Decisions API (community, support, smm, guard, route)
+  ai moderate [набор] "текст"       модерация: omni-moderation-latest или decisions, если /moderations нет
+  ai channels --listen [--port n]   HTTP и WebSocket: /v1/decisions, /v1/moderate, /v1/chats/reply, /v1/channels
+  ai telegram poll                  длинный опрос Telegram: модерация групп, каналов и личных чатов
+  ai telegram send <chat_id> "текст"  отправить сообщение ботом
 
 Ввод:
   --image <путь|url>     приложить изображение (можно несколько)   --detail auto|low|high|original
@@ -45,7 +50,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --no-stream            без потоковой передачи
 
 Инструменты и автономность:
-  --tools fs,shell,fetch,mcp  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
+  --tools fs,shell,fetch,mcp,channels  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
   search_files scope=path|symbol|content|all читает карту проекта.
   --web                  поиск в интернете (web_search)       --images   генерация картинок в ответах
   --desktop              включает экран Windows, мышь, клавиатуру и AutoHotkey v2
@@ -61,7 +66,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
                          scanner, solver, clicker, typer, encoder, tester, default, all
                          (например: --role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
   --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
-  --route encoder|planner  куда отдать первый ответ. Без флага решает метка ответа, иначе код или путь
+  --route encoder|planner|decisions  куда отдать первый ответ. decisions спрашивает модель решений. Без флага решает метка ответа
   --template <файл>      текст задачи из файла. {{message}} заменяется целью. Можно несколько
   --fidelity <0..100>    цель соответствия референсам (по умолчанию 87). Процент не измеряется
   --creativity <0..100>  сколько можно добавить сверх референсов (по умолчанию 20)
@@ -98,6 +103,17 @@ MCP:
   Серверы — stdio, кадры Content-Length. add/remove правят ~/.ai-agent/config.json и не запускают процесс.
   Вызовы инструментов MCP подтверждаются как сеть (категория network).
 
+Чаты и решения:
+  ai decide и POST /v1/decisions — модель openai/gpt-6-luna-decisions (или decisions.model).
+  ai moderate в режиме auto сначала вызывает /moderations (omni-moderation-latest). Если шлюз отвечает 404, 405 или 501,
+  тот же текст уходит в decisions. Пороги decisions.reviewAt (0.5) и blockAt (0.9) дают allow, review или hide.
+  Наборы вопросов: community (группы и каналы), support (клиенты), smm (публикация), guard (подмена инструкций), route (encode или plan).
+  ai channels --listen слушает 127.0.0.1. WebSocket: кадр {"type":"moderate"|"decide"|"reply"|"telegram", ...}.
+  Токен: --token или AI_CHANNELS_TOKEN. Адрес 0.0.0.0 без токена не поднимается.
+  ai telegram poll не требует публичного URL. Удаление — только действие hide в группе, супергруппе или канале.
+  Личные сообщения и сообщения о вреде себе не удаляются. Ответ клиенту включается telegram.reply.
+  Инструменты decide, moderate_text, channel_reply, telegram_call включаются tools.channels или --tools channels.
+
 Прочее:
   --json                 события и результат в формате JSON Lines     --quiet, -q   только ответ
   --verbose, -v          подробный журнал     --timeout <сек>   таймаут простоя соединения
@@ -105,7 +121,8 @@ MCP:
   --help, -h  --version, -V
 
 Переменные окружения: OPENAI_API_KEY (обязательно), OPENAI_BASE_URL, OPENAI_ORG_ID, OPENAI_PROJECT_ID,
-AI_MODEL (или OPENAI_MODEL), AI_IMAGE_MODEL, AI_AGENT_HOME (по умолчанию ~/.ai-agent), AI_ASCII=1 (без Unicode-символов).
+AI_MODEL (или OPENAI_MODEL), AI_IMAGE_MODEL, AI_DECISION_MODEL, TELEGRAM_BOT_TOKEN, AI_CHANNELS_TOKEN,
+AI_AGENT_HOME (по умолчанию ~/.ai-agent), AI_ASCII=1 (без Unicode-символов).
 Файл .env в рабочем каталоге задаёт те же имена и перекрывает унаследованное окружение.
 На Windows ключ и адрес из разных областей (пользователь и система) не смешиваются: берётся пара из той области, где заданы оба.
 Коды выхода: 0 — успех, 1 — задача не завершена/ошибка API, 2 — ошибка аргументов/конфигурации, 130 — отменено.

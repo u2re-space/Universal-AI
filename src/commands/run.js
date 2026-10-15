@@ -99,7 +99,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
     const mcp = await openMcpSources(config, { signal, notify: emit });
     try {
         const toolset = createToolset({
-            root: ctx.cwd, config, client, names, approvalLevel: level, extras: mcp.extras,
+            root: ctx.cwd, config, client, ledger, names, approvalLevel: level, extras: mcp.extras,
             approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
             backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
             describeImage: roles.shouldDelegateVision('default') ? roles.describeImage : null, summarizeFile: roles.summarizeFile,

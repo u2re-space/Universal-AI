@@ -2,7 +2,7 @@
  * @file src/cli.js
  * @module cli
  * @purpose Parse argv, dispatch one command, and map failures to process exit codes.
- * @depends node:path, node:util, node:fs/promises, node:url, node:module, core/config, ui/renderer, jobs/manager, openai/errors, commands/shared, commands/ask, commands/chat, commands/run, commands/image, commands/jobs, commands/memory, commands/misc, commands/map, commands/complete, commands/gen, commands/mcp, cli-help
+ * @depends node:path, node:util, node:fs/promises, node:url, node:module, core/config, ui/renderer, jobs/manager, openai/errors, commands/shared, commands/ask, commands/chat, commands/run, commands/image, commands/jobs, commands/memory, commands/misc, commands/map, commands/complete, commands/gen, commands/mcp, commands/channels, cli-help
  * @usedBy bin/ai
  * @exports HELP, stripDetach, main
  * @ai.tags cli, dispatch
@@ -31,6 +31,7 @@ import { mapCommand } from './commands/map.js';
 import { complete } from './commands/complete.js';
 import { gen } from './commands/gen.js';
 import { mcpCommand } from './commands/mcp.js';
+import { decide, moderate, channels, telegram } from './commands/channels.js';
 
 const pkg = createRequire(import.meta.url)('../package.json');
 
@@ -62,8 +63,8 @@ const OPTIONS = {
     'mcp-command': { type: 'string' }, 'mcp-arg': { type: 'string', multiple: true },
 };
 
-const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand, map: mapCommand, complete, gen, mcp: mcpCommand };
-const NEEDS_API_KEY = new Set(['ask', 'chat', 'run', 'image', 'resume', 'cancel', 'models', 'gen']);
+const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand, map: mapCommand, complete, gen, mcp: mcpCommand, decide, moderate, channels, telegram };
+const NEEDS_API_KEY = new Set(['ask', 'chat', 'run', 'image', 'resume', 'cancel', 'models', 'gen', 'decide', 'moderate', 'channels']);
 const DETACHABLE = new Set(['ask', 'run', 'image', 'gen']);
 
 /**

@@ -19,6 +19,8 @@
 | Автономные задачи | `ai run "добавь тесты для src/utils.js и прогони их"` — инструменты: файлы, команды, URL, web-поиск, картинки |
 | Сайты, лендинги, бэкенды | `ai gen landing "собери страницу" --image test-gen/landing.png` — точность 87% (цель, не измерение), креативность, профиль Chrome 157 Beta |
 | Свои MCP-серверы | `ai mcp add design --mcp-command node --mcp-arg server.js` — инструменты и ресурсы по stdio |
+| Решения и модерация | `ai decide`, `ai moderate` — `/v1/decisions` (`openai/gpt-6-luna-decisions`) или `omni-moderation-latest`, если шлюз отдаёт `/v1/moderations` |
+| Чаты и Telegram | `ai channels --listen`, `ai telegram poll` — группы, каналы, личные чаты, черновик ответа или пост |
 | Разные модели под роли | старшая модель планирует и проверяет, младшие собирают контекст и генерируют вызовы инструментов, отдельная модель читает картинки: `--role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna` |
 | Память и общий контекст | долговременная память в SQLite (факты, соглашения, решения — по проекту и глобально), заметки проекта `AGENTS.md`, история задач, кеш сводок файлов; один общий контекст для всех ролей |
 | Фон | `--background` (сервер считает, можно переподключиться `ai resume`) и `--detach` (локальная фоновая задача, `ai jobs …`) |
@@ -56,6 +58,10 @@ ai complete                  вставка в месте курсора (ред
 ai complete --listen [--port n]   HTTP и WebSocket для IDE на 127.0.0.1
 ai gen <landing|site|backend|app> "задача"   сгенерировать проект по референсам
 ai mcp list|add|remove|probe    пользовательские MCP-серверы (stdio)
+ai decide [набор] "текст"        вероятности модели решений
+ai moderate [набор] "текст"      модерация сообщения
+ai channels --listen [--port n]  HTTP и WebSocket для чатов и решений
+ai telegram poll|send            адаптер Telegram Bot API
 ```
 
 Полный список флагов — `ai --help`.
@@ -226,6 +232,43 @@ ai mcp remove design
 
 `tools.mcp` по умолчанию `true`. Пустой список серверов ничего не добавляет. `--no-tools` и `--tools` без `mcp` отключают источники.
 
+## Чаты, решения и Telegram
+
+Проект остаётся универсальным: решения размечают обращение, модерация решает, пропускать ли его, текстовая модель пишет ответ клиенту или пост. Один и тот же слой доступен агенту, CLI, HTTP и WebSocket.
+
+ProxyAPI принимает `POST /v1/decisions`. Модель по умолчанию — `openai/gpt-6-luna-decisions`. В `state` лежат данные, в `questions` — вопросы типов `noul` (да/нет и вероятность), `choice` и `score`. Ответ — вероятности, не текст. Платится вход.
+
+`ai moderate` в режиме `moderation.mode: auto` сначала вызывает `POST /v1/moderations` с `omni-moderation-latest`. Если шлюз отвечает 404, 405 или 501, то же сообщение уходит в decisions. Режим `decisions` не трогает `/moderations`. Режим `moderations` не делает запасной вызов.
+
+Пороги `decisions.reviewAt` (0.5) и `decisions.blockAt` (0.9):
+
+| Действие | Смысл |
+| --- | --- |
+| `allow` | можно отвечать |
+| `review` | оставить человеку |
+| `hide` | убрать из группы, супергруппы или канала |
+
+Наборы вопросов: `community` (группа, супергруппа, канал), `support` (клиент), `smm` (готовность поста), `guard` (подмена инструкций и можно ли показать ответ), `route` (encoder или planner). `ai run --route decisions` спрашивает набор `route` после первого ответа. Если вызов не удался, остаётся прежняя эвристика.
+
+```bash
+ai decide support "после оплаты страница пустая"
+ai moderate community "купите подписчиков дёшево"
+ai channels --listen --port 8787
+# POST http://127.0.0.1:8787/v1/decisions
+# POST http://127.0.0.1:8787/v1/moderate
+# POST http://127.0.0.1:8787/v1/chats/reply
+# POST http://127.0.0.1:8787/v1/telegram/webhook
+# WS   ws://127.0.0.1:8787/v1/channels
+ai telegram poll
+ai telegram send 123456 "текст"
+```
+
+Кадр WebSocket: `{"type":"moderate","input":"текст","preset":"community"}`. Типы: `decide`, `moderate`, `reply`, `telegram`, `ping`. Сервер слушает `channels.host` (`127.0.0.1`). `0.0.0.0` требует `channels.token` или `--token` / `AI_CHANNELS_TOKEN`.
+
+Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `getChat`, `banChatMember`, `restrictChatMember`. Токен: `TELEGRAM_BOT_TOKEN` или `telegram.token`. Длинный опрос не нуждается в публичном адресе. Webhook на этом сервере принимает обновление, если до машины доходит обратный прокси на localhost.
+
+Удаление автоматическое только при `hide` и `telegram.enforce: delete` в группе, супергруппе или канале. Личный чат не удаляется. Сообщение о вреде себе получает `review`, а не `hide`. `telegram.reply: true` отправляет черновик, когда действие `allow`: личный чат — поддержка, канал — пост, группа — короткий ответ модератора. Инструменты `decide`, `moderate_text`, `channel_reply`, `telegram_call` включаются `tools.channels` или `--tools channels` и подтверждаются как сеть.
+
 ## Память
 
 * **База** — `~/.ai-agent/memory.db` (SQLite, `node:sqlite`, полнотекстовый поиск FTS5): записи видов
@@ -271,7 +314,7 @@ ai mcp remove design
   "store": false,
   "approve": "ask",
   "shell": null,
-  "tools": { "fs": true, "shell": true, "fetch": true, "web": false, "images": false, "askUser": true, "desktop": false },
+  "tools": { "fs": true, "shell": true, "fetch": true, "web": false, "images": false, "askUser": true, "desktop": false, "mcp": true, "channels": false },
   "desktop": { "ahkPath": null },
   "limits": { "maxTurns": 60, "budgetUsd": null, "budgetTokens": null, "commandTimeoutMs": 180000 },
   "roles": {
@@ -287,6 +330,10 @@ ai mcp remove design
   "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": "." },
   "completion": { "model": "gpt-5.3-codex-spark", "effort": "low", "maxLineBytes": 524288, "maxContextBytes": 24576 },
   "compaction": { "auto": false, "afterInputTokens": 200000 },
+  "decisions": { "model": "openai/gpt-6-luna-decisions", "reviewAt": 0.5, "blockAt": 0.9 },
+  "moderation": { "mode": "auto", "model": "omni-moderation-latest", "preset": "community", "guardReplies": false },
+  "telegram": { "token": null, "reply": false, "moderate": true, "enforce": "delete" },
+  "channels": { "host": "127.0.0.1", "port": 8787, "token": null },
   "prices": { "gpt-6.1-sol": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-6-luna*": { "input": 0.25, "output": 2 } },
   "instructions": "Отвечай кратко."
 }
@@ -297,7 +344,8 @@ ai mcp remove design
 Цены в примере условные — проверьте актуальные.
 
 Переменные окружения: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID`,
-`AI_MODEL`, `AI_IMAGE_MODEL`, `AI_AGENT_HOME`, `AI_ASCII=1` (без Unicode-символов в журнале).
+`AI_MODEL`, `AI_IMAGE_MODEL`, `AI_AGENT_HOME`, `AI_DECISION_MODEL`, `TELEGRAM_BOT_TOKEN`, `AI_CHANNELS_TOKEN`,
+`AI_ASCII=1` (без Unicode-символов в журнале).
 
 ### Состояние разговора
 
@@ -392,13 +440,16 @@ src/complete/context.js   курсор, сокращение файла, про�
 src/complete/complete.js  запрос к быстрой модели (по умолчанию gpt-5.3-codex-spark, effort low)
 src/complete/server.js    POST /v1/complete и WebSocket на 127.0.0.1
 src/complete/ws.js        кадры WebSocket поверх node:http
-src/commands/*.js         ask, chat, run, image, jobs, memory, complete, resume/cancel/models/config
+src/channels/             решения, модерация, черновики, HTTP и WebSocket /v1/channels
+src/telegram/             адаптер Bot API, нормализация апдейтов, длинный опрос
+src/commands/*.js         ask, chat, run, image, jobs, memory, complete, decide, moderate, channels, telegram
 ```
 
 Программный интерфейс (`index.js`): `createClient`, `createSession`, `createLedger`, `createToolset`,
 `runTurn`, `createRoleRunner`, `runTeam`, `openMemory`, `createSharedContext`, `resolveRole`,
 `buildUserMessage`, `createRenderer`, `createJobManager`, `buildCompletionContext`,
-`completeCode`, `startCompletionServer`.
+`completeCode`, `startCompletionServer`, `requestDecision`, `moderateText`, `draftReply`,
+`handleInbound`, `startChannelServer`, `createTelegram`, `normalizeUpdate`.
 
 ## Тесты
 

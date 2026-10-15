@@ -7,7 +7,7 @@
  * @exports TOOL_SPECS, READ_ONLY_TOOLS, SHELL_TOOL_NAMES, toolDefinitions, enabledToolNames, describeTool, toolCategory
  * @ai.tags tools, schema
  * @ai.hint pure
- * @changed 2026-10-15 run_script and ssh next to run_command.
+ * @changed 2026-10-15 Channel tools: decide, moderate, reply, Telegram.
  */
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
 
@@ -282,6 +282,41 @@ export const TOOL_SPECS = {
             task: str('One task for that specialist.'),
         }),
     },
+    decide: {
+        category: 'network', group: 'channels',
+        description: 'Ask a decision model (POST /decisions, default openai/gpt-6-luna-decisions). Returns probabilities, not prose. questions_json is a Decisions questions object; empty string uses preset (community, support, smm, guard, route).',
+        parameters: schema({
+            state_json: str('JSON value: string, object, or array. The data the questions are about.'),
+            questions_json: str('JSON object of questions. Empty string uses preset.'),
+            preset: { type: 'string', enum: ['', 'community', 'support', 'smm', 'guard', 'route'], description: 'Built-in question pack. Empty string uses the configured preset when questions_json is empty.' },
+            model: str('Decision model id. Empty string uses decisions.model.'),
+        }),
+    },
+    moderate_text: {
+        category: 'network', group: 'channels',
+        description: 'Moderate one chat message. mode auto tries omni-moderation-latest and falls back to the decisions preset when /moderations is missing. Returns action allow, review, or hide.',
+        parameters: schema({
+            text: str('Message text.'),
+            preset: { type: 'string', enum: ['community', 'support', 'smm', 'guard', 'route'], description: 'community for groups, support for customers, smm for posts, guard for injection, route for encode versus plan.' },
+        }),
+    },
+    channel_reply: {
+        category: 'network', group: 'channels',
+        description: 'Draft one reply: support for a customer, community for a group, or smm for a post. Does not send it.',
+        parameters: schema({
+            purpose: { type: 'string', enum: ['support', 'smm', 'community'], description: 'Who the draft is for.' },
+            text: str('The message to answer or the notes for a post.'),
+            context: str('Extra facts the draft may use. Empty string if none. Do not invent facts that are not here.'),
+        }),
+    },
+    telegram_call: {
+        category: 'network', group: 'channels',
+        description: 'Call one Telegram Bot API method. args_json is the method body (chat_id, text, message_id, user_id, permissions). Methods: getMe, getChat, sendMessage, deleteMessage, getUpdates, banChatMember, restrictChatMember.',
+        parameters: schema({
+            method: { type: 'string', enum: ['getMe', 'getChat', 'sendMessage', 'deleteMessage', 'getUpdates', 'banChatMember', 'restrictChatMember'], description: 'Bot API method.' },
+            args_json: str('JSON object for the method. Empty string means {}.'),
+        }),
+    },
 };
 
 export const READ_ONLY_TOOLS = ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall'];
@@ -314,6 +349,7 @@ export function enabledToolNames(tools, { interactive = false, memory = false, s
     if (memory) names.push('recall', 'remember');
     if (tools.askUser && interactive) names.push('ask_user');
     if (tools.images && imageApi) names.push('generate_image', 'edit_image');
+    if (tools.channels) names.push('decide', 'moderate_text', 'channel_reply', 'telegram_call');
     return names;
 }
 

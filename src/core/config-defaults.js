@@ -6,7 +6,7 @@
  * @exports defaults, ROLE_NAMES, REASONING_EFFORTS, REASONING_SUMMARIES, APPROVAL_LEVELS, IMAGE_DETAILS
  * @ai.tags config
  * @ai.hint pure
- * @changed 2026-10-15 Generation defaults and MCP server list.
+ * @changed 2026-10-15 Decisions, moderation, Telegram, and the channel server.
  */
 const KiB = 1024;
 const MiB = KiB * KiB;
@@ -41,7 +41,7 @@ export const defaults = Object.freeze({
     retries: 2,
     approve: null,                    // ask | read | write | all; null → ask (TTY) or read (no TTY)
     shell: null,                      // run_command shell: null (cmd.exe / sh) | powershell | pwsh | bash | sh | zsh | cmd
-    tools: { fs: true, shell: true, fetch: true, web: false, images: false, askUser: true, desktop: false, mcp: true },
+    tools: { fs: true, shell: true, fetch: true, web: false, images: false, askUser: true, desktop: false, mcp: true, channels: false },
     /** Windows screen, mouse, keyboard, and AutoHotkey v2. Tools stay off until tools.desktop is true. */
     desktop: { ahkPath: null, shotAfterAction: true },
     limits: {
@@ -132,6 +132,39 @@ export const defaults = Object.freeze({
     /** User MCP servers. stdio only. An empty list leaves tools.mcp as a no-op. */
     mcp: {
         servers: [],
+    },
+    /**
+     * Decision models. ProxyAPI serves them at POST /v1/decisions (input tokens only).
+     * reviewAt marks a message for a person. blockAt hides it in a group or channel.
+     */
+    decisions: {
+        model: 'openai/gpt-6-luna-decisions',
+        reviewAt: 0.5,
+        blockAt: 0.9,
+    },
+    /**
+     * auto tries POST /moderations (omni-moderation-latest) and falls back to decisions
+     * when that route is missing. decisions skips /moderations. moderations does not fall back.
+     */
+    moderation: {
+        mode: 'auto',
+        model: 'omni-moderation-latest',
+        preset: 'community',
+        guardReplies: false,
+    },
+    /** Telegram Bot API. token null reads TELEGRAM_BOT_TOKEN. reply stays off until set. */
+    telegram: {
+        token: null,
+        baseURL: 'https://api.telegram.org',
+        reply: false,
+        moderate: true,
+        enforce: 'delete',
+    },
+    /** HTTP and WebSocket for chats. host outside localhost requires token. */
+    channels: {
+        host: '127.0.0.1',
+        port: 8787,
+        token: null,
     },
     /**
      * Inline completion for editors (`ai complete`, HTTP and WebSocket).

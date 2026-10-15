@@ -7,7 +7,7 @@
  * @exports ApiError, createClient
  * @ai.tags openai, http
  * @ai.hint io
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-15 Decisions and moderations endpoints.
  */
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -267,6 +267,14 @@ export function createClient({
         list: (options = {}) => call('models', { method: 'GET', ...options }),
         retrieve: (id, options = {}) => call(`models/${encodeURIComponent(id)}`, { method: 'GET', ...options }),
     };
+    const decisions = {
+        /** POST /decisions — probabilities for noul, choice, and score questions. No stream. */
+        create: (body, options = {}) => call('decisions', { body, ...options }),
+    };
+    const moderations = {
+        /** POST /moderations — omni moderation when the gateway exposes it. */
+        create: (body, options = {}) => call('moderations', { body, ...options }),
+    };
 
-    return Object.freeze({ responses, images, models, call, baseURL: root.href, close: () => transport.close() });
+    return Object.freeze({ responses, images, models, decisions, moderations, call, baseURL: root.href, close: () => transport.close() });
 }

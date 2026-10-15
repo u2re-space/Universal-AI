@@ -2,12 +2,12 @@
  * @file src/agent/tools.js
  * @module agent/tools
  * @purpose Build the local toolset: approval, handlers, and the re-exports from tool-specs.
- * @depends node:path, node:crypto, node:fs/promises, openai/errors, core/attachments, util/text, agent/paths, agent/fs-tools, agent/map, agent/shell, agent/desktop, agent/tool-specs
+ * @depends node:path, node:crypto, node:fs/promises, openai/errors, core/attachments, util/text, agent/paths, agent/fs-tools, agent/map, agent/shell, agent/desktop, agent/tool-specs, channels/tool-handlers
  * @usedBy commands/ask, commands/chat, commands/run, agent/team, index.js
  * @exports TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory, createToolset, relativeToRoot
  * @ai.tags tools, approval
  * @ai.hint hot
- * @changed 2026-10-15 Optional extras for MCP tools.
+ * @changed 2026-10-15 Channel tools for decisions, moderation, replies, and Telegram.
  */
 
 import path from 'node:path';
@@ -24,6 +24,7 @@ import { SHELLS, runCommand, runProgram, scriptLaunch, sshPlan } from './shell.j
 import { structureCode } from '../structure/structure.js';
 import { DESKTOP_TOOL_NAMES, createDesktopHandlers } from './desktop.js';
 import { createImageHandlers } from './image-tools.js';
+import { createChannelHandlers } from '../channels/tool-handlers.js';
 
 import {
     TOOL_SPECS,
@@ -145,7 +146,7 @@ export function createToolset({
     root = process.cwd(), config, names, approvalLevel = 'read', approve = async () => 'no', askUser = null,
     backupDir = null, signal, emit = () => {}, memory = null, projectKey = null, projectName = null,
     describeImage = null, summarizeFile = null, editPaths = () => null,
-    describeScreen = null, performDesktop = null, delegate = null, extras = [], client = null,
+    describeScreen = null, performDesktop = null, delegate = null, extras = [], client = null, ledger = null,
 }) {
     const limits = config.limits;
     const allowed = new Set(names);
@@ -193,6 +194,10 @@ export function createToolset({
             case 'run_script': return `Скрипт (${args.shell || 'по расширению'}): ${args.path}\nАргументы: ${(args.args ?? []).join(' ') || '—'}\nПричина: ${args.reason ?? '—'}`;
             case 'ssh': return `SSH ${args.mode} ${args.host}${args.command ? `: ${args.command}` : ''}${args.local_path ? `\nФайл: ${args.local_path}` : ''}${args.remote_path ? `\nУдалённый путь: ${args.remote_path}` : ''}\nПричина: ${args.reason ?? '—'}`;
             case 'fetch_url': return `Загрузить ${args.url}`;
+            case 'decide': return `Решение ${args.preset || 'свои вопросы'}: ${truncate(args.state_json ?? '', 300)}`;
+            case 'moderate_text': return `Модерация (${args.preset}): ${truncate(args.text ?? '', 300)}`;
+            case 'channel_reply': return `Черновик ${args.purpose}: ${truncate(args.text ?? '', 300)}`;
+            case 'telegram_call': return `Telegram ${args.method}`;
             case 'generate_image': return `Нарисовать: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}`;
             case 'edit_image': return `Изменить ${args.image}: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}`;
             case 'click': return `Клик: ${truncate(clickTarget(args), 400)}`;
@@ -455,6 +460,9 @@ export function createToolset({
     if (desktopNames.length) {
         const desktopHandlers = createDesktopHandlers({ root, config, decide, describeScreen, performDesktop, delegate });
         for (const name of desktopNames) handlers[name] = desktopHandlers[name];
+    }
+    if (['decide', 'moderate_text', 'channel_reply', 'telegram_call'].some((name) => allowed.has(name))) {
+        Object.assign(handlers, createChannelHandlers({ client, config, signal, ledger }));
     }
     for (const extra of extraByName.values()) handlers[extra.name] = extra.handler;
 

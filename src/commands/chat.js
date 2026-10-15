@@ -27,7 +27,7 @@ const HELP = `Команды чата:
   /file <путь>              приложить файл (PDF, текст) к следующему сообщению
   /model [id]               показать / сменить модель
   /effort [уровень]         reasoning effort: ${REASONING_EFFORTS.join(' | ')}
-  /tools [fs,shell,fetch|none]  локальные инструменты (файлы, команды, загрузка URL)
+  /tools [fs,shell,fetch,channels|none]  локальные инструменты (файлы, команды, загрузка URL, решения и Telegram)
   /approve <уровень>        политика подтверждений: ${APPROVAL_LEVELS.join(' | ')}
   /web [on|off]             поиск в интернете (web_search)
   /images [on|off]          генерация изображений (image_generation)
@@ -75,13 +75,13 @@ export async function chat(ctx) {
     function enableLocalTools(list) {
         if (!list || list === 'none' || list === 'off') { toolset = null; return 'локальные инструменты выключены'; }
         const selection = list === 'on' || list === true ? { fs: true, shell: true, fetch: true, askUser: true }
-            : Object.fromEntries(['fs', 'shell', 'fetch', 'askUser'].map((name) => [name, list.split(',').map((s) => s.trim()).includes(name)]));
+            : Object.fromEntries(['fs', 'shell', 'fetch', 'askUser', 'channels'].map((name) => [name, list.split(',').map((s) => s.trim()).includes(name)]));
         store ??= openMemoryFor(config, ctx.cwd, renderer);
         const names = enabledToolNames({ ...config.tools, ...selection, askUser: false }, { interactive: false, memory: Boolean(store) });
         if (!names.length) { toolset = null; return 'локальные инструменты выключены'; }
         ctx.backupDir ??= backupDirFor(config);
         toolset = createToolset({
-            root: ctx.cwd, config, names, approvalLevel: approvalLevel(config, true),
+            root: ctx.cwd, config, client, ledger, names, approvalLevel: approvalLevel(config, true),
             approve: (request) => renderer.approve(request, { signal: ctx.turnSignal() }), askUser: null,
             backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
         });
