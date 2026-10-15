@@ -26,4 +26,4 @@ Use the screenshot tool when the screen is the source. State the answer and the 
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'high' };
+export const settings = { effort: 'high', model: 'gpt-6.1-sol' };

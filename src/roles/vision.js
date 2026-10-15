@@ -36,4 +36,4 @@ Transcribe visible text. Do not invent controls that are not visible. ${UNTRUSTE
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'low' };
+export const settings = { effort: 'low', model: 'gpt-6.1-sol' };

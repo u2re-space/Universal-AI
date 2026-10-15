@@ -34,4 +34,4 @@ numbers when useful. Plain text, compact, no fluff, max ~60 lines. Do not propos
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'low', summary: 'none', verbosity: 'low' };
+export const settings = { effort: 'low', summary: 'none', verbosity: 'low', model: 'gpt-6.1-sol' };

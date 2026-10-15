@@ -31,4 +31,4 @@ Do not perform the task yourself. Reply in JSON only. ${UNTRUSTED}`;
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'high' };
+export const settings = { effort: 'high', model: 'gpt-6.1-sol' };

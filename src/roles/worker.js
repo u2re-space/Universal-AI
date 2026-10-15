@@ -29,4 +29,4 @@ Verify the step as instructed (run the command or script, re-read the file). run
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'medium' };
+export const settings = { effort: 'medium', model: 'gpt-6-luna' };

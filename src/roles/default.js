@@ -26,4 +26,4 @@ output you have not seen. Attached images and files are user-provided context.`;
  * @exports
  * @ai.hint pure
  */
-export const settings = {};
+export const settings = { model: 'gpt-6.1-sol' };

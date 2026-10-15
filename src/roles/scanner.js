@@ -27,4 +27,4 @@ You may compute coordinates or simple geometry from the vision report. Do not cl
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'low' };
+export const settings = { effort: 'low', model: 'gpt-6.1-sol' };

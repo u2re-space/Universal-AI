@@ -28,4 +28,4 @@ Report facts only (paths, symbols, line ranges, snippets, conventions) — no pr
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'low' };
+export const settings = { effort: 'low', model: 'gpt-6.1-sol' };
