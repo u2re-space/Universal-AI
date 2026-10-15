@@ -123,8 +123,8 @@
 
 ### Task 4: Merge
 
-- [ ] **Step 1:** Review the branch diff against `main`.
+- [x] **Step 1:** Review the branch diff against `main`.
 
-- [ ] **Step 2:** `git checkout main` and `git merge --no-ff feat/mcp-generate`.
+- [x] **Step 2:** `git checkout main` and `git merge --no-ff feat/mcp-generate`.
 
-- [ ] **Step 3:** Run `npm test` on `main`.
+- [x] **Step 3:** Run `npm test` on `main`.
