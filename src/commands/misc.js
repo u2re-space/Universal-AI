@@ -125,6 +125,8 @@ export async function configCommand(ctx) {
             },
             agent: { mode: 'team', maxSteps: 12, maxReviewRounds: 2 },
             memory: { enabled: true, autoSave: true, maxRecall: 8, notesFile: 'AGENTS.md' },
+            generate: { fidelity: defaults.generate.fidelity, creativity: defaults.generate.creativity, platform: defaults.generate.platform },
+            mcp: { servers: [] },
             image: { ...defaults.image },
             completion: { model: defaults.completion.model, effort: defaults.completion.effort },
             prices: {},

@@ -2,12 +2,12 @@
  * @file src/agent/team.js
  * @module agent/team
  * @purpose Run planner, collector, worker, reviewer, and summarizer over one shared context.
- * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text
+ * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, mcp/session
  * @usedBy commands/run, index.js
  * @exports toolNamesForRole, runTeam
  * @ai.tags team, roles
  * @ai.hint keep
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-15 MCP tools on the worker, and read-only MCP tools on collector and reviewer.
  */
 
 import path from 'node:path';
@@ -29,6 +29,7 @@ import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, BATCH_SCHE
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
 import { SHELL_TOOL_NAMES } from './tool-specs.js';
+import { openMcpSources } from '../mcp/session.js';
 
 import { bullets, renderFindings, renderPlan } from './team-text.js';
 const HARD_STOP = new Set(['cancelled', 'budget']);
@@ -64,6 +65,8 @@ export async function runTeam({
         recalled: [], memoriesSaved: [], reviewRounds: 0, error: null };
 
     const toolBase = { root, config, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile };
+    const mcp = await openMcpSources(config, { signal, notify });
+    const mcpRead = mcp.extras.filter((extra) => extra.category === 'read');
     const enabled = enabledToolNames(config.tools, { interactive, memory: Boolean(memory), summarize: true });
     const readNames = toolNamesForRole(enabled, 'collector');
     const reviewerNames = toolNamesForRole(enabled, 'reviewer');
@@ -85,12 +88,12 @@ export async function runTeam({
     }
     const workerTools = createToolset({
         ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker'), editPaths: () => taskMarks.edit,
-        describeScreen: roles.describeScreen, delegate,
+        describeScreen: roles.describeScreen, delegate, extras: mcp.extras,
     });
-    const collectorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('collector') });
+    const collectorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('collector'), extras: mcpRead });
     const reviewerTools = createToolset({
         ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer'),
-        describeScreen: roles.describeScreen, delegate,
+        describeScreen: roles.describeScreen, delegate, extras: mcpRead,
     });
     const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images });
     /** Copy tool stats onto the team result and return it. */
@@ -110,6 +113,7 @@ export async function runTeam({
         ctx.set('environment', 'Environment', `Platform: ${process.platform}; shell for run_command: ${config.shell ?? (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh')}; ` +
             `access policy: ${approvalLevel}; interactive operator: ${interactive ? 'yes' : 'no'}; date: ${new Date().toISOString().slice(0, 10)}`, { priority: 9 });
         if (extraInstructions) ctx.set('operator', 'Operator instructions', extraInstructions, { priority: 9 });
+        if (mcp.describe()) ctx.set('mcp', 'MCP sources', mcp.describe(), { priority: 8 });
 
         // 0. Long-term memory and project notes.
         if (memory) {
@@ -277,5 +281,7 @@ export async function runTeam({
         result.status = isAbortError(error) || signal?.aborted || error instanceof CancelledError ? 'cancelled' : 'failed';
         result.error = error;
         return finish();
+    } finally {
+        await mcp.close();
     }
 }

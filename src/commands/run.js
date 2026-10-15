@@ -2,12 +2,12 @@
  * @file src/commands/run.js
  * @module commands/run
  * @purpose Run an autonomous task as a role team or as a single tool loop.
- * @depends agent/map, agent/tools, agent/roles, agent/team, core/config, util/text, commands/instructions, commands/flow, commands/shared
+ * @depends agent/map, agent/tools, agent/roles, agent/team, core/config, util/text, commands/instructions, commands/flow, commands/shared, mcp/session
  * @usedBy cli
  * @exports run
  * @ai.tags cli, agent, team
  * @ai.hint io
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-15 Single-agent runs can call MCP tools.
  */
 import { ensureProjectMap } from '../agent/map.js';
 import { createToolset, enabledToolNames } from '../agent/tools.js';
@@ -19,6 +19,7 @@ import { agentBase } from './instructions.js';
 import { runOnce } from './flow.js';
 import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstructions, approvalLevel, backupDirFor, openMemoryFor,
     describeRoles, usageRow, usageBreakdownRows, describeChanges, createClientFor, createLedgerFor, writeOutput, exitCodeFor, STATUS_LABELS } from './shared.js';
+import { openMcpSources } from '../mcp/session.js';
 
 const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло результат', incomplete: 'шаги выполнены не полностью' };
 
@@ -76,18 +77,24 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
     const client = createClientFor(config);
     const ledger = createLedgerFor(config);
     const roles = createRoleRunner({ client, config, ledger, emit, signal });
-    const toolset = createToolset({
-        root: ctx.cwd, config, names, approvalLevel: level,
-        approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
-        backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
-        describeImage: roles.shouldDelegateVision('default') ? roles.describeImage : null, summarizeFile: roles.summarizeFile,
-    });
-    const instructions = composeInstructions(agentBase({ root: ctx.cwd, approvalLevel: level, toolNames: toolset.names(), interactive, shell: config.shell ?? null }), config, extra);
-    renderer.line('info', `Агент (single): ${role.model}${role.effort ? `:${role.effort}` : ''} · каталог ${ctx.cwd} · доступ: ${level} · инструменты: ${toolset.names().join(', ')}${config.tools.web ? ' + web_search' : ''}${config.tools.images ? ' + image_generation' : ''}${store ? ' · память включена' : ''}`, { dim: true });
-    ctx.client = client;
-    ctx.ledger = ledger;
-    return runOnce({ ...ctx, config: role.config }, { prompt: task, parts, instructions, toolset, maxTurns: config.limits.maxTurns, summaryTitle: 'итог задачи',
-        extraRows: () => [...usageBreakdownRows(ledger), ...(toolset.stats().memories.length ? [['память', `сохранено ${toolset.stats().memories.length}`]] : [])] });
+    const mcp = await openMcpSources(config, { signal, notify: emit });
+    try {
+        const toolset = createToolset({
+            root: ctx.cwd, config, names, approvalLevel: level, extras: mcp.extras,
+            approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
+            backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
+            describeImage: roles.shouldDelegateVision('default') ? roles.describeImage : null, summarizeFile: roles.summarizeFile,
+        });
+        const mcpNote = mcp.describe() ? `\n\nMCP sources:\n${mcp.describe()}` : '';
+        const instructions = composeInstructions(agentBase({ root: ctx.cwd, approvalLevel: level, toolNames: toolset.names(), interactive, shell: config.shell ?? null }), config, extra) + mcpNote;
+        renderer.line('info', `Агент (single): ${role.model}${role.effort ? `:${role.effort}` : ''} · каталог ${ctx.cwd} · доступ: ${level} · инструменты: ${toolset.names().join(', ')}${config.tools.web ? ' + web_search' : ''}${config.tools.images ? ' + image_generation' : ''}${store ? ' · память включена' : ''}`, { dim: true });
+        ctx.client = client;
+        ctx.ledger = ledger;
+        return await runOnce({ ...ctx, config: role.config }, { prompt: task, parts, instructions, toolset, maxTurns: config.limits.maxTurns, summaryTitle: 'итог задачи',
+            extraRows: () => [...usageBreakdownRows(ledger), ...(toolset.stats().memories.length ? [['память', `сохранено ${toolset.stats().memories.length}`]] : [])] });
+    } finally {
+        await mcp.close();
+    }
 }
 
 /**

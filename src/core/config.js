@@ -2,17 +2,19 @@
  * @file src/core/config.js
  * @module core/config
  * @purpose Load, validate, and redact configuration, and resolve per-role settings.
- * @depends node:os, node:path, node:fs/promises, util/text, core/config-defaults
+ * @depends node:os, node:path, node:fs/promises, util/text, core/config-defaults, generate/platform, mcp/servers
  * @usedBy cli, commands/shared, commands/flags, commands/ask, commands/run, commands/chat, commands/misc, agent/loop, agent/roles
  * @exports APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, defaults, resolveRole, defaultHome, loadConfig, isReasoningModel, supportsVerbosity, redactConfig
  * @ai.tags config
  * @ai.hint io
- * @changed 2026-10-15 Validate completion settings.
+ * @changed 2026-10-15 Validate generation targets and MCP servers.
  */
 import os from 'node:os';
 import path from 'node:path';
 import { readFile, mkdir } from 'node:fs/promises';
 import { deepMerge, isRecord } from '../util/text.js';
+import { PLATFORMS } from '../generate/platform.js';
+import { normalizeMcpServer } from '../mcp/servers.js';
 import {
     APPROVAL_LEVELS,
     IMAGE_DETAILS,
@@ -21,6 +23,8 @@ import {
     ROLE_NAMES,
     defaults,
 } from './config-defaults.js';
+
+const KiB = 1024;
 
 export {
     APPROVAL_LEVELS,
@@ -226,6 +230,19 @@ function validateConfig(c) {
     if (c.completion.token !== null && (typeof c.completion.token !== 'string' || c.completion.token.length < 8 || /[\r\n]/.test(c.completion.token))) {
         fail('completion.token: null или строка от 8 символов без перевода строки');
     }
+    if (!isRecord(c.generate)) fail('generate должен быть объектом');
+    for (const key of Object.keys(c.generate)) {
+        if (!(key in defaults.generate)) fail(`неизвестный параметр generate.${key}`);
+    }
+    if (!Number.isInteger(c.generate.fidelity) || c.generate.fidelity < 0 || c.generate.fidelity > 100) fail('generate.fidelity: целое 0..100');
+    if (!Number.isInteger(c.generate.creativity) || c.generate.creativity < 0 || c.generate.creativity > 100) fail('generate.creativity: целое 0..100');
+    if (!Object.hasOwn(PLATFORMS, c.generate.platform)) fail(`generate.platform: ${Object.keys(PLATFORMS).join(' | ')}`);
+    if (!isRecord(c.mcp)) fail('mcp должен быть объектом');
+    for (const key of Object.keys(c.mcp)) {
+        if (!(key in defaults.mcp)) fail(`неизвестный параметр mcp.${key}`);
+    }
+    if (!Array.isArray(c.mcp.servers)) fail('mcp.servers должен быть массивом');
+    c.mcp.servers = c.mcp.servers.map((entry) => normalizeMcpServer(entry));
 }
 
 /** Heuristic: does this model accept the `reasoning` parameter? */
@@ -242,5 +259,12 @@ export function supportsVerbosity(model) {
 export function redactConfig(config) {
     const copy = structuredClone(config);
     if (copy.apiKey) copy.apiKey = `${copy.apiKey.slice(0, 7)}…${copy.apiKey.slice(-4)}`;
+    if (Array.isArray(copy.mcp?.servers)) {
+        for (const server of copy.mcp.servers) {
+            if (server.env && typeof server.env === 'object') {
+                server.env = Object.fromEntries(Object.keys(server.env).map((key) => [key, '…']));
+            }
+        }
+    }
     return copy;
 }

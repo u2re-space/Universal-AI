@@ -17,6 +17,8 @@
 | Картинки | `ai image "кот-космонавт" --size 1024x1024 --quality high` (инструмент `image_generation`, черновики пишутся по мере генерации) |
 | Изображения и файлы во входе | `ai --image screenshot.png "что не так на экране?"`, `ai -f spec.pdf "сделай план"` |
 | Автономные задачи | `ai run "добавь тесты для src/utils.js и прогони их"` — инструменты: файлы, команды, URL, web-поиск, картинки |
+| Сайты, лендинги, бэкенды | `ai gen landing "собери страницу" --image test-gen/landing.png` — точность 87% (цель, не измерение), креативность, профиль Chrome 157 Beta |
+| Свои MCP-серверы | `ai mcp add design --mcp-command node --mcp-arg server.js` — инструменты и ресурсы по stdio |
 | Разные модели под роли | старшая модель планирует и проверяет, младшие собирают контекст и генерируют вызовы инструментов, отдельная модель читает картинки: `--role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna` |
 | Память и общий контекст | долговременная память в SQLite (факты, соглашения, решения — по проекту и глобально), заметки проекта `AGENTS.md`, история задач, кеш сводок файлов; один общий контекст для всех ролей |
 | Фон | `--background` (сервер считает, можно переподключиться `ai resume`) и `--detach` (локальная фоновая задача, `ai jobs …`) |
@@ -52,6 +54,8 @@ ai config show|init|path     конфигурация
 ai map [path]                индекс файлов и символов (.ai/map.json)
 ai complete                  вставка в месте курсора (редактор, быстрая модель)
 ai complete --listen [--port n]   HTTP и WebSocket для IDE на 127.0.0.1
+ai gen <landing|site|backend|app> "задача"   сгенерировать проект по референсам
+ai mcp list|add|remove|probe    пользовательские MCP-серверы (stdio)
 ```
 
 Полный список флагов — `ai --help`.
@@ -179,6 +183,45 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 Снимки попадают в `.ai/desktop/`; роль `vision` описывает их как TOON.
 Роль `encoder` записывает пакет. `run_batch` его выполняет.
 Клик — по координатам, заголовку окна, элементу управления или картинке.
+
+## Генерация проектов
+
+`ai gen` собирает лендинг, статический сайт, бэкенд или небольшое приложение. Команда пишет контракт в `.ai/generation.json` и запускает ту же команду ролей, что и `ai run`.
+
+```bash
+ai gen landing "повтори макет" --image test-gen/landing.png --approve write
+ai gen backend "заметки по HTTP" --creativity 10 --approve write
+ai gen site "витрина" --template templates/base --example https://css-tricks.com/ --fidelity 87
+```
+
+* **Точность** (`--fidelity`, по умолчанию 87) — насколько видимая структура, текст, палитра и порядок блоков должны совпасть с референсами. Это цель. Поле `measured` остаётся `null`: сравнения кадра и вёрстки нет, процент не вычисляется.
+* **Креативность** (`--creativity`, по умолчанию 20) — сколько можно добавить того, чего в референсах нет. 0 ничего не добавляет. Оси независимы.
+* **Референсы** — `--image` (макеты), `--file`, `--template` (шаблоны), `--example` (примеры дизайна). Можно несколько каждого.
+* **Платформа** — `--platform chrome-157-beta` (единственный профиль и значение по умолчанию). Chrome 157 Beta без экспериментальных флагов и без origin trial. ECMAScript — редакция 2026, только то, что Chrome 157 выполняет без флага. CSS `random()` и пять флаговых возможностей снимка от 2026-10-15 не используются. Ориентиры: [CSS-Tricks](https://css-tricks.com/), [дорожная карта Chrome](https://chromestatus.com/roadmap), [ECMA-262](https://262.ecma-international.org/), [caniuse](https://caniuse.com/).
+* Страницы без npm и без сборщика. Бэкенд и приложение — Node.js 26, ESM, только `node:http`, адрес `127.0.0.1`, порт `PORT` или 3000.
+
+## MCP-источники
+
+Пользовательские серверы MCP отдают инструменты и ресурсы. Транспорт — stdio, кадры `Content-Length`. Протокол клиента — `2025-06-18`.
+
+```bash
+ai mcp add design --mcp-command node --mcp-arg servers/design.js
+ai mcp list
+ai mcp probe design
+ai mcp remove design
+```
+
+`add` и `remove` меняют `~/.ai-agent/config.json` и не запускают процесс. `probe`, `ai run` и `ai gen` запускают. Один упавший сервер не останавливает остальные. Имя инструмента для модели: `mcp_<id>_<tool>`. Вызов требует того же подтверждения, что и сеть (`--approve ask` спрашивает, `--approve all` разрешает, `--approve write` не разрешает). Чтение ресурсов (`mcp_list_resources`, `mcp_read_resource`) доступно без подтверждения.
+
+```json
+"mcp": {
+  "servers": [
+    { "id": "design", "command": "node", "args": ["servers/design.js"], "env": { "TOKEN": "…" }, "enabled": true }
+  ]
+}
+```
+
+`tools.mcp` по умолчанию `true`. Пустой список серверов ничего не добавляет. `--no-tools` и `--tools` без `mcp` отключают источники.
 
 ## Память
 

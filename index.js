@@ -4,10 +4,10 @@
  * @purpose Public programmatic API: client, session, ledger, tools, and one-turn runs.
  * @depends openai/client, core/session, core/usage, core/config, core/attachments, core/memory, core/context, agent/tools, agent/loop, agent/roles, agent/team, ui/renderer, jobs/manager, agent/map, agent/task-map, complete/complete, complete/server, complete/context
  * @usedBy external
- * @exports createClient, ApiError, createSession, createLedger, loadConfig, configDefaults, resolveRole, buildUserMessage, loadImageAttachment, loadFileAttachment, openMemory, projectKey, createSharedContext, createToolset, runTurn, createRoleRunner, runTeam, createRenderer, createJobManager, loadProjectMap, draftTaskMap, buildCompletionContext, completeCode, startCompletionServer
+ * @exports createClient, ApiError, createSession, createLedger, loadConfig, configDefaults, resolveRole, buildUserMessage, loadImageAttachment, loadFileAttachment, openMemory, projectKey, createSharedContext, createToolset, runTurn, createRoleRunner, runTeam, createRenderer, createJobManager, loadProjectMap, draftTaskMap, buildCompletionContext, completeCode, startCompletionServer, buildGenerationBrief, resolvePlatform, connectMcp, openMcpSources
  * @ai.tags api, exports
  * @ai.hint keep
- * @changed 2026-10-15 Export editor completion.
+ * @changed 2026-10-15 Export generation and MCP.
  *
  * Public programmatic API (Node.js 26+, ESM).
  *
@@ -37,3 +37,7 @@ export { draftTaskMap } from './src/agent/task-map.js';
 export { buildCompletionContext } from './src/complete/context.js';
 export { completeCode } from './src/complete/complete.js';
 export { startCompletionServer } from './src/complete/server.js';
+export { buildGenerationBrief } from './src/generate/brief.js';
+export { resolvePlatform } from './src/generate/platform.js';
+export { connectMcp } from './src/mcp/client.js';
+export { openMcpSources } from './src/mcp/session.js';

@@ -6,7 +6,7 @@
  * @exports defaults, ROLE_NAMES, REASONING_EFFORTS, REASONING_SUMMARIES, APPROVAL_LEVELS, IMAGE_DETAILS
  * @ai.tags config
  * @ai.hint pure
- * @changed 2026-10-15 Completion defaults for editor autocomplete.
+ * @changed 2026-10-15 Generation defaults and MCP server list.
  */
 const KiB = 1024;
 const MiB = KiB * KiB;
@@ -41,7 +41,7 @@ export const defaults = Object.freeze({
     retries: 2,
     approve: null,                    // ask | read | write | all; null → ask (TTY) or read (no TTY)
     shell: null,                      // run_command shell: null (cmd.exe / sh) | powershell | pwsh | bash | sh | zsh | cmd
-    tools: { fs: true, shell: true, fetch: true, web: false, images: false, askUser: true, desktop: false },
+    tools: { fs: true, shell: true, fetch: true, web: false, images: false, askUser: true, desktop: false, mcp: true },
     /** Windows screen, mouse, keyboard, and AutoHotkey v2. Tools stay off until tools.desktop is true. */
     desktop: { ahkPath: null, shotAfterAction: true },
     limits: {
@@ -117,6 +117,19 @@ export const defaults = Object.freeze({
         maxRecall: 8,                   // memories injected into the shared context
         notesFile: 'AGENTS.md',         // project notes file included in the context when present
         dbFile: null,                   // null → <home>/memory.db
+    },
+    /**
+     * Project generation (`ai gen`). Fidelity is a target, not a measured score.
+     * platform selects the frozen web-platform profile (Chrome 157 Beta, flags off).
+     */
+    generate: {
+        fidelity: 87,
+        creativity: 20,
+        platform: 'chrome-157-beta',
+    },
+    /** User MCP servers. stdio only. An empty list leaves tools.mcp as a no-op. */
+    mcp: {
+        servers: [],
     },
     /**
      * Inline completion for editors (`ai complete`, HTTP and WebSocket).
