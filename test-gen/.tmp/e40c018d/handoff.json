@@ -1,0 +1,37 @@
+{
+  "id": "e40c018d",
+  "relDir": ".tmp/e40c018d",
+  "from": "executor",
+  "to": "encoder",
+  "route": "encode",
+  "text": "Создайте файл `index.html` и откройте его в браузере. Игра работает без библиотек: есть счёт, уровни, следующая фигура, пауза и кнопки для сенсорного экрана.\n\n### `index.html`\n[artifact a001] .tmp/e40c018d/a001 · hint index.html · html · 12151 bytes",
+  "artifacts": [
+    {
+      "id": "a001",
+      "rel": ".tmp/e40c018d/a001",
+      "hintLanguage": "html",
+      "hintPath": "index.html",
+      "bytes": 12151,
+      "origin": null,
+      "start": null,
+      "end": null
+    }
+  ],
+  "commands": [
+    {
+      "command": "fs:write",
+      "path": "index.html",
+      "cwd": ".",
+      "type": "code",
+      "language": "html",
+      "content": null,
+      "lines": null,
+      "source": ".tmp/e40c018d/a001",
+      "start": null,
+      "end": null,
+      "depth": null,
+      "mode": null
+    }
+  ],
+  "profile": null
+}

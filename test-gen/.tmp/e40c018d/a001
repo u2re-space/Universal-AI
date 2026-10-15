@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Тетрис</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #0c1020;
+      color: #edf2ff;
+      font-family: system-ui, sans-serif;
+    }
+    main { padding: 20px 12px; }
+    h1 { margin: 0 0 18px; text-align: center; letter-spacing: 5px; }
+    .game { display: flex; align-items: flex-start; gap: 16px; }
+    .board { position: relative; }
+    #board {
+      display: block;
+      width: min(60vw, 300px);
+      height: auto;
+      border: 2px solid #364568;
+      border-radius: 6px;
+      background: #11182b;
+    }
+    aside { width: 120px; }
+    .card {
+      padding: 12px;
+      margin-bottom: 12px;
+      border: 1px solid #303d5d;
+      border-radius: 10px;
+      background: #182139;
+    }
+    .label { color: #a8b6d4; font-size: 12px; }
+    .value { font-size: 24px; font-weight: 700; overflow-wrap: anywhere; }
+    #next { display: block; width: 96px; height: 96px; margin: auto; }
+    button {
+      padding: 11px 8px;
+      border: 1px solid #465b83;
+      border-radius: 8px;
+      background: #253657;
+      color: white;
+      font: inherit;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    button:hover { background: #344d79; }
+    button:active { background: #476799; }
+    aside button { width: 100%; margin-bottom: 10px; }
+    .overlay {
+      position: absolute;
+      inset: 2px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 15px;
+      text-align: center;
+      background: #0b1024df;
+      border-radius: 4px;
+    }
+    .overlay[hidden] { display: none; }
+    .overlay strong { font-size: 25px; }
+    .overlay p { color: #b8c6e3; }
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 7px;
+      margin-top: 15px;
+    }
+    .help {
+      max-width: 436px;
+      color: #a8b6d4;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    @media (max-width: 380px) {
+      .game { gap: 9px; }
+      aside { width: 104px; }
+      .card { padding: 8px; }
+      #next { width: 86px; height: 86px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ТЕТРИС</h1>
+    <div class="game">
+      <div class="board">
+        <canvas id="board" width="300" height="600" aria-label="Игровое поле тетриса"></canvas>
+        <div id="overlay" class="overlay" role="status" aria-live="polite" hidden>
+          <strong id="message"></strong>
+          <p id="description"></p>
+        </div>
+      </div>
+      <aside>
+        <div class="card">
+          <div class="label">СЧЁТ</div>
+          <div id="score" class="value">0</div>
+          <div class="label">РЕКОРД</div>
+          <div id="best" class="value">0</div>
+        </div>
+        <div class="card">
+          <div class="label">УРОВЕНЬ</div>
+          <div id="level" class="value">1</div>
+          <div class="label">ЛИНИИ</div>
+          <div id="lines" class="value">0</div>
+        </div>
+        <div class="card">
+          <div class="label">ДАЛЕЕ</div>
+          <canvas id="next" width="120" height="120" aria-label="Следующая фигура"></canvas>
+        </div>
+        <button id="pause">Пауза</button>
+        <button id="restart">Новая игра</button>
+      </aside>
+    </div>
+
+    <div class="controls" aria-label="Управление">
+      <button data-action="left" aria-label="Влево">←</button>
+      <button data-action="rotate" aria-label="Повернуть">↻</button>
+      <button data-action="right" aria-label="Вправо">→</button>
+      <button data-action="down" aria-label="Вниз">↓</button>
+      <button data-action="drop" aria-label="Сбросить">⤓</button>
+    </div>
+    <p class="help">
+      ← → — движение · ↑ — поворот · ↓ — ускорение<br>
+      Пробел — сбросить · P / Esc — пауза · R — новая игра
+    </p>
+  </main>
+
+  <script>
+    'use strict';
+
+    const $ = id => document.getElementById(id);
+    const ctx = $('board').getContext('2d');
+    const preview = $('next').getContext('2d');
+    const COLS = 10, ROWS = 20, CELL = 30;
+    const colors = [
+      '', '#32d7ed', '#5287ff', '#ffae45',
+      '#ffe260', '#68dc90', '#b38aff', '#ff6685'
+    ];
+    const shapes = [
+      [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+      [[2,0,0],[2,2,2],[0,0,0]],
+      [[0,0,3],[3,3,3],[0,0,0]],
+      [[4,4],[4,4]],
+      [[0,5,5],[5,5,0],[0,0,0]],
+      [[0,6,0],[6,6,6],[0,0,0]],
+      [[7,7,0],[0,7,7],[0,0,0]]
+    ];
+
+    let board, active, next, bag;
+    let score = 0, lines = 0, level = 1, best = 0;
+    let paused = false, over = false, elapsed = 0, lastTime = 0;
+    try { best = Number(localStorage.getItem('tetris-best')) || 0; } catch {}
+
+    function randomShape() {
+      if (!bag.length) {
+        bag = [0,1,2,3,4,5,6];
+        for (let i = bag.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [bag[i], bag[j]] = [bag[j], bag[i]];
+        }
+      }
+      return shapes[bag.pop()].map(row => row.slice());
+    }
+
+    function updateStats() {
+      if (score > best) {
+        best = score;
+        try { localStorage.setItem('tetris-best', String(best)); } catch {}
+      }
+      $('score').textContent = score;
+      $('best').textContent = best;
+      $('lines').textContent = lines;
+      $('level').textContent = level;
+    }
+
+    function updateOverlay() {
+      $('overlay').hidden = !paused && !over;
+      $('message').textContent = over ? 'Игра окончена' : 'Пауза';
+      $('description').textContent = over
+        ? `Ваш счёт: ${score}. Нажмите «Новая игра».`
+        : 'Нажмите «Продолжить» или P';
+      $('pause').textContent = paused ? 'Продолжить' : 'Пауза';
+      $('pause').disabled = over;
+    }
+
+    function collides(matrix, x, y) {
+      return matrix.some((row, dy) => row.some((value, dx) => {
+        if (!value) return false;
+        const bx = x + dx, by = y + dy;
+        return bx < 0 || bx >= COLS || by >= ROWS ||
+          (by >= 0 && board[by][bx] !== 0);
+      }));
+    }
+
+    function spawn() {
+      active = {
+        matrix: next,
+        x: Math.floor((COLS - next[0].length) / 2),
+        y: 0
+      };
+      next = randomShape();
+      elapsed = 0;
+      if (collides(active.matrix, active.x, active.y)) {
+        over = true;
+        updateOverlay();
+      }
+      drawPreview();
+    }
+
+    function reset() {
+      board = Array.from({length: ROWS}, () => Array(COLS).fill(0));
+      bag = [];
+      score = lines = 0;
+      level = 1;
+      paused = over = false;
+      next = randomShape();
+      spawn();
+      updateStats();
+      updateOverlay();
+      draw();
+    }
+
+    function lock() {
+      active.matrix.forEach((row, dy) => row.forEach((value, dx) => {
+        if (value) board[active.y + dy][active.x + dx] = value;
+      }));
+
+      let removed = 0;
+      for (let y = ROWS - 1; y >= 0; y--) {
+        if (board[y].every(Boolean)) {
+          board.splice(y, 1);
+          board.unshift(Array(COLS).fill(0));
+          removed++;
+          y++;
+        }
+      }
+      score += [0, 100, 300, 500, 800][removed] * level;
+      lines += removed;
+      level = 1 + Math.floor(lines / 10);
+      updateStats();
+      spawn();
+    }
+
+    function down(manual = false) {
+      if (!collides(active.matrix, active.x, active.y + 1)) {
+        active.y++;
+        if (manual) { score++; updateStats(); }
+      } else {
+        lock();
+      }
+      elapsed = 0;
+    }
+
+    function rotate() {
+      const m = active.matrix;
+      const rotated = m[0].map((_, x) => m.map(row => row[x]).reverse());
+      for (const offset of [0, -1, 1, -2, 2]) {
+        if (!collides(rotated, active.x + offset, active.y)) {
+          active.matrix = rotated;
+          active.x += offset;
+          break;
+        }
+      }
+    }
+
+    function action(name) {
+      if (paused || over) return;
+      if (name === 'left' || name === 'right') {
+        const dx = name === 'left' ? -1 : 1;
+        if (!collides(active.matrix, active.x + dx, active.y)) active.x += dx;
+      } else if (name === 'rotate') {
+        rotate();
+      } else if (name === 'down') {
+        down(true);
+      } else if (name === 'drop') {
+        while (!collides(active.matrix, active.x, active.y + 1)) {
+          active.y++;
+          score += 2;
+        }
+        lock();
+      }
+      draw();
+    }
+
+    function cell(context, x, y, size, color, ghost = false) {
+      context.fillStyle = color;
+      context.globalAlpha = ghost ? 0.18 : 1;
+      context.fillRect(x + 1, y + 1, size - 2, size - 2);
+      context.strokeStyle = ghost ? color : '#ffffff40';
+      context.strokeRect(x + 2, y + 2, size - 4, size - 4);
+      context.globalAlpha = 1;
+    }
+
+    function drawPiece(matrix, x, y, ghost = false) {
+      matrix.forEach((row, dy) => row.forEach((value, dx) => {
+        if (value) cell(ctx, (x + dx) * CELL, (y + dy) * CELL,
+          CELL, colors[value], ghost);
+      }));
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, 300, 600);
+      ctx.strokeStyle = '#ffffff08';
+      ctx.lineWidth = 1;
+      for (let x = 0; x <= COLS; x++) {
+        ctx.beginPath();
+        ctx.moveTo(x * CELL, 0);
+        ctx.lineTo(x * CELL, 600);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= ROWS; y++) {
+        ctx.beginPath();
+        ctx.moveTo(0, y * CELL);
+        ctx.lineTo(300, y * CELL);
+        ctx.stroke();
+      }
+      drawPiece(board, 0, 0);
+      if (!over) {
+        let ghostY = active.y;
+        while (!collides(active.matrix, active.x, ghostY + 1)) ghostY++;
+        drawPiece(active.matrix, active.x, ghostY, true);
+        drawPiece(active.matrix, active.x, active.y);
+      }
+    }
+
+    function drawPreview() {
+      preview.clearRect(0, 0, 120, 120);
+      const size = 24;
+      const x = (120 - next[0].length * size) / 2;
+      const y = (120 - next.length * size) / 2;
+      next.forEach((row, dy) => row.forEach((value, dx) => {
+        if (value) cell(preview, x + dx * size, y + dy * size, size, colors[value]);
+      }));
+    }
+
+    function togglePause() {
+      if (over) return;
+      paused = !paused;
+      elapsed = 0;
+      updateOverlay();
+    }
+
+    $('pause').addEventListener('click', togglePause);
+    $('restart').addEventListener('click', reset);
+    document.querySelectorAll('[data-action]').forEach(button => {
+      button.addEventListener('click', () => action(button.dataset.action));
+    });
+
+    document.addEventListener('keydown', event => {
+      const key = event.key.toLowerCase();
+      const map = {
+        arrowleft: 'left', arrowright: 'right',
+        arrowup: 'rotate', arrowdown: 'down', ' ': 'drop'
+      };
+      if (map[key] || ['p', 'з', 'escape', 'r', 'к'].includes(key)) {
+        // Не перехватываем активацию сфокусированных кнопок пробелом.
+        if (key === ' ' && event.target instanceof HTMLButtonElement) return;
+        event.preventDefault();
+        if (map[key]) {
+          if (event.repeat && ['rotate', 'drop'].includes(map[key])) return;
+          action(map[key]);
+        } else if (!event.repeat) {
+          if (['r', 'к'].includes(key)) reset();
+          else togglePause();
+        }
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && !over && !paused) togglePause();
+    });
+
+    function frame(time) {
+      const delta = Math.min(time - lastTime, 100);
+      lastTime = time;
+      if (!paused && !over) {
+        elapsed += delta;
+        const interval = Math.max(80, 800 * Math.pow(0.8, level - 1));
+        if (elapsed >= interval) down();
+        draw();
+      }
+      requestAnimationFrame(frame);
+    }
+
+    reset();
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>
