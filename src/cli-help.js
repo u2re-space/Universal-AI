@@ -102,7 +102,9 @@ MCP:
   --help, -h  --version, -V
 
 Переменные окружения: OPENAI_API_KEY (обязательно), OPENAI_BASE_URL, OPENAI_ORG_ID, OPENAI_PROJECT_ID,
-AI_MODEL, AI_IMAGE_MODEL, AI_AGENT_HOME (по умолчанию ~/.ai-agent), AI_ASCII=1 (без Unicode-символов).
+AI_MODEL (или OPENAI_MODEL), AI_IMAGE_MODEL, AI_AGENT_HOME (по умолчанию ~/.ai-agent), AI_ASCII=1 (без Unicode-символов).
+Файл .env в рабочем каталоге задаёт те же имена и перекрывает унаследованное окружение.
+На Windows ключ и адрес из разных областей (пользователь и система) не смешиваются: берётся пара из той области, где заданы оба.
 Коды выхода: 0 — успех, 1 — задача не завершена/ошибка API, 2 — ошибка аргументов/конфигурации, 130 — отменено.
 `;
 

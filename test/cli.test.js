@@ -390,7 +390,7 @@ test('launcher forwards a PowerShell pipeline', async () => {
         const command = `& { 'hello from pipe' | & '${ps1}' ask 'two words' }`;
         const { code, stdout, stderr } = await new Promise((resolve) => {
             const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
-                env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+                cwd: home, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
             });
             let out = '', err = '';
             child.stdout.on('data', (d) => { out += d; });

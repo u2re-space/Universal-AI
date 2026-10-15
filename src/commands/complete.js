@@ -139,7 +139,7 @@ export async function complete(ctx) {
             return 0;
         } finally { client?.close(); }
     }
-    if (!config.apiKey) throw new UsageError('Не задан OPENAI_API_KEY. Экспортируйте переменную окружения или укажите apiKey в ~/.ai-agent/config.json.');
+    if (!config.apiKey) throw new UsageError('Не задан OPENAI_API_KEY. Укажите его в .env, в окружении или в ~/.ai-agent/config.json.');
     const client = createClientFor(config);
     try {
         const result = await completeCode({ client, config, request, cwd, signal });

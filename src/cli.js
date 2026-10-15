@@ -7,7 +7,7 @@
  * @exports HELP, stripDetach, main
  * @ai.tags cli, dispatch
  * @ai.hint keep
- * @changed 2026-10-15 Register gen and mcp.
+ * @changed 2026-10-15 Load .env and repair a split Windows API key and base URL.
  */
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -15,6 +15,7 @@ import { stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { loadConfig } from './core/config.js';
+import { resolveRuntimeEnv } from './core/runtime-env.js';
 import { createRenderer, detectMode } from './ui/renderer.js';
 import { createJobManager } from './jobs/manager.js';
 import { ApiError, BudgetError, CancelledError, isAbortError } from './openai/errors.js';
@@ -140,9 +141,11 @@ export async function main(argv = process.argv.slice(2)) {
         if (major < 26) throw new UsageError(`Нужен Node.js 26+; запущен ${process.versions.node}.`);
         const cwd = path.resolve(values.cwd ?? '.');
         if (!(await stat(cwd).then((s) => s.isDirectory()).catch(() => false))) throw new UsageError(`Каталог не найден: ${cwd}`);
-        const config = await loadConfig({ configPath: values.config, overrides: overridesFrom(values) });
+        const config = await loadConfig({
+            configPath: values.config, overrides: overridesFrom(values), env: await resolveRuntimeEnv({ cwd }),
+        });
         if (NEEDS_API_KEY.has(commandName) && !config.apiKey) {
-            throw new UsageError('Не задан OPENAI_API_KEY. Экспортируйте переменную окружения или укажите apiKey в ~/.ai-agent/config.json.');
+            throw new UsageError('Не задан OPENAI_API_KEY. Укажите его в .env, в окружении или в ~/.ai-agent/config.json.');
         }
 
         if (values.detach) {

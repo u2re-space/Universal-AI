@@ -7,7 +7,7 @@
  * @exports APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, defaults, resolveRole, defaultHome, loadConfig, isReasoningModel, supportsVerbosity, redactConfig
  * @ai.tags config
  * @ai.hint io
- * @changed 2026-10-15 Validate generation targets and MCP servers.
+ * @changed 2026-10-15 Accept OPENAI_MODEL when AI_MODEL is unset.
  */
 import os from 'node:os';
 import path from 'node:path';
@@ -108,6 +108,7 @@ async function readJsonFile(file, { optional = false } = {}) {
 function fromEnv(env) {
     const result = {};
     if (env.AI_MODEL) result.model = env.AI_MODEL;
+    else if (env.OPENAI_MODEL) result.model = env.OPENAI_MODEL;
     if (env.AI_IMAGE_MODEL) result.imageModel = env.AI_IMAGE_MODEL;
     if (env.OPENAI_BASE_URL) result.baseURL = env.OPENAI_BASE_URL;
     if (env.OPENAI_API_KEY) result.apiKey = env.OPENAI_API_KEY;
@@ -120,6 +121,7 @@ function fromEnv(env) {
 /**
  * Resolve the effective configuration.
  * Precedence: defaults < ~/.ai-agent/config.json < --config file < environment < overrides (CLI).
+ * The CLI passes environment after reading .env and repairing a split Windows credential pair.
  */
 export async function loadConfig({ configPath = null, overrides = {}, env = process.env, ensureHome = true } = {}) {
     const home = defaultHome(env);
