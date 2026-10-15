@@ -7,7 +7,7 @@
  * @exports instructions, settings
  * @ai.tags roles, plan
  * @ai.hint pure
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-15 Planner uses the workspace scan when it is present.
  */
 
 import { UNTRUSTED } from './untrusted.js';
@@ -19,7 +19,8 @@ import { UNTRUSTED } from './untrusted.js';
  * @ai.hint pure
  */
 export const instructions = `You are the senior planner of a team of AI agents working on a task in a local project.
-You see the task, the shared context (project notes, long-term memories, a directory listing) and any attached images.
+You see the task, the shared context (project notes, long-term memories, a directory listing, and a Workspace scan when this is a Node.js or frontend project) and any attached images.
+When a Workspace scan is present, package.json, tsconfig.json or jsconfig.json, import maps, and the scanner file list are the layout. Prefer those resolved paths.
 Produce a JSON plan: a short summary, complexity, 1–${'{maxSteps}'} concrete steps for a junior worker agent (each step small, ordered,
 verifiable, with precise file paths and commands), files the context collector should read first, literal search queries,
 questions the collector must answer, acceptance criteria, risks, and whether an independent review is worth it.

@@ -2,12 +2,12 @@
  * @file src/commands/run.js
  * @module commands/run
  * @purpose Run an autonomous task as a role team or as a single tool loop.
- * @depends agent/map, agent/tools, agent/roles, agent/team, core/config, util/text, commands/instructions, commands/flow, commands/shared, mcp/session
+ * @depends agent/map, agent/tools, agent/roles, agent/team, agent/workspace-scan, core/config, util/text, commands/instructions, commands/flow, commands/shared, mcp/session
  * @usedBy cli
  * @exports run
  * @ai.tags cli, agent, team
  * @ai.hint io
- * @changed 2026-10-15 Single-agent runs can call MCP tools.
+ * @changed 2026-10-15 Single-agent runs include a Node or frontend workspace scan.
  */
 import { ensureProjectMap } from '../agent/map.js';
 import { createToolset, enabledToolNames } from '../agent/tools.js';
@@ -23,6 +23,7 @@ import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstruct
 import { openMcpSources } from '../mcp/session.js';
 import { prepareTeamInvocation } from './team-args.js';
 import { imageTransport } from '../openai/images.js';
+import { formatWorkspace, scanWorkspace } from '../agent/workspace-scan.js';
 import { buildGenerationBrief, writeGenerationManifest } from '../generate/brief.js';
 import { resolvePlatform } from '../generate/platform.js';
 
@@ -40,7 +41,7 @@ const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло 
  */
 export async function run(ctx) {
     const { config, renderer, values, positionals } = ctx;
-    const stdinText = await readStdin({ maxBytes: config.limits.maxStdinBytes });
+    const stdinText = await readStdin({ maxBytes: config.limits.maxStdinBytes, stdin: ctx.stdin ?? process.stdin });
     const prepared = await prepareTeamInvocation({ positionals, values, cwd: ctx.cwd, stdinText: stdinText ?? '' });
     let task = prepared.task;
     const parts = await loadAttachments({ images: values.image ?? [], files: values.file ?? [], detail: values.detail ?? 'auto', cwd: ctx.cwd, config, renderer });
@@ -106,11 +107,22 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
         });
         const mcpNote = mcp.describe() ? `\n\nMCP sources:\n${mcp.describe()}` : '';
         const instructions = composeInstructions(agentBase({ root: ctx.cwd, approvalLevel: level, toolNames: toolset.names(), interactive, shell: config.shell ?? null }), config, extra) + mcpNote;
+        let prompt = task;
+        try {
+            const card = await scanWorkspace(ctx.cwd, { task });
+            if (card) {
+                emit({ type: 'stage.start', stage: 'scan', role: 'scanner' });
+                prompt = `${formatWorkspace(card)}\n\n# Task\n${task}`;
+                emit({ type: 'stage.done', stage: 'scan', status: 'completed', files: card.files.map((item) => item.path) });
+            }
+        } catch (error) {
+            emit({ type: 'warning', message: `Сканер workspace: ${error.message}` });
+        }
         renderer.line('info', `Агент (single): ${role.model}${role.effort ? `:${role.effort}` : ''} · каталог ${ctx.cwd} · доступ: ${level} · инструменты: ${toolset.names().join(', ')}${config.tools.web ? ' + web_search' : ''}${config.tools.images ? ' + image_generation' : ''}${store ? ' · память включена' : ''}`, { dim: true });
         ctx.client = client;
         ctx.ledger = ledger;
         const imageApi = imageTransport(config) === 'images';
-        return await runOnce({ ...ctx, config: role.config }, { prompt: task, parts, instructions, toolset, maxTurns: config.limits.maxTurns, summaryTitle: 'итог задачи',
+        return await runOnce({ ...ctx, config: role.config }, { prompt, parts, instructions, toolset, maxTurns: config.limits.maxTurns, summaryTitle: 'итог задачи',
             builtin: builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi }),
             extraRows: () => [...usageBreakdownRows(ledger), ...(toolset.stats().memories.length ? [['память', `сохранено ${toolset.stats().memories.length}`]] : [])] });
     } finally {

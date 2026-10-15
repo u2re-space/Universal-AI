@@ -29,7 +29,7 @@ import { resolveInside } from '../agent/paths.js';
 export async function image(ctx) {
     const { config, renderer, values, positionals } = ctx;
     let prompt = positionals.join(' ').trim();
-    if (!prompt) prompt = (await readStdin({ maxBytes: config.limits.maxStdinBytes })) ?? '';
+    if (!prompt) prompt = (await readStdin({ maxBytes: config.limits.maxStdinBytes, stdin: ctx.stdin ?? process.stdin })) ?? '';
     if (!prompt.trim()) throw new UsageError('Укажите описание изображения: ai image "…"');
     const count = Math.max(1, Math.min(10, Number(values.count ?? 1) || 1));
     const parts = await loadAttachments({ images: values.image ?? [], files: [], detail: values.detail ?? 'auto', cwd: ctx.cwd, config, renderer });

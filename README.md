@@ -62,9 +62,26 @@ ai decide [набор] "текст"        вероятности модели �
 ai moderate [набор] "текст"      модерация сообщения
 ai channels --listen [--port n]  HTTP и WebSocket для чатов и решений
 ai telegram poll|send            адаптер Telegram Bot API
+ai serve [--port <n>]        локальная шина WebSocket на 127.0.0.1
 ```
 
 Полный список флагов — `ai --help`.
+
+### Локальная шина
+
+`ai serve` слушает `ws://127.0.0.1:<порт>` и пишет адрес и токен в `~/.ai-agent/serve.json` (права `0600`). Токен в журнал не попадает. `--port` задаёт порт; без него берётся свободный.
+
+Дополнительные аргументы запуска — обычные флаги CLI (`--model`, `--approve`, `--web`). Они становятся конфигурацией сервера. Поля одного запуска передаются в кадре `start`: `prompt`, `cwd`, `approve`, `tools`, `files`, `images`, `role`, `single`, `team` и остальные флаги команды.
+
+```bash
+ai serve --port 8765
+ai run "добавь тест" --serve
+ai run "добавь тест" --serve ws://127.0.0.1:8765
+```
+
+Клиент WebSocket после `hello` с токеном может отправить `start` (`ask`, `run`, `chat`, `image`) и подписаться на любой запуск. Подтверждения записи и команд для клиентского запуска приходят кадром `approval.request` тому сокету, который отправил `start`. Наблюдатели получают события и не могут подтверждать действия.
+
+`ai jobs` и `--detach` не меняются.
 
 ### Карта проекта
 
@@ -442,14 +459,17 @@ src/complete/server.js    POST /v1/complete и WebSocket на 127.0.0.1
 src/complete/ws.js        кадры WebSocket поверх node:http
 src/channels/             решения, модерация, черновики, HTTP и WebSocket /v1/channels
 src/telegram/             адаптер Bot API, нормализация апдейтов, длинный опрос
-src/commands/*.js         ask, chat, run, image, jobs, memory, complete, decide, moderate, channels, telegram
+src/commands/*.js         ask, chat, run, image, jobs, memory, complete, decide, moderate, channels, telegram, serve
+src/server/protocol.js    WebSocket поверх node:http для ai serve
+src/server/hub.js         запуски, подписчики и подтверждения
+src/server/publish.js     --serve: публикация событий терминала
 ```
 
 Программный интерфейс (`index.js`): `createClient`, `createSession`, `createLedger`, `createToolset`,
 `runTurn`, `createRoleRunner`, `runTeam`, `openMemory`, `createSharedContext`, `resolveRole`,
 `buildUserMessage`, `createRenderer`, `createJobManager`, `buildCompletionContext`,
 `completeCode`, `startCompletionServer`, `requestDecision`, `moderateText`, `draftReply`,
-`handleInbound`, `startChannelServer`, `createTelegram`, `normalizeUpdate`.
+`handleInbound`, `startChannelServer`, `listenProtocol`, `createHub`, `createTelegram`, `normalizeUpdate`.
 
 ## Тесты
 

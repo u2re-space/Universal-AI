@@ -65,7 +65,7 @@ export const defaults = Object.freeze({
         pollIntervalMs: 2_000,
     },
     image: { size: 'auto', quality: 'auto', format: 'png', background: 'auto', partialImages: 2, outputDir: '.', transport: null },
-    webSearch: { contextSize: 'medium' },
+    webSearch: { contextSize: null },       // null → { type: "web_search" }. low | medium | high adds search_context_size
     compaction: { auto: false, afterInputTokens: 200_000 },
     /**
      * Per-role model settings. Every field is optional and falls back to roles.default, then to the

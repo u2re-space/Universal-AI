@@ -2,12 +2,12 @@
  * @file src/agent/team.js
  * @module agent/team
  * @purpose Run planner, collector, worker, reviewer, and summarizer over one shared context.
- * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, mcp/session, channels/decide, channels/questions, channels/verdict
+ * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, mcp/session, channels/decide, channels/questions, channels/verdict
  * @usedBy commands/run, index.js
  * @exports toolNamesForRole, runTeam
  * @ai.tags team, roles
  * @ai.hint keep
- * @changed 2026-10-15 Optional decisions route after the first answer.
+ * @changed 2026-10-15 Workspace scanner before the answer, encoder, and planner.
  */
 
 import path from 'node:path';
@@ -29,6 +29,7 @@ import { imageTransport } from '../openai/images.js';
 import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA } from './schemas.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
+import { formatWorkspace, mergeTaskDraft, scanWorkspace } from './workspace-scan.js';
 import { SHELL_TOOL_NAMES } from './tool-specs.js';
 import { openMcpSources } from '../mcp/session.js';
 import { ANSWER_INSTRUCTIONS, chooseRoute, openHandoff, readDirectory, saveHandoff, seedDirectory, seedTextFile, spillAnswer } from './handoff.js';
@@ -149,7 +150,15 @@ export async function runTeam({
             const ensured = await ensureProjectMap(root);
             projectMap = ensured?.error ? null : ensured;
         }
-        const draft = formatDraft(draftTaskMap(task, projectMap));
+        let workspace = null;
+        try { workspace = await scanWorkspace(root, { task }); }
+        catch (error) { notify({ type: 'warning', message: `Сканер workspace: ${errorMessage(error)}` }); }
+        if (workspace) {
+            notify({ type: 'stage.start', stage: 'scan', role: 'scanner' });
+            ctx.set('workspace', 'Workspace scan', formatWorkspace(workspace), { priority: 8 });
+            notify({ type: 'stage.done', stage: 'scan', status: 'completed', files: workspace.files.map((item) => item.path) });
+        }
+        const draft = formatDraft(mergeTaskDraft(draftTaskMap(task, projectMap), workspace?.files ?? []));
         let handoff = null;
 
         /** Run fs:read and fs:write. A batch error finishes the team. */
@@ -173,8 +182,9 @@ export async function runTeam({
         async function encodeHandoff() {
             notify({ type: 'stage.start', stage: 'encode', role: 'encoder', model: roles.resolve('encoder').model });
             const index = handoff.artifacts.map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''} ${item.hintPath ?? ''}`.trim()).join('\n') || '(none)';
+            const workspaceText = ctx.get('workspace');
             const encoded = await roles.run('encoder', {
-                text: `${handoff.text}\n\n# Directory tree\n${directoryTree}\n\n# Artifacts\n${index}`,
+                text: `${handoff.text}\n\n# Directory tree\n${directoryTree}${workspaceText ? `\n\n# Workspace scan\n${workspaceText}` : ''}\n\n# Artifacts\n${index}`,
                 instructions: fileInstructions, instructionsOnly: true, schema: FILE_COMMANDS_SCHEMA, schemaName: 'file_commands',
             });
             if (encoded.status !== 'completed' || !encoded.data) return { ok: false, done: stop(encoded, 'encoder') };
@@ -198,6 +208,7 @@ export async function runTeam({
             const answered = await roles.run('default', {
                 text: `${ctx.render({ maxBytes })}\n\n# Task\n${task}${handoff.text ? `\n\n# Attached files\n${handoff.text}` : ''}`,
                 parts, instructions: ANSWER_INSTRUCTIONS, instructionsOnly: true,
+                builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
             });
             if (answered.status !== 'completed') return stop(answered, 'ответ');
             const spilled = await spillAnswer(root, handoff, answered.text);
@@ -244,6 +255,7 @@ export async function runTeam({
         const planned = await roles.run('planner', {
             text: `${ctx.render({ maxBytes })}\n\n# Directory tree\n${directoryTree}\n\n${draft}\n\n# Task\n${task}`, parts: handoff ? [] : parts,
             instructions: ROLE_INSTRUCTIONS.planner.replace('{maxSteps}', String(config.agent.maxSteps)), schema: PLAN_SCHEMA, schemaName: 'plan',
+            builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
         });
         if (planned.status !== 'completed') return stop(planned, 'план');
         const plan = planned.data;

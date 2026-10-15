@@ -7,7 +7,7 @@
  * @exports ANSWER_INSTRUCTIONS, INLINE_BYTES, spillFences, stripRoute, chooseRoute, referenceLine, renderArtifactRef, openHandoff, seedTextFile, readDirectory, seedDirectory
  * @ai.tags handoff, tmp
  * @ai.hint io
- * @changed 2026-10-15 First answer chain.
+ * @changed 2026-10-15 First answer follows a workspace scan when one is present.
  */
 
 import path from 'node:path';
@@ -28,6 +28,8 @@ export const INLINE_BYTES = 2048;
  */
 export const ANSWER_INSTRUCTIONS = `You write the first answer to the task. Reply in the user's language.
 Put every file body in a fenced code block with a language tag. Name the file in the heading or the paragraph just before the block when you know it.
+When the shared context has a Workspace scan, follow its import aliases and use the resolved file paths.
+If a web_search tool is available, use it for facts that may have changed, then answer. Source links are shown separately.
 On the last line write exactly "route: encode" when those bodies are ready to save, or "route: plan" when a planner should decide the next steps.
 Do not write files yourself.`;
 

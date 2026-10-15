@@ -2,7 +2,7 @@
 /**
  * @file bin/ai.js
  * @module bin/ai
- * @purpose Process entry for the `ai` command. Forwards argv to `cli.main` and sets the exit code.
+ * @purpose Process entry for the `ai` command. Forwards every argument, including `serve` and `--port`, to `cli.main`.
  * @depends cli
  * @usedBy package bin
  * @ai.tags cli

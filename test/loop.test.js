@@ -222,3 +222,28 @@ test('shrinkHistory drops older screenshots and clips old tool output', () => {
     const second = shrinkHistory(first.items, { clipNewest: true });
     assert.equal(typeof second.items[2].output, 'string');
 });
+
+test('web_search is sent without search_context_size and sources stay in the next turn', async () => {
+    script = (body) => {
+        assert.deepEqual(body.tools, [{ type: 'web_search' }]);
+        return {
+            text: 'См. документацию.',
+            annotations: [{ type: 'url_citation', url: 'https://proxyapi.ru/docs/web-search', title: 'Поиск' }],
+            searches: [{ query: 'web_search proxyapi', sources: [{ type: 'url', url: 'https://proxyapi.ru/docs/web-search' }] }],
+        };
+    };
+    const ctx = setup();
+    const result = await runTurn({
+        client: client(), config: ctx.cfg, session: ctx.session, ledger: ctx.ledger,
+        builtin: builtinTools(ctx.cfg, { web: true }), emit: ctx.emit,
+    });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(result.sources[0].url, 'https://proxyapi.ru/docs/web-search');
+    assert.equal(result.sources[0].title, 'Поиск');
+    const sources = ctx.events.find((event) => event.type === 'web.sources');
+    assert.deepEqual(sources.queries, ['web_search proxyapi']);
+    assert.ok(ctx.session.items.some((item) => /web_search: web_search proxyapi/.test(item.content?.[0]?.text ?? '')));
+    assert.ok(ctx.session.items.some((item) => item.content?.[0]?.text === 'См. документацию.'));
+    const sized = builtinTools({ ...ctx.cfg, webSearch: { contextSize: 'low' } }, { web: true });
+    assert.deepEqual(sized, [{ type: 'web_search', search_context_size: 'low' }]);
+});

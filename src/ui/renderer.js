@@ -7,7 +7,7 @@
  * @exports detectMode, createRenderer
  * @ai.tags ui, terminal, stream
  * @ai.hint io
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-15 Stage label for the workspace scanner.
  */
 
 import { styleText } from 'node:util';
@@ -47,7 +47,7 @@ export function createRenderer({
         active: false, frame: 0, textStreaming: false, lastChar: '\n', statusVisible: false, reasoningBuffer: '',
         askOpen: false, model: null, roles: [],
     };
-    const STAGES = { plan: 'план', collect: 'сбор контекста', work: 'выполнение', review: 'ревью', fix: 'исправления', memory: 'память' };
+    const STAGES = { scan: 'сканер', answer: 'ответ', encode: 'запись', plan: 'план', collect: 'сбор контекста', work: 'выполнение', review: 'ревью', fix: 'исправления', memory: 'память' };
     let timer = null;
     let rl = null;
 

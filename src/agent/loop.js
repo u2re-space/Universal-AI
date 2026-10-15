@@ -2,7 +2,7 @@
  * @file src/agent/loop.js
  * @module agent/loop
  * @purpose Send one conversation turn, run requested local tools, and record images and usage.
- * @depends openai/errors, openai/stream, core/config, core/images, core/background, util/text
+ * @depends openai/errors, openai/stream, openai/web-search, core/config, core/images, core/background, util/text
  * @usedBy commands/chat, commands/flow, commands/image, agent/roles, agent/team, index.js
  * @exports builtinTools, buildRequestBody, compactSession, shrinkHistory, runTurn
  * @ai.tags loop, tools
@@ -12,6 +12,7 @@
 
 import { ApiError, BudgetError, CancelledError, isAbortError } from '../openai/errors.js';
 import { outputText, refusalText } from '../openai/stream.js';
+import { collectWebSources, webSearchTool } from '../openai/web-search.js';
 import { isReasoningModel, supportsVerbosity } from '../core/config.js';
 import { createImageSink } from '../core/images.js';
 import { attachBackground, awaitBackground, TERMINAL_STATUSES } from '../core/background.js';
@@ -20,7 +21,7 @@ import { byteSize, clipMiddle, estimateTokens, errorMessage, formatBytes } from 
 /** Built-in tool definitions derived from the configuration. */
 export function builtinTools(config, { web = false, images = false } = {}) {
     const tools = [];
-    if (web) tools.push({ type: 'web_search', search_context_size: config.webSearch.contextSize });
+    if (web) tools.push(webSearchTool(config.webSearch?.contextSize));
     if (images) {
         const image = { type: 'image_generation', output_format: config.image.format, partial_images: config.image.partialImages };
         if (config.imageModel) image.model = config.imageModel;
@@ -120,7 +121,7 @@ export async function compactSession({ client, session, model, instructions = nu
  * model answers without tool calls (or a limit is reached). Works for plain prompts too
  * (toolset = null): then it is a single request plus image/usage bookkeeping.
  *
- * Returns { status, text, response, turns, toolCalls, images, refusal, error }.
+ * Returns { status, text, response, turns, toolCalls, images, sources, refusal, error }.
  * status: completed | incomplete | refused | max_turns | budget | cancelled | failed
  */
 export async function runTurn({
@@ -130,7 +131,7 @@ export async function runTurn({
 }) {
     const notify = (event) => { try { emit(event); } catch { /* observers never break the loop */ } };
     const images = createImageSink({ target: imageTarget, format: config.image.format });
-    const result = { status: 'failed', text: '', response: null, turns: 0, toolCalls: 0, images: [], refusal: '', error: null };
+    const result = { status: 'failed', text: '', response: null, turns: 0, toolCalls: 0, images: [], sources: [], refusal: '', error: null };
     const tools = [...(toolset ? toolset.definitions() : []), ...builtin];
     // function_call items recorded in the session that still need a function_call_output.
     // If the turn is interrupted we answer them synthetically so the history stays valid.
@@ -209,8 +210,15 @@ export async function runTurn({
             const entry = ledger.record({ model: response.model ?? model, usage: response.usage, elapsedMs, responseId: response.id ?? null });
             session.recordUsage(entry);
             result.response = response;
+            const web = collectWebSources(response);
+            for (const source of web.sources) {
+                if (!result.sources.some((item) => item.url === source.url)) result.sources.push(source);
+            }
+            if (web.queries.length || web.sources.length) {
+                notify({ type: 'web.sources', queries: web.queries, sources: web.sources, searches: web.searches });
+            }
             notify({ type: 'response.done', responseId: response.id ?? null, status: response.status, usage: entry.usage, costUsd: entry.costUsd,
-                elapsedMs, ledger: ledger.snapshot(), model: response.model ?? model });
+                elapsedMs, ledger: ledger.snapshot(), model: response.model ?? model, searches: web.searches });
 
             // Persist generated images and remember their paths for the replayable history.
             const imagePaths = new Map();

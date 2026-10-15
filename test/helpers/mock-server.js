@@ -26,10 +26,19 @@ export async function startMockServer({ script, backgroundPolls = 2 } = {}) {
         for (const [i, image] of (scenario.images ?? []).entries()) {
             items.push({ id: `ig_${id}_${i}`, type: 'image_generation_call', status: 'completed', result: image.b64, output_format: image.format ?? 'png', revised_prompt: image.revisedPrompt ?? null });
         }
+        for (const [i, search] of (scenario.searches ?? []).entries()) {
+            items.push({
+                id: `ws_${id}_${i}`, type: 'web_search_call', status: search.status ?? 'completed',
+                action: {
+                    type: search.type ?? 'search', query: search.query ?? null, queries: search.queries ?? null,
+                    url: search.url ?? null, sources: search.sources ?? null,
+                },
+            });
+        }
         for (const [i, call] of (scenario.calls ?? []).entries()) {
             items.push({ id: `fc_${id}_${i}`, type: 'function_call', status: 'completed', name: call.name, call_id: `call_${id}_${i}`, arguments: typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments ?? {}) });
         }
-        if (scenario.text !== undefined) items.push({ id: `msg_${id}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: scenario.text, annotations: [] }] });
+        if (scenario.text !== undefined) items.push({ id: `msg_${id}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: scenario.text, annotations: scenario.annotations ?? [] }] });
         if (scenario.refusal) items.push({ id: `msg_${id}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'refusal', refusal: scenario.refusal }] });
         return items;
     }

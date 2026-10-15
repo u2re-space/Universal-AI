@@ -6,7 +6,7 @@
  * @exports HELP
  * @ai.tags cli
  * @ai.hint pure
- * @changed 2026-10-15 Help for decisions, moderation, channels, and Telegram.
+ * @changed 2026-10-15 Help mentions the Node and frontend workspace scanner.
  */
 export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
 
@@ -31,6 +31,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai channels --listen [--port n]   HTTP и WebSocket: /v1/decisions, /v1/moderate, /v1/chats/reply, /v1/channels
   ai telegram poll                  длинный опрос Telegram: модерация групп, каналов и личных чатов
   ai telegram send <chat_id> "текст"  отправить сообщение ботом
+  ai serve [--port n]               шина WebSocket на 127.0.0.1. Кадр start принимает дополнительные поля (prompt, tools, approve, model через конфиг, files, images и остальные флаги). approval.request отвечает сокет, отправивший start
 
 Ввод:
   --image <путь|url>     приложить изображение (можно несколько)   --detail auto|low|high|original
@@ -52,7 +53,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 Инструменты и автономность:
   --tools fs,shell,fetch,mcp,channels  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
   search_files scope=path|symbol|content|all читает карту проекта.
-  --web                  поиск в интернете (web_search)       --images   генерация картинок в ответах
+  --web                  поиск web_search на /v1/responses (ProxyAPI). Запросы и страницы печатаются под ответом
+                         --images   генерация картинок в ответах
   --desktop              включает экран Windows, мышь, клавиатуру и AutoHotkey v2
   --approve ask|read|write|all   политика подтверждений (по умолчанию: ask в терминале, read без него)
   --yes, -y              = --approve all (без вопросов; осторожно)
@@ -67,6 +69,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
                          (например: --role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
   --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
   --route encoder|planner|decisions  куда отдать первый ответ. decisions спрашивает модель решений. Без флага решает метка ответа
+  В каталоге Node.js или фронтенда сканер (до ответа, encoder и planner) кладёт в контекст package.json, tsconfig.json или jsconfig.json, import map и найденные по ним файлы. Корневой index.html целиком — если он до 8 КиБ или задача про страницу.
   --template <файл>      текст задачи из файла. {{message}} заменяется целью. Можно несколько
   --fidelity <0..100>    цель соответствия референсам (по умолчанию 87). Процент не измеряется
   --creativity <0..100>  сколько можно добавить сверх референсов (по умолчанию 20)
@@ -80,6 +83,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --background, -b       фоновый режим Responses API (сервер считает, можно переподключиться: ai resume)
   --detach, -d           запустить как локальную фоновую задачу (ai jobs …)
   --follow               jobs log: следить за журналом
+  --serve [ws://127.0.0.1:порт]  публиковать события этого запуска в ai serve. Без адреса берётся ~/.ai-agent/serve.json
+  --port <n>             порт ai serve, ai complete --listen и ai channels --listen. 0 — свободный порт
 
 Изображения (image / --images):
   --size WxH|auto  --quality low|medium|high|xhigh|max|auto  --format png|webp|jpeg

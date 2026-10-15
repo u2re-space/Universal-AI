@@ -25,7 +25,7 @@ import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstruct
  */
 export async function ask(ctx) {
     const { config, renderer, values, positionals, signal, emit } = ctx;
-    const stdinText = await readStdin({ maxBytes: config.limits.maxStdinBytes });
+    const stdinText = await readStdin({ maxBytes: config.limits.maxStdinBytes, stdin: ctx.stdin ?? process.stdin });
     let prompt = positionals.join(' ').trim();
     let stdinIsPrompt = false;
     if (!prompt && stdinText) { prompt = stdinText; stdinIsPrompt = true; }

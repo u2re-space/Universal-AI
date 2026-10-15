@@ -32,6 +32,8 @@ import { complete } from './commands/complete.js';
 import { gen } from './commands/gen.js';
 import { mcpCommand } from './commands/mcp.js';
 import { decide, moderate, channels, telegram } from './commands/channels.js';
+import { serve } from './commands/serve.js';
+import { attachPublisher, splitServeUrl } from './server/publish.js';
 
 const pkg = createRequire(import.meta.url)('../package.json');
 
@@ -57,13 +59,13 @@ const OPTIONS = {
     route: { type: 'string' }, 'no-chain': { type: 'boolean', default: false },
     memory: { type: 'boolean', default: true }, global: { type: 'boolean', default: false }, kind: { type: 'string' }, tags: { type: 'string' },
     listen: { type: 'boolean', default: false }, port: { type: 'string' }, line: { type: 'string' }, character: { type: 'string' },
-    language: { type: 'string' }, token: { type: 'string' },
+    language: { type: 'string' }, token: { type: 'string' }, serve: { type: 'boolean', default: false },
     fidelity: { type: 'string' }, creativity: { type: 'string' }, platform: { type: 'string' },
     template: { type: 'string', multiple: true }, example: { type: 'string', multiple: true },
     'mcp-command': { type: 'string' }, 'mcp-arg': { type: 'string', multiple: true },
 };
 
-const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand, map: mapCommand, complete, gen, mcp: mcpCommand, decide, moderate, channels, telegram };
+const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand, map: mapCommand, complete, gen, mcp: mcpCommand, decide, moderate, channels, telegram, serve };
 const NEEDS_API_KEY = new Set(['ask', 'chat', 'run', 'image', 'resume', 'cancel', 'models', 'gen', 'decide', 'moderate', 'channels']);
 const DETACHABLE = new Set(['ask', 'run', 'image', 'gen']);
 
@@ -96,8 +98,11 @@ export function stripDetach(argv) {
  * @exports
  * @ai.hint io
  */
-export async function main(argv = process.argv.slice(2)) {
+export async function main(argvInput = process.argv.slice(2)) {
+    const split = splitServeUrl(argvInput);
+    const argv = split.argv;
     let values, positionals;
+    let publisher = null;
     try {
         ({ values, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true, allowNegative: true }));
     } catch (error) {
@@ -169,7 +174,14 @@ export async function main(argv = process.argv.slice(2)) {
             reporter = createJobManager({ home: config.home }).reporter(values.job);
             renderer.onStatus = (status) => reporter.status(status);
         }
-        const emit = (event) => { renderer.handle(event); reporter?.event(event); };
+        if (values.serve) {
+            if (commandName === 'serve') throw new UsageError('ai serve --serve нельзя сочетать.');
+            publisher = await attachPublisher({
+                home: config.home, url: split.serveUrl, command: commandName,
+                title: `${commandName} ${rest.join(' ')}`.trim(), cwd,
+            });
+        }
+        const emit = (event) => { renderer.handle(event); publisher?.event(event); reporter?.event(event); };
         const ctx = {
             argv, values, positionals: rest, config, renderer, controller, signal: controller.signal, emit, cwd, reporter, backupDir: null,
             /**
@@ -211,6 +223,9 @@ export async function main(argv = process.argv.slice(2)) {
         await reporter?.finish({ status: exitCode === 130 ? 'cancelled' : 'failed', text: '', error: { message: error.message, code: error.code ?? null } }, exitCode).catch(() => {});
         return exitCode;
     } finally {
+        try { await publisher?.end(exitCode === 0 ? 'completed' : exitCode === 130 ? 'cancelled' : 'failed', exitCode); }
+        catch { /* the bus is already gone */ }
+        publisher?.close();
         process.off('SIGINT', onInterrupt);
         process.off('SIGTERM', onInterrupt);
         renderer.close();

@@ -333,6 +333,91 @@ test('--no-chain starts at the planner', async () => {
     assert.deepEqual(events.filter((event) => event.type === 'stage.start').map((event) => event.stage), ['plan', 'work']);
 });
 
+test('a node frontend workspace is scanned before the encoder', async () => {
+    const dir = path.join(root, 'frontend-scan');
+    await mkdir(path.join(dir, 'src'), { recursive: true });
+    await writeFile(path.join(dir, 'package.json'), '{"name":"widget","type":"module"}\n');
+    await writeFile(path.join(dir, 'tsconfig.json'), '{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}\n');
+    await writeFile(path.join(dir, 'index.html'), '<script type="module" src="./src/main.js"></script>\n');
+    await writeFile(path.join(dir, 'src', 'app.js'), 'export const n = 1;\n');
+    await writeFile(path.join(dir, 'src', 'main.js'), "import { n } from './app.js';\n");
+    const events = [];
+    let encoderText = '';
+    let answerText = '';
+    script = (body) => {
+        const role = roleOf(body);
+        const text = JSON.stringify(body.input);
+        if (role === 'answer') {
+            answerText = text;
+            return { text: '```js\nexport const n = 2;\n```\nroute: encode' };
+        }
+        if (role === 'encoder') {
+            encoderText = text;
+            return { text: JSON.stringify({ summary: 'файл', commands: [{
+                command: 'fs:write', path: 'src/app.js', cwd: '.', type: 'code', language: 'js',
+                content: 'export const n = 2;\n', lines: null, source: null, start: null, end: null,
+            }] }) };
+        }
+        return { text: 'planner should not run' };
+    };
+    const result = await runTeam({
+        client: client(), config: baseConfig(), ledger: createLedger(),
+        task: 'исправь @/app', root: dir, approvalLevel: 'all', emit: (event) => events.push(event),
+    });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.match(answerText, /widget/);
+    assert.match(answerText, /@\/\*/);
+    assert.match(encoderText, /# Workspace scan/);
+    assert.match(encoderText, /src\/app\.js/);
+    assert.equal(events.filter((event) => event.type === 'stage.start').map((event) => event.stage)[0], 'scan');
+    assert.deepEqual(events.find((event) => event.type === 'stage.done' && event.stage === 'scan').files.includes('src/app.js'), true);
+    assert.equal(await readFile(path.join(dir, 'src', 'app.js'), 'utf8'), 'export const n = 2;\n');
+});
+
+test('a node frontend scan is in the planner draft before edits', async () => {
+    const dir = path.join(root, 'frontend-plan');
+    await mkdir(path.join(dir, 'src'), { recursive: true });
+    await writeFile(path.join(dir, 'package.json'), '{"name":"widget","type":"module"}\n');
+    await writeFile(path.join(dir, 'jsconfig.json'), '{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}\n');
+    await writeFile(path.join(dir, 'src', 'app.js'), 'export const n = 1;\n');
+    let plannerText = '';
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            plannerText = body.input[0].content[0].text;
+            return { text: JSON.stringify({ summary: 'мелочь', complexity: 'trivial', steps: [{ goal: 'посмотреть', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        }
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'исправь @/app', root: dir, approvalLevel: 'read', emit() {} });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.match(plannerText, /Workspace scan/);
+    assert.match(plannerText, /jsconfig\.json/);
+    assert.match(plannerText, /edit src\/app\.js/);
+});
+
+test('web_search is offered to the answer, the planner, and the worker', async () => {
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push({ role, tools: body.tools ?? [] });
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') return { text: JSON.stringify({ summary: 'мелочь', complexity: 'trivial', steps: [{ goal: 'посмотреть', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.tools = { ...config.tools, web: true };
+    config.memory = { ...defaults.memory, enabled: false };
+    const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'что нового', root, approvalLevel: 'read', emit() {} });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.deepEqual(seen.find((item) => item.role === 'answer').tools, [{ type: 'web_search' }]);
+    assert.deepEqual(seen.find((item) => item.role === 'planner').tools, [{ type: 'web_search' }]);
+    assert.equal(seen.find((item) => item.role === 'worker').tools.some((tool) => tool.type === 'web_search'), true);
+});
+
 test('team run puts the confirmed read file in the collector brief', async () => {
     await mkdir(path.join(root, 'src'), { recursive: true });
     await writeFile(path.join(root, 'src', 'sum.js'), 'export function sum(a, b) { return a + b; }\n');

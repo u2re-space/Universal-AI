@@ -2,7 +2,7 @@
  * @file src/core/session.js
  * @module core/session
  * @purpose Conversation state: replay items, usage totals, and JSON files under the agent home.
- * @depends node:path, node:crypto, node:fs/promises, util/text
+ * @depends node:path, node:crypto, node:fs/promises, util/text, openai/web-search
  * @usedBy commands/shared, agent/roles, agent/team
  * @exports createSession, loadSession, sessionFile
  * @ai.tags session
@@ -13,6 +13,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { isRecord } from '../util/text.js';
+import { collectWebSources, formatWebSources } from '../openai/web-search.js';
 
 const SESSION_VERSION = 1;
 
@@ -74,7 +75,13 @@ export function createSession({ store = false, model = null, name = null, instru
                     : item.status === 'failed' ? '[Генерация изображения не удалась]' : '[Изображение сгенерировано]';
                 return { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: note, annotations: [] }], status: 'completed' };
             }
-            case 'web_search_call':
+            case 'web_search_call': {
+                if (store) return item;
+                if (item.status === 'failed') return null;
+                const note = formatWebSources(collectWebSources({ output: [item] }));
+                if (!note) return null;
+                return { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: note, annotations: [] }], status: 'completed' };
+            }
             case 'file_search_call':
             case 'code_interpreter_call':
             case 'mcp_call':

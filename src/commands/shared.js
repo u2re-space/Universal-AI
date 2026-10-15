@@ -294,7 +294,8 @@ export function describeChanges(stats) {
 export function resultObject({ result, ledger, toolset = null, outFile = null, session = null }) {
     return {
         type: 'result', status: result.status, text: result.text, refusal: result.refusal || undefined,
-        turns: result.turns, toolCalls: result.toolCalls, images: result.images, outFile,
+        turns: result.turns, toolCalls: result.toolCalls, images: result.images,
+        ...(result.sources?.length ? { sources: result.sources } : {}), outFile,
         responseId: result.response?.id ?? null, sessionId: session?.id ?? null,
         usage: ledger.snapshot(), tools: toolset?.stats() ?? null,
         error: result.error ? { message: result.error.message, code: result.error.code ?? null } : null,

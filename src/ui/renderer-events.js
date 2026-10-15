@@ -108,9 +108,14 @@ export function handleRendererEvent(event, api) {
             break;
         case 'builtin.done':
             if (event.kind === 'web_search') {
-                const query = event.item?.action?.query ?? event.item?.action?.url ?? '';
+                const query = event.item?.action?.query ?? event.item?.action?.queries?.[0] ?? event.item?.action?.url ?? '';
                 line('ok', `web_search${query ? `: ${truncate(query, 80)}` : ''}`);
             } else if (event.kind !== 'image_generation') line('ok', event.kind);
+            break;
+        case 'web.sources':
+            if (event.queries?.length) line('info', `web_search: ${event.queries.join('; ')}`, { dim: true });
+            for (const source of event.sources ?? []) line('info', source.title ? `${source.title} — ${source.url}` : source.url, { dim: true });
+            if (event.searches) line('info', `поисковых запросов: ${event.searches}`, { dim: true });
             break;
         case 'image.progress':
             setStatus('генерирует изображение…', `черновик ${event.index + 1} → ${event.path}`);

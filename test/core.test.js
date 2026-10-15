@@ -24,10 +24,11 @@ test('session: replayable items for stateless history', () => {
         { type: 'message', id: 'msg_1', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'done', annotations: [{ type: 'url_citation' }] }] },
     ] }, { imagePaths: new Map([['ig_1', '/tmp/a.png']]) });
     const types = session.items.map((i) => i.type);
-    assert.deepEqual(types, ['message', 'reasoning', 'message', 'function_call', 'message']);
+    assert.deepEqual(types, ['message', 'reasoning', 'message', 'message', 'function_call', 'message']);
     assert.equal(session.items[1].encrypted_content, 'enc');
-    assert.match(session.items[2].content[0].text, /\/tmp\/a\.png/);
-    assert.deepEqual(session.items[4].content[0].annotations, []);
+    assert.match(session.items[2].content[0].text, /web_search: q/);
+    assert.match(session.items[3].content[0].text, /\/tmp\/a\.png/);
+    assert.deepEqual(session.items[5].content[0].annotations, []);
     assert.equal(session.lastResponseId, 'resp_1');
     assert.deepEqual(session.requestInput(), { input: session.items });
 });
