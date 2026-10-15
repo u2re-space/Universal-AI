@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, readFile, writeFile, symlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
 import { createJobManager } from '../src/jobs/manager.js';
@@ -250,14 +250,15 @@ test('package manifest name is universal-ai', async () => {
   assert.equal(pkg.bin.ai, './bin/ai.js');
 });
 
-function runLauncher(launcher, args, cwd) {
+function runLauncher(launcher, args, cwd, { env = {}, input = null } = {}) {
   const ext = path.extname(launcher).toLowerCase();
   let command;
   let commandArgs;
   let windowsVerbatimArguments = false;
   if (ext === '.cmd') {
     command = process.env.ComSpec || 'cmd.exe';
-    commandArgs = ['/d', '/s', '/c', `"${launcher}"`, ...args];
+    const quotedArgs = args.map((arg) => `"${arg.replaceAll('"', '')}"`).join(' ');
+    commandArgs = ['/d', '/s', '/c', `""${launcher}" ${quotedArgs}"`];
     windowsVerbatimArguments = true;
   } else if (ext === '.ps1') {
     command = 'powershell.exe';
@@ -268,12 +269,14 @@ function runLauncher(launcher, args, cwd) {
   }
   return new Promise((resolve) => {
     const child = spawn(command, commandArgs, {
-      cwd, windowsVerbatimArguments, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+      cwd, env: { ...process.env, ...env }, windowsVerbatimArguments,
+      stdio: [input === null ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true,
     });
     let stdout = '', stderr = '';
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
     child.once('close', (code) => resolve({ code, stdout, stderr }));
+    if (input !== null) child.stdin.end(input);
   });
 }
 
@@ -288,5 +291,118 @@ test('launchers print version from outside the repository', async () => {
     const { code, stdout, stderr } = await runLauncher(launcher, ['--version'], cwd);
     assert.equal(code, 0, stderr);
     assert.equal(stdout, 'universal-ai 1.0.0\n');
+  }
+});
+
+test('launcher spaced path prints version', async () => {
+  if (process.platform !== 'win32') return;
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const link = path.join(os.tmpdir(), 'ua review space');
+  await rm(link, { force: true }).catch(() => {});
+  await symlink(root, link, 'junction');
+  try {
+    const { code, stdout, stderr } = await runLauncher(path.join(link, 'bin', 'ai.cmd'), ['--version'], os.tmpdir());
+    assert.equal(code, 0, stderr);
+    assert.equal(stdout, 'universal-ai 1.0.0\n');
+  } finally {
+    await rm(link, { force: true });
+  }
+});
+
+test('launcher ignores caller node.cmd', async () => {
+  if (process.platform !== 'win32') return;
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'ai-planted-node-'));
+  try {
+    await writeFile(path.join(cwd, 'node.cmd'), '@echo PLANTED& exit /b 42');
+    const { code, stdout, stderr } = await runLauncher(path.join(root, 'bin', 'ai.cmd'), ['--version'], cwd);
+    assert.equal(code, 0, stderr);
+    assert.equal(stdout, 'universal-ai 1.0.0\n');
+    assert.doesNotMatch(stdout, /PLANTED/);
+    assert.doesNotMatch(stderr, /PLANTED/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test('launchers map the caller directory and reject an unknown target', async () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const launchers = process.platform === 'win32'
+    ? [path.join(root, 'bin', 'ai.cmd'), path.join(root, 'bin', 'ai.ps1')]
+    : [path.join(root, 'bin', 'ai.sh')];
+  for (const launcher of launchers) {
+    const cwd = await mkdtemp(path.join(os.tmpdir(), 'ai-map-work-'));
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-map-home-'));
+    try {
+      await writeFile(path.join(cwd, 'a.js'), 'export function hello() {}\n');
+      const env = { AI_AGENT_HOME: home, OPENAI_API_KEY: '' };
+      const built = await runLauncher(launcher, ['map'], cwd, { env });
+      assert.equal(built.code, 0, built.stderr);
+      await readFile(path.join(cwd, '.ai', 'map.json'), 'utf8');
+      const unknown = await runLauncher(launcher, ['map', 'nope'], cwd, { env });
+      assert.equal(unknown.code, 2, unknown.stderr);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      await rm(home, { recursive: true, force: true });
+    }
+  }
+});
+
+test('launcher exits non-zero when node is missing from PATH', async () => {
+  if (process.platform !== 'win32') return;
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const empty = await mkdtemp(path.join(os.tmpdir(), 'ai-no-node-'));
+  const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  try {
+    const env = { ...process.env };
+    for (const key of Object.keys(env)) if (key.toLowerCase() === 'path') delete env[key];
+    env.PATH = empty;
+    const { code, stderr } = await new Promise((resolve) => {
+      const child = spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'bin', 'ai.ps1'), '--version'], {
+        cwd: empty, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let err = '';
+      child.stderr.on('data', (d) => { err += d; });
+      child.stdout.on('data', () => {});
+      child.once('close', (c) => resolve({ code: c, stderr: err }));
+    });
+    assert.notEqual(code, 0, stderr);
+  } finally {
+    await rm(empty, { recursive: true, force: true });
+  }
+});
+
+test('launcher forwards a PowerShell pipeline', async () => {
+  if (process.platform !== 'win32') return;
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const ps1 = path.join(root, 'bin', 'ai.ps1');
+  const home = await mkdtemp(path.join(os.tmpdir(), 'ai-pipe-home-'));
+  const mock = await startMockServer({ script: () => ({ text: 'ok' }) });
+  try {
+    const env = {
+      ...process.env,
+      OPENAI_API_KEY: 'sk-test',
+      OPENAI_BASE_URL: mock.baseURL,
+      AI_MODEL: 'mock-model',
+      AI_AGENT_HOME: home,
+      NO_COLOR: '1',
+    };
+    const command = `& { 'hello from pipe' | & '${ps1}' ask 'two words' }`;
+    const { code, stdout, stderr } = await new Promise((resolve) => {
+      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+        env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let out = '', err = '';
+      child.stdout.on('data', (d) => { out += d; });
+      child.stderr.on('data', (d) => { err += d; });
+      child.once('close', (c) => resolve({ code: c, stdout: out, stderr: err }));
+    });
+    const body = JSON.stringify(mock.requests.map((r) => r.body));
+    assert.match(body, /hello from pipe/, `${stderr}\n${stdout}`);
+    assert.equal(code, 0, stderr);
+    assert.match(stdout, /ok/);
+  } finally {
+    await mock.close();
+    await rm(home, { recursive: true, force: true });
   }
 });
