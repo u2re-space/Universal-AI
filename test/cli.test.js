@@ -249,3 +249,44 @@ test('package manifest name is universal-ai', async () => {
   assert.equal(pkg.name, 'universal-ai');
   assert.equal(pkg.bin.ai, './bin/ai.js');
 });
+
+function runLauncher(launcher, args, cwd) {
+  const ext = path.extname(launcher).toLowerCase();
+  let command;
+  let commandArgs;
+  let windowsVerbatimArguments = false;
+  if (ext === '.cmd') {
+    command = process.env.ComSpec || 'cmd.exe';
+    commandArgs = ['/d', '/s', '/c', `"${launcher}"`, ...args];
+    windowsVerbatimArguments = true;
+  } else if (ext === '.ps1') {
+    command = 'powershell.exe';
+    commandArgs = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcher, ...args];
+  } else {
+    command = 'sh';
+    commandArgs = [launcher, ...args];
+  }
+  return new Promise((resolve) => {
+    const child = spawn(command, commandArgs, {
+      cwd, windowsVerbatimArguments, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+    });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.once('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+test('launchers print version from outside the repository', async () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const cwd = os.tmpdir();
+  assert.notEqual(path.resolve(cwd), path.resolve(root));
+  const launchers = process.platform === 'win32'
+    ? [path.join(root, 'bin', 'ai.cmd'), path.join(root, 'bin', 'ai.ps1')]
+    : [path.join(root, 'bin', 'ai.sh')];
+  for (const launcher of launchers) {
+    const { code, stdout, stderr } = await runLauncher(launcher, ['--version'], cwd);
+    assert.equal(code, 0, stderr);
+    assert.equal(stdout, 'universal-ai 1.0.0\n');
+  }
+});
