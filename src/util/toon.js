@@ -38,8 +38,8 @@ function encodePrimitive(value) {
   }
   if (typeof value === 'string') {
     const reserved = value === 'true' || value === 'false' || value === 'null';
-    // A whitespace-only bare cell is an empty line, which the decoder ignores.
-    if (BARE_STRING.test(value) && !reserved && !NUMERIC.test(value) && value.trim() !== '') return value;
+    // decodeDocument trims the document, so a bare token at either edge would lose spaces.
+    if (BARE_STRING.test(value) && !reserved && !NUMERIC.test(value) && value === value.trim()) return value;
     return JSON.stringify(value);
   }
   throw fail('unsupported value');

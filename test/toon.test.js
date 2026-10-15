@@ -23,3 +23,12 @@ test('decodeDocument accepts JSON', () => {
 test('encodeToon rejects a non-uniform array', () => {
   assert.throws(() => encodeToon({ items: [{ a: 1 }, { a: 1, b: 2 }] }), /TOON:/);
 });
+
+test('strings with surrounding spaces round-trip', () => {
+  assert.deepEqual(decodeDocument(encodeToon({ script: 'Save ' })), { script: 'Save ' });
+  assert.deepEqual(decodeDocument(encodeToon({ script: 'null ' })), { script: 'null ' });
+  assert.deepEqual(
+    decodeDocument(encodeToon({ row: [{ name: 'a', cell: '1 ' }] })),
+    { row: [{ name: 'a', cell: '1 ' }] },
+  );
+});
