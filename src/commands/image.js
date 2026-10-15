@@ -9,10 +9,14 @@
  * @ai.hint io
  * @changed 2026-10-15 JSDoc card, 4-space indent.
  */
+import path from 'node:path';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { builtinTools } from '../agent/loop.js';
 import { IMAGE_BASE } from './instructions.js';
 import { runOnce } from './flow.js';
-import { UsageError, readStdin, loadAttachments, composeInstructions, resolveTextArg } from './shared.js';
+import { UsageError, readStdin, loadAttachments, composeInstructions, resolveTextArg, createClientFor } from './shared.js';
+import { imageModelFor, imageTransport, sniffImage } from '../openai/images.js';
+import { resolveInside } from '../agent/paths.js';
 
 /**
  * `ai image <prompt>` — generate (or edit, with --image) pictures through the Responses API
@@ -31,6 +35,7 @@ export async function image(ctx) {
     const parts = await loadAttachments({ images: values.image ?? [], files: [], detail: values.detail ?? 'auto', cwd: ctx.cwd, config, renderer });
     const extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
     const instructions = composeInstructions(IMAGE_BASE, config, extra);
+    if (imageTransport(config) === 'images') return runImagesEndpoint(ctx, prompt, count);
     const builtin = builtinTools({ ...config, tools: { ...config.tools, images: true } }, { images: true, web: false });
     const target = values.out ?? config.image.outputDir;
     renderer.line('info', `Генерация: ${config.imageModel ?? 'модель по умолчанию инструмента'} · ${config.image.size} · качество ${config.image.quality} · ${config.image.format} → ${target}`, { dim: true });
@@ -49,4 +54,51 @@ export async function image(ctx) {
     }
     if (count > 1) renderer.line('ok', `Готово: ${produced.length} файл(ов): ${produced.join(', ')}`);
     return code;
+}
+
+/**
+ * Draw or edit through /images/generations and /images/edits. No Responses image tool.
+ * @param {object} ctx
+ * @param {string} prompt
+ * @param {number} count
+ * @returns {Promise<number>}
+ * @ai.hint io
+ */
+async function runImagesEndpoint(ctx, prompt, count) {
+    const { config, renderer, values, signal } = ctx;
+    const model = imageModelFor(config);
+    const sources = values.image ?? [];
+    const target = values.out ?? config.image.outputDir;
+    renderer.line('info', `Изображения API: ${model} · ${sources.length ? 'редактирование' : 'генерация'} → ${target}`, { dim: true });
+    const client = createClientFor(config);
+    try {
+        const payloads = sources.length
+            ? await client.images.edit({
+                model, prompt, size: config.image.size, signal,
+                files: await Promise.all(sources.map(async (file) => {
+                    const located = await resolveInside(ctx.cwd, file, { allowRoot: false });
+                    const bytes = await readFile(located.abs);
+                    return { filename: path.basename(located.rel), mime: sniffImage(bytes).mime, bytes };
+                })),
+            })
+            : await client.images.generate({ model, prompt, size: config.image.size, quality: config.image.quality, n: count, signal });
+        const saved = [];
+        for (const [index, b64] of payloads.entries()) {
+            const buffer = Buffer.from(b64, 'base64');
+            const kind = sniffImage(buffer);
+            const rel = payloads.length > 1 ? `image-${index + 1}.${kind.ext}` : `image.${kind.ext}`;
+            const dest = path.resolve(ctx.cwd, target, rel);
+            await mkdir(path.dirname(dest), { recursive: true });
+            await writeFile(dest, buffer);
+            saved.push(path.relative(ctx.cwd, dest));
+            renderer.line('ok', `Изображение сохранено: ${saved.at(-1)}`);
+        }
+        renderer.line('ok', `Готово: ${saved.join(', ')}`);
+        return saved.length ? 0 : 1;
+    } catch (error) {
+        renderer.line('fail', error.message);
+        return 1;
+    } finally {
+        client.close();
+    }
 }

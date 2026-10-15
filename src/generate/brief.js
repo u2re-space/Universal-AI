@@ -96,6 +96,7 @@ export function buildGenerationBrief({ kind = null, prompt = '', fidelity, creat
         ...manifest.outputs.map((file) => `- ${file}`),
         '',
         'A contract file .ai/generation.json is already written. You may add the paths you created. Leave measured null.',
+        ...(refs.images.length ? ['', 'Reference images are mockups. Recreate their photographs, illustrations, and textures with generate_image, or change a reference file with edit_image. If the only image tool is image_generation, use that. Point the page at the new files. Do not use a reference image as the page background or as a screenshot of the whole layout. Type, controls, and layout are HTML and CSS.'] : []),
     ].join('\n');
     const instructions = [
         platformInstructions(platform),
@@ -103,6 +104,7 @@ export function buildGenerationBrief({ kind = null, prompt = '', fidelity, creat
         kind ? KIND_RULES[kind] : 'Choose the files the request needs.',
         '',
         fidelityInstructions(contract),
+        ...(refs.images.length ? ['', 'The worker must create each artwork region with generate_image or edit_image before the page is finished. The saved image paths belong in the HTML and CSS.'] : []),
     ].join('\n');
     return { task, instructions, manifest };
 }

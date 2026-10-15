@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolvePlatform, platformInstructions, PLATFORM_SOURCES, ENABLED_IN_157 } from '../src/generate/platform.js';
 import { fidelityContract, DEFAULT_FIDELITY, DEFAULT_CREATIVITY } from '../src/generate/fidelity.js';
 import { buildGenerationBrief, GENERATION_KINDS } from '../src/generate/brief.js';
 import { loadConfig, redactConfig } from '../src/core/config.js';
 import { overridesFrom } from '../src/commands/flags.js';
-import { startMockServer } from './helpers/mock-server.js';
+import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
 
 const landing = fileURLToPath(new URL('../test-gen/landing.png', import.meta.url));
 const bin = fileURLToPath(new URL('../bin/ai.js', import.meta.url));
@@ -54,7 +54,7 @@ test('fidelity defaults to 87 and is not measured', () => {
 });
 
 test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
-    const bytes = await readFile(landing);
+    const bytes = await readFile(landing).catch(() => Buffer.from(TINY_PNG, 'base64'));
     assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     const brief = buildGenerationBrief({
         kind: 'landing',
@@ -78,6 +78,9 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
     assert.match(brief.instructions, /Experimental flags: off/);
     assert.match(brief.instructions, /No framework, no bundler, no npm/);
     assert.match(brief.instructions, /Leave measured null|Leave measured null|measured null/);
+    assert.match(brief.task, /image_generation/);
+    assert.match(brief.task, /Do not use a reference image as the page background/);
+    assert.match(brief.instructions, /generate_image/);
     assert.deepEqual(GENERATION_KINDS, ['landing', 'site', 'backend', 'app']);
     const backend = buildGenerationBrief({ kind: 'backend', prompt: 'api', fidelity: 87, creativity: 0, platform: resolvePlatform(), references: {} });
     assert.match(backend.instructions, /node:http/);
@@ -125,8 +128,10 @@ test('loadConfig rejects a bad server id and a bad fidelity', async () => {
 
 test('ai gen landing sends the mockup and records an unmeasured 87% contract', async () => {
     let planner = '';
+    let sawImageTool = false;
     const server = await startMockServer({
         script: (body) => {
+            if (body.tools?.some((tool) => tool.type === 'image_generation')) sawImageTool = true;
             const role = body.text?.format?.name ?? 'worker';
             if (role === 'plan') {
                 planner = JSON.stringify(body.input);
@@ -138,7 +143,12 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-gen-home-'));
     const work = await mkdtemp(path.join(os.tmpdir(), 'ai-gen-work-'));
     try {
-        const child = spawn(process.execPath, [bin, 'gen', 'landing', 'Повтори макет', '--image', landing, '--no-memory', '--approve', 'write', '--json'], {
+        const image = await readFile(landing).then(() => landing, async () => {
+            const file = path.join(work, 'landing.png');
+            await writeFile(file, Buffer.from(TINY_PNG, 'base64'));
+            return file;
+        });
+        const child = spawn(process.execPath, [bin, 'gen', 'landing', 'Повтори макет', '--image', image, '--no-memory', '--approve', 'write', '--json'], {
             cwd: work,
             env: { ...process.env, OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: server.baseURL, AI_AGENT_HOME: home, AI_MODEL: 'mock-model', NO_COLOR: '1' },
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -153,6 +163,8 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
         assert.match(planner, /87%/);
         assert.match(planner, /chrome-157-beta/);
         assert.match(planner, /landing\.png/);
+        assert.match(planner, /image_generation/);
+        assert.equal(sawImageTool, true);
         assert.match(stdout, /готово/);
         const manifest = JSON.parse(await readFile(path.join(work, '.ai', 'generation.json'), 'utf8'));
         assert.equal(manifest.kind, 'landing');
@@ -161,7 +173,7 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
         assert.equal(manifest.measured, null);
         assert.equal(manifest.method, 'unmeasured');
         assert.equal(manifest.platform, 'chrome-157-beta');
-        assert.equal(manifest.references.images[0], landing);
+        assert.equal(manifest.references.images[0], image);
     } finally {
         await server.close();
         await rm(home, { recursive: true, force: true });

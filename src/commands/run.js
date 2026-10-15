@@ -11,6 +11,7 @@
  */
 import { ensureProjectMap } from '../agent/map.js';
 import { createToolset, enabledToolNames } from '../agent/tools.js';
+import { builtinTools } from '../agent/loop.js';
 import { createRoleRunner } from '../agent/roles.js';
 import { runTeam } from '../agent/team.js';
 import { resolveRole, ROLE_NAMES } from '../core/config.js';
@@ -21,6 +22,7 @@ import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstruct
     describeRoles, usageRow, usageBreakdownRows, describeChanges, createClientFor, createLedgerFor, writeOutput, exitCodeFor, STATUS_LABELS } from './shared.js';
 import { openMcpSources } from '../mcp/session.js';
 import { prepareTeamInvocation } from './team-args.js';
+import { imageTransport } from '../openai/images.js';
 import { buildGenerationBrief, writeGenerationManifest } from '../generate/brief.js';
 import { resolvePlatform } from '../generate/platform.js';
 
@@ -47,7 +49,12 @@ export async function run(ctx) {
     const interactive = renderer.interactive;
     const level = approvalLevel(config, interactive);
     const store = openMemoryFor(config, ctx.cwd, renderer);
-    const names = enabledToolNames(config.tools, { interactive, memory: Boolean(store), summarize: true });
+    const mockups = values.image ?? [];
+    const toolsChosen = values.tools !== undefined || Boolean(values['no-tools']) || Boolean(values.images);
+    if (prepared.wantsProfile && mockups.length && !toolsChosen) config.tools.images = true;
+    if (prepared.wantsProfile && mockups.length && config.tools.images && !values.route) config.agent.route = 'planner';
+    const imageApi = imageTransport(config) === 'images';
+    const names = enabledToolNames(config.tools, { interactive, memory: Boolean(store), summarize: true, imageApi });
     if (!names.length && !config.tools.web && !config.tools.images) {
         throw new UsageError('Все инструменты отключены; для run нужен хотя бы один (fs, shell, fetch, web, images).');
     }
@@ -92,7 +99,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
     const mcp = await openMcpSources(config, { signal, notify: emit });
     try {
         const toolset = createToolset({
-            root: ctx.cwd, config, names, approvalLevel: level, extras: mcp.extras,
+            root: ctx.cwd, config, client, names, approvalLevel: level, extras: mcp.extras,
             approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
             backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
             describeImage: roles.shouldDelegateVision('default') ? roles.describeImage : null, summarizeFile: roles.summarizeFile,
@@ -102,7 +109,9 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
         renderer.line('info', `Агент (single): ${role.model}${role.effort ? `:${role.effort}` : ''} · каталог ${ctx.cwd} · доступ: ${level} · инструменты: ${toolset.names().join(', ')}${config.tools.web ? ' + web_search' : ''}${config.tools.images ? ' + image_generation' : ''}${store ? ' · память включена' : ''}`, { dim: true });
         ctx.client = client;
         ctx.ledger = ledger;
+        const imageApi = imageTransport(config) === 'images';
         return await runOnce({ ...ctx, config: role.config }, { prompt: task, parts, instructions, toolset, maxTurns: config.limits.maxTurns, summaryTitle: 'итог задачи',
+            builtin: builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi }),
             extraRows: () => [...usageBreakdownRows(ledger), ...(toolset.stats().memories.length ? [['память', `сохранено ${toolset.stats().memories.length}`]] : [])] });
     } finally {
         await mcp.close();

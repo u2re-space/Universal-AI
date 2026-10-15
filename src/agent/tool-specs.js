@@ -254,6 +254,26 @@ export const TOOL_SPECS = {
             path: str('Batch file path relative to the working directory. Empty string when unused.'),
         }),
     },
+    generate_image: {
+        category: 'write', group: 'images',
+        description: 'Draw a new image with POST /images/generations and save it in the working directory. Use this for artwork that does not exist yet.',
+        parameters: schema({
+            prompt: str('What to draw. Describe the artwork only, not the page layout.'),
+            path: str('Relative output path such as assets/portrait.png. Empty string lets the tool choose a name.'),
+            size: str('WIDTHxHEIGHT, or an empty string for the server default.'),
+            quality: str('low, medium, high, or an empty string for the server default.'),
+        }),
+    },
+    edit_image: {
+        category: 'write', group: 'images',
+        description: 'Edit an existing image with POST /images/edits and save the result. Use this to restyle or extract a region of a reference file.',
+        parameters: schema({
+            prompt: str('How to change the source image.'),
+            image: str('Source image path relative to the working directory.'),
+            path: str('Relative output path. Empty string lets the tool choose a name.'),
+            size: str('WIDTHxHEIGHT, or an empty string for the server default.'),
+        }),
+    },
     delegate_role: {
         category: 'read', group: 'desktop',
         description: 'Send one task to a specialist and return its answer. encoder returns a batch and does not run it; pass that batch to run_batch.',
@@ -284,7 +304,7 @@ export function toolDefinitions(names) {
 }
 
 /** Which tools are enabled for a config.tools selection. */
-export function enabledToolNames(tools, { interactive = false, memory = false, summarize = false } = {}) {
+export function enabledToolNames(tools, { interactive = false, memory = false, summarize = false, imageApi = false } = {}) {
     const names = [];
     if (tools.fs) names.push('list_files', 'read_file', 'search_files', 'write_file', 'replace_text', 'delete_file', 'make_dir', 'view_image', 'structure_file');
     if (tools.fs && summarize) names.push('summarize_file');
@@ -293,6 +313,7 @@ export function enabledToolNames(tools, { interactive = false, memory = false, s
     if (tools.desktop) names.push(...DESKTOP_TOOL_NAMES);
     if (memory) names.push('recall', 'remember');
     if (tools.askUser && interactive) names.push('ask_user');
+    if (tools.images && imageApi) names.push('generate_image', 'edit_image');
     return names;
 }
 

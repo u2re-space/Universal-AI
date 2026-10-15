@@ -15,6 +15,7 @@ import { ApiError } from './errors.js';
 import { createHttp, readBody } from './http.js';
 import { parseSSE } from './sse.js';
 import { createStreamReducer, outputText } from './stream.js';
+import { encodeMultipart, generationBody, imagePayloads } from './images.js';
 
 export { ApiError };
 
@@ -114,14 +115,14 @@ export function createClient({
    * Core call. `stream` = expect text/event-stream and reduce it; otherwise parse JSON.
    * Retries only before any response byte has been consumed, and only for retryable failures.
    */
-    async function call(path, { method = 'POST', body, query, stream = false, signal, onEvent, idleTimeout } = {}) {
+    async function call(path, { method = 'POST', body, rawBody, contentType, query, stream = false, signal, onEvent, idleTimeout } = {}) {
         const url = new URL(path, root);
         for (const [key, value] of Object.entries(query ?? {})) {
             if (value === undefined || value === null) continue;
             for (const item of Array.isArray(value) ? value : [value]) url.searchParams.append(key, String(item));
         }
         const emit = (event) => { try { onEvent?.(event); globalOnEvent?.(event); } catch { /* observer */ } };
-        const payload = body === undefined ? undefined : JSON.stringify(body);
+        const payload = rawBody !== undefined ? rawBody : (body === undefined ? undefined : JSON.stringify(body));
         let attempt = 0;
         for (;;) {
             signal?.throwIfAborted();
@@ -131,7 +132,9 @@ export function createClient({
                 requestBytes: payload ? Buffer.byteLength(payload) : 0, stream });
             let res;
             try {
-                res = await transport.request({ url, method, body: payload, signal, idleTimeout, headers: headersFor(stream, clientRequestId) });
+                const headers = headersFor(stream, clientRequestId);
+                if (contentType) headers['Content-Type'] = contentType;
+                res = await transport.request({ url, method, body: payload, signal, idleTimeout, headers });
             } catch (error) {
                 if (error instanceof ApiError && error.retryable && attempt < retries && !signal?.aborted) {
                     const delay = retryDelayMs(attempt, null);
@@ -240,10 +243,30 @@ export function createClient({
         inputTokens: (body, options = {}) => call('responses/input_tokens', { body, ...options }),
         inputItems: (id, options = {}) => call(`responses/${encodeURIComponent(id)}/input_items`, { method: 'GET', ...options }),
     };
+    const images = {
+        /** POST /images/generations. Returns base64 payloads from data[].b64_json. */
+        async generate({ model, prompt, size, quality, n, signal } = {}) {
+            const result = await call('images/generations', { body: generationBody({ model, prompt, size, quality, n }), signal });
+            const payloads = imagePayloads(result);
+            if (!payloads.length) throw new ApiError('Ответ images/generations не содержит b64_json.', { code: 'INVALID_RESPONSE' });
+            return payloads;
+        },
+        /** POST /images/edits as multipart form data. `files` are { filename, mime, bytes }. */
+        async edit({ model, prompt, files, size, signal } = {}) {
+            const form = encodeMultipart({
+                fields: { model, prompt, ...(size && size !== 'auto' ? { size } : {}) },
+                files: files.map((file) => ({ ...file, field: 'image' })),
+            });
+            const result = await call('images/edits', { rawBody: form.body, contentType: form.contentType, signal });
+            const payloads = imagePayloads(result);
+            if (!payloads.length) throw new ApiError('Ответ images/edits не содержит b64_json.', { code: 'INVALID_RESPONSE' });
+            return payloads;
+        },
+    };
     const models = {
         list: (options = {}) => call('models', { method: 'GET', ...options }),
         retrieve: (id, options = {}) => call(`models/${encodeURIComponent(id)}`, { method: 'GET', ...options }),
     };
 
-    return Object.freeze({ responses, models, call, baseURL: root.href, close: () => transport.close() });
+    return Object.freeze({ responses, images, models, call, baseURL: root.href, close: () => transport.close() });
 }

@@ -64,7 +64,7 @@ export const defaults = Object.freeze({
         maxStdinBytes: 4 * MiB,
         pollIntervalMs: 2_000,
     },
-    image: { size: 'auto', quality: 'auto', format: 'png', background: 'auto', partialImages: 2, outputDir: '.' },
+    image: { size: 'auto', quality: 'auto', format: 'png', background: 'auto', partialImages: 2, outputDir: '.', transport: null },
     webSearch: { contextSize: 'medium' },
     compaction: { auto: false, afterInputTokens: 200_000 },
     /**

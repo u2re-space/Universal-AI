@@ -1,0 +1,293 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --ink: #131416;
+  --canvas: #ededed;
+  --portrait-width: 30vw;
+  --page-top: 29px;
+  --page-left: 49px;
+  --page-right: 14px;
+  --column-gap: 49px;
+  --portrait-radius: 36px;
+  font-family: Arial, Helvetica, sans-serif;
+  color: var(--ink);
+  background: var(--canvas);
+  font-synthesis: none;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #555d85;
+  outline-offset: 6px;
+}
+
+.landing {
+  min-height: 100svh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--portrait-width);
+  gap: var(--column-gap);
+  padding: var(--page-top) var(--page-right) 0 var(--page-left);
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 24% 2%, #eed3d9 0, transparent 29%),
+    radial-gradient(ellipse at 39% 52%, #ccd8f1 0, transparent 40%),
+    radial-gradient(ellipse at 67% 94%, #ecced8 0, transparent 43%),
+    #ededed;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-top: 20px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 23px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.brand-symbol {
+  width: 25px;
+  height: 27px;
+  display: block;
+  background: currentColor;
+  clip-path: polygon(
+    50% 0%, 57% 27%, 80% 8%, 74% 36%, 100% 29%,
+    80% 49%, 100% 60%, 73% 64%, 81% 89%, 59% 75%,
+    50% 100%, 42% 74%, 19% 92%, 26% 65%, 0 72%,
+    20% 51%, 0 40%, 28% 36%, 20% 10%, 42% 27%
+  );
+}
+
+.socials {
+  display: flex;
+  align-items: center;
+  gap: 21px;
+  font-size: 15px;
+  font-weight: 500;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pill {
+  border: 0;
+  border-radius: 999px;
+  min-height: 33px;
+  padding: 8px 13px;
+  background: #fff;
+  color: #131416;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pill-dark {
+  color: #fff;
+  background: #131416;
+}
+
+.announcement {
+  margin-top: auto;
+  padding-bottom: 16px;
+}
+
+h1 {
+  margin: 0 0 32px;
+  font-size: clamp(42px, 5.86vw, 90px);
+  line-height: 1.085;
+  letter-spacing: -2.9px;
+  font-weight: 300;
+  text-transform: uppercase;
+  transform: scaleX(.96);
+  transform-origin: left center;
+}
+
+.showreel {
+  display: inline-flex;
+  align-items: center;
+  gap: 30px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #50515b;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.play {
+  display: grid;
+  place-items: center;
+  width: 100px;
+  height: 101px;
+  border: 1px solid #50515b;
+  border-radius: 50%;
+  transition: background 180ms ease;
+}
+
+.play svg {
+  width: 40px;
+  height: 44px;
+  translate: 4px 0;
+}
+
+.showreel:hover .play {
+  background: #ffffff60;
+}
+
+.portrait {
+  position: relative;
+  min-height: calc(100svh - var(--page-top));
+  border-radius: var(--portrait-radius) var(--portrait-radius) 0 0;
+  background: #929fa8;
+  overflow: hidden;
+}
+
+.portrait-image {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 0;
+}
+
+.menu-button {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  padding-inline: 9px;
+  font-size: 16px;
+  line-height: 17px;
+}
+
+[aria-disabled="true"] {
+  cursor: default;
+}
+
+@media (min-width: 1400px) {
+  .socials {
+    gap: 30px;
+  }
+}
+
+@media (max-width: 900px) {
+  .landing {
+    gap: 25px;
+    padding-left: 28px;
+  }
+
+  .socials > a {
+    display: none;
+  }
+
+  h1 {
+    font-size: 6vw;
+    letter-spacing: -2px;
+  }
+}
+
+@media (max-width: 600px) {
+  .landing {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    padding: 18px 20px 0;
+  }
+
+  .content {
+    min-height: max(440px, 70svh);
+    padding-top: 12px;
+  }
+
+  .header {
+    gap: 12px;
+  }
+
+  .brand {
+    font-size: 20px;
+    gap: 6px;
+  }
+
+  .brand-symbol {
+    width: 23px;
+    height: 25px;
+  }
+
+  .pill-dark {
+    font-size: 12px;
+    padding-inline: 10px;
+  }
+
+  .portrait {
+    min-height: 0;
+    aspect-ratio: 2 / 3;
+    border-radius: 26px 26px 0 0;
+  }
+
+  .menu-button {
+    top: 16px;
+    right: 16px;
+  }
+
+  .announcement {
+    padding-top: 80px;
+    padding-bottom: 0;
+  }
+
+  h1 {
+    font-size: clamp(30px, 8.5vw, 51px);
+    letter-spacing: -1.4px;
+    margin-bottom: 28px;
+  }
+
+  .showreel {
+    gap: 22px;
+    font-size: 12px;
+  }
+
+  .play {
+    flex: none;
+    width: 76px;
+    height: 76px;
+  }
+
+  .play svg {
+    width: 32px;
+    height: 36px;
+  }
+}

@@ -9,7 +9,7 @@ import { createLedger } from '../src/core/usage.js';
 import { defaults } from '../src/core/config.js';
 import { buildUserMessage } from '../src/core/attachments.js';
 import { createToolset, enabledToolNames } from '../src/agent/tools.js';
-import { runTurn, buildRequestBody, builtinTools } from '../src/agent/loop.js';
+import { runTurn, buildRequestBody, builtinTools, shrinkHistory } from '../src/agent/loop.js';
 import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
 
 let server;
@@ -205,4 +205,20 @@ test('writeFile tool keeps backups when overwriting', async () => {
     await runTurn({ client: client(), config: cfg, session, ledger: createLedger(), toolset });
     assert.equal(await readFile(path.join(root, 'keep.txt'), 'utf8'), 'new');
     assert.equal(await readFile(path.join(backupDir, 'keep.txt'), 'utf8'), 'old');
+});
+
+test('shrinkHistory drops older screenshots and clips old tool output', () => {
+    const huge = 'x'.repeat(40_000);
+    const items = [
+        { type: 'function_call_output', call_id: 'old', output: [{ type: 'input_text', text: 'screenshot' }, { type: 'input_image', image_url: 'data:image/png;base64,AAAA' }] },
+        { type: 'function_call_output', call_id: 'log', output: huge },
+        { type: 'function_call_output', call_id: 'new', output: [{ type: 'input_image', image_url: 'data:image/png;base64,BBBB' }] },
+    ];
+    const first = shrinkHistory(items);
+    assert.equal(typeof first.items[0].output, 'string');
+    assert.match(first.items[0].output, /screenshot/);
+    assert.match(first.items[1].output, /пропущено/);
+    assert.equal(first.items[2].output[0].image_url, 'data:image/png;base64,BBBB');
+    const second = shrinkHistory(first.items, { clipNewest: true });
+    assert.equal(typeof second.items[2].output, 'string');
 });

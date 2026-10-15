@@ -23,6 +23,7 @@ import { loadProjectMap, searchMapped, updateProjectMapPath } from './map.js';
 import { SHELLS, runCommand, runProgram, scriptLaunch, sshPlan } from './shell.js';
 import { structureCode } from '../structure/structure.js';
 import { DESKTOP_TOOL_NAMES, createDesktopHandlers } from './desktop.js';
+import { createImageHandlers } from './image-tools.js';
 
 import {
     TOOL_SPECS,
@@ -144,7 +145,7 @@ export function createToolset({
     root = process.cwd(), config, names, approvalLevel = 'read', approve = async () => 'no', askUser = null,
     backupDir = null, signal, emit = () => {}, memory = null, projectKey = null, projectName = null,
     describeImage = null, summarizeFile = null, editPaths = () => null,
-    describeScreen = null, performDesktop = null, delegate = null, extras = [],
+    describeScreen = null, performDesktop = null, delegate = null, extras = [], client = null,
 }) {
     const limits = config.limits;
     const allowed = new Set(names);
@@ -192,6 +193,8 @@ export function createToolset({
             case 'run_script': return `Скрипт (${args.shell || 'по расширению'}): ${args.path}\nАргументы: ${(args.args ?? []).join(' ') || '—'}\nПричина: ${args.reason ?? '—'}`;
             case 'ssh': return `SSH ${args.mode} ${args.host}${args.command ? `: ${args.command}` : ''}${args.local_path ? `\nФайл: ${args.local_path}` : ''}${args.remote_path ? `\nУдалённый путь: ${args.remote_path}` : ''}\nПричина: ${args.reason ?? '—'}`;
             case 'fetch_url': return `Загрузить ${args.url}`;
+            case 'generate_image': return `Нарисовать: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}`;
+            case 'edit_image': return `Изменить ${args.image}: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}`;
             case 'click': return `Клик: ${truncate(clickTarget(args), 400)}`;
             case 'type': return `Ввод: ${truncate(args.text ?? '', 400)}`;
             case 'run_ahk': return `Скрипт: ${truncate(args.script ?? '', 400)}`;
@@ -443,6 +446,11 @@ export function createToolset({
         },
     };
 
+    if (allowed.has('generate_image') || allowed.has('edit_image')) {
+        const imageHandlers = createImageHandlers({ root, client, config, signal });
+        if (allowed.has('generate_image')) handlers.generate_image = imageHandlers.generate_image;
+        if (allowed.has('edit_image')) handlers.edit_image = imageHandlers.edit_image;
+    }
     const desktopNames = DESKTOP_TOOL_NAMES.filter((name) => allowed.has(name));
     if (desktopNames.length) {
         const desktopHandlers = createDesktopHandlers({ root, config, decide, describeScreen, performDesktop, delegate });

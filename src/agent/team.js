@@ -25,6 +25,7 @@ import { listFiles } from './fs-tools.js';
 import { describeChangeSet } from './diff.js';
 import { createRoleRunner } from './roles.js';
 import { builtinTools } from './loop.js';
+import { imageTransport } from '../openai/images.js';
 import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA } from './schemas.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
@@ -68,14 +69,19 @@ export async function runTeam({
     const result = { status: 'failed', text: '', plan: null, review: null, steps: [], images: [], changes: [], stats: null,
         recalled: [], memoriesSaved: [], reviewRounds: 0, error: null };
 
-    const toolBase = { root, config, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile };
+    const toolBase = { root, config, client, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile };
     const mcp = await openMcpSources(config, { signal, notify });
     const mcpRead = mcp.extras.filter((extra) => extra.category === 'read');
-    const enabled = enabledToolNames(config.tools, { interactive, memory: Boolean(memory), summarize: true });
+    const imageApi = imageTransport(config) === 'images';
+    const enabled = enabledToolNames(config.tools, { interactive, memory: Boolean(memory), summarize: true, imageApi });
     const readNames = toolNamesForRole(enabled, 'collector');
     const reviewerNames = toolNamesForRole(enabled, 'reviewer');
     const allNames = toolNamesForRole(enabled, 'worker');
-    const vision = (role) => (roles.shouldDelegateVision(role) ? roles.describeImage : null);
+    const vision = (role) => {
+        if (config.agent.visionDelegate === 'never') return null;
+        if (role === 'worker' || role === 'reviewer') return roles.describeImage;
+        return roles.shouldDelegateVision(role) ? roles.describeImage : null;
+    };
     const taskMarks = { edit: null };
     let marks = [];
     /** Run one specialist on `task` and return its text, status, and JSON. */
@@ -99,7 +105,7 @@ export async function runTeam({
         ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer'),
         describeScreen: roles.describeScreen, delegate, extras: mcpRead,
     });
-    const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images });
+    const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi });
     /** Copy tool stats onto the team result and return it. */
     const fileChanges = [];
     const finish = () => {

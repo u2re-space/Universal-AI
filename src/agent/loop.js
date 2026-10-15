@@ -4,7 +4,7 @@
  * @purpose Send one conversation turn, run requested local tools, and record images and usage.
  * @depends openai/errors, openai/stream, core/config, core/images, core/background, util/text
  * @usedBy commands/chat, commands/flow, commands/image, agent/roles, agent/team, index.js
- * @exports builtinTools, buildRequestBody, compactSession, runTurn
+ * @exports builtinTools, buildRequestBody, compactSession, shrinkHistory, runTurn
  * @ai.tags loop, tools
  * @ai.hint hot
  * @changed 2026-10-15 JSDoc card, 4-space indent.
@@ -15,7 +15,7 @@ import { outputText, refusalText } from '../openai/stream.js';
 import { isReasoningModel, supportsVerbosity } from '../core/config.js';
 import { createImageSink } from '../core/images.js';
 import { attachBackground, awaitBackground, TERMINAL_STATUSES } from '../core/background.js';
-import { byteSize, estimateTokens, errorMessage, formatBytes } from '../util/text.js';
+import { byteSize, clipMiddle, estimateTokens, errorMessage, formatBytes } from '../util/text.js';
 
 /** Built-in tool definitions derived from the configuration. */
 export function builtinTools(config, { web = false, images = false } = {}) {
@@ -67,6 +67,40 @@ export function buildRequestBody({
     if (config.promptCacheKey) body.prompt_cache_key = config.promptCacheKey;
     if (include.length) body.include = include;
     return body;
+}
+
+const OUTPUT_KEEP_BYTES = 16 * 1024;
+
+/**
+ * Drop older screenshots and clip old tool output so the next request can fit maxRequestBytes.
+ * The newest tool result is kept intact on the first pass.
+ * @param {object[]} items
+ * @param {{ clipNewest?: boolean }} [options]
+ * @returns {{ items: object[], changed: boolean }}
+ * @exports
+ * @ai.hint pure
+ */
+export function shrinkHistory(items, { clipNewest = false } = {}) {
+    const outputs = [];
+    items.forEach((item, index) => { if (item?.type === 'function_call_output') outputs.push(index); });
+    const newest = outputs.at(-1);
+    let changed = false;
+    const next = items.map((item, index) => {
+        if (item?.type !== 'function_call_output') return item;
+        const keep = index === newest && !clipNewest;
+        if (Array.isArray(item.output)) {
+            if (keep || !item.output.some((part) => part?.type === 'input_image')) return item;
+            changed = true;
+            const text = item.output.filter((part) => part?.type === 'input_text').map((part) => part.text).join('\n');
+            return { ...item, output: text || '[изображение убрано из истории]' };
+        }
+        if (!keep && typeof item.output === 'string' && Buffer.byteLength(item.output) > OUTPUT_KEEP_BYTES) {
+            changed = true;
+            return { ...item, output: clipMiddle(item.output, OUTPUT_KEEP_BYTES) };
+        }
+        return item;
+    });
+    return { items: next, changed };
 }
 
 /** Server-side compaction of a stateless history (POST /responses/compact). */
@@ -146,9 +180,24 @@ export async function runTurn({
             signal?.throwIfAborted();
             result.turns++;
             session.bumpTurn();
-            const { input, previous_response_id: previousResponseId } = session.requestInput();
-            const body = buildRequestBody({ config, model, instructions, input, previousResponseId, tools, toolChoice, textFormat, background });
-            const requestBytes = byteSize(body);
+            let { input, previous_response_id: previousResponseId } = session.requestInput();
+            let body = buildRequestBody({ config, model, instructions, input, previousResponseId, tools, toolChoice, textFormat, background });
+            let requestBytes = byteSize(body);
+            if (requestBytes > config.limits.maxRequestBytes && !session.store) {
+                const before = requestBytes;
+                const apply = (clipNewest) => {
+                    const shrunk = shrinkHistory(session.toJSON().items, { clipNewest });
+                    if (!shrunk.changed) return false;
+                    session.replace(shrunk.items);
+                    ({ input, previous_response_id: previousResponseId } = session.requestInput());
+                    body = buildRequestBody({ config, model, instructions, input, previousResponseId, tools, toolChoice, textFormat, background });
+                    requestBytes = byteSize(body);
+                    return true;
+                };
+                apply(false);
+                if (requestBytes > config.limits.maxRequestBytes) apply(true);
+                if (requestBytes < before) notify({ type: 'warning', message: `История сокращена: запрос был ${formatBytes(before)}.` });
+            }
             if (requestBytes > config.limits.maxRequestBytes) {
                 throw new ApiError(`Запрос (${formatBytes(requestBytes)}) превышает limits.maxRequestBytes; сократите контекст (/compact, /clear) или вложения.`, { code: 'REQUEST_LIMIT' });
             }

@@ -79,6 +79,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 Изображения (image / --images):
   --size WxH|auto  --quality low|medium|high|xhigh|max|auto  --format png|webp|jpeg
   --image-background transparent|opaque|auto  --partials 0..3  --image-model <id>  --count, -n <n>
+  Для api.proxyapi.ru картинки идут через /images/generations и /images/edits (модель openai/gpt-image-1-mini, если не задана --image-model).
 
 Дополнение кода (complete):
   JSON: content и/или prefix+suffix, cursor или selection (line/character с нуля, как в LSP), либо символ | в тексте.
