@@ -36,6 +36,28 @@ function skipString(text, from, end) {
 }
 
 /**
+ * Index just after an SCSS interpolation `#{...}` that starts at `hash`.
+ * @param {string} text
+ * @param {number} hash
+ * @param {number} end
+ * @returns {number}
+ * @ai.hint pure
+ */
+function skipInterpolation(text, hash, end) {
+    if (text[hash + 1] !== '{') return hash + 1;
+    let depth = 0;
+    for (let i = hash + 1; i < end; i++) {
+        if (text[i] === '"' || text[i] === "'") { i = skipString(text, i, end) - 1; continue; }
+        if (text[i] === '{') depth++;
+        else if (text[i] === '}') {
+            depth--;
+            if (depth === 0) return i + 1;
+        }
+    }
+    return end;
+}
+
+/**
  * Index of the `}` that closes the `{` at `open`.
  * @param {string} text
  * @param {number} open
@@ -124,6 +146,7 @@ function parseList(text, start = 0, end = text.length) {
             continue;
         }
         if (text[i] === '"' || text[i] === "'") { i = skipString(text, i, end); continue; }
+        if (text[i] === '#' && text[i + 1] === '{') { i = skipInterpolation(text, i, end); continue; }
         if (text[i] === '{') {
             const prelude = text.slice(chunkStart, i).trim();
             const close = findClose(text, i, end);

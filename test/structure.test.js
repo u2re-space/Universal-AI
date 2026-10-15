@@ -38,6 +38,16 @@ test('sort-imports groups modules and sorts names inside a brace list', () => {
     assert.match(result.text, /export const kept = 1;/);
 });
 
+test('sort-imports leaves a value export and a later import in place', () => {
+    const source = [
+        'import { b, a } from "./local";',
+        'export const kept = 1;',
+        'import z from "zod";',
+    ].join('\n');
+    const result = structureText(source, { language: 'ts', tasks: ['sort-imports'] });
+    assert.match(result.text, /^import \{ a, b \} from "\.\/local";\n\nexport const kept = 1;\nimport z from "zod";/);
+});
+
 test('scss tasks dedupe, merge, group selectors, and group properties', () => {
     const source = [
         '.btn {',
@@ -55,6 +65,22 @@ test('scss tasks dedupe, merge, group selectors, and group properties', () => {
     assert.match(result.text, /\.btn \{[^}]*display: block;[^}]*margin: 1px;[^}]*padding: 2px;[^}]*color: blue;/s);
     assert.match(result.text, /\.a, \.b \{/);
     assert.equal((result.text.match(/color: red/g) ?? []).length, 1);
+});
+
+test('scss interpolation stays inside the declaration', () => {
+    const source = [
+        '.card {',
+        '  margin: 0;',
+        '  background: #{palette(brand)};',
+        '  .title { color: blue; color: blue; }',
+        '  display: flex;',
+        '}',
+    ].join('\n');
+    const result = structureText(source, { language: 'scss', tasks: ['dedupe', 'group-properties', 'clean'] });
+    assert.match(result.text, /background: #\{palette\(brand\)\};/);
+    assert.match(result.text, /display: flex;[\s\S]*margin: 0;[\s\S]*background: #\{palette\(brand\)\};/);
+    assert.equal((result.text.match(/color: blue/g) ?? []).length, 1);
+    assert.match(result.text, /\.title \{/);
 });
 
 test('layers follow user rules and a selection edits only that range', () => {

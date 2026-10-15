@@ -53,13 +53,14 @@ function classifyStatement(statement, internalPrefixes) {
 }
 
 /**
- * True when the line continues an import or re-export block.
+ * True when the line opens an import or a re-export. A value export does not.
  * @param {string} line
  * @returns {boolean}
  * @ai.hint pure
  */
-function isImportLine(line) {
-    return /^\s*(import|export)\b/.test(line) || /^\s*\/\//.test(line) || line.trim() === '';
+function startsImport(line) {
+    const trimmed = line.trim();
+    return /^import\b/.test(trimmed) || /^export\s+(?:\*|\{|type\s+\{)/.test(trimmed);
 }
 
 /**
@@ -79,14 +80,30 @@ export function sortImports(text, rules = {}) {
     while (index < lines.length && /^\s*['"]use (client|strict|server)['"];?\s*$/.test(lines[index])) head.push(lines[index++]);
     const block = [];
     let seenImport = false;
+    let open = false;
     while (index < lines.length) {
         const line = lines[index];
-        if (/^\s*(import|export)\b/.test(line)) seenImport = true;
-        if (!seenImport) break;
-        if (!isImportLine(line) && line.trim() !== '') break;
-        if (line.trim() === '' && lines.slice(index + 1).find((next) => next.trim()) && !/^\s*(import|export|\/\/)/.test(lines.slice(index + 1).find((next) => next.trim()) ?? '')) break;
-        block.push(lines[index]);
+        const trimmed = line.trim();
+        if (open) {
+            block.push(line);
+            index++;
+            if (/;\s*$/.test(trimmed)) open = false;
+            continue;
+        }
+        if (trimmed === '' || trimmed.startsWith('//') || trimmed.startsWith('/*')) {
+            const next = lines.slice(index + 1).find((item) => item.trim());
+            if (seenImport && next && (startsImport(next) || next.trim().startsWith('//') || next.trim().startsWith('/*'))) {
+                block.push(line);
+                index++;
+                continue;
+            }
+            break;
+        }
+        if (!startsImport(line)) break;
+        seenImport = true;
+        block.push(line);
         index++;
+        if (!/;\s*$/.test(trimmed)) open = true;
     }
     if (!seenImport) return text;
     const statements = [];
