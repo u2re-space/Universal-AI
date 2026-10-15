@@ -55,6 +55,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --tools fs,shell,fetch  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
   search_files scope=path|symbol|content|all читает карту проекта.
   --web                  поиск в интернете (web_search)       --images   генерация картинок в ответах
+  --desktop              включает экран Windows, мышь, клавиатуру и AutoHotkey v2
   --approve ask|read|write|all   политика подтверждений (по умолчанию: ask в терминале, read без него)
   --yes, -y              = --approve all (без вопросов; осторожно)
   --cwd, -C <каталог>    рабочий каталог для инструментов (по умолчанию текущий)
@@ -62,7 +63,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 
 Роли и память (run):
-  --role <роль=модель[:effort]>  модель для роли: planner, collector, worker, reviewer, vision, summarizer, default, all
+  --role <роль=модель[:effort]>  модель для роли: planner, collector, worker, reviewer, vision, summarizer,
+                         scanner, solver, clicker, typer, encoder, tester, default, all
                          (например: --role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
   --team / --single      команда ролей (план → сбор контекста → исполнение → ревью → память) / один агент
   --no-memory            не использовать долговременную память (SQLite в ~/.ai-agent/memory.db)
@@ -93,7 +95,7 @@ const OPTIONS = {
   reasoning: { type: 'boolean', default: true }, instructions: { type: 'string', short: 'i' },
   image: { type: 'string', multiple: true }, file: { type: 'string', short: 'f', multiple: true }, detail: { type: 'string' },
   out: { type: 'string', short: 'o' }, session: { type: 'string', short: 's' }, store: { type: 'boolean', default: false },
-  web: { type: 'boolean', default: false }, images: { type: 'boolean', default: false }, tools: { type: 'string' },
+  web: { type: 'boolean', default: false }, images: { type: 'boolean', default: false }, desktop: { type: 'boolean', default: false }, tools: { type: 'string' },
   'no-tools': { type: 'boolean', default: false }, approve: { type: 'string' }, yes: { type: 'boolean', short: 'y', default: false },
   cwd: { type: 'string', short: 'C' }, 'max-turns': { type: 'string' }, 'budget-usd': { type: 'string' }, 'budget-tokens': { type: 'string' },
   'max-output-tokens': { type: 'string' }, temperature: { type: 'string' }, verbosity: { type: 'string' }, shell: { type: 'string' },

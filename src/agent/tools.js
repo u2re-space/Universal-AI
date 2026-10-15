@@ -8,6 +8,7 @@ import { resolveInside } from './paths.js';
 import { listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory } from './fs-tools.js';
 import { loadProjectMap, searchMapped, updateProjectMapPath } from './map.js';
 import { runCommand } from './shell.js';
+import { DESKTOP_TOOL_NAMES, createDesktopHandlers } from './desktop.js';
 
 const str = (description) => ({ type: 'string', description });
 const nullableInt = (description) => ({ type: ['integer', 'null'], description });
@@ -132,6 +133,57 @@ export const TOOL_SPECS = {
     description: 'Ask the human operator a short clarifying question and wait for the answer. Only available in interactive sessions; otherwise returns a note to proceed autonomously.',
     parameters: schema({ question: str('The question to ask.') }),
   },
+  screenshot: {
+    category: 'exec', group: 'desktop',
+    description: 'Capture the Windows screen. The result includes the relative PNG path under .ai/desktop. When screen vision is available, a TOON description is appended.',
+    parameters: schema({}),
+  },
+  click: {
+    category: 'exec', group: 'desktop',
+    description: 'Click once. mode is coord (integer x and y), title (window title), control (title and control), or image (a path inside the working directory). Unused strings are "" and unused integers are null.',
+    parameters: schema({
+      mode: { type: 'string', enum: ['coord', 'title', 'control', 'image'], description: 'coord, title, control, or image.' },
+      x: nullableInt('Pixel x for coord, or an offset for title. Null when unused.'),
+      y: nullableInt('Pixel y for coord, or an offset for title. Null when unused.'),
+      button: str('left, right, or middle. Empty string means left.'),
+      clicks: nullableInt('1 or 2. Null means 1.'),
+      title: str('Window title. Empty string when unused.'),
+      control: str('Control name. Empty string when unused.'),
+      image: str('Image path relative to the working directory for ImageSearch. Empty string when unused.'),
+    }),
+  },
+  type: {
+    category: 'exec', group: 'desktop',
+    description: 'Type into the focused control. mode text sends literal characters; mode keys sends an AutoHotkey key string.',
+    parameters: schema({
+      mode: { type: 'string', enum: ['text', 'keys'], description: 'text (literal) or keys (AutoHotkey Send).' },
+      text: str('Literal text or an AutoHotkey key string such as ^s.'),
+    }),
+  },
+  run_ahk: {
+    category: 'exec', group: 'desktop',
+    description: 'Run AutoHotkey v2 statements (not a whole program). The runner wraps them and can capture the screen afterward.',
+    parameters: schema({
+      script: str('AutoHotkey v2 statements to run inside the wrapper.'),
+    }),
+  },
+  run_batch: {
+    category: 'exec', group: 'desktop',
+    description: 'Run a desktop batch. Set exactly one of batch_json, batch_toon, or path (a file inside the working directory). Each action is approved on its own.',
+    parameters: schema({
+      batch_json: str('JSON batch document. Empty string when unused.'),
+      batch_toon: str('TOON batch document. Empty string when unused.'),
+      path: str('Batch file path relative to the working directory. Empty string when unused.'),
+    }),
+  },
+  delegate_role: {
+    category: 'read', group: 'desktop',
+    description: 'Send one task to a specialist and return its answer. encoder returns a batch and does not run it; pass that batch to run_batch.',
+    parameters: schema({
+      role: { type: 'string', enum: ['scanner', 'solver', 'clicker', 'typer', 'encoder', 'tester'], description: 'Specialist to call.' },
+      task: str('One task for that specialist.'),
+    }),
+  },
 };
 
 export const READ_ONLY_TOOLS = ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall'];
@@ -149,6 +201,7 @@ export function enabledToolNames(tools, { interactive = false, memory = false, s
   if (tools.fs && summarize) names.push('summarize_file');
   if (tools.shell) names.push('run_command');
   if (tools.fetch) names.push('fetch_url');
+  if (tools.desktop) names.push(...DESKTOP_TOOL_NAMES);
   if (memory) names.push('recall', 'remember');
   if (tools.askUser && interactive) names.push('ask_user');
   return names;
@@ -165,6 +218,24 @@ function htmlToText(html) {
     .replace(/[ \t]+/g, ' ').replace(/\n\s*\n\s*\n+/g, '\n\n').trim();
 }
 
+function clickTarget(args) {
+  if (!args || typeof args !== 'object') return '';
+  if (args.mode === 'coord') return `${args.x},${args.y}`;
+  if (args.mode === 'title') return String(args.title ?? '');
+  if (args.mode === 'control') return [args.title, args.control].filter((part) => typeof part === 'string' && part.trim()).join(' / ');
+  if (args.mode === 'image') return String(args.image ?? '');
+  return String(args.mode ?? '');
+}
+
+function batchSource(args) {
+  if (!args || typeof args !== 'object') return '';
+  for (const key of ['path', 'batch_json', 'batch_toon']) {
+    const value = args[key];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return '';
+}
+
 /**
  * Create the executable toolset for one agent run.
  *
@@ -174,11 +245,15 @@ function htmlToText(html) {
  * memory / projectKey / projectName — long-term memory store (enables recall / remember).
  * describeImage({ part, question }) → string — vision role delegation for view_image (optional).
  * summarizeFile({ rel, text, focus }) → string — summarizer role for summarize_file (optional).
+ * describeScreen({ part, rel }) → string | { toon } — screen vision for a desktop capture (optional).
+ * performDesktop(action) → { message, screenshotAbs, screenshotRel } — injected runner; skips AutoHotkey (optional).
+ * delegate(role, task) → { output, summary, data? } — specialist call for delegate_role (optional).
  */
 export function createToolset({
   root = process.cwd(), config, names, approvalLevel = 'read', approve = async () => 'no', askUser = null,
   backupDir = null, signal, emit = () => {}, memory = null, projectKey = null, projectName = null,
   describeImage = null, summarizeFile = null, editPaths = () => null,
+  describeScreen = null, performDesktop = null, delegate = null,
 }) {
   const limits = config.limits;
   const allowed = new Set(names);
@@ -215,6 +290,10 @@ export function createToolset({
       case 'make_dir': return `Создать каталог ${args.path}`;
       case 'run_command': return `Команда: ${args.command}\nКаталог: ${args.cwd ?? '.'}\nПричина: ${args.reason ?? '—'}`;
       case 'fetch_url': return `Загрузить ${args.url}`;
+      case 'click': return `Клик: ${truncate(clickTarget(args), 400)}`;
+      case 'type': return `Ввод: ${truncate(args.text ?? '', 400)}`;
+      case 'run_ahk': return `Скрипт: ${truncate(args.script ?? '', 400)}`;
+      case 'run_batch': return `Пакет: ${truncate(batchSource(args), 400)}`;
       default: return `${name} ${JSON.stringify(args)}`;
     }
   }
@@ -374,6 +453,12 @@ export function createToolset({
       return { output: answer === null || answer === '' ? '(оператор не ответил)' : answer, summary: truncate(answer ?? '', 60) };
     },
   };
+
+  const desktopNames = DESKTOP_TOOL_NAMES.filter((name) => allowed.has(name));
+  if (desktopNames.length) {
+    const desktopHandlers = createDesktopHandlers({ root, config, decide, describeScreen, performDesktop, delegate });
+    for (const name of desktopNames) handlers[name] = desktopHandlers[name];
+  }
 
   /** Execute one function_call item. Never throws for tool errors; throws only on cancellation. */
   async function execute(call) {

@@ -3,7 +3,9 @@ import { buildUserMessage } from '../core/attachments.js';
 import { resolveRole } from '../core/config.js';
 import { clipMiddle } from '../util/text.js';
 import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
+import { encodeToon } from '../util/toon.js';
 import { runTurn } from './loop.js';
+import { SCREEN_SCHEMA } from './schemas.js';
 
 /**
  * Runs requests on behalf of a named role with that role's model / reasoning settings.
@@ -63,6 +65,17 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
     return result.text.trim();
   }
 
+  /** Describe a screenshot through the vision role; returns structured data and its TOON form. */
+  async function describeScreen({ part, rel = 'screenshot' }) {
+    const prompt = `Screenshot: ${rel}\nDescribe the screen.`;
+    const result = await run('vision', {
+      text: prompt, parts: [part], instructions: ROLE_INSTRUCTIONS.visionScreen,
+      schema: SCREEN_SCHEMA, schemaName: 'screen', silent: true,
+    });
+    if (result.status !== 'completed' || !result.data) throw new Error(result.error?.message ?? `Роль vision не вернула описание (${result.status}).`);
+    return { data: result.data, toon: encodeToon(result.data) };
+  }
+
   /** Summarize a text file through the summarizer role. */
   async function summarizeFile({ rel, text, focus = null }) {
     const body = clipMiddle(text, 400 * 1024);
@@ -72,5 +85,5 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
     return { summary: result.text.trim(), model: resolve('summarizer').model };
   }
 
-  return { resolve, run, describeImage, summarizeFile, shouldDelegateVision };
+  return { resolve, run, describeImage, describeScreen, summarizeFile, shouldDelegateVision };
 }

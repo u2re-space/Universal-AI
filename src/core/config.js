@@ -36,7 +36,9 @@ export const defaults = Object.freeze({
   retries: 2,
   approve: null,                    // ask | read | write | all; null → ask (TTY) or read (no TTY)
   shell: null,                      // run_command shell: null (cmd.exe / sh) | powershell | pwsh | bash | sh | zsh | cmd
-  tools: { fs: true, shell: true, fetch: true, web: false, images: false, askUser: true },
+  tools: { fs: true, shell: true, fetch: true, web: false, images: false, askUser: true, desktop: false },
+  /** Windows screen, mouse, keyboard, and AutoHotkey v2. Tools stay off until tools.desktop is true. */
+  desktop: { ahkPath: null, shotAfterAction: true },
   limits: {
     maxTurns: 60,
     maxToolCallsPerTurn: 32,
@@ -70,6 +72,12 @@ export const defaults = Object.freeze({
    *   reviewer   — verifies the result (read-only tools, may run tests)
    *   vision     — describes images for other roles (view_image delegation)
    *   summarizer — compaction, file summaries, memory extraction (cheapest model)
+   *   scanner    — decides what to capture; may return coordinates
+   *   solver     — solves the step, including math and captchas
+   *   clicker    — clicks one UI target
+   *   typer      — types into a named UI field
+   *   encoder    — returns a batch for later execution
+   *   tester     — checks whether the step result is true
    */
   roles: {
     default: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
@@ -79,6 +87,12 @@ export const defaults = Object.freeze({
     reviewer: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
     vision: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
     summarizer: { model: null, effort: 'low', summary: 'none', verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
+    scanner: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+    solver: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+    clicker: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+    typer: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+    encoder: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+    tester: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
   },
   /** Multi-role orchestration used by `ai run`. */
   agent: {
@@ -209,6 +223,14 @@ function validateConfig(c) {
   for (const [key, value] of Object.entries(c.tools)) {
     if (!(key in defaults.tools) || typeof value !== 'boolean') fail(`tools.${key}: true | false`);
   }
+  if (!isRecord(c.desktop)) fail('desktop должен быть объектом');
+  for (const key of Object.keys(c.desktop)) {
+    if (!(key in defaults.desktop)) fail(`неизвестный параметр desktop.${key}`);
+  }
+  if (c.desktop.ahkPath !== null && (typeof c.desktop.ahkPath !== 'string' || c.desktop.ahkPath.trim() === '')) {
+    fail('desktop.ahkPath: непустая строка или null');
+  }
+  if (typeof c.desktop.shotAfterAction !== 'boolean') fail('desktop.shotAfterAction: true | false');
   if (!['png', 'webp', 'jpeg'].includes(c.image.format)) fail('image.format: png | webp | jpeg');
   if (!['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(c.image.quality)) fail('image.quality: auto | low | medium | high | xhigh | max');
   if (!['auto', 'transparent', 'opaque'].includes(c.image.background)) fail('image.background: auto | transparent | opaque');

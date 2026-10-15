@@ -6,12 +6,14 @@ import { renderMemories } from '../core/memory.js';
 import { isAbortError, CancelledError } from '../openai/errors.js';
 import { clipMiddle, errorMessage } from '../util/text.js';
 import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
+import { SPECIALISTS } from '../roles/index.js';
 import { createToolset, enabledToolNames, READ_ONLY_TOOLS } from './tools.js';
+import { DESKTOP_TOOL_NAMES } from './desktop.js';
 import { listFiles } from './fs-tools.js';
 import { describeChangeSet } from './diff.js';
 import { createRoleRunner } from './roles.js';
 import { builtinTools } from './loop.js';
-import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA } from './schemas.js';
+import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA } from './schemas.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
 
@@ -33,6 +35,15 @@ function renderFindings(report) {
 
 const bullets = (items, empty = '- (none)') => (items.length ? items.map((i) => `- ${i}`).join('\n') : empty);
 
+/** Collector stays read-only. Reviewer may run commands and use the desktop. Worker keeps every enabled name. */
+export function toolNamesForRole(allNames, role) {
+  if (role === 'collector') return allNames.filter((name) => READ_ONLY_TOOLS.includes(name));
+  if (role === 'reviewer') {
+    return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || name === 'run_command' || DESKTOP_TOOL_NAMES.includes(name));
+  }
+  return allNames;
+}
+
 /**
  * Multi-role run: planner (senior) → collector (cheap, read-only) → worker (tool calls, step by step)
  * → reviewer (+ fix rounds) → summarizer (long-term memory). All roles share one context document.
@@ -52,15 +63,33 @@ export async function runTeam({
     recalled: [], memoriesSaved: [], reviewRounds: 0, error: null };
 
   const toolBase = { root, config, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile };
-  const allNames = enabledToolNames(config.tools, { interactive, memory: Boolean(memory), summarize: true });
-  const readNames = allNames.filter((n) => READ_ONLY_TOOLS.includes(n));
-  const reviewerNames = allNames.filter((n) => READ_ONLY_TOOLS.includes(n) || n === 'run_command');
+  const enabled = enabledToolNames(config.tools, { interactive, memory: Boolean(memory), summarize: true });
+  const readNames = toolNamesForRole(enabled, 'collector');
+  const reviewerNames = toolNamesForRole(enabled, 'reviewer');
+  const allNames = toolNamesForRole(enabled, 'worker');
   const vision = (role) => (roles.shouldDelegateVision(role) ? roles.describeImage : null);
   const taskMarks = { edit: null };
   let marks = [];
-  const workerTools = createToolset({ ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker'), editPaths: () => taskMarks.edit });
+  async function delegate(role, task) {
+    if (!Object.hasOwn(SPECIALISTS, role)) throw new Error(`delegate_role: неизвестная роль «${role}».`);
+    const spec = SPECIALISTS[role];
+    const names = spec.tools.filter((name) => allNames.includes(name));
+    const toolset = createToolset({ ...toolBase, names, approvalLevel, describeScreen: roles.describeScreen });
+    const result = await roles.run(role, {
+      text: task, instructions: ROLE_INSTRUCTIONS[role], toolset, maxTurns: spec.turns, silent: true,
+      ...(spec.schema === 'batch' ? { schema: BATCH_SCHEMA, schemaName: 'batch' } : {}),
+    });
+    return { output: result.text, summary: role + ' ' + result.status, data: result.data ?? null };
+  }
+  const workerTools = createToolset({
+    ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker'), editPaths: () => taskMarks.edit,
+    describeScreen: roles.describeScreen, delegate,
+  });
   const collectorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('collector') });
-  const reviewerTools = createToolset({ ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer') });
+  const reviewerTools = createToolset({
+    ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer'),
+    describeScreen: roles.describeScreen, delegate,
+  });
   const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images });
   const finish = () => {
     result.changes = workerTools.stats().changes;
