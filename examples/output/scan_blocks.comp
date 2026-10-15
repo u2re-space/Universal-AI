@@ -1,0 +1,69 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+#include "radix_common.glsl"
+
+layout(set = 0, binding = 0, std430)
+readonly buffer ScanInput
+{
+    uvec4 inputVectors[];
+};
+
+layout(set = 0, binding = 1, std430)
+writeonly buffer ScanOutput
+{
+    uvec4 outputVectors[];
+};
+
+layout(set = 0, binding = 2, std430)
+writeonly buffer BlockSums
+{
+    uint blockSums[];
+};
+
+layout(push_constant) uniform Push
+{
+    uint count;
+} pc;
+
+void main()
+{
+    uint group = linearGroupID();
+    uint blockBase = group * TILE_SIZE;
+
+    if (blockBase >= pc.count)
+        return;
+
+    uint tid = logicalThreadID();
+
+    uint vectorIndex = group * WG_SIZE + tid;
+    uint scalarIndex = vectorIndex * 4u;
+
+    uvec4 v = uvec4(0u);
+
+    if (scalarIndex < pc.count)
+    {
+        // Физически буфер дополнен до кратности четырём uint.
+        v = inputVectors[vectorIndex];
+
+        if (scalarIndex + 1u >= pc.count) v.y = 0u;
+        if (scalarIndex + 2u >= pc.count) v.z = 0u;
+        if (scalarIndex + 3u >= pc.count) v.w = 0u;
+    }
+
+    uint total = v.x + v.y + v.z + v.w;
+    uint prefix = workgroupExclusiveAdd(total);
+
+    uvec4 result = uvec4(
+        prefix,
+        prefix + v.x,
+        prefix + v.x + v.y,
+        prefix + v.x + v.y + v.z
+    );
+
+    if (scalarIndex < pc.count)
+        outputVectors[vectorIndex] = result;
+
+    if (tid == WG_SIZE - 1u)
+        blockSums[group] = prefix + total;
+}

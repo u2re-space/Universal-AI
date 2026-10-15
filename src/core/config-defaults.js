@@ -109,6 +109,8 @@ export const defaults = Object.freeze({
         reviewerMaxTurns: 10,
         maxContextBytes: 96 * KiB,      // rendered shared context per request
         visionDelegate: 'auto',         // auto (when roles.vision has its own model) | always | never
+        chain: true,                    // first answer, then encoder or planner
+        route: null,                    // null | encoder | planner; null lets the answer and the heuristic choose
     },
     /** Long-term memory (SQLite, node:sqlite) and project notes. */
     memory: {

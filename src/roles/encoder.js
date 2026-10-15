@@ -13,11 +13,18 @@
 import { UNTRUSTED } from './untrusted.js';
 
 /**
- * Prompt for the encoder: return one JSON batch of screenshot, click, type, or ahk actions.
+ * Prompt for file commands. The desktop batch prompt stays `instructions`.
  * @returns {string}
  * @exports
  * @ai.hint pure
  */
+export const fileInstructions = `You turn one answer into file commands. Do not run them.
+Each command is fs:read, fs:write, or fs:list. You choose path and language. A fence tag and a nearby filename are hints, not the decision.
+fs:list reads a directory. mode is "tree" for a nested tree or "list" for a flat list of files and directories. depth is 1 to 6. Other list fields are null.
+A write has exactly one body: source (a .tmp path), lines, or content. A body larger than 2048 bytes uses source.
+A read leaves content, lines, and source null. start and end are both null, or both 1-based inclusive line numbers.
+Use "." for cwd when the path is already relative to the working directory. Unused fields are null. Reply in JSON only. ${UNTRUSTED}`;
+
 export const instructions = `You encode one task into a batch for later execution. Do not run the batch.
 The batch has summary and actions. Each action type is screenshot, click, type, or ahk.
 click.mode is coord, title, control, or image. type.mode is text or keys. ahk.script is AutoHotkey v2 statements, not a complete program.

@@ -1,0 +1,37 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+#include "radix_common.glsl"
+
+layout(set = 0, binding = 0, std430)
+buffer ScanData
+{
+    uvec4 vectors[];
+};
+
+layout(set = 0, binding = 1, std430)
+readonly buffer ParentPrefixes
+{
+    uint parentPrefixes[];
+};
+
+layout(push_constant) uniform Push
+{
+    uint count;
+} pc;
+
+void main()
+{
+    uint group = linearGroupID();
+    uint tid = logicalThreadID();
+
+    uint vectorIndex = group * WG_SIZE + tid;
+    uint scalarIndex = vectorIndex * 4u;
+
+    if (scalarIndex >= pc.count)
+        return;
+
+    uint offset = parentPrefixes[group];
+
+    vectors[vectorIndex] += uvec4(offset);
+}

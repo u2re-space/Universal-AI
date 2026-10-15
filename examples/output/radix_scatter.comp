@@ -1,0 +1,241 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+#ifndef WITH_VALUES
+#define WITH_VALUES 1
+#endif
+
+#include "radix_common.glsl"
+
+layout(set = 0, binding = 0, std430)
+readonly buffer InputKeys
+{
+    uint inputKeys[];
+};
+
+#if WITH_VALUES
+layout(set = 0, binding = 1, std430)
+readonly buffer InputValues
+{
+    uint inputValues[];
+};
+#endif
+
+layout(set = 0, binding = 2, std430)
+writeonly buffer OutputKeys
+{
+    uint outputKeys[];
+};
+
+#if WITH_VALUES
+layout(set = 0, binding = 3, std430)
+writeonly buffer OutputValues
+{
+    uint outputValues[];
+};
+#endif
+
+layout(set = 0, binding = 4, std430)
+readonly buffer HistogramPrefixes
+{
+    uint histogramPrefixes[];
+};
+
+layout(push_constant) uniform Push
+{
+    uint count;
+    uint shift;
+    uint groupCount;
+} pc;
+
+// Сначала: количество элементов каждого digit внутри warp.
+// Затем: exclusive prefix этого количества по warp.
+shared uint warpHistogram[8 * 256];
+
+shared uint binLocalStart[256];
+shared uint binGlobalStart[256];
+
+shared uint sortedKeys[1024];
+
+#if WITH_VALUES
+shared uint sortedValues[1024];
+#endif
+
+void main()
+{
+    uint group = linearGroupID();
+
+    if (group >= pc.groupCount)
+        return;
+
+    uint tid = logicalThreadID();
+    uint warp = gl_SubgroupID;
+    uint lane = gl_SubgroupInvocationID;
+
+    [[unroll]]
+    for (uint w = 0u; w < WARP_COUNT; ++w)
+        warpHistogram[w * BIN_COUNT + tid] = 0u;
+
+    barrier();
+
+    uint tileBase = group * TILE_SIZE;
+    uint tileCount = min(TILE_SIZE, pc.count - tileBase);
+
+    uint keys[4];
+    uint digits[4];
+    uint ranks[4];
+
+#if WITH_VALUES
+    uint values[4];
+#endif
+
+    // ------------------------------------------------------------
+    // 1. Стабильные ранги внутри каждого warp.
+    // ------------------------------------------------------------
+
+    [[unroll]]
+    for (uint item = 0u; item < ITEMS; ++item)
+    {
+        uint localIndex = warp * (WARP_SIZE * ITEMS)
+                        + item * WARP_SIZE
+                        + lane;
+
+        uint index = tileBase + localIndex;
+        bool valid = localIndex < tileCount;
+
+        uint key = 0u;
+
+        if (valid)
+            key = inputKeys[index];
+
+        keys[item] = key;
+
+#if WITH_VALUES
+        uint value = 0u;
+
+        if (valid)
+            value = inputValues[index];
+
+        values[item] = value;
+#endif
+
+        uint digit = keyDigit(key, pc.shift);
+        digits[item] = digit;
+
+        uvec4 validMask = subgroupBallot(valid);
+        uvec4 peers = subgroupPartitionNV(digit) & validMask;
+
+        uint peerCount = subgroupBallotBitCount(peers);
+        uint leader = 0u;
+
+        if (peerCount != 0u)
+            leader = subgroupBallotFindLSB(peers);
+
+        uint previousCount = 0u;
+
+        if (valid && lane == leader)
+        {
+            previousCount = atomicAdd(
+                warpHistogram[warp * BIN_COUNT + digit],
+                peerCount
+            );
+        }
+
+        previousCount = subgroupShuffle(previousCount, leader);
+
+        ranks[item] = previousCount
+                    + subgroupBallotExclusiveBitCount(peers);
+
+        // Следующий item должен видеть завершённые обновления
+        // предыдущего item, в том числе при смене leader.
+        subgroupMemoryBarrierShared();
+        subgroupBarrier();
+    }
+
+    barrier();
+
+    // ------------------------------------------------------------
+    // 2. Prefix по warp для каждого bin.
+    // Один invocation обслуживает один bin.
+    // ------------------------------------------------------------
+
+    uint binTotal = 0u;
+
+    [[unroll]]
+    for (uint w = 0u; w < WARP_COUNT; ++w)
+    {
+        uint address = w * BIN_COUNT + tid;
+        uint count = warpHistogram[address];
+
+        warpHistogram[address] = binTotal;
+        binTotal += count;
+    }
+
+    // Начало bin внутри локально отсортированного tile.
+    uint localStart = workgroupExclusiveAdd(binTotal);
+
+    binLocalStart[tid] = localStart;
+
+    // Начало участка этой workgroup в глобальном bin.
+    binGlobalStart[tid] =
+        histogramPrefixes[tid * pc.groupCount + group];
+
+    barrier();
+
+    // ------------------------------------------------------------
+    // 3. Стабильная перестановка в shared memory.
+    // ------------------------------------------------------------
+
+    [[unroll]]
+    for (uint item = 0u; item < ITEMS; ++item)
+    {
+        uint localIndex = warp * (WARP_SIZE * ITEMS)
+                        + item * WARP_SIZE
+                        + lane;
+
+        if (localIndex < tileCount)
+        {
+            uint digit = digits[item];
+
+            uint position =
+                binLocalStart[digit]
+                + warpHistogram[warp * BIN_COUNT + digit]
+                + ranks[item];
+
+            sortedKeys[position] = keys[item];
+
+#if WITH_VALUES
+            sortedValues[position] = values[item];
+#endif
+        }
+    }
+
+    barrier();
+
+    // ------------------------------------------------------------
+    // 4. Читаем shared последовательно.
+    // Внутри одного bin глобальные адреса последовательны.
+    // ------------------------------------------------------------
+
+    [[unroll]]
+    for (uint item = 0u; item < ITEMS; ++item)
+    {
+        uint position = item * WG_SIZE + tid;
+
+        if (position < tileCount)
+        {
+            uint key = sortedKeys[position];
+            uint digit = keyDigit(key, pc.shift);
+
+            uint destination =
+                binGlobalStart[digit]
+                + (position - binLocalStart[digit]);
+
+            outputKeys[destination] = key;
+
+#if WITH_VALUES
+            outputValues[destination] = sortedValues[position];
+#endif
+        }
+    }
+}

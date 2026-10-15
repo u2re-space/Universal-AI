@@ -1,0 +1,79 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+#include "radix_common.glsl"
+
+layout(set = 0, binding = 0, std430)
+readonly buffer InputKeys
+{
+    uint inputKeys[];
+};
+
+layout(set = 0, binding = 1, std430)
+writeonly buffer Histogram
+{
+    uint histogram[];
+};
+
+layout(push_constant) uniform Push
+{
+    uint count;
+    uint shift;
+    uint groupCount;
+} pc;
+
+shared uint localHistogram[256];
+
+void main()
+{
+    uint group = linearGroupID();
+
+    // Условие одинаково для всей workgroup.
+    if (group >= pc.groupCount)
+        return;
+
+    uint tid = logicalThreadID();
+    uint warp = gl_SubgroupID;
+    uint lane = gl_SubgroupInvocationID;
+
+    localHistogram[tid] = 0u;
+
+    barrier();
+
+    uint tileBase = group * TILE_SIZE;
+
+    // Каждому warp принадлежит непрерывный участок из 128 ключей.
+    [[unroll]]
+    for (uint item = 0u; item < ITEMS; ++item)
+    {
+        uint index = tileBase
+                   + warp * (WARP_SIZE * ITEMS)
+                   + item * WARP_SIZE
+                   + lane;
+
+        bool valid = index < pc.count;
+
+        uint key = 0u;
+
+        if (valid)
+            key = inputKeys[index];
+
+        uint digit = keyDigit(key, pc.shift);
+
+        uvec4 validMask = subgroupBallot(valid);
+        uvec4 peers = subgroupPartitionNV(digit) & validMask;
+
+        uint peerCount = subgroupBallotBitCount(peers);
+        uint leader = 0u;
+
+        if (peerCount != 0u)
+            leader = subgroupBallotFindLSB(peers);
+
+        if (valid && lane == leader)
+            atomicAdd(localHistogram[digit], peerCount);
+    }
+
+    barrier();
+
+    histogram[tid * pc.groupCount + group] = localHistogram[tid];
+}

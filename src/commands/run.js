@@ -20,6 +20,9 @@ import { runOnce } from './flow.js';
 import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstructions, approvalLevel, backupDirFor, openMemoryFor,
     describeRoles, usageRow, usageBreakdownRows, describeChanges, createClientFor, createLedgerFor, writeOutput, exitCodeFor, STATUS_LABELS } from './shared.js';
 import { openMcpSources } from '../mcp/session.js';
+import { prepareTeamInvocation } from './team-args.js';
+import { buildGenerationBrief, writeGenerationManifest } from '../generate/brief.js';
+import { resolvePlatform } from '../generate/platform.js';
 
 const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло результат', incomplete: 'шаги выполнены не полностью' };
 
@@ -36,10 +39,8 @@ const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло 
 export async function run(ctx) {
     const { config, renderer, values, positionals } = ctx;
     const stdinText = await readStdin({ maxBytes: config.limits.maxStdinBytes });
-    let task = positionals.join(' ').trim();
-    if (task.startsWith('@') && positionals.length === 1) task = (await resolveTextArg(task, { cwd: ctx.cwd, what: 'задачу' })).trim();
-    if (!task && stdinText) task = stdinText;
-    if (!task) throw new UsageError('Укажите задачу: ai run "описание задачи" (или @file, или через stdin).');
+    const prepared = await prepareTeamInvocation({ positionals, values, cwd: ctx.cwd, stdinText: stdinText ?? '' });
+    let task = prepared.task;
     const parts = await loadAttachments({ images: values.image ?? [], files: values.file ?? [], detail: values.detail ?? 'auto', cwd: ctx.cwd, config, renderer });
     if (stdinText && task !== stdinText) parts.push({ type: 'input_text', text: `--- stdin ---\n${stdinText}\n--- конец stdin ---` });
 
@@ -51,13 +52,24 @@ export async function run(ctx) {
         throw new UsageError('Все инструменты отключены; для run нужен хотя бы один (fs, shell, fetch, web, images).');
     }
     ctx.backupDir = backupDirFor(config);
-    const extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
+    let extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
+    if (prepared.wantsProfile) {
+        const brief = buildGenerationBrief({
+            kind: prepared.kind, prompt: task, fidelity: config.generate.fidelity, creativity: config.generate.creativity,
+            platform: resolvePlatform(config.generate.platform),
+            references: { images: values.image ?? [], files: values.file ?? [], examples: values.example ?? [] },
+        });
+        await writeGenerationManifest(ctx.cwd, brief.manifest);
+        renderer.line('info', `Контракт генерации: .ai/generation.json · точность ${brief.manifest.fidelity}% · креативность ${brief.manifest.creativity}%`, { dim: true });
+        task = brief.task;
+        extra = [brief.instructions, extra].filter(Boolean).join('\n\n');
+    }
     if (level === 'read' && !interactive) renderer.line('warn', 'Неинтерактивный режим без --approve write|all: агент сможет только читать файлы.');
 
     try {
         const ensured = await ensureProjectMap(ctx.cwd);
         if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
-        if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra });
+        if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra, seedFiles: prepared.seedFiles });
         return await runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra });
     } finally {
         store?.memory.close();
@@ -104,7 +116,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
  * @returns {Promise<number>}
  * @ai.hint io
  */
-async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra }) {
+async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [] }) {
     const { config, renderer, values, signal, emit } = ctx;
     const client = createClientFor(config);
     const ledger = createLedgerFor(config);
@@ -115,7 +127,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra 
         client, config, ledger, task, parts, root: ctx.cwd, approvalLevel: level, interactive,
         approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
         memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
-        backupDir: ctx.backupDir, extraInstructions: extra, emit, signal,
+        backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles,
     });
     renderer.idle();
     renderer.ensureNewline();

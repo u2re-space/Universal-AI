@@ -24,7 +24,10 @@ Produce a JSON plan: a short summary, complexity, 1–${'{maxSteps}'} concrete s
 verifiable, with precise file paths and commands), files the context collector should read first, literal search queries,
 questions the collector must answer, acceptance criteria, risks, and whether an independent review is worth it.
 Mark trivial tasks (one obvious small edit, a question answered from a single file) as "trivial" with a single step and needsReview=false.
-Do not perform the task yourself. Reply in JSON only. ${UNTRUSTED}`;
+Do not perform the task yourself. Reply in JSON only.
+fileActions may ask the encoder to turn artifacts into fs:write commands, read a file or a line range, copy one artifact to a path, or list a directory.
+A list action uses mode "tree" for a nested tree or "list" for a flat list, and depth from 1 to 6. The directory tree in the message is already a listing you can reuse.
+You do not write files. Use an empty fileActions list when no file work is needed. ${UNTRUSTED}`;
 /**
  * High reasoning effort for the planner role.
  * @returns {object}

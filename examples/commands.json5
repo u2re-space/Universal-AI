@@ -1,0 +1,25 @@
+[   // Это ПРИМЕРНЫЙ вид команд для запуска из LLM, которое кодируется by `encoder` ролью из примера `heading-answer.md`
+    // поле "content" это или строка или массив строк, который будет закодирован в строку и передан в `encoder` роль
+    {
+        "command": "fs:write",
+        "path": "./scan_add.comp",
+        "cwd": "./output",
+        "type": "code",
+        "language": "glsl",
+        "content": [ // TODO: add content
+"", // Я пока что не вставил код сюда, но этот массив будет закодирован в строку и передан в `encoder` роль
+""
+        ]
+    },
+    {
+        "command": "fs:write",
+        "path": "./scan_blocks.comp",
+        "cwd": "./output",
+        "type": "code",
+        "language": "glsl",
+        "content": [ // TODO: add content
+"", // Я пока что не вставил код сюда, но этот массив будет закодирован в строку и передан в `encoder` роль
+""
+        ]
+    }
+]

@@ -40,6 +40,22 @@ export const PLAN_SCHEMA = object({
     needsReview: { type: 'boolean', description: 'Whether an independent review of the result is worth its cost.' },
     imageNotes: { ...nullableString, description: 'What the attached images show that matters for the task (null if none).' },
     risks: strings,
+    fileActions: {
+        type: 'array',
+        description: 'File work after the plan and before the collector. Empty when there is none.',
+        items: object({
+            action: { type: 'string', enum: ['encode', 'write', 'read', 'list'] },
+            source: nullableString,
+            path: nullableString,
+            cwd: nullableString,
+            language: nullableString,
+            reason: string,
+            start: nullableInteger,
+            end: nullableInteger,
+            depth: nullableInteger,
+            mode: { type: ['string', 'null'], enum: ['tree', 'list', null], description: 'list action: tree is nested, list is flat.' },
+        }),
+    },
     taskMap: {
         type: 'array',
         description: 'Final read/edit/scan marks. Empty array when nothing applies.',

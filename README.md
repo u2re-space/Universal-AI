@@ -193,12 +193,13 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 ```bash
 ai gen landing "повтори макет" --image test-gen/landing.png --approve write
 ai gen backend "заметки по HTTP" --creativity 10 --approve write
-ai gen site "витрина" --template templates/base --example https://css-tricks.com/ --fidelity 87
+ai gen site "витрина" --example templates/base --example https://css-tricks.com/ --fidelity 87
+ai run --template quest.md --file notes.md "допиши шейдер"
 ```
 
 * **Точность** (`--fidelity`, по умолчанию 87) — насколько видимая структура, текст, палитра и порядок блоков должны совпасть с референсами. Это цель. Поле `measured` остаётся `null`: сравнения кадра и вёрстки нет, процент не вычисляется.
 * **Креативность** (`--creativity`, по умолчанию 20) — сколько можно добавить того, чего в референсах нет. 0 ничего не добавляет. Оси независимы.
-* **Референсы** — `--image` (макеты), `--file`, `--template` (шаблоны), `--example` (примеры дизайна). Можно несколько каждого.
+* **Референсы** — `--image` (макеты), `--file`, `--example` (примеры и шаблоны оформления). Можно несколько каждого. `--template` — файл с текстом задачи, в том числе вместо фразы в команде.
 * **Платформа** — `--platform chrome-157-beta` (единственный профиль и значение по умолчанию). Chrome 157 Beta без экспериментальных флагов и без origin trial. ECMAScript — редакция 2026, только то, что Chrome 157 выполняет без флага. CSS `random()` и пять флаговых возможностей снимка от 2026-10-15 не используются. Ориентиры: [CSS-Tricks](https://css-tricks.com/), [дорожная карта Chrome](https://chromestatus.com/roadmap), [ECMA-262](https://262.ecma-international.org/), [caniuse](https://caniuse.com/).
 * Страницы без npm и без сборщика. Бэкенд и приложение — Node.js 26, ESM, только `node:http`, адрес `127.0.0.1`, порт `PORT` или 3000.
 

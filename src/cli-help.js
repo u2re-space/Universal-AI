@@ -14,6 +14,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai [ask] "запрос"                 один запрос → ответ (текст, код, документ)
   ai chat                           интерактивный чат (/help — команды чата)
   ai run "задача"                   автономный агент: файлы, команды, URL, web, картинки
+  ai gen [landing|site|backend|app] "задача"   то же, что run; первое слово-вид выбирает генерацию
   ai image "описание"               генерация изображения (image_generation)
   ai resume <resp_id>               подключиться к фоновому ответу API
   ai cancel <resp_id>               отменить фоновый ответ API
@@ -24,7 +25,6 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai map [path]                     карта проекта .ai/map.json (файлы и символы). Черновик read/edit/scan подтверждает planner; запись вне edit выполняется и помечается
   ai complete                       вставка в месте курсора (JSON из stdin). Модель gpt-5.3-codex-spark, effort low
   ai complete --listen [--port n]   HTTP POST и WebSocket /v1/complete на 127.0.0.1 (для редактора)
-  ai gen <landing|site|backend|app> "задача"   сайт, лендинг, бэкенд или приложение по референсам
   ai mcp [list|add|remove|probe]    пользовательские MCP-серверы (stdio)
 
 Ввод:
@@ -56,13 +56,20 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   При tools.shell агент может: run_command (оболочка на вызов), run_script (.ps1 .cmd .bat .sh .bash), ssh (команда или файл, scp put/get).
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 
-Роли и память (run):
+Команда (run и gen):
   --role <роль=модель[:effort]>  модель для роли: planner, collector, worker, reviewer, vision, summarizer,
                          scanner, solver, clicker, typer, encoder, tester, default, all
                          (например: --role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
-  --team / --single      команда ролей (план → сбор контекста → исполнение → ревью → память) / один агент
+  --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
+  --route encoder|planner  куда отдать первый ответ. Без флага решает метка ответа, иначе код или путь
+  --template <файл>      текст задачи из файла. {{message}} заменяется целью. Можно несколько
+  --fidelity <0..100>    цель соответствия референсам (по умолчанию 87). Процент не измеряется
+  --creativity <0..100>  сколько можно добавить сверх референсов (по умолчанию 20)
+  --platform <id>        профиль платформы (по умолчанию chrome-157-beta)
+  --example <путь|url>   пример или шаблон оформления, можно несколько
+  --kind landing|site|backend|app  вид генерации. У memory --kind по-прежнему вид записи
   --no-memory            не использовать долговременную память (SQLite в ~/.ai-agent/memory.db)
-  --global               memory: работать с глобальными записями   --kind <вид>  --tags a,b
+  --global               memory: работать с глобальными записями   --tags a,b
 
 Фон:
   --background, -b       фоновый режим Responses API (сервер считает, можно переподключиться: ai resume)
@@ -82,12 +89,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   sort-properties, group-properties, group-selectors, layers, clean, dedupe, merge, sort-lines.
   rules — порядок импортов, группы свойств, слои. prompt — своя задача. selection правит только диапазон.
 
-Генерация (gen):
-  --fidelity <0..100>    цель соответствия референсам (по умолчанию 87). Процент не измеряется.
-  --creativity <0..100>  сколько можно добавить сверх референсов (по умолчанию 20)
-  --platform <id>        профиль платформы (по умолчанию chrome-157-beta, без экспериментальных флагов)
-  --template <путь>      шаблон, можно несколько     --example <путь|url>  пример дизайна, можно несколько
-  Референсы: --image, --file, --template, --example. Контракт пишется в .ai/generation.json (measured: null).
+Референсы run/gen: --image, --file, --example. Контракт .ai/generation.json пишется, когда задан вид или флаг точности, креативности, платформы или примера. measured остаётся null.
 
 MCP:
   ai mcp add <id> --mcp-command <команда> [--mcp-arg <аргумент> ...]

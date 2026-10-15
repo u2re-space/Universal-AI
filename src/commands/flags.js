@@ -96,8 +96,13 @@ export function overridesFrom(values) {
             }
         }
     }
-    if (values.single) o.agent = { mode: 'single' };
-    if (values.team) o.agent = { mode: 'team' };
+    if (values.single) (o.agent ??= {}).mode = 'single';
+    if (values.team) (o.agent ??= {}).mode = 'team';
+    if (values['no-chain']) (o.agent ??= {}).chain = false;
+    if (values.route) {
+        if (values.route !== 'encoder' && values.route !== 'planner') throw new UsageError('--route: encoder | planner');
+        (o.agent ??= {}).route = values.route;
+    }
     if (values.memory === false) o.memory = { enabled: false };
     if (values.web) o.tools.web = true;
     if (values.images) o.tools.images = true;

@@ -53,6 +53,7 @@ const OPTIONS = {
     partials: { type: 'string' }, 'image-model': { type: 'string' }, count: { type: 'string', short: 'n' }, schema: { type: 'string' },
     follow: { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h', default: false }, version: { type: 'boolean', short: 'V', default: false },
     role: { type: 'string', multiple: true }, single: { type: 'boolean', default: false }, team: { type: 'boolean', default: false },
+    route: { type: 'string' }, 'no-chain': { type: 'boolean', default: false },
     memory: { type: 'boolean', default: true }, global: { type: 'boolean', default: false }, kind: { type: 'string' }, tags: { type: 'string' },
     listen: { type: 'boolean', default: false }, port: { type: 'string' }, line: { type: 'string' }, character: { type: 'string' },
     language: { type: 'string' }, token: { type: 'string' },
@@ -156,7 +157,7 @@ export async function main(argv = process.argv.slice(2)) {
             const title = `${commandName} ${rest.join(' ')}`.trim();
             const { id } = await manager.create({ title, argv: childArgv, cwd });
             const pid = await manager.spawnDetached({ id, script: fileURLToPath(new URL('../bin/ai.js', import.meta.url)), argv: childArgv, cwd });
-            if (commandName === 'run' && !config.approve) {
+            if ((commandName === 'run' || commandName === 'gen') && !config.approve) {
                 renderer.line('warn', 'Фоновая задача неинтерактивна: без --approve write|all агент сможет только читать файлы.');
             }
             renderer.write(`Фоновая задача ${id} запущена (pid ${pid}).\n  статус:  ai jobs status ${id}\n  журнал:  ai jobs log ${id} --follow\n  стоп:    ai jobs cancel ${id}\n`);

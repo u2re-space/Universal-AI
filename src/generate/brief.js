@@ -52,8 +52,8 @@ function referenceLines(label, items) {
  * @exports
  * @ai.hint pure
  */
-export function buildGenerationBrief({ kind, prompt = '', fidelity, creativity, platform, references = {} }) {
-    if (!GENERATION_KINDS.includes(kind)) throw new Error(`Вид генерации: ${GENERATION_KINDS.join('|')}`);
+export function buildGenerationBrief({ kind = null, prompt = '', fidelity, creativity, platform, references = {} }) {
+    if (kind != null && !GENERATION_KINDS.includes(kind)) throw new Error(`Вид генерации: ${GENERATION_KINDS.join('|')}`);
     const contract = fidelityContract({ fidelity, creativity });
     const refs = {
         images: [...(references.images ?? [])],
@@ -78,10 +78,10 @@ export function buildGenerationBrief({ kind, prompt = '', fidelity, creativity, 
         platform: platform.id,
         experimentalFlags: false,
         references: refs,
-        outputs: [...KIND_OUTPUTS[kind]],
+        outputs: kind ? [...KIND_OUTPUTS[kind]] : [],
     };
     const task = [
-        `Generate a ${kind}.`,
+        kind ? `Generate a ${kind}.` : 'Generate from the request and the references.',
         '',
         'User request:',
         prompt.trim() || '(no text; follow the references)',
@@ -92,15 +92,15 @@ export function buildGenerationBrief({ kind, prompt = '', fidelity, creativity, 
         listed.length ? 'References:' : 'References: none attached.',
         ...listed,
         '',
-        'Create these files:',
-        ...KIND_OUTPUTS[kind].map((file) => `- ${file}`),
+        manifest.outputs.length ? 'Create these files:' : 'Create the files the request needs.',
+        ...manifest.outputs.map((file) => `- ${file}`),
         '',
         'A contract file .ai/generation.json is already written. You may add the paths you created. Leave measured null.',
     ].join('\n');
     const instructions = [
         platformInstructions(platform),
         '',
-        KIND_RULES[kind],
+        kind ? KIND_RULES[kind] : 'Choose the files the request needs.',
         '',
         fidelityInstructions(contract),
     ].join('\n');

@@ -36,9 +36,11 @@ const client = () => createClient({ apiKey: 'sk-test', baseURL: server.baseURL }
 function roleOf(body) {
     const format = body.text?.format?.name;
     if (format === 'plan') return 'planner';
+    if (format === 'file_commands') return 'encoder';
     if (format === 'context_report') return 'collector';
     if (format === 'review') return 'reviewer';
     if (format === 'memory_update') return 'summarizer';
+    if (typeof body.instructions === 'string' && body.instructions.includes('route: encode')) return 'answer';
     if (body.input.some((i) => i.type === 'message' && i.content?.some?.((c) => c.type === 'input_image'))) return 'vision';
     if (body.model === 'gpt-6-luna-nano') return 'summarizer-file';
     return 'worker';
@@ -115,6 +117,8 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
         const role = roleOf(body);
         seen.push({ role, model: body.model, effort: body.reasoning?.effort });
         switch (role) {
+            case 'answer':
+                return { text: 'Черновик без кода.\nroute: plan' };
             case 'planner':
                 assert.match(body.input[0].content[0].text, /Проект: демо/, 'project notes are in the shared context');
                 assert.match(body.input[0].content[0].text, /Long-term memory/, 'recalled memories are in the shared context');
@@ -185,7 +189,7 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
     assert.equal(seen.find((s) => s.role === 'collector').model, 'gpt-6-luna');
     assert.equal(seen.find((s) => s.role === 'summarizer').model, 'gpt-6-luna-nano');
     const stages = events.filter((e) => e.type === 'stage.start').map((e) => e.stage);
-    assert.deepEqual(stages, ['plan', 'collect', 'work', 'review', 'fix', 'review', 'memory']);
+    assert.deepEqual(stages, ['answer', 'plan', 'collect', 'work', 'review', 'fix', 'review', 'memory']);
     assert.ok(events.some((e) => e.type === 'plan.ready' && e.steps.length === 2));
     assert.ok(events.some((e) => e.type === 'memory.saved' && e.count === 2));
     const byRole = Object.fromEntries(ledger.snapshot().byRole.map((r) => [r.role, r]));
@@ -199,6 +203,7 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
 test('team run: trivial plan skips collector and review; worker failure marks the run incomplete', async () => {
     script = (body) => {
         const role = roleOf(body);
+        if (role === 'answer') return { text: 'ok\nroute: plan' };
         if (role === 'planner') return { text: JSON.stringify({ summary: 'мелочь', complexity: 'trivial', steps: [{ goal: 'сделать', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
         if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
         return { status: 'incomplete', text: 'oops', reason: 'max_output_tokens' };
@@ -207,11 +212,11 @@ test('team run: trivial plan skips collector and review; worker failure marks th
     const events = [];
     const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'мелкая правка', root, approvalLevel: 'read', emit: (e) => events.push(e) });
     assert.equal(result.status, 'incomplete');
-    assert.deepEqual(events.filter((e) => e.type === 'stage.start').map((e) => e.stage), ['plan', 'work']);
+    assert.deepEqual(events.filter((e) => e.type === 'stage.start').map((e) => e.stage), ['answer', 'plan', 'work']);
 });
 
 test('team run stops on budget and reports the stage', async () => {
-    script = (body) => (roleOf(body) === 'planner'
+    script = (body) => (roleOf(body) === 'answer' ? { text: 'ok\nroute: plan' } : roleOf(body) === 'planner'
         ? { text: JSON.stringify({ summary: 's', complexity: 'normal', steps: [{ goal: 'a', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: true, imageNotes: null, risks: [] }) }
         : { text: 'done' });
     const result = await runTeam({ client: client(), config: baseConfig(), ledger: createLedger({ budgetTokens: 150 }), task: 'x', root, approvalLevel: 'read' });
@@ -252,6 +257,80 @@ test('role runner: vision delegation and file summaries with cache', async () =>
     assert.equal(summaryCalls, 1, 'second summary served from cache');
     assert.equal(memory.stats().fileSummaries, 1);
     memory.close();
+});
+
+test('encode branch writes the file and does not call the planner', async () => {
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: '```js\nexport const n = 1;\n```\nroute: encode' };
+        if (role === 'encoder') {
+            assert.match(JSON.stringify(body.input), /# Directory tree/);
+            return { text: JSON.stringify({ summary: 'файл', commands: [{
+                command: 'fs:write', path: 'out.js', cwd: '.', type: 'code', language: 'js',
+                content: 'export const n = 1;\n', lines: null, source: null, start: null, end: null,
+            }] }) };
+        }
+        return { text: 'planner' };
+    };
+    const result = await runTeam({ client: client(), config: baseConfig(), ledger: createLedger(), task: 'запиши модуль', root, approvalLevel: 'all', emit() {} });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(result.plan, null);
+    assert.equal(await readFile(path.join(root, 'out.js'), 'utf8'), 'export const n = 1;\n');
+});
+
+test('a plan list stores a nested directory for the next role', async () => {
+    await mkdir(path.join(root, 'src', 'util'), { recursive: true });
+    await writeFile(path.join(root, 'src', 'app.js'), 'export {}\n');
+    await writeFile(path.join(root, 'src', 'util', 'text.js'), 'export {}\n');
+    let plannerSawTree = false;
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен список.\nroute: plan' };
+        if (role === 'planner') {
+            plannerSawTree = JSON.stringify(body.input).includes('# Directory tree') && JSON.stringify(body.input).includes('src/');
+            return { text: JSON.stringify({ summary: 's', complexity: 'trivial', steps: [{ goal: 'посмотреть', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [], fileActions: [{ action: 'list', source: null, path: 'src', cwd: '.', language: null, reason: 'дерево', start: null, end: null, depth: 3, mode: 'tree' }] }) };
+        }
+        return { text: 'ok' };
+    };
+    const result = await runTeam({ client: client(), config: { ...baseConfig(), memory: { ...defaults.memory, enabled: false } }, ledger: createLedger(), task: 'покажи дерево', root, approvalLevel: 'read', emit() {} });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(plannerSawTree, true);
+    const { readdir } = await import('node:fs/promises');
+    const docs = await Promise.all((await readdir(path.join(root, '.tmp'))).map(async (id) => JSON.parse(await readFile(path.join(root, '.tmp', id, 'handoff.json'), 'utf8'))));
+    assert.equal(docs.some((handoff) => handoff.artifacts.some((item) => item.hintLanguage === 'tree' && item.entries?.some((entry) => entry.path === 'src/util/text.js'))), true);
+});
+
+test('a plan read attaches a line range before the collector', async () => {
+    await writeFile(path.join(root, 'note.txt'), 'alpha\nbeta\ngamma\n');
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен фрагмент.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({ summary: 's', complexity: 'trivial', steps: [{ goal: 'посмотреть', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [], fileActions: [{ action: 'read', source: null, path: 'note.txt', cwd: '.', language: 'text', reason: 'вторая строка', start: 2, end: 2 }] }) };
+        }
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
+        return { text: 'ok' };
+    };
+    const result = await runTeam({ client: client(), config: { ...baseConfig(), memory: { ...defaults.memory, enabled: false } }, ledger: createLedger(), task: 'прочитай строку', root, approvalLevel: 'read', emit() {} });
+    assert.equal(result.status, 'completed', result.error?.message);
+    const handoffDir = path.join(root, '.tmp');
+    const { readdir } = await import('node:fs/promises');
+    const docs = await Promise.all((await readdir(handoffDir)).map(async (id) => JSON.parse(await readFile(path.join(handoffDir, id, 'handoff.json'), 'utf8'))));
+    assert.equal(docs.some((handoff) => handoff.artifacts.some((item) => item.origin === 'note.txt' && item.start === 2)), true);
+});
+
+test('--no-chain starts at the planner', async () => {
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'planner') return { text: JSON.stringify({ summary: 'мелочь', complexity: 'trivial', steps: [{ goal: 'сделать', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.agent.chain = false;
+    const events = [];
+    const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'мелкая правка', root, approvalLevel: 'read', emit: (event) => events.push(event) });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.deepEqual(events.filter((event) => event.type === 'stage.start').map((event) => event.stage), ['plan', 'work']);
 });
 
 test('team run puts the confirmed read file in the collector brief', async () => {

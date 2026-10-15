@@ -33,12 +33,12 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
      */
     async function run(name, {
         text, parts = [], instructions = '', toolset = null, builtin = [], schema = null, schemaName = 'result',
-        maxTurns = 1, imageTarget = config.image.outputDir, session = null, silent = Boolean(schema),
+        maxTurns = 1, imageTarget = config.image.outputDir, session = null, silent = Boolean(schema), instructionsOnly = false,
     }) {
         const role = resolve(name);
         const conversation = session ?? createSession({ store: false, model: role.model });
         conversation.addUserMessage(buildUserMessage({ text, parts }));
-        const fullInstructions = [instructions, role.instructions].filter((part) => part && part.trim()).join('\n\n');
+        const fullInstructions = instructionsOnly ? instructions : [instructions, role.instructions].filter((part) => part && part.trim()).join('\n\n');
         const previousRole = ledger.role;
         ledger.setRole(name);
         notify({ type: 'role.start', role: name, model: role.model, effort: role.effort });
