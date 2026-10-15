@@ -160,3 +160,5 @@ ai-image-*.webp
 #
 .env
 .ai
+.tmp
+.temp
