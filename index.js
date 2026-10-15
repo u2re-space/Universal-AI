@@ -1,4 +1,14 @@
 /**
+ * @file index.js
+ * @module index
+ * @purpose Public programmatic API: client, session, ledger, tools, and one-turn runs.
+ * @depends openai/client, core/session, core/usage, core/config, core/attachments, core/memory, core/context, agent/tools, agent/loop, agent/roles, agent/team, ui/renderer, jobs/manager, agent/map, agent/task-map
+ * @usedBy external
+ * @exports createClient, ApiError, createSession, createLedger, loadConfig, configDefaults, resolveRole, buildUserMessage, loadImageAttachment, loadFileAttachment, openMemory, projectKey, createSharedContext, createToolset, runTurn, createRoleRunner, runTeam, createRenderer, createJobManager, loadProjectMap, draftTaskMap
+ * @ai.tags api, exports
+ * @ai.hint keep
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ *
  * Public programmatic API (Node.js 26+, ESM).
  *
  * The CLI (bin/ai.js) is built on top of exactly these primitives:

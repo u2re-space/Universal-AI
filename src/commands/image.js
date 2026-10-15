@@ -1,3 +1,14 @@
+/**
+ * @file src/commands/image.js
+ * @module commands/image
+ * @purpose Generate or edit images through the Responses image_generation tool.
+ * @depends agent/loop, commands/instructions, commands/flow, commands/shared
+ * @usedBy cli
+ * @exports image
+ * @ai.tags cli, image
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import { builtinTools } from '../agent/loop.js';
 import { IMAGE_BASE } from './instructions.js';
 import { runOnce } from './flow.js';
@@ -6,6 +17,10 @@ import { UsageError, readStdin, loadAttachments, composeInstructions, resolveTex
 /**
  * `ai image <prompt>` — generate (or edit, with --image) pictures through the Responses API
  * image_generation tool. Partial images are written progressively; final files are listed.
+ * @param {object} ctx Command context from cli.main.
+ * @returns {Promise<number>} Worst exit code across --count images.
+ * @exports
+ * @ai.hint io
  */
 export async function image(ctx) {
     const { config, renderer, values, positionals } = ctx;

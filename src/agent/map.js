@@ -39,6 +39,13 @@ export function projectMapFile(root) {
     return path.join(root, '.ai', 'map.json');
 }
 
+/**
+ * POSIX relative path, or null when `rel` escapes the project root.
+ * `readCachedText` and `updateProjectMapPath` call this.
+ * @param {string} rel
+ * @returns {string | null}
+ * @ai.hint pure
+ */
 function normalizeRel(rel) {
     if (typeof rel !== 'string' || rel.includes('\0')) return null;
     const posix = rel.replaceAll('\\', '/');
@@ -49,6 +56,14 @@ function normalizeRel(rel) {
     return normalized;
 }
 
+/**
+ * True when `rel` is `dir` or a file under it.
+ * `searchMapped` uses this to limit hits.
+ * @param {string} rel
+ * @param {string} dir
+ * @returns {boolean}
+ * @ai.hint pure
+ */
 function inDir(rel, dir) {
     let normalized = String(dir ?? '.').replaceAll('\\', '/');
     if (normalized.startsWith('./')) normalized = normalized.slice(2);
@@ -69,6 +84,14 @@ function sameMapTime(info, storedMs) {
     return info.mtimeMs === storedMs || info.mtime.getTime() === Math.round(storedMs);
 }
 
+/**
+ * True when the first 8 KiB of the file contain a NUL byte.
+ * `indexFile` skips those files.
+ * @param {string} abs
+ * @param {number} size
+ * @returns {Promise<boolean>}
+ * @ai.hint io
+ */
 async function hasNulByte(abs, size) {
     const handle = await open(abs, 'r');
     try {
@@ -91,6 +114,13 @@ function isSkippedDir(name) {
     return name === '.ai' || NOISY_DIRS.test(name) || isForbiddenDirName(name);
 }
 
+/**
+ * True when `rel` is a protected file or sits under a skipped directory.
+ * `indexFile` drops those paths.
+ * @param {string} rel
+ * @returns {boolean}
+ * @ai.hint pure
+ */
 function skippedRel(rel) {
     const segments = rel.split('/');
     const name = segments.at(-1);
@@ -98,6 +128,14 @@ function skippedRel(rel) {
     return segments.slice(0, -1).some((segment) => isSkippedDir(segment));
 }
 
+/**
+ * Read one UTF-8 file into a map record, or return null when it should be skipped.
+ * `walk` and `updateProjectMapPath` call this.
+ * @param {string} root
+ * @param {string} rel
+ * @returns {Promise<object | null>}
+ * @ai.hint io
+ */
 async function indexFile(root, rel) {
     if (skippedRel(rel)) return null;
     const abs = path.join(root, ...rel.split('/'));
@@ -118,6 +156,15 @@ async function indexFile(root, rel) {
     return { bytes: info.size, mtimeMs: info.mtimeMs, symbols, importSpecs, doc };
 }
 
+/**
+ * Walk `dirRel` and append indexed files to `collected`.
+ * `buildProjectMap` starts this at the project root.
+ * @param {string} root
+ * @param {string} dirRel
+ * @param {object[]} collected
+ * @returns {Promise<void>}
+ * @ai.hint io
+ */
 async function walk(root, dirRel, collected) {
     const dirAbs = dirRel ? path.join(root, ...dirRel.split('/')) : root;
     const entries = await readdir(dirAbs, { withFileTypes: true });
@@ -139,6 +186,13 @@ async function walk(root, dirRel, collected) {
     }
 }
 
+/**
+ * Map each lowercased symbol name to the files and lines where it appears.
+ * `install` stores the table on the RAM entry.
+ * @param {Map<string, { symbols: object[] }>} files
+ * @returns {Map<string, object[]>}
+ * @ai.hint pure
+ */
 function symbolTable(files) {
     const symbols = new Map();
     for (const [rel, record] of files) {
@@ -220,6 +274,15 @@ function sanitizeRecord(record) {
     return item;
 }
 
+/**
+ * Read `rel` through the LRU, keyed by mtime.
+ * The entry's `readText` method calls this.
+ * @param {string} root
+ * @param {object} entry
+ * @param {string} rel
+ * @returns {Promise<string>}
+ * @ai.hint io
+ */
 async function readCachedText(root, entry, rel) {
     const posix = normalizeRel(rel);
     if (!posix) throw new Error(`Путь вне рабочего каталога: ${rel}`);
@@ -248,6 +311,16 @@ async function readCachedText(root, entry, rel) {
     return text;
 }
 
+/**
+ * Sanitize `map`, build the symbol table, and store the RAM entry for `root`.
+ * `buildProjectMap`, `loadProjectMap`, and `updateProjectMapPath` finish here.
+ * @param {string} root
+ * @param {object} map
+ * @param {number} mtimeMs
+ * @param {Map<string, unknown[]>} importSpecs
+ * @returns {object}
+ * @ai.hint pure
+ */
 function install(root, map, mtimeMs, importSpecs = new Map()) {
     const files = new Map();
     const rels = Object.keys(map.files ?? {}).sort();
@@ -261,6 +334,7 @@ function install(root, map, mtimeMs, importSpecs = new Map()) {
         files,
         symbols: null,
         mtimeMs,
+        /** Read `rel` through the per-entry LRU. */
         readText(rel) {
             return readCachedText(root, entry, rel);
         },
@@ -273,6 +347,14 @@ function install(root, map, mtimeMs, importSpecs = new Map()) {
     return entry;
 }
 
+/**
+ * Write `.ai/map.json` and return its stat.
+ * `buildProjectMap` and `updateProjectMapPath` call this.
+ * @param {string} root
+ * @param {object} map
+ * @returns {Promise<import('node:fs').Stats>}
+ * @ai.hint io
+ */
 async function writeMap(root, map) {
     const file = projectMapFile(root);
     await mkdir(path.dirname(file), { recursive: true });
@@ -442,6 +524,7 @@ export async function searchMapped(projectMap, { query, dir = '.', scope = 'all'
     const appeared = [];
     const seen = new Set();
 
+    /** Record one hit and the file it came from; return false once `maxResults` is full. */
     const push = (line, rel) => {
         if (lines.length >= maxResults) {
             truncated = true;

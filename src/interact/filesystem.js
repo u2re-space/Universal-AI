@@ -1,3 +1,15 @@
+/**
+ * @file src/interact/filesystem.js
+ * @module interact/filesystem
+ * @purpose Find AutoHotkey v2, run one script file, and perform one normalized desktop action.
+ * @depends node:path, node:child_process, node:fs/promises, node:os, agent/shell, util/text, interact/ahk-script
+ * @usedBy agent/desktop, interact/keyboard, interact/mouse
+ * @exports ahkString, scriptFor, wrapScript, findAhk, runScript, performAction
+ * @ai.tags desktop, autohotkey, process
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -9,6 +21,13 @@ export { ahkString, scriptFor, wrapScript };
 
 const AHK_NOT_FOUND = 'AutoHotkey v2 не найден (AutoHotkey64.exe). Укажите desktop.ahkPath.';
 
+/**
+ * List AutoHotkey64.exe paths, the explicit path first, then Program Files and LocalAppData.
+ * @param {string | undefined} ahkPath Configured executable, when set.
+ * @param {object | undefined} env Environment used for the standard install locations.
+ * @returns {string[]}
+ * @ai.hint pure
+ */
 function ahkCandidates(ahkPath, env) {
     const candidates = [];
     if (ahkPath) candidates.push(ahkPath);
@@ -19,6 +38,12 @@ function ahkCandidates(ahkPath, env) {
     return candidates;
 }
 
+/**
+ * True when stat reports an existing file. A missing path returns false.
+ * @param {string} filePath Candidate path.
+ * @returns {Promise<boolean>}
+ * @ai.hint io
+ */
 async function isFile(filePath) {
     try {
         return (await stat(filePath)).isFile();
@@ -32,6 +57,12 @@ function stripUtf8Bom(text) {
     return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
+/**
+ * Read the AutoHotkey result file as UTF-8 and drop a leading BOM. A missing file is empty.
+ * @param {string} resultPath Path the script writes.
+ * @returns {Promise<string>}
+ * @ai.hint io
+ */
 async function readResultText(resultPath) {
     try {
         return stripUtf8Bom(await readFile(resultPath, 'utf8'));
@@ -41,10 +72,27 @@ async function readResultText(resultPath) {
     }
 }
 
+/**
+ * Spawn the executable without a shell and resolve with its exit code. A timeout kills the child.
+ * @param {Function} spawnFn Process starter, usually node:child_process.spawn.
+ * @param {string} executable AutoHotkey executable.
+ * @param {string[]} args Arguments, including the script path and result path.
+ * @param {string} [cwd] Working directory for the child.
+ * @param {number} timeoutMs Milliseconds before the child is killed.
+ * @returns {Promise<number>}
+ * @ai.hint io
+ */
 function runChild({ spawnFn, executable, args, cwd, timeoutMs }) {
     return new Promise((resolve, reject) => {
         let child;
         let settled = false;
+        /**
+         * Resolve or reject the child promise a single time.
+         * @param {Function} fn resolve or reject.
+         * @param {unknown} value Exit code or error.
+         * @returns {void}
+         * @ai.hint pure
+         */
         const finish = (fn, value) => {
             if (settled) return;
             settled = true;

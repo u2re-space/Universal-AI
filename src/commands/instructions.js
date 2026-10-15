@@ -1,3 +1,14 @@
+/**
+ * @file src/commands/instructions.js
+ * @module commands/instructions
+ * @purpose System prompts for ask, chat, image generation, and the autonomous agent.
+ * @depends node:os, roles/index
+ * @usedBy commands/ask, commands/chat, commands/image, commands/run, agent/roles, agent/team
+ * @exports ASSISTANT_BASE, IMAGE_BASE, ROLE_INSTRUCTIONS, agentBase
+ * @ai.tags prompt, instructions
+ * @ai.hint pure
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import os from 'node:os';
 
 /** Base instructions for plain prompting / chat (no local tools). */
@@ -15,7 +26,13 @@ After the tool returns, reply with one short sentence describing the generated i
 /** Role instructions for team runs. Defined in src/roles. */
 export { ROLE_INSTRUCTIONS } from '../roles/index.js';
 
-/** Instructions for the autonomous agent (local tools). */
+/**
+ * Instructions for the autonomous agent (local tools).
+ * @param {{ root: string, approvalLevel: string, toolNames: string[], interactive: boolean, shell: string|null }} options Working directory, approval policy, enabled tools, and shell.
+ * @returns {string} Prompt including platform, date, and access policy.
+ * @exports
+ * @ai.hint pure
+ */
 export function agentBase({ root, approvalLevel, toolNames, interactive, shell }) {
     const platform = `${process.platform} ${os.release()} (${os.arch()})`;
     const shellName = shell ?? (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh');

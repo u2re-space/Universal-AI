@@ -1,6 +1,24 @@
+/**
+ * @file src/commands/map.js
+ * @module commands/map
+ * @purpose Rebuild `.ai/map.json` or print its path and symbol counts.
+ * @depends agent/map, commands/shared
+ * @usedBy cli
+ * @exports mapCommand
+ * @ai.tags cli, index
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import { buildProjectMap, loadProjectMap, projectMapFile, countProjectMap } from '../agent/map.js';
 import { UsageError } from './shared.js';
 
+/**
+ * `ai map` rebuilds the project map. `ai map path` prints the file and counts without writing.
+ * @param {object} ctx Command context: renderer, positionals, and cwd.
+ * @returns {Promise<number>} 0. Unknown arguments throw UsageError.
+ * @exports
+ * @ai.hint io
+ */
 export async function mapCommand(ctx) {
     const { renderer, positionals, cwd } = ctx;
     const sub = positionals[0] ?? '';

@@ -1,3 +1,14 @@
+/**
+ * @file src/commands/ask.js
+ * @module commands/ask
+ * @purpose Run one prompt and return when the model stops calling tools.
+ * @depends agent/tools, core/config, commands/instructions, commands/flow, commands/shared
+ * @usedBy cli
+ * @exports ask
+ * @ai.tags cli, prompt
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import { createToolset, enabledToolNames } from '../agent/tools.js';
 import { resolveRole } from '../core/config.js';
 import { ASSISTANT_BASE } from './instructions.js';
@@ -7,6 +18,10 @@ import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstruct
 /**
  * `ai ask [prompt…]` — one prompt, one answer (plus optional attachments, stdin context,
  * web search / image generation tools, structured output and persistent sessions).
+ * @param {object} ctx Command context from cli.main.
+ * @returns {Promise<number>} Exit code from runOnce.
+ * @exports
+ * @ai.hint io
  */
 export async function ask(ctx) {
     const { config, renderer, values, positionals, signal, emit } = ctx;

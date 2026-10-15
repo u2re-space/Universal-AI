@@ -1,3 +1,15 @@
+/**
+ * @file src/ui/sanitize.js
+ * @module ui/sanitize
+ * @purpose Strip terminal controls from model text before it is printed or emitted as JSON.
+ * @depends node:util
+ * @usedBy ui/renderer, commands/memory, commands/jobs
+ * @exports sanitizeTerminal, sanitizeValue
+ * @ai.tags ui, terminal, sanitize
+ * @ai.hint pure
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import { stripVTControlCharacters } from 'node:util';
 
 /**

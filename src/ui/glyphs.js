@@ -15,6 +15,16 @@ const ASCII_SYMBOLS = { action: '>', ok: '+', fail: 'x', warn: '!', reasoning: '
 
 export { FRAMES, ASCII_FRAMES, SYMBOLS, ASCII_SYMBOLS };
 
+/**
+ * Return json, quiet, tty, or plain from the flags and whether both streams are TTYs.
+ * @param {boolean} [json] Request JSON lines.
+ * @param {boolean} [quiet] Request quiet mode.
+ * @param {object} [stdout] Stream whose isTTY flag selects tty or plain.
+ * @param {object} [stderr] Stream whose isTTY flag selects tty or plain.
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
 export function detectMode({ json = false, quiet = false, stdout = process.stdout, stderr = process.stderr } = {}) {
     if (json) return 'json';
     if (quiet) return 'quiet';

@@ -1,5 +1,24 @@
+/**
+ * @file src/interact/mouse.js
+ * @module interact/mouse
+ * @purpose Build AutoHotkey v2 statements for one normalized click.
+ * @depends interact/filesystem
+ * @usedBy interact/ahk-script
+ * @exports clickBody
+ * @ai.tags desktop, mouse, autohotkey
+ * @ai.hint pure
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import { ahkString } from './filesystem.js';
 
+/**
+ * AutoHotkey lines that set CoordMode and click the action point.
+ * @param {object} action Normalized click with x, y, button, and clicks.
+ * @param {string} coordMode AutoHotkey mouse coordinate space, such as Window.
+ * @returns {string[]}
+ * @ai.hint pure
+ */
 function clickAt(action, coordMode) {
     return [
         `CoordMode("Mouse", ${ahkString(coordMode)})`,
@@ -7,6 +26,11 @@ function clickAt(action, coordMode) {
     ];
 }
 
+/**
+ * AutoHotkey lines that read the virtual-screen origin with GetSystemMetrics.
+ * @returns {string[]}
+ * @ai.hint pure
+ */
 function virtualOrigin() {
     return [
         'originX := DllCall("user32\\GetSystemMetrics", "Int", 76, "Int")',

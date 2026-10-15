@@ -1,3 +1,14 @@
+/**
+ * @file src/commands/run.js
+ * @module commands/run
+ * @purpose Run an autonomous task as a role team or as a single tool loop.
+ * @depends agent/map, agent/tools, agent/roles, agent/team, core/config, util/text, commands/instructions, commands/flow, commands/shared
+ * @usedBy cli
+ * @exports run
+ * @ai.tags cli, agent, team
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import { ensureProjectMap } from '../agent/map.js';
 import { createToolset, enabledToolNames } from '../agent/tools.js';
 import { createRoleRunner } from '../agent/roles.js';
@@ -16,6 +27,10 @@ const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло 
  *   team   (default): planner → collector → worker steps → reviewer (+fix rounds) → summarizer/memory,
  *                     each role with its own model (config.roles / --role).
  *   single (--single): one model, one tool loop (plus memory tools).
+ * @param {object} ctx Command context from cli.main.
+ * @returns {Promise<number>} Exit code from the team or single flow.
+ * @exports
+ * @ai.hint io
  */
 export async function run(ctx) {
     const { config, renderer, values, positionals } = ctx;
@@ -48,6 +63,13 @@ export async function run(ctx) {
     }
 }
 
+/**
+ * One model and one tool loop. runOnce prints the summary and returns the exit code.
+ * @param {object} ctx Command context. client and ledger are attached before runOnce.
+ * @param {{ task: string, parts: object[], level: string, interactive: boolean, store: object|null, names: string[], extra: string|null }} options Task text, attachments, approval level, and tool names.
+ * @returns {Promise<number>}
+ * @ai.hint io
+ */
 async function runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra }) {
     const { config, renderer, signal, emit } = ctx;
     const role = resolveRole(config, 'default');
@@ -68,6 +90,13 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
         extraRows: () => [...usageBreakdownRows(ledger), ...(toolset.stats().memories.length ? [['память', `сохранено ${toolset.stats().memories.length}`]] : [])] });
 }
 
+/**
+ * Planner, collector, worker, and reviewer. Prints the summary and writes --out.
+ * @param {object} ctx Command context.
+ * @param {{ task: string, parts: object[], level: string, interactive: boolean, store: object|null, extra: string|null }} options Task text, attachments, approval level, and extra instructions.
+ * @returns {Promise<number>}
+ * @ai.hint io
+ */
 async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra }) {
     const { config, renderer, values, signal, emit } = ctx;
     const client = createClientFor(config);

@@ -1,3 +1,15 @@
+/**
+ * @file src/agent/fs-tools.js
+ * @module agent/fs-tools
+ * @purpose List, read, search, and edit UTF-8 files inside the working directory.
+ * @depends node:path, node:fs/promises, agent/paths, util/text
+ * @usedBy agent/tools, agent/team
+ * @exports listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory
+ * @ai.tags filesystem, tools
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import path from 'node:path';
 import { readFile, writeFile, mkdir, stat, readdir, unlink, copyFile, open } from 'node:fs/promises';
 import { resolveInside, NOISY_DIRS } from './paths.js';
@@ -5,6 +17,14 @@ import { formatBytes } from '../util/text.js';
 
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
+/**
+ * True when the first 8 KiB contain a NUL byte.
+ * `readTextFile` and `searchFiles` skip those files.
+ * @param {string} abs
+ * @param {number} size
+ * @returns {Promise<boolean>}
+ * @ai.hint io
+ */
 async function isBinary(abs, size) {
     const handle = await open(abs, 'r');
     try {
@@ -26,6 +46,14 @@ async function backup(abs, rel, backupDir) {
     return destination;
 }
 
+/**
+ * List a directory tree, mark noisy folders, and stop at `maxEntries`.
+ * The `list_files` tool calls this.
+ * @param {{ root: string, dir?: string, depth?: number, includeHidden?: boolean, maxEntries?: number }} options
+ * @returns {Promise<{ text: string, count: number, truncated: boolean }>}
+ * @exports
+ * @ai.hint io
+ */
 export async function listFiles({ root, dir = '.', depth = 2, includeHidden = false, maxEntries = 400 }) {
     const { abs, rel } = await resolveInside(root, dir);
     const info = await stat(abs).catch(() => null);
@@ -33,6 +61,7 @@ export async function listFiles({ root, dir = '.', depth = 2, includeHidden = fa
     if (!info.isDirectory()) throw new Error(`Не каталог: ${dir}`);
     const lines = [];
     let truncated = false;
+    /** List one level and descend until `depth`, skipping noisy directory contents. */
     async function walk(current, prefix, level) {
         if (truncated) return;
         let entries;
@@ -58,6 +87,14 @@ export async function listFiles({ root, dir = '.', depth = 2, includeHidden = fa
     return { text: `${lines.join('\n') || '(пусто)'}${truncated ? `\n…список усечён (${maxEntries} записей)` : ''}`, count: lines.length, truncated };
 }
 
+/**
+ * Return numbered UTF-8 lines for one file, clipped to `maxBytes`.
+ * The `read_file` tool calls this.
+ * @param {{ root: string, file: string, startLine?: number | null, endLine?: number | null, maxBytes?: number }} options
+ * @returns {Promise<object>}
+ * @exports
+ * @ai.hint io
+ */
 export async function readTextFile({ root, file, startLine = null, endLine = null, maxBytes = 256 * 1024 }) {
     const { abs, rel } = await resolveInside(root, file, { allowRoot: false });
     const info = await stat(abs).catch(() => null);
@@ -87,6 +124,14 @@ export async function readTextFile({ root, file, startLine = null, endLine = nul
     return { text: `${header}\n${numbered}`, totalLines: total, from, to, bytes: buffer.length, truncated };
 }
 
+/**
+ * Find `query` in text files and return `path:line: text` hits.
+ * `search_files` uses this when the project map is missing.
+ * @param {{ root: string, query: string, dir?: string, regex?: boolean, maxResults?: number, maxFileBytes?: number }} options
+ * @returns {Promise<{ text: string, count: number, scanned: number, truncated: boolean }>}
+ * @exports
+ * @ai.hint io
+ */
 export async function searchFiles({ root, query, dir = '.', regex = false, maxResults = 60, maxFileBytes = 1024 * 1024 }) {
     if (typeof query !== 'string' || !query) throw new Error('Пустой запрос поиска.');
     const { abs, rel } = await resolveInside(root, dir);
@@ -96,6 +141,7 @@ export async function searchFiles({ root, query, dir = '.', regex = false, maxRe
     }
     const results = [];
     let scanned = 0, truncated = false;
+    /** Scan text files under this directory until `maxResults` hits. */
     async function walk(current, prefix) {
         if (truncated) return;
         let entries;
@@ -131,6 +177,14 @@ export async function searchFiles({ root, query, dir = '.', regex = false, maxRe
         count: results.length, scanned, truncated };
 }
 
+/**
+ * Create or overwrite a UTF-8 file, copying the old bytes into `backupDir` first.
+ * The `write_file` tool calls this.
+ * @param {{ root: string, file: string, content: string, overwrite?: boolean, maxBytes?: number, backupDir?: string | null }} options
+ * @returns {Promise<object>} rel, bytes, created, backupPath.
+ * @exports
+ * @ai.hint io
+ */
 export async function writeTextFile({ root, file, content, overwrite = true, maxBytes = 4 * 1024 * 1024, backupDir = null }) {
     if (typeof content !== 'string') throw new Error('content должен быть строкой.');
     if (Buffer.byteLength(content) > maxBytes) throw new Error(`Содержимое больше лимита ${formatBytes(maxBytes)}.`);
@@ -145,6 +199,14 @@ export async function writeTextFile({ root, file, content, overwrite = true, max
     return { rel, bytes: Buffer.byteLength(content), created: !existing, backupPath };
 }
 
+/**
+ * Replace an exact fragment once, or every time when `all` is set.
+ * The `replace_text` tool calls this.
+ * @param {{ root: string, file: string, search: string, replacement: string, all?: boolean, maxBytes?: number, backupDir?: string | null }} options
+ * @returns {Promise<object>} rel, replacements, bytes, backupPath.
+ * @exports
+ * @ai.hint io
+ */
 export async function replaceInFile({ root, file, search, replacement, all = false, maxBytes = 4 * 1024 * 1024, backupDir = null }) {
     if (typeof search !== 'string' || !search) throw new Error('search должен быть непустой строкой.');
     if (typeof replacement !== 'string') throw new Error('replacement должен быть строкой.');
@@ -170,6 +232,14 @@ export async function replaceInFile({ root, file, search, replacement, all = fal
     return { rel, replacements: all ? count : 1, bytes: Buffer.byteLength(updated), backupPath };
 }
 
+/**
+ * Copy a file into `backupDir`, then delete it.
+ * The `delete_file` tool calls this.
+ * @param {{ root: string, file: string, backupDir?: string | null }} options
+ * @returns {Promise<{ rel: string, backupPath: string | null }>}
+ * @exports
+ * @ai.hint io
+ */
 export async function deleteFile({ root, file, backupDir = null }) {
     const { abs, rel } = await resolveInside(root, file, { forWrite: true, allowRoot: false });
     const info = await stat(abs).catch(() => null);
@@ -180,6 +250,14 @@ export async function deleteFile({ root, file, backupDir = null }) {
     return { rel, backupPath };
 }
 
+/**
+ * Create a directory and any missing parents.
+ * The `make_dir` tool calls this.
+ * @param {{ root: string, dir: string }} options
+ * @returns {Promise<{ rel: string }>}
+ * @exports
+ * @ai.hint io
+ */
 export async function makeDirectory({ root, dir }) {
     const { abs, rel } = await resolveInside(root, dir, { forWrite: true, allowRoot: false });
     await mkdir(abs, { recursive: true });

@@ -1,3 +1,15 @@
+/**
+ * @file src/agent/loop.js
+ * @module agent/loop
+ * @purpose Send one conversation turn, run requested local tools, and record images and usage.
+ * @depends openai/errors, openai/stream, core/config, core/images, core/background, util/text
+ * @usedBy commands/chat, commands/flow, commands/image, agent/roles, agent/team, index.js
+ * @exports builtinTools, buildRequestBody, compactSession, runTurn
+ * @ai.tags loop, tools
+ * @ai.hint hot
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import { ApiError, BudgetError, CancelledError, isAbortError } from '../openai/errors.js';
 import { outputText, refusalText } from '../openai/stream.js';
 import { isReasoningModel, supportsVerbosity } from '../core/config.js';
@@ -89,12 +101,14 @@ export async function runTurn({
     // function_call items recorded in the session that still need a function_call_output.
     // If the turn is interrupted we answer them synthetically so the history stays valid.
     let pendingCalls = [];
+    /** Write synthetic tool results so an interrupted turn still has a valid history. */
     const settlePending = (note) => {
         if (!pendingCalls.length) return;
         session.addItems(pendingCalls.map((call) => ({ type: 'function_call_output', call_id: call.call_id, output: note })));
         pendingCalls = [];
     };
 
+    /** Save a partial image when the stream sends one, then forward the event. */
     const onEvent = (event) => {
         if (event.type === 'image.partial' && event.b64) {
             images.savePartial(event.itemId, event.b64, event.outputFormat)
@@ -105,6 +119,7 @@ export async function runTurn({
         notify(event);
     };
 
+    /** Create a response; in background mode, reattach a dropped stream or poll. */
     async function request(body) {
         if (!background) return client.responses.create(body, { signal, onEvent });
         // Background mode: keep the stream attached when possible, fall back to polling otherwise.

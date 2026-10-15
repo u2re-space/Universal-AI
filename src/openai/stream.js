@@ -1,3 +1,14 @@
+/**
+ * @file src/openai/stream.js
+ * @module openai/stream
+ * @purpose Reduce Responses API stream events and read text, refusal, and usage from a response.
+ * @depends openai/errors
+ * @usedBy openai/client, core/usage, agent/loop, commands/misc
+ * @exports createStreamReducer, outputText, refusalText, normalizeUsage
+ * @ai.tags stream
+ * @ai.hint hot
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import { ApiError } from './errors.js';
 
 const BUILTIN_KINDS = {
@@ -38,6 +49,12 @@ export function createStreamReducer({ emit = () => {} } = {}) {
     const notify = (event) => { try { emit(event); } catch { /* observers never break a request */ } };
     const kindOf = (item) => BUILTIN_KINDS[item?.type] ?? null;
 
+    /**
+     * Apply one raw stream event and emit the matching application event.
+     * @param {object} event
+     * @returns {void}
+     * @ai.hint pure
+     */
     function handle(event) {
         if (Number.isSafeInteger(event.sequence_number)) lastSequence = event.sequence_number;
         switch (event.type) {
@@ -143,9 +160,29 @@ export function createStreamReducer({ emit = () => {} } = {}) {
 
     return {
         handle,
+        /**
+         * Response object seen so far, or null before response.created.
+         * @returns {object|null}
+         * @ai.hint pure
+         */
         get response() { return response; },
+        /**
+         * Last SSE sequence_number, or null when none has arrived.
+         * @returns {number|null}
+         * @ai.hint pure
+         */
         get lastSequence() { return lastSequence; },
+        /**
+         * Error event from the stream, if the API sent one.
+         * @returns {ApiError|null}
+         * @ai.hint pure
+         */
         get streamError() { return streamError; },
+        /**
+         * Output items in arrival order.
+         * @returns {object[]}
+         * @ai.hint pure
+         */
         get items() { return [...items.values()]; },
         /** Text accumulated so far (useful when the stream was cut before response.completed). */
         partialText() { return [...textByItem.values()].join(''); },

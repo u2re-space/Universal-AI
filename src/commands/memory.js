@@ -1,3 +1,14 @@
+/**
+ * @file src/commands/memory.js
+ * @module commands/memory
+ * @purpose List, search, add, and delete long-term SQLite memories and past tasks.
+ * @depends core/memory, ui/sanitize, util/text, commands/shared
+ * @usedBy cli
+ * @exports memoryCommand
+ * @ai.tags cli, memory
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import { MEMORY_KINDS } from '../core/memory.js';
 import { sanitizeTerminal } from '../ui/sanitize.js';
 import { formatNumber, truncate } from '../util/text.js';
@@ -5,6 +16,12 @@ import { UsageError, openMemoryFor } from './shared.js';
 
 const SCOPE_RU = { global: 'глобально', project: 'проект' };
 
+/**
+ * One terminal line for a memory row: id, scope, kind, text, and tags.
+ * @param {object} row Row from memory.list or memory.recall.
+ * @returns {string}
+ * @ai.hint pure
+ */
 function formatRow(row) {
     return `#${String(row.id).padEnd(4)} ${SCOPE_RU[row.scope] ?? row.scope}/${row.kind}${row.project_name && row.scope === 'project' ? ` (${row.project_name})` : ''}  ${sanitizeTerminal(row.content)}${row.tags ? `  [${row.tags}]` : ''}`;
 }
@@ -12,6 +29,10 @@ function formatRow(row) {
 /**
  * `ai memory <list|search|add|forget|clear|tasks|stats|path> …` — long-term memory management.
  * Memory is scoped to the working directory (project) plus global entries; use --global for global.
+ * @param {object} ctx Command context from cli.main.
+ * @returns {Promise<number>} 0, or 1 when forget misses or clear is declined.
+ * @exports
+ * @ai.hint io
  */
 export async function memoryCommand(ctx) {
     const { config, renderer, positionals, values } = ctx;

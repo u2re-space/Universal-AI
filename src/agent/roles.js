@@ -1,3 +1,15 @@
+/**
+ * @file src/agent/roles.js
+ * @module agent/roles
+ * @purpose Run a named role as a fresh conversation with that role's model, tools, and optional JSON schema.
+ * @depends core/session, core/attachments, core/config, util/text, commands/instructions, util/toon, agent/loop, agent/schemas
+ * @usedBy commands/run, agent/team, index.js
+ * @exports createRoleRunner
+ * @ai.tags roles, models
+ * @ai.hint hot
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import { createSession } from '../core/session.js';
 import { buildUserMessage } from '../core/attachments.js';
 import { resolveRole } from '../core/config.js';

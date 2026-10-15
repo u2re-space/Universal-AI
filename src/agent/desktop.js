@@ -1,4 +1,15 @@
-/** Desktop tools. AutoHotkey is started only by performAction, and only when no performDesktop is injected. */
+/**
+ * @file src/agent/desktop.js
+ * @module agent/desktop
+ * @purpose Desktop tools. AutoHotkey is started only by performAction, and only when no performDesktop is injected.
+ * @depends node:fs/promises, core/attachments, interact/batch, interact/filesystem, util/text, agent/paths
+ * @usedBy agent/tools, agent/team, agent/tool-specs
+ * @exports DESKTOP_TOOL_NAMES, createDesktopHandlers
+ * @ai.tags desktop, tools
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import { readFile } from 'node:fs/promises';
 import { detectImageMime } from '../core/attachments.js';
 import { executeBatch, normalizeBatch, parseBatch } from '../interact/batch.js';
@@ -10,6 +21,13 @@ export const DESKTOP_TOOL_NAMES = Object.freeze(['screenshot', 'click', 'type', 
 
 const BATCH_SOURCES = ['batch_json', 'batch_toon', 'path'];
 
+/**
+ * Return null for null, undefined, or a blank string.
+ * Click handling uses this so unused tool fields stay empty.
+ * @param {unknown} value
+ * @returns {unknown}
+ * @ai.hint pure
+ */
 function emptyToNull(value) {
     if (value == null) return null;
     if (typeof value !== 'string') return value;
@@ -34,6 +52,7 @@ function actionPreview(action) {
 export function createDesktopHandlers(ctx) {
     const { root, config, decide, describeScreen = null, performDesktop = null, delegate = null } = ctx;
 
+    /** Run `action` through `performDesktop`, or through AutoHotkey. */
     async function perform(action) {
         if (performDesktop) return performDesktop(action);
         const executable = await findAhk({ ahkPath: config.desktop?.ahkPath ?? null });
@@ -46,11 +65,13 @@ export function createDesktopHandlers(ctx) {
         });
     }
 
+    /** Normalize a one-action batch and perform its only step. */
     async function runOne(action) {
         const batch = normalizeBatch({ summary: 'tool', actions: [action] });
         return perform(batch.actions[0]);
     }
 
+    /** Ask the vision role for a TOON description of a saved screenshot. */
     async function screenToon(abs, rel) {
         const buffer = await readFile(abs);
         const mime = detectImageMime(buffer, abs);
@@ -62,6 +83,7 @@ export function createDesktopHandlers(ctx) {
         throw new Error('vision не вернул TOON.');
     }
 
+    /** Render status lines, and append a screen description when vision is set. */
     async function renderText(result) {
         const lines = ['status: ok', `message: ${result?.message ?? ''}`];
         if (result?.screenshotRel) lines.push(`screenshot: ${result.screenshotRel}`);
@@ -75,16 +97,19 @@ export function createDesktopHandlers(ctx) {
         return lines.join('\n');
     }
 
+    /** Pair rendered text with a short summary for the tool result. */
     async function render(result) {
         const output = await renderText(result);
         const summary = result?.screenshotRel ? `${result.message} ${result.screenshotRel}` : String(result?.message ?? '');
         return { output, summary, ok: true };
     }
 
+    /** Capture the screen and return the rendered tool result. */
     async function screenshot() {
         return render(await runOne({ type: 'screenshot' }));
     }
 
+    /** Click by coordinate, title, control, or an image path inside `root`. */
     async function click(args) {
         const image = emptyToNull(args.image);
         return render(await runOne({
@@ -100,14 +125,17 @@ export function createDesktopHandlers(ctx) {
         }));
     }
 
+    /** Type literal text or an AutoHotkey key string. */
     async function type(args) {
         return render(await runOne({ type: 'type', mode: args.mode, text: args.text }));
     }
 
+    /** Run AutoHotkey statements through the desktop wrapper. */
     async function run_ahk(args) {
         return render(await runOne({ type: 'ahk', script: args.script }));
     }
 
+    /** Read the one batch source: JSON, TOON, or a file under `root`. */
     async function batchText(args) {
         const present = BATCH_SOURCES.filter((key) => typeof args?.[key] === 'string' && args[key].trim() !== '');
         if (present.length !== 1) throw new Error('Нужен ровно один из batch_json, batch_toon или path.');
@@ -120,6 +148,7 @@ export function createDesktopHandlers(ctx) {
         return text.replace(/^\uFEFF/, '');
     }
 
+    /** Parse a batch, approve each action, and join the rendered results. */
     async function run_batch(args) {
         const batch = parseBatch(await batchText(args));
         const results = await executeBatch({
@@ -135,6 +164,7 @@ export function createDesktopHandlers(ctx) {
         return { output, summary: truncate(batch.summary, 80), ok: true };
     }
 
+    /** Call `delegate` and flatten its output, summary, and JSON data. */
     async function delegate_role(args) {
         if (typeof delegate !== 'function') throw new Error('delegate_role недоступен.');
         const result = await delegate(args.role, args.task);

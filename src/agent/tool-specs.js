@@ -11,10 +11,41 @@
  */
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
 
+/**
+ * String field for a strict tool schema.
+ * @param {string} description
+ * @returns {object}
+ * @ai.hint pure
+ */
 const str = (description) => ({ type: 'string', description });
+/**
+ * Integer field that may be null.
+ * @param {string} description
+ * @returns {object}
+ * @ai.hint pure
+ */
 const nullableInt = (description) => ({ type: ['integer', 'null'], description });
+/**
+ * String field that may be null.
+ * @param {string} description
+ * @returns {object}
+ * @ai.hint pure
+ */
 const nullableStr = (description) => ({ type: ['string', 'null'], description });
+/**
+ * Boolean field for a strict tool schema.
+ * @param {string} description
+ * @returns {object}
+ * @ai.hint pure
+ */
 const bool = (description) => ({ type: 'boolean', description });
+/**
+ * Strict object schema: every property is required and extras are rejected.
+ * Each entry in `TOOL_SPECS` builds its parameters with this.
+ * @param {object} properties
+ * @returns {object}
+ * @ai.hint pure
+ */
 const schema = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
 
 /**
@@ -189,6 +220,14 @@ export const TOOL_SPECS = {
 
 export const READ_ONLY_TOOLS = ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall'];
 
+/**
+ * Strict function-tool definitions for names that exist in `TOOL_SPECS`.
+ * `createToolset` returns these from `definitions()`.
+ * @param {string[]} names
+ * @returns {object[]}
+ * @exports
+ * @ai.hint pure
+ */
 export function toolDefinitions(names) {
     return names.filter((name) => TOOL_SPECS[name]).map((name) => ({
         type: 'function', name, description: TOOL_SPECS[name].description, parameters: TOOL_SPECS[name].parameters, strict: true,
@@ -207,5 +246,20 @@ export function enabledToolNames(tools, { interactive = false, memory = false, s
     if (tools.askUser && interactive) names.push('ask_user');
     return names;
 }
+
+/**
+ * Description shown to the model, or an empty string when `name` is unknown.
+ * @param {string} name
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
 export const describeTool = (name) => TOOL_SPECS[name]?.description ?? '';
+/**
+ * Approval category for `name`, or null when the tool is unknown.
+ * @param {string} name
+ * @returns {string | null}
+ * @exports
+ * @ai.hint pure
+ */
 export const toolCategory = (name) => TOOL_SPECS[name]?.category ?? null;

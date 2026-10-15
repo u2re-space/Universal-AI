@@ -1,3 +1,14 @@
+/**
+ * @file src/openai/sse.js
+ * @module openai/sse
+ * @purpose Parse a Responses API server-sent event byte stream into JSON events.
+ * @depends openai/errors
+ * @usedBy openai/client
+ * @exports parseSSE
+ * @ai.tags sse, stream
+ * @ai.hint pure
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import { ApiError } from './errors.js';
 
 const byteLength = (text) => Buffer.byteLength(text, 'utf8');
@@ -19,11 +30,22 @@ export async function* parseSSE(source, {
 
     const fail = (message, code = 'INVALID_SSE') => { throw new ApiError(message, { code }); };
 
+    /**
+     * Add text to the current line and reject an event that exceeds maxEventBytes.
+     * @param {string} fragment
+     * @returns {void}
+     * @ai.hint pure
+     */
     function append(fragment) {
         lineBytes += byteLength(fragment);
         if (lineBytes + eventBytes > maxEventBytes) fail('SSE-событие превышает лимит размера.', 'EVENT_LIMIT');
         line += fragment;
     }
+    /**
+     * Finish one event. `[DONE]` becomes `{ type: '__done' }`. Returns null when there is no data.
+     * @returns {object|null}
+     * @ai.hint pure
+     */
     function dispatch() {
         const data = dataLines.length ? dataLines.join('\n') : null;
         const name = eventName;
@@ -37,6 +59,11 @@ export async function* parseSSE(source, {
         if (name && name !== 'message' && name !== event.type) fail('Имя SSE-события не совпадает с JSON type.');
         return event;
     }
+    /**
+     * Close the current line: blank dispatches, `:` is a comment, `data` and `event` are stored.
+     * @returns {object|null}
+     * @ai.hint pure
+     */
     function endLine() {
         const current = line;
         eventBytes += lineBytes + 1;
@@ -52,6 +79,12 @@ export async function* parseSSE(source, {
         else if (field === 'event') eventName = value;
         return null;
     }
+    /**
+     * Split one decoded chunk on CR, LF, and CRLF and yield each finished event.
+     * @param {string} text
+     * @returns {Generator<object>}
+     * @ai.hint pure
+     */
     function* consume(text) {
         let start = 0;
         if (skipLF && text.length) { if (text[0] === '\n') start = 1; skipLF = false; }

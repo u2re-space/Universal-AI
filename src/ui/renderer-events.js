@@ -12,6 +12,14 @@
 import { formatBytes, formatDuration, formatNumber, formatUsd, truncate } from '../util/text.js';
 
 // ---- event handling ---------------------------------------------------------------------
+/**
+ * Show one agent event. JSON mode writes a trimmed object; other modes log and update status.
+ * @param {object} event Agent event. Its type selects the branch.
+ * @param {object} api Renderer callbacks, mode, stages, and mutable state.
+ * @returns {void}
+ * @exports
+ * @ai.hint pure
+ */
 export function handleRendererEvent(event, api) {
     const {
         mode, verbose, line, setStatus, text, state, showReasoning, emitJson,
@@ -201,6 +209,13 @@ export function handleRendererEvent(event, api) {
     }
 }
 
+/**
+ * Shorten tool arguments for the action log line.
+ * @param {string} name Tool name.
+ * @param {object | undefined} args Arguments from the tool call.
+ * @returns {string}
+ * @ai.hint pure
+ */
 function describeArgs(name, args) {
     if (!args || typeof args !== 'object') return '';
     switch (name) {

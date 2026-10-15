@@ -1,3 +1,14 @@
+/**
+ * @file src/core/attachments.js
+ * @module core/attachments
+ * @purpose Turn local files, URLs, and data URLs into Responses API input parts.
+ * @depends node:path, node:fs/promises, util/text
+ * @usedBy commands/shared, commands/flow, commands/chat, agent/roles, agent/tools, agent/desktop
+ * @exports detectImageMime, loadImageAttachment, loadFileAttachment, buildUserMessage
+ * @ai.tags attachments, images
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import path from 'node:path';
 import { readFile, stat } from 'node:fs/promises';
 import { formatBytes } from '../util/text.js';

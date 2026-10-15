@@ -1,3 +1,14 @@
+/**
+ * @file src/core/usage.js
+ * @module core/usage
+ * @purpose Token and USD ledger for one process, priced only from the user's table.
+ * @depends openai/errors, openai/stream, util/text
+ * @usedBy commands/shared
+ * @exports priceFor, costOf, createLedger
+ * @ai.tags usage, budget
+ * @ai.hint pure
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import { BudgetError } from '../openai/errors.js';
 import { normalizeUsage } from '../openai/stream.js';
 import { formatNumber, formatUsd } from '../util/text.js';
@@ -15,6 +26,14 @@ export function priceFor(prices, model) {
     return best?.price ?? null;
 }
 
+/**
+ * USD cost of one usage block. Cached input uses cachedInput when that rate is set.
+ * @param {{ input: number, output: number, cachedInput?: number }|null} price
+ * @param {{ input: number, cached: number, output: number }|null} usage
+ * @returns {number|null}
+ * @exports
+ * @ai.hint pure
+ */
 export function costOf(price, usage) {
     if (!price || !usage) return null;
     const cachedRate = Number.isFinite(price.cachedInput) ? price.cachedInput : price.input;
@@ -35,6 +54,15 @@ export function createLedger({ prices = {}, budgetUsd = null, budgetTokens = nul
     const listeners = new Set();
     let currentRole = null;
 
+    /**
+     * Add one request to a model or role bucket.
+     * @param {Map<string, object>} map
+     * @param {string|null} key
+     * @param {object|null} normalized
+     * @param {number|null} costUsd
+     * @returns {void}
+     * @ai.hint pure
+     */
     function bump(map, key, normalized, costUsd) {
         if (!key) return;
         const row = map.get(key) ?? { key, requests: 0, input: 0, cached: 0, output: 0, reasoning: 0, costUsd: 0, unknownCost: 0 };
@@ -44,6 +72,12 @@ export function createLedger({ prices = {}, budgetUsd = null, budgetTokens = nul
         map.set(key, row);
     }
 
+    /**
+     * Record one response and notify listeners with a fresh snapshot.
+     * @param {{ model?: string, usage?: object, elapsedMs?: number, kind?: string, responseId?: string|null, role?: string|null }} entry
+     * @returns {object}
+     * @ai.hint pure
+     */
     function record({ model, usage, elapsedMs = 0, kind = 'response', responseId = null, role = currentRole }) {
         const normalized = normalizeUsage(usage);
         totals.requests++;
@@ -65,6 +99,11 @@ export function createLedger({ prices = {}, budgetUsd = null, budgetTokens = nul
         return entry;
     }
 
+    /**
+     * Totals, remaining budget, and per-model and per-role rows.
+     * @returns {object}
+     * @ai.hint pure
+     */
     function snapshot() {
         return { ...totals, costUsd: totals.unknownCostRequests ? (totals.costUsd || null) : totals.costUsd,
             costKnown: totals.unknownCostRequests === 0, budgetUsd, budgetTokens,
@@ -94,10 +133,21 @@ export function createLedger({ prices = {}, budgetUsd = null, budgetTokens = nul
         }
     }
 
+    /**
+     * The BudgetError when the budget is already spent, otherwise false.
+     * @returns {BudgetError|false}
+     * @ai.hint pure
+     */
     function exceeded() {
         try { assertBudget(); return false; } catch (error) { return error instanceof BudgetError ? error : false; }
     }
 
+    /**
+     * One-line token and cost summary for the status line.
+     * @param {boolean} [short]
+     * @returns {string}
+     * @ai.hint pure
+     */
     function describe(short = false) {
         const t = snapshot();
         const parts = [`↑ ${formatNumber(t.input)}${t.cached ? ` (кеш ${formatNumber(t.cached)})` : ''}`,
@@ -111,13 +161,45 @@ export function createLedger({ prices = {}, budgetUsd = null, budgetTokens = nul
 
     return {
         record, snapshot, assertBudget, exceeded, describe, priceFor: (model) => priceFor(prices, model),
+        /**
+         * Count generated images. They are not part of the USD figure.
+         * @param {number} [count]
+         * @returns {void}
+         * @ai.hint pure
+         */
         addImages(count = 1) { totals.images += count; },
         /** Tag subsequent records with a role name (team runs). */
         setRole(name) { currentRole = name ?? null; },
+        /**
+         * Role name applied to later records.
+         * @returns {string|null}
+         * @ai.hint pure
+         */
         get role() { return currentRole; },
+        /**
+         * Subscribe to snapshots. The return value removes the listener.
+         * @param {(snapshot: object) => void} listener
+         * @returns {() => boolean}
+         * @ai.hint pure
+         */
         onChange(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+        /**
+         * Copy of recorded entries.
+         * @returns {object[]}
+         * @ai.hint pure
+         */
         get entries() { return [...entries]; },
+        /**
+         * Configured USD budget, or null when unset.
+         * @returns {number|null}
+         * @ai.hint pure
+         */
         get budgetUsd() { return budgetUsd; },
+        /**
+         * Configured token budget, or null when unset.
+         * @returns {number|null}
+         * @ai.hint pure
+         */
         get budgetTokens() { return budgetTokens; },
     };
 }

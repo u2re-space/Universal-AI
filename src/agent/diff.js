@@ -1,7 +1,26 @@
+/**
+ * @file src/agent/diff.js
+ * @module agent/diff
+ * @purpose Summarize a toolset's file changes as bounded unified diffs for the reviewer.
+ * @depends node:path, node:fs/promises, util/text
+ * @usedBy agent/team
+ * @exports diffHunk, describeChangeSet
+ * @ai.tags diff, review
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import path from 'node:path';
 import { readFile, stat } from 'node:fs/promises';
 import { byteSize, clipMiddle, formatBytes } from '../util/text.js';
 
+/**
+ * Split `text` into lines and keep each newline on its line.
+ * `diffHunk` uses this for the before and after texts.
+ * @param {string} text
+ * @returns {string[]}
+ * @ai.hint pure
+ */
 const lines = (text) => text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 
 /** One unified-diff hunk covering the changed region (common prefix/suffix trimmed, 3 context lines). */

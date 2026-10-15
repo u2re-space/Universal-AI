@@ -1,3 +1,14 @@
+/**
+ * @file src/cli.js
+ * @module cli
+ * @purpose Parse argv, dispatch one command, and map failures to process exit codes.
+ * @depends node:path, node:util, node:fs/promises, node:url, node:module, core/config, ui/renderer, jobs/manager, openai/errors, commands/shared, commands/ask, commands/chat, commands/run, commands/image, commands/jobs, commands/memory, commands/misc, commands/map, cli-help
+ * @usedBy bin/ai
+ * @exports HELP, stripDetach, main
+ * @ai.tags cli, dispatch
+ * @ai.hint keep
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { stat } from 'node:fs/promises';
@@ -45,7 +56,13 @@ const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, c
 const NEEDS_API_KEY = new Set(['ask', 'chat', 'run', 'image', 'resume', 'cancel', 'models']);
 const DETACHABLE = new Set(['ask', 'run', 'image']);
 
-/** Remove --detach / -d (also inside combined short groups like -dv) from the raw argv. */
+/**
+ * Remove --detach / -d (also inside combined short groups like -dv) from the raw argv.
+ * @param {string[]} argv Arguments after the node binary and script path.
+ * @returns {string[]} Copy with detach flags removed.
+ * @exports
+ * @ai.hint pure
+ */
 export function stripDetach(argv) {
     const result = [];
     for (const arg of argv) {
@@ -60,6 +77,14 @@ export function stripDetach(argv) {
     return result;
 }
 
+/**
+ * Parse argv, run the selected command, and return a process exit code.
+ * bin/ai.js calls this. Handles --help, --version, --detach, and SIGINT.
+ * @param {string[]} [argv=process.argv.slice(2)] Raw command-line arguments.
+ * @returns {Promise<number>} 0 success, 1 failure, 2 usage, 130 cancelled.
+ * @exports
+ * @ai.hint io
+ */
 export async function main(argv = process.argv.slice(2)) {
     let values, positionals;
     try {
@@ -79,6 +104,11 @@ export async function main(argv = process.argv.slice(2)) {
     const controller = new AbortController();
     let turnController = null;
     let interrupts = 0;
+    /**
+     * Abort the active turn on the first SIGINT, the whole run on the second, and exit on the third.
+     * @returns {void}
+     * @ai.hint io
+     */
     const onInterrupt = () => {
         interrupts++;
         if (turnController && !turnController.signal.aborted) {
@@ -129,6 +159,12 @@ export async function main(argv = process.argv.slice(2)) {
         const emit = (event) => { renderer.handle(event); reporter?.event(event); };
         const ctx = {
             argv, values, positionals: rest, config, renderer, controller, signal: controller.signal, emit, cwd, reporter, backupDir: null,
+            /**
+             * Remember the AbortController for the turn that is running now.
+             * @param {AbortController|null} next Controller the next SIGINT aborts.
+             * @returns {void}
+             * @ai.hint pure
+             */
             setTurnController(next) { turnController = next; },
             turnSignal: () => (turnController ? AbortSignal.any([controller.signal, turnController.signal]) : controller.signal),
         };

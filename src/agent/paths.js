@@ -1,3 +1,15 @@
+/**
+ * @file src/agent/paths.js
+ * @module agent/paths
+ * @purpose Keep model paths inside the working directory and reject secrets, symlink escapes, and noisy trees.
+ * @depends node:path, node:fs/promises
+ * @usedBy agent/fs-tools, agent/map, agent/tools, agent/desktop
+ * @exports NOISY_DIRS, isProtectedFileName, isForbiddenDirName, toPosix, isInside, resolveInside
+ * @ai.tags paths, sandbox
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import path from 'node:path';
 import { realpath, lstat } from 'node:fs/promises';
 
@@ -9,18 +21,51 @@ const FORBIDDEN_DIRS = /^(?:\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.docker)$/i;
 export const NOISY_DIRS = /^(?:\.git|node_modules|\.hg|\.svn|dist|build|coverage|\.next|\.nuxt|\.cache|\.venv|venv|__pycache__|target|\.ai-agent)$/i;
 const READ_ONLY_DIRS = /^(?:\.git|node_modules)$/i;
 
+/**
+ * True when `name` is a secret or key file.
+ * `skippedRel` in agent/map calls this while indexing.
+ * @param {string} name File name, not a path.
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
 export function isProtectedFileName(name) {
     return PROTECTED_FILES.test(name);
 }
 
+/**
+ * True when `name` is a directory the model must never enter.
+ * `isSkippedDir` in agent/map calls this.
+ * @param {string} name
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
 export function isForbiddenDirName(name) {
     return FORBIDDEN_DIRS.test(name);
 }
 
+/**
+ * Rewrite `relative` with forward slashes.
+ * `resolveInside` stores that form as `rel`.
+ * @param {string} relative
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
 export function toPosix(relative) {
     return relative.split(path.sep).join('/');
 }
 
+/**
+ * True when `candidate` is `root` or a path beneath it.
+ * `resolveInside` checks this before and after `realpath`.
+ * @param {string} root
+ * @param {string} candidate
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
 export function isInside(root, candidate) {
     const relative = path.relative(root, candidate);
     return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));

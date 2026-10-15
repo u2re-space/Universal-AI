@@ -206,6 +206,7 @@ function scanJs(source) {
     let seenCode = false;
     let block = null;
 
+    /** Keep the file card once, and hold this block for the next declaration. */
     const finishBlock = (body, atLine) => {
         const parsed = parseDoc(body);
         if (!seenCode && !doc) doc = fileDoc(parsed);

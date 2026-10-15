@@ -1,3 +1,14 @@
+/**
+ * @file src/core/memory.js
+ * @module core/memory
+ * @purpose SQLite store for durable memories, file summaries, and finished tasks.
+ * @depends node:path, node:crypto, node:fs, node:sqlite
+ * @usedBy commands/shared, commands/memory, agent/team
+ * @exports MEMORY_KINDS, MEMORY_SCOPES, projectKey, openMemory, renderMemories
+ * @ai.tags memory, sqlite
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { mkdirSync, realpathSync } from 'node:fs';
@@ -86,11 +97,24 @@ export function openMemory({ file }) {
         taskInsert: db.prepare('INSERT INTO tasks (project, project_name, task, status, summary, changes, usage, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
     };
 
+    /**
+     * SQL fragment that limits rows to one project, global rows, or both.
+     * @param {string|null} project
+     * @param {{ includeGlobal?: boolean }} [options]
+     * @returns {{ sql: string, params: object }}
+     * @ai.hint pure
+     */
     function scopeFilter(project, { includeGlobal = true } = {}) {
         if (!project) return { sql: includeGlobal ? "m.scope = 'global'" : '0', params: {} };
         return { sql: includeGlobal ? "(m.scope = 'global' OR (m.scope = 'project' AND m.project = $project))" : "(m.scope = 'project' AND m.project = $project)", params: { $project: project } };
     }
 
+    /**
+     * Insert a memory or refresh kind, tags, and updated_at when the same content already exists.
+     * @param {{ scope?: string, project?: string|null, projectName?: string|null, kind?: string, content: string, tags?: string[]|string, source?: string|null }} entry
+     * @returns {object}
+     * @ai.hint io
+     */
     function remember({ scope = 'project', project = null, projectName = null, kind = 'fact', content, tags = [], source = null }) {
         if (!MEMORY_SCOPES.includes(scope)) throw new Error(`scope: ${MEMORY_SCOPES.join(' | ')}`);
         if (!MEMORY_KINDS.includes(kind)) kind = 'note';
@@ -126,6 +150,12 @@ export function openMemory({ file }) {
         return rows.map(({ rank, hits, ...row }) => row);
     }
 
+    /**
+     * Newest memories first, optionally filtered by project, scope, and kind.
+     * @param {{ project?: string|null, scope?: string|null, kind?: string|null, limit?: number, includeGlobal?: boolean }} [options]
+     * @returns {object[]}
+     * @ai.hint io
+     */
     function list({ project = null, scope = null, kind = null, limit = 200, includeGlobal = true } = {}) {
         const filter = scopeFilter(project, { includeGlobal });
         const where = [filter.sql];
@@ -135,32 +165,79 @@ export function openMemory({ file }) {
         return db.prepare(`SELECT m.* FROM memories m WHERE ${where.join(' AND ')} ORDER BY updated_at DESC LIMIT $limit`).all(params);
     }
 
+    /**
+     * Delete one memory by id. Returns false when no row matched.
+     * @param {number|string} id
+     * @returns {boolean}
+     * @ai.hint io
+     */
     function forget(id) { return statements.forget.run(Number(id)).changes > 0; }
 
+    /**
+     * Delete every global memory, or every memory of one project. Returns the row count.
+     * @param {{ project?: string|null, scope?: string }} [options]
+     * @returns {number}
+     * @ai.hint io
+     */
     function clear({ project = null, scope = 'project' } = {}) {
         if (scope === 'global') return db.prepare("DELETE FROM memories WHERE scope = 'global'").run().changes;
         if (!project) throw new Error('Для очистки памяти проекта нужен идентификатор проекта.');
         return db.prepare("DELETE FROM memories WHERE scope = 'project' AND project = ?").run(project).changes;
     }
 
+    /**
+     * Cached file summary when the stored hash still matches.
+     * @param {string} project
+     * @param {string} relPath
+     * @param {string} sha256
+     * @returns {object|null}
+     * @ai.hint io
+     */
     function getFileSummary(project, relPath, sha256) {
         const row = statements.fileGet.get(project, relPath);
         return row && row.sha256 === sha256 ? row : null;
     }
+    /**
+     * Store or replace the summary for one project path.
+     * @param {string} project
+     * @param {string} relPath
+     * @param {string} sha256
+     * @param {string} summary
+     * @param {string|null} [model]
+     * @returns {void}
+     * @ai.hint io
+     */
     function putFileSummary(project, relPath, sha256, summary, model = null) {
         statements.filePut.run(project, relPath, sha256, summary, model, now());
     }
 
+    /**
+     * Append one finished run. Changes and usage are stored as JSON text.
+     * @param {{ project?: string|null, projectName?: string|null, task: string, status: string, summary?: string|null, changes?: object[], usage?: object|null }} entry
+     * @returns {void}
+     * @ai.hint io
+     */
     function recordTask({ project = null, projectName = null, task, status, summary = null, changes = [], usage = null }) {
         statements.taskInsert.run(project, projectName, String(task).slice(0, 4000), status, summary ? String(summary).slice(0, 8000) : null,
             JSON.stringify(changes ?? []), usage ? JSON.stringify(usage) : null, now());
     }
+    /**
+     * Newest tasks first, optionally for one project.
+     * @param {{ project?: string|null, limit?: number }} [options]
+     * @returns {object[]}
+     * @ai.hint io
+     */
     function listTasks({ project = null, limit = 20 } = {}) {
         return project
             ? db.prepare('SELECT * FROM tasks WHERE project = ? ORDER BY id DESC LIMIT ?').all(project, limit)
             : db.prepare('SELECT * FROM tasks ORDER BY id DESC LIMIT ?').all(limit);
     }
 
+    /**
+     * Row counts and whether the FTS5 index exists.
+     * @returns {{ memories: number, global: number, projects: number, fileSummaries: number, tasks: number, fts: boolean, file: string }}
+     * @ai.hint io
+     */
     function stats() {
         return {
             memories: db.prepare('SELECT COUNT(*) AS n FROM memories').get().n,
@@ -172,7 +249,16 @@ export function openMemory({ file }) {
         };
     }
 
-    return { remember, recall, list, forget, clear, getFileSummary, putFileSummary, recordTask, listTasks, stats, close: () => db.close(), get fts() { return fts; } };
+    return {
+        remember, recall, list, forget, clear, getFileSummary, putFileSummary, recordTask, listTasks, stats,
+        close: () => db.close(),
+        /**
+         * Whether the FTS5 index was created for this database.
+         * @returns {boolean}
+         * @ai.hint pure
+         */
+        get fts() { return fts; },
+    };
 }
 
 /** Render memories as a compact bulleted block for prompts. */

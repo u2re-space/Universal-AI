@@ -11,6 +11,13 @@
  */
 import { NUMERIC, assign, fail } from './toon-shared.js';
 
+/**
+ * Read one JSON string that starts at `start`.
+ * @param {string} text
+ * @param {number} start
+ * @returns {{ value: *, end: number }}
+ * @ai.hint pure
+ */
 function readJsonString(text, start) {
     if (text[start] !== '"') throw fail('expected string');
     let i = start + 1;
@@ -32,6 +39,12 @@ function readJsonString(text, start) {
     throw fail('unterminated string');
 }
 
+/**
+ * Parse null, true, false, or a number. Anything else is returned as text.
+ * @param {string} text
+ * @returns {null|boolean|number|string}
+ * @ai.hint pure
+ */
 function parseBare(text) {
     if (text === 'null') return null;
     if (text === 'true') return true;
@@ -40,6 +53,12 @@ function parseBare(text) {
     return text;
 }
 
+/**
+ * Parse a quoted JSON string or a bare token. Extra characters after a quote are an error.
+ * @param {string} text
+ * @returns {null|boolean|number|string}
+ * @ai.hint pure
+ */
 function parsePrimitive(text) {
     if (text.startsWith('"')) {
         const { value, end } = readJsonString(text, 0);
@@ -49,6 +68,12 @@ function parsePrimitive(text) {
     return parseBare(text);
 }
 
+/**
+ * Split a comma-separated cell list. Commas inside quotes stay in the cell.
+ * @param {string} text
+ * @returns {Array<null|boolean|number|string>}
+ * @ai.hint pure
+ */
 function parseCells(text) {
     if (text === '') return [];
     const cells = [];
@@ -72,6 +97,12 @@ function parseCells(text) {
     return cells;
 }
 
+/**
+ * Split a table field list. Empty names and duplicates are errors.
+ * @param {string} text
+ * @returns {string[]}
+ * @ai.hint pure
+ */
 function parseFieldList(text) {
     if (text === '') return [];
     const fields = [];
@@ -99,6 +130,12 @@ function parseFieldList(text) {
     return fields;
 }
 
+/**
+ * Index of the `}` that closes a field list, ignoring braces inside quotes.
+ * @param {string} text
+ * @returns {number}
+ * @ai.hint pure
+ */
 function findClosingBrace(text) {
     let i = 1;
     while (i < text.length) {
@@ -112,6 +149,12 @@ function findClosingBrace(text) {
     throw fail('unterminated field list');
 }
 
+/**
+ * Parse a decimal array length. Leading zeros and non-integers are errors.
+ * @param {string} text
+ * @returns {number}
+ * @ai.hint pure
+ */
 function parseLength(text) {
     if (!/^\d+$/.test(text)) throw fail('bad length');
     const length = Number(text);
@@ -119,6 +162,12 @@ function parseLength(text) {
     return length;
 }
 
+/**
+ * Read a bare or quoted key and return the unmatched remainder of the line.
+ * @param {string} text
+ * @returns {{ key: string, rest: string }}
+ * @ai.hint pure
+ */
 function parseKey(text) {
     if (text.startsWith('"')) {
         const parsed = readJsonString(text, 0);
@@ -130,6 +179,12 @@ function parseKey(text) {
     return { key: match[0], rest: text.slice(match[0].length) };
 }
 
+/**
+ * Classify one content line as an inline array, a table header, or a field.
+ * @param {string} text
+ * @returns {{ kind: string, key: string }}
+ * @ai.hint pure
+ */
 function parseHeader(text) {
     const { key, rest } = parseKey(text);
     const array = /^\[(\d+)\]/.exec(rest);
@@ -158,11 +213,23 @@ function parseHeader(text) {
     throw fail('expected colon');
 }
 
+/**
+ * True for a blank line or a `#` comment.
+ * @param {string} line
+ * @returns {boolean}
+ * @ai.hint pure
+ */
 function isIgnorable(line) {
     const trimmed = line.trim();
     return trimmed === '' || trimmed.startsWith('#');
 }
 
+/**
+ * Count leading spaces. A tab is an error.
+ * @param {string} line
+ * @returns {number}
+ * @ai.hint pure
+ */
 function lineIndent(line) {
     let i = 0;
     while (line[i] === ' ') i += 1;
@@ -170,12 +237,28 @@ function lineIndent(line) {
     return i;
 }
 
+/**
+ * Index of the next line that is not blank or a comment, or `end` when none remains.
+ * @param {string[]} lines
+ * @param {number} index
+ * @param {number} end
+ * @returns {number}
+ * @ai.hint pure
+ */
 function nextContent(lines, index, end) {
     let i = index;
     while (i < end && isIgnorable(lines[i])) i += 1;
     return i;
 }
 
+/**
+ * First line at or after `start` whose indent is below `minIndent`. Blanks and comments are skipped.
+ * @param {string[]} lines
+ * @param {number} start
+ * @param {number} minIndent
+ * @returns {number}
+ * @ai.hint pure
+ */
 function blockEnd(lines, start, minIndent) {
     let i = start;
     while (i < lines.length) {
@@ -189,6 +272,13 @@ function blockEnd(lines, start, minIndent) {
     return i;
 }
 
+/**
+ * Build one table row. The cell count must match `fields`.
+ * @param {string} text
+ * @param {string[]} fields
+ * @returns {object}
+ * @ai.hint pure
+ */
 function parseRow(text, fields) {
     const cells = parseCells(text);
     if (cells.length !== fields.length) throw fail('row width mismatch');
@@ -197,6 +287,15 @@ function parseRow(text, fields) {
     return row;
 }
 
+/**
+ * Parse one object from `lines` in `[start, end)` at a fixed indent. Nested objects sit two spaces deeper.
+ * @param {string[]} lines
+ * @param {number} start
+ * @param {number} end
+ * @param {number} indent
+ * @returns {object}
+ * @ai.hint pure
+ */
 function parseObject(lines, start, end, indent) {
     const obj = {};
     let i = start;
@@ -247,11 +346,24 @@ function parseObject(lines, start, end, indent) {
     return obj;
 }
 
+/**
+ * Parse a TOON document into one plain object.
+ * @param {string} text
+ * @returns {object}
+ * @ai.hint pure
+ */
 function decodeToon(text) {
     const lines = text.split(/\r?\n/);
     return parseObject(lines, 0, lines.length, 0);
 }
 
+/**
+ * Parse JSON when the trimmed text starts with `{` or `[`. Otherwise parse TOON.
+ * @param {string} text
+ * @returns {*}
+ * @exports
+ * @ai.hint pure
+ */
 export function decodeDocument(text) {
     if (typeof text !== 'string') throw fail('expected a string');
     const trimmed = text.trim();

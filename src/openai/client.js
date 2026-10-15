@@ -1,3 +1,14 @@
+/**
+ * @file src/openai/client.js
+ * @module openai/client
+ * @purpose Responses API client on node:https: create, retrieve, cancel, compact, and count tokens.
+ * @depends node:crypto, node:timers/promises, openai/errors, openai/http, openai/sse, openai/stream
+ * @usedBy commands/shared
+ * @exports ApiError, createClient
+ * @ai.tags openai, http
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { ApiError } from './errors.js';
@@ -16,6 +27,12 @@ const defaults = Object.freeze({
     maxEventBytes: 32 * 1024 * 1024,
 });
 
+/**
+ * Parse a base URL and require a path that ends with `/`. Credentials, query, and hash are rejected.
+ * @param {string} value
+ * @returns {URL}
+ * @ai.hint pure
+ */
 function normalizeBaseURL(value) {
     const url = new URL(value);
     if (url.username || url.password || url.search || url.hash) {
@@ -25,6 +42,13 @@ function normalizeBaseURL(value) {
     return url;
 }
 
+/**
+ * Delay before a retry. A positive Retry-After wins, capped at 60 seconds; otherwise backoff with jitter.
+ * @param {number} attempt
+ * @param {string|number|null} retryAfter
+ * @returns {number}
+ * @ai.hint pure
+ */
 function retryDelayMs(attempt, retryAfter) {
     const header = Number(retryAfter);
     if (Number.isFinite(header) && header > 0) return Math.min(header * 1000, 60_000);
@@ -51,6 +75,13 @@ export function createClient({
     const root = normalizeBaseURL(baseURL);
     const transport = http ?? createHttp({ idleTimeoutMs, connectTimeoutMs });
 
+    /**
+     * Auth and content headers for one call. Accept is event-stream only when streaming.
+     * @param {boolean} stream
+     * @param {string} clientRequestId
+     * @returns {object}
+     * @ai.hint pure
+     */
     const headersFor = (stream, clientRequestId) => ({
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -60,6 +91,13 @@ export function createClient({
         ...(project ? { 'OpenAI-Project': project } : {}),
     });
 
+    /**
+     * Read a capped error body and build an ApiError. Retryable is true for the retry status set.
+     * @param {{ status: number, headers: object, body: AsyncIterable<Buffer> }} res
+     * @param {string} clientRequestId
+     * @returns {Promise<ApiError>}
+     * @ai.hint io
+     */
     async function apiErrorFrom(res, clientRequestId) {
         const raw = await readBody(res.body, maxErrorBytes, { truncate: true }).catch(() => Buffer.alloc(0));
         let parsed = null;
@@ -174,6 +212,12 @@ export function createClient({
         }
     }
 
+    /**
+     * Copy concatenated output text onto a response object.
+     * @param {object|null} response
+     * @returns {object|null}
+     * @ai.hint pure
+     */
     const withText = (response) => (response && typeof response === 'object'
         ? Object.assign(response, { output_text: outputText(response) }) : response);
 

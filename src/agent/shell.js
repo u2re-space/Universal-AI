@@ -1,3 +1,15 @@
+/**
+ * @file src/agent/shell.js
+ * @module agent/shell
+ * @purpose Spawn a shell command with a timeout, capped output, and a secret-stripped environment.
+ * @depends node:child_process
+ * @usedBy agent/tools, interact/filesystem
+ * @exports childEnvironment, runCommand
+ * @ai.tags shell, process
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import { spawn } from 'node:child_process';
 
 const SECRET_ENV = /(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)/i;
@@ -14,6 +26,14 @@ export function childEnvironment(env = process.env) {
     return result;
 }
 
+/**
+ * Choose the executable and arguments for `command`.
+ * `runCommand` passes the result to `spawn`.
+ * @param {string} command
+ * @param {string | null} shell powershell, pwsh, cmd, bash, sh, zsh, or null for the platform default.
+ * @returns {{ file: string, args: string[], verbatim?: boolean }}
+ * @ai.hint pure
+ */
 function shellCommand(command, shell) {
     const win = process.platform === 'win32';
     switch (shell) {
@@ -33,6 +53,13 @@ function shellCommand(command, shell) {
     }
 }
 
+/**
+ * Kill `child` and the processes it started.
+ * `runCommand` calls this on timeout and on abort.
+ * @param {import('node:child_process').ChildProcess} child
+ * @returns {void}
+ * @ai.hint io
+ */
 function killTree(child) {
     if (!child.pid) return;
     if (process.platform === 'win32') {
@@ -60,12 +87,14 @@ export function runCommand({ command, cwd, timeoutMs = 180_000, maxOutputBytes =
         const output = { stdout: [], stderr: [] };
         let captured = 0, truncated = false, timedOut = false, cancelled = false, finished = false;
         let spawnError = null;
+        /** Keep stdout or stderr until `maxOutputBytes`, then set `truncated`. */
         const consume = (stream, chunk) => {
             const room = Math.max(0, maxOutputBytes - captured);
             const slice = chunk.subarray(0, room);
             if (slice.length) { output[stream].push(slice); captured += slice.length; onOutput?.({ stream, bytes: slice.length }); }
             if (slice.length < chunk.length) truncated = true;
         };
+        /** Resolve once with the captured output and the timeout, cancel, and error flags. */
         const finish = (code, sig) => {
             if (finished) return;
             finished = true;

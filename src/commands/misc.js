@@ -1,3 +1,14 @@
+/**
+ * @file src/commands/misc.js
+ * @module commands/misc
+ * @purpose Resume or cancel a background response, list models, and show or create config.
+ * @depends node:path, node:fs/promises, core/background, openai/stream, core/config, util/text, commands/shared
+ * @usedBy cli
+ * @exports resume, cancel, models, configCommand, helpers
+ * @ai.tags cli, config
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import path from 'node:path';
 import { writeFile, stat } from 'node:fs/promises';
 import { attachBackground, TERMINAL_STATUSES } from '../core/background.js';
@@ -6,7 +17,13 @@ import { defaults, redactConfig } from '../core/config.js';
 import { formatDuration, formatNumber } from '../util/text.js';
 import { UsageError, createClientFor, createLedgerFor, usageRow } from './shared.js';
 
-/** `ai resume <response_id>` — re-attach to a background response and print its output. */
+/**
+ * `ai resume <response_id>` — re-attach to a background response and print its output.
+ * @param {object} ctx Command context from cli.main. positionals[0] is resp_….
+ * @returns {Promise<number>} 0 when the response completed, otherwise 1.
+ * @exports
+ * @ai.hint io
+ */
 export async function resume(ctx) {
     const { config, renderer, positionals, signal, emit } = ctx;
     const id = positionals[0];
@@ -38,7 +55,13 @@ export async function resume(ctx) {
     } finally { client.close(); }
 }
 
-/** `ai cancel <response_id>` — cancel a background response on the server. */
+/**
+ * `ai cancel <response_id>` — cancel a background response on the server.
+ * @param {object} ctx Command context from cli.main. positionals[0] is resp_….
+ * @returns {Promise<number>} 0 after the cancel request returns.
+ * @exports
+ * @ai.hint io
+ */
 export async function cancel(ctx) {
     const { config, renderer, positionals, signal } = ctx;
     const id = positionals[0];
@@ -52,7 +75,13 @@ export async function cancel(ctx) {
     } finally { client.close(); }
 }
 
-/** `ai models [filter]` — list models visible to the API key. */
+/**
+ * `ai models [filter]` — list models visible to the API key.
+ * @param {object} ctx Command context from cli.main. positionals[0] is an optional substring filter.
+ * @returns {Promise<number>} 0.
+ * @exports
+ * @ai.hint io
+ */
 export async function models(ctx) {
     const { config, renderer, positionals, signal } = ctx;
     const client = createClientFor(config);
@@ -69,7 +98,13 @@ export async function models(ctx) {
     } finally { client.close(); }
 }
 
-/** `ai config [show|init|path]` — inspect or bootstrap the configuration file. */
+/**
+ * `ai config [show|init|path]` — inspect or bootstrap the configuration file.
+ * @param {object} ctx Command context from cli.main.
+ * @returns {Promise<number>} 0. init throws UsageError when the file already exists.
+ * @exports
+ * @ai.hint io
+ */
 export async function configCommand(ctx) {
     const { config, renderer, positionals } = ctx;
     const sub = positionals[0] ?? 'show';

@@ -1,3 +1,15 @@
+/**
+ * @file src/agent/team.js
+ * @module agent/team
+ * @purpose Run planner, collector, worker, reviewer, and summarizer over one shared context.
+ * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text
+ * @usedBy commands/run, index.js
+ * @exports toolNamesForRole, runTeam
+ * @ai.tags team, roles
+ * @ai.hint keep
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { createSession } from '../core/session.js';
@@ -58,6 +70,7 @@ export async function runTeam({
     const vision = (role) => (roles.shouldDelegateVision(role) ? roles.describeImage : null);
     const taskMarks = { edit: null };
     let marks = [];
+    /** Run one specialist on `task` and return its text, status, and JSON. */
     async function delegate(role, task) {
         if (!Object.hasOwn(SPECIALISTS, role)) throw new Error(`delegate_role: неизвестная роль «${role}».`);
         const spec = SPECIALISTS[role];
@@ -79,11 +92,13 @@ export async function runTeam({
         describeScreen: roles.describeScreen, delegate,
     });
     const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images });
+    /** Copy tool stats onto the team result and return it. */
     const finish = () => {
         result.changes = workerTools.stats().changes;
         result.stats = { worker: workerTools.stats(), collector: collectorTools.stats(), reviewer: reviewerTools.stats() };
         return result;
     };
+    /** Store this stage's status as the team error and return the finished result. */
     const stop = (roleResult, stage) => {
         result.status = roleResult.status === 'completed' ? 'failed' : roleResult.status;
         result.error = roleResult.error ?? new Error(`Этап «${stage}» завершился со статусом ${roleResult.status}.`);
@@ -163,6 +178,7 @@ export async function runTeam({
         let workerSession = createSession({ store: false, model: roles.resolve('worker').model });
         let workIncomplete = false;
         let contextSent = false;
+        /** Send one worker step, reusing the session until it grows past 160 items. */
         const runWorker = async (title, body) => {
             if (workerSession.size > 160) { workerSession = createSession({ store: false, model: roles.resolve('worker').model }); contextSent = false; }
             const header = contextSent ? `# Context updates\n${ctx.get('progress') ? clipMiddle(ctx.get('progress'), 12 * 1024) : '(none)'}` : ctx.render({ maxBytes, exclude: ['tree'] });

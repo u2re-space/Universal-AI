@@ -58,7 +58,9 @@ ai map [path]                индекс файлов и символов (.ai/
 
 `ai map` строит `.ai/map.json`: пути, время изменения и символы. Повторный поиск читает эту карту из памяти процесса. `ai map path` печатает путь и число файлов и символов.
 
-`search_files` принимает `scope`: `path`, `symbol`, `content` или `all`.
+`search_files` принимает `scope`: `path`, `symbol`, `content` или `all`. `scope=symbol` смотрит имя, `@purpose`, `@ai.hint` и `@ai.tags`.
+
+Исходники в `src/` с отступом в 4 пробела. Карточка модуля (`@file`, `@purpose`, `@exports`, `@depends`, `@usedBy`) и типы функций (`@param`, `@returns`) описаны в `docs/jsdoc/TAGS.md`. Сборка карты кладёт их в `.ai/map.json`: у файла поле `doc`, у символа `purpose`, `params`, `returns`, `hint`, `tags`.
 
 В `ai run` правила намечают файлы как `read`, `edit` или `scan`. Planner подтверждает список. Запись в файл вне `edit` выполняется, а ответ инструмента начинается с пометки, что пути не было в карте правок.
 
@@ -283,10 +285,12 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 ```
 bin/ai.js                 точка входа
 src/cli.js                разбор аргументов, команды, сигналы, коды выхода
+src/cli-help.js           текст `ai --help`
 src/openai/http.js        транспорт на node:https (явный таймаут простоя, без скрытых лимитов undici)
 src/openai/sse.js         ограниченный по размеру парсер Server-Sent Events
 src/openai/stream.js      события Responses API → события приложения, финальный объект ответа
 src/openai/client.js      /responses (create, retrieve+resume, cancel, compact, input_tokens), /models, повторы
+src/core/config-defaults.js  значения по умолчанию и списки допустимых полей
 src/core/config.js        конфигурация, роли (resolveRole) и валидация
 src/core/session.js       история разговора (stateless / previous_response_id), сохранение сессий
 src/core/usage.js         учёт токенов и стоимости (всего, по ролям, по моделям), бюджеты
@@ -295,7 +299,11 @@ src/core/context.js       общий контекст ролей с приори
 src/core/attachments.js   изображения и файлы → input_image / input_file / input_text
 src/core/background.js    опрос и переподключение к фоновым ответам
 src/core/images.js        сохранение итоговых и промежуточных изображений
-src/agent/tools.js        описания инструментов, политика подтверждений, исполнение (вкл. память, vision, сводки)
+src/agent/tool-specs.js   схемы и список включённых инструментов
+src/agent/tools.js        политика подтверждений и исполнение (память, vision, сводки)
+src/agent/map.js          `.ai/map.json` и кеш в памяти
+src/agent/map-scan.js     символы, JSDoc-метки и относительные импорты
+src/agent/team-text.js    текст плана и находок сборщика
 src/agent/fs-tools.js     операции с файлами (лимиты, резервные копии)
 src/agent/shell.js        запуск команд с таймаутом и завершением дерева процессов
 src/agent/paths.js        ограничение путей рабочим каталогом, защищённые имена
@@ -304,7 +312,12 @@ src/agent/roles.js        запуск запросов от имени роли
 src/agent/team.js         оркестратор команды: план → сбор контекста → шаги → ревью/правки → память
 src/agent/schemas.js      JSON-схемы структурированных ответов ролей
 src/agent/diff.js         diff изменений для ревьюера
+src/ui/glyphs.js          кадры спиннера и определение режима вывода
 src/ui/renderer.js        строка статуса, журнал, вопросы пользователю; режимы tty/plain/json/quiet
+src/ui/renderer-events.js текст одного события агента
+src/util/toon.js          фасад кодека TOON (encode / decode в соседних файлах)
+src/interact/ahk-script.js  текст программы AutoHotkey v2
+src/commands/flags.js     флаги CLI → поля конфигурации
 src/jobs/manager.js       локальные фоновые задачи
 src/commands/*.js         ask, chat, run, image, jobs, memory, resume/cancel/models/config
 ```

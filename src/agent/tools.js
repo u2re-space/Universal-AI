@@ -1,3 +1,15 @@
+/**
+ * @file src/agent/tools.js
+ * @module agent/tools
+ * @purpose Build the local toolset: approval, handlers, and the re-exports from tool-specs.
+ * @depends node:path, node:crypto, node:fs/promises, openai/errors, core/attachments, util/text, agent/paths, agent/fs-tools, agent/map, agent/shell, agent/desktop, agent/tool-specs
+ * @usedBy commands/ask, commands/chat, commands/run, agent/team, index.js
+ * @exports TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory, createToolset, relativeToRoot
+ * @ai.tags tools, approval
+ * @ai.hint hot
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
@@ -21,6 +33,13 @@ import {
 export { TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory };
 
 
+/**
+ * Drop scripts, styles, and tags so fetched HTML becomes readable text.
+ * `fetch_url` calls this when the response is HTML.
+ * @param {string} html
+ * @returns {string}
+ * @ai.hint pure
+ */
 function htmlToText(html) {
     return html
         .replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -32,6 +51,13 @@ function htmlToText(html) {
         .replace(/[ \t]+/g, ' ').replace(/\n\s*\n\s*\n+/g, '\n\n').trim();
 }
 
+/**
+ * Short click description for the approval card.
+ * `preview` calls this for the `click` tool.
+ * @param {object} args
+ * @returns {string}
+ * @ai.hint pure
+ */
 function clickTarget(args) {
     if (!args || typeof args !== 'object') return '';
     if (args.mode === 'coord') return `${args.x},${args.y}`;
@@ -41,6 +67,13 @@ function clickTarget(args) {
     return String(args.mode ?? '');
 }
 
+/**
+ * First non-empty batch field among path, batch_json, and batch_toon.
+ * `preview` calls this for `run_batch`.
+ * @param {object} args
+ * @returns {string}
+ * @ai.hint pure
+ */
 function batchSource(args) {
     if (!args || typeof args !== 'object') return '';
     for (const key of ['path', 'batch_json', 'batch_toon']) {
@@ -77,6 +110,7 @@ export function createToolset({
     const stats = { calls: 0, byTool: {}, changes: [], commands: [], denied: 0, errors: 0, memories: [] };
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
 
+    /** Apply the approval level, and throw when the operator aborts. */
     async function decide(name, category, args, preview) {
         if (category === 'read' || category === 'user' || category === 'memory') return true;
         if (approvalLevel === 'all') return true;
@@ -91,6 +125,7 @@ export function createToolset({
         return answer === 'yes';
     }
 
+    /** Build the approval card for a write, shell, or desktop call. */
     function preview(name, args) {
         switch (name) {
             case 'write_file': {
@@ -112,6 +147,7 @@ export function createToolset({
         }
     }
 
+    /** Prefix the tool output when `rel` is outside the worker edit set. */
     function labelOutsideEdit(rel, output) {
         const allowed = typeof editPaths === 'function' ? editPaths() : editPaths;
         if (allowed && !allowed.has(rel)) return `Не в карте правок (${rel}): ${output}`;
@@ -119,15 +155,18 @@ export function createToolset({
     }
 
     const handlers = {
+        /** List a directory and return the entry count. */
         async list_files(args) {
             const result = await listFiles({ root, dir: args.path || '.', depth: Math.min(6, Math.max(1, args.depth ?? 2)),
                 includeHidden: Boolean(args.include_hidden), maxEntries: limits.maxListEntries });
             return { output: result.text, summary: `${result.count} записей` };
         },
+        /** Read numbered lines from a UTF-8 file. */
         async read_file(args) {
             const result = await readTextFile({ root, file: args.path, startLine: args.start_line, endLine: args.end_line, maxBytes: limits.maxFileReadBytes });
             return { output: result.text, summary: `${args.path}: строки ${result.from}-${result.to}/${result.totalLines}` };
         },
+        /** Search the project map, or walk the tree when the map is missing. */
         async search_files(args) {
             const scope = args.scope ?? 'all';
             if (!['path', 'symbol', 'content', 'all'].includes(scope)) throw new Error('scope: path, symbol, content или all.');
@@ -139,6 +178,7 @@ export function createToolset({
             const result = await searchFiles({ root, query: args.query, dir: args.path || '.', regex: Boolean(args.regex), maxResults: limits.maxSearchResults });
             return { output: `Карта проекта недоступна; поиск по дереву.\n${result.text}`, summary: `${result.count} совпадений` };
         },
+        /** Write the file, record the change, and refresh that map path. */
         async write_file(args) {
             const result = await writeTextFile({ root, file: args.path, content: args.content, overwrite: args.overwrite !== false,
                 maxBytes: limits.maxFileWriteBytes, backupDir });
@@ -148,6 +188,7 @@ export function createToolset({
             const output = labelOutsideEdit(result.rel, `${result.created ? 'Создан' : 'Перезаписан'} ${result.rel} (${formatBytes(result.bytes)}).`);
             return { output, summary: `${result.created ? '+' : '~'} ${result.rel}` };
         },
+        /** Replace the fragment, record the edit, and refresh that map path. */
         async replace_text(args) {
             const result = await replaceInFile({ root, file: args.path, search: args.search, replacement: args.replacement, all: Boolean(args.all),
                 maxBytes: limits.maxFileWriteBytes, backupDir });
@@ -157,6 +198,7 @@ export function createToolset({
             const output = labelOutsideEdit(result.rel, `Изменён ${result.rel}: замен ${result.replacements}.`);
             return { output, summary: `~ ${result.rel}` };
         },
+        /** Delete the file, record it, and refresh that map path. */
         async delete_file(args) {
             const result = await deleteFile({ root, file: args.path, backupDir });
             stats.changes.push({ op: 'delete', path: result.rel, backupPath: result.backupPath });
@@ -165,10 +207,12 @@ export function createToolset({
             const output = labelOutsideEdit(result.rel, `Удалён ${result.rel}.`);
             return { output, summary: `- ${result.rel}` };
         },
+        /** Create a directory under `root`. */
         async make_dir(args) {
             const result = await makeDirectory({ root, dir: args.path });
             return { output: `Каталог ${result.rel} создан.`, summary: result.rel };
         },
+        /** Run the command under `root` and return a status block. */
         async run_command(args) {
             if (typeof args.command !== 'string' || !args.command.trim()) throw new Error('Пустая команда.');
             const cwd = args.cwd ? (await resolveInside(root, args.cwd)).abs : root;
@@ -182,6 +226,7 @@ export function createToolset({
             if (result.truncated) body.push('(вывод усечён)');
             return { output: body.join('\n'), summary: status, ok: result.exitCode === 0 };
         },
+        /** GET an http(s) URL and return text, reducing HTML with `htmlToText`. */
         async fetch_url(args) {
             let url;
             try { url = new URL(args.url); } catch { throw new Error('Некорректный URL.'); }
@@ -213,6 +258,7 @@ export function createToolset({
                 return { output: header + text, summary: `HTTP ${res.status}, ${formatBytes(total)}`, ok: res.ok };
             } finally { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); }
         },
+        /** Attach a local image, or ask the vision role when `describeImage` is set. */
         async view_image(args) {
             const { abs, rel } = await resolveInside(root, args.path, { allowRoot: false });
             const info = await stat(abs).catch(() => null);
@@ -231,6 +277,7 @@ export function createToolset({
                 summary: `${rel} (${formatBytes(buffer.length)})`,
             };
         },
+        /** Summarize a UTF-8 file, reusing the memory cache when the bytes match. */
         async summarize_file(args) {
             const { abs, rel } = await resolveInside(root, args.path, { allowRoot: false });
             const info = await stat(abs).catch(() => null);
@@ -249,11 +296,13 @@ export function createToolset({
             if (memory && projectKey) memory.putFileSummary(projectKey, cacheKey, sha256, summary, model ?? null);
             return { output: `Сводка ${rel} (${formatBytes(buffer.length)}):\n${summary}`, summary: `${rel} (${formatBytes(buffer.length)})` };
         },
+        /** Search long-term memory and return the matching rows. */
         async recall(args) {
             const rows = memory.recall(String(args.query ?? ''), { project: projectKey, limit: 10 });
             if (!rows.length) return { output: 'В памяти ничего подходящего не найдено.', summary: '0 записей' };
             return { output: rows.map((r) => `[${r.scope}/${r.kind}#${r.id}] ${r.content}${r.tags ? ` (теги: ${r.tags})` : ''}`).join('\n'), summary: `${rows.length} записей` };
         },
+        /** Save one memory row and emit `memory.saved`. */
         async remember(args) {
             const row = memory.remember({ scope: args.scope ?? 'project', project: projectKey, projectName, kind: args.kind ?? 'fact',
                 content: args.content, tags: args.tags ?? [], source: 'agent' });
@@ -261,6 +310,7 @@ export function createToolset({
             notify({ type: 'memory.saved', count: 1, items: [row] });
             return { output: `Сохранено в память (#${row.id}, ${row.scope}/${row.kind}).`, summary: truncate(row.content, 60) };
         },
+        /** Ask the operator, or tell the model to continue when nobody is there. */
         async ask_user(args) {
             if (!askUser) return { output: 'Оператор недоступен (неинтерактивный режим). Примите разумное решение самостоятельно и перечислите допущения в итоговом ответе.', summary: 'нет оператора' };
             const answer = await askUser(String(args.question ?? ''));
@@ -315,4 +365,12 @@ export function createToolset({
     });
 }
 
+/**
+ * POSIX path of `abs` relative to `root`.
+ * @param {string} root
+ * @param {string} abs
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
 export const relativeToRoot = (root, abs) => path.relative(root, abs).split(path.sep).join('/');

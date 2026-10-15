@@ -1,3 +1,15 @@
+/**
+ * @file src/ui/renderer.js
+ * @module ui/renderer
+ * @purpose Stream agent output to a tty, plain, JSON, or quiet terminal.
+ * @depends node:util, node:readline/promises, ui/sanitize, util/text, ui/glyphs, ui/renderer-events
+ * @usedBy cli, index.js
+ * @exports detectMode, createRenderer
+ * @ai.tags ui, terminal, stream
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 import { styleText } from 'node:util';
 import { createInterface } from 'node:readline/promises';
 import { sanitizeTerminal, sanitizeValue } from './sanitize.js';
@@ -22,6 +34,13 @@ export function createRenderer({
     const tty = mode === 'tty';
     const symbols = ascii ? ASCII_SYMBOLS : SYMBOLS;
     const frames = ascii ? ASCII_FRAMES : FRAMES;
+    /**
+     * Color one status or log string when the mode is tty.
+     * @param {string} format styleText color name.
+     * @param {string} text Text to color.
+     * @returns {string}
+     * @ai.hint pure
+     */
     const color = (format, text) => (tty ? styleText(format, text, { stream: stderr }) : text);
     const state = {
         phase: '', detail: '', startedAt: Date.now(), turn: null, maxTurns: null, liveChars: 0, ledger: null,
@@ -33,11 +52,21 @@ export function createRenderer({
     let rl = null;
 
     // ---- low level output -------------------------------------------------------------------
+    /**
+     * Erase the live status line on stderr when one is showing.
+     * @returns {void}
+     * @ai.hint io
+     */
     function clearStatus() {
         if (!state.statusVisible) return;
         stderr.write('\r\x1b[2K');
         state.statusVisible = false;
     }
+    /**
+     * Build the status line from the role, phase, elapsed time, tokens, cost, and turn.
+     * @returns {string}
+     * @ai.hint pure
+     */
     function statusText() {
         const parts = [];
         const phase = state.phase || 'работает';
@@ -56,6 +85,11 @@ export function createRenderer({
         if (state.turn && state.maxTurns > 1) parts.push(`ход ${state.turn}/${state.maxTurns}`);
         return parts.join(' · ');
     }
+    /**
+     * Write one spinner frame and the status line while a tty turn is active.
+     * @returns {void}
+     * @ai.hint io
+     */
     function drawStatus() {
         if (!tty || !state.active || state.textStreaming || state.askOpen) return;
         const frame = frames[state.frame++ % frames.length];
@@ -64,14 +98,32 @@ export function createRenderer({
         stderr.write(`\r\x1b[2K${color('cyan', line)}`);
         state.statusVisible = true;
     }
+    /**
+     * Clear the status line, write text to the stream, and remember the last character.
+     * @param {object} stream stdout or stderr.
+     * @param {string} text Characters to write.
+     * @returns {void}
+     * @ai.hint io
+     */
     function out(stream, text) {
         clearStatus();
         stream.write(text);
         if (text.length) state.lastChar = text.at(-1);
     }
+    /**
+     * Write a newline to stdout when the previous character was not one.
+     * @returns {void}
+     * @ai.hint io
+     */
     function ensureNewline() {
         if (state.lastChar !== '\n') { stdout.write('\n'); state.lastChar = '\n'; }
     }
+    /**
+     * Write one sanitized JSON event, including an ISO time, as a line on stdout.
+     * @param {object} event Event fields merged after the time.
+     * @returns {void}
+     * @ai.hint io
+     */
     function emitJson(event) {
         stdout.write(`${JSON.stringify(sanitizeValue({ time: new Date().toISOString(), ...event }))}\n`);
     }
@@ -106,6 +158,13 @@ export function createRenderer({
         out(stderr, `${color('gray', clean)}\n`);
         drawStatus();
     }
+    /**
+     * Store the phase and detail, notify onStatus, and redraw the tty status line.
+     * @param {string} phase Short phase label.
+     * @param {string} [detail] Extra text truncated on the status line.
+     * @returns {void}
+     * @ai.hint io
+     */
     function setStatus(phase, detail = '') {
         state.phase = phase; state.detail = detail;
         onStatus?.({ phase, detail, elapsedMs: Date.now() - state.startedAt });
@@ -113,6 +172,11 @@ export function createRenderer({
         if (!state.active) { state.active = true; state.startedAt = state.startedAt || Date.now(); timer ??= setInterval(drawStatus, statusIntervalMs); timer.unref?.(); }
         drawStatus();
     }
+    /**
+     * Reset the turn clock and start the status timer on a tty.
+     * @returns {void}
+     * @ai.hint io
+     */
     function begin() {
         state.startedAt = Date.now(); state.liveChars = 0; state.turn = null; state.textStreaming = false;
         if (tty) { state.active = true; timer ??= setInterval(drawStatus, statusIntervalMs); timer.unref?.(); }
@@ -124,6 +188,11 @@ export function createRenderer({
         clearStatus();
         if (state.textStreaming) { ensureNewline(); state.textStreaming = false; }
     }
+    /**
+     * Open the readline interface once and forward Ctrl-C to onInterrupt.
+     * @returns {import('node:readline/promises').Interface}
+     * @ai.hint io
+     */
     function readline() {
         if (!rl) {
             rl = createInterface({ input: stdin, output: stderr, terminal: Boolean(stdin.isTTY) });
@@ -165,6 +234,12 @@ export function createRenderer({
         }
     }
 
+    /**
+     * Pass one agent event to handleRendererEvent with this renderer's callbacks.
+     * @param {object} event Agent event.
+     * @returns {void}
+     * @ai.hint io
+     */
     function handle(event) {
         return handleRendererEvent(event, {
             mode, verbose, line, setStatus, text, state, showReasoning, emitJson,
@@ -187,8 +262,19 @@ export function createRenderer({
         }
     }
 
+    /**
+     * Write one event object when the mode is json.
+     * @param {object} event Event to emit.
+     * @returns {void}
+     * @ai.hint io
+     */
     function json(event) { if (mode === 'json') emitJson(event); }
 
+    /**
+     * Stop the status line and close the readline interface.
+     * @returns {void}
+     * @ai.hint io
+     */
     function close() {
         idle();
         if (rl) { rl.close(); rl = null; }
@@ -199,9 +285,32 @@ export function createRenderer({
         ensureNewline,
         /** Plain stdout output for commands (suppressed in JSON mode, where callers emit objects). */
         write: (value) => { if (mode !== 'json') out(stdout, sanitizeTerminal(value)); },
+        /**
+         * True when the mode is not json and stdin is a TTY.
+         * @returns {boolean}
+         * @ai.hint pure
+         */
         get interactive() { return mode !== 'json' && Boolean(stdin.isTTY); },
+        /**
+         * Store the usage snapshot drawn on the status line.
+         * @param {object | null} snapshot Token and cost totals.
+         * @returns {void}
+         * @ai.hint pure
+         */
         set ledger(snapshot) { state.ledger = snapshot; },
+        /**
+         * Replace the callback notified when the status phase changes.
+         * @param {Function | null} fn Status listener.
+         * @returns {void}
+         * @ai.hint pure
+         */
         set onStatus(fn) { onStatus = fn; },
+        /**
+         * Replace the callback used when readline receives Ctrl-C.
+         * @param {Function | null} fn Interrupt listener.
+         * @returns {void}
+         * @ai.hint pure
+         */
         set onInterrupt(fn) { onInterrupt = fn; },
     };
 }

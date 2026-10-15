@@ -11,10 +11,22 @@
  */
 import { BARE_STRING, IDENTIFIER, NUMERIC, fail, isPlainObject } from './toon-shared.js';
 
+/**
+ * Leave identifier keys bare. Quote anything else as JSON.
+ * @param {string} key
+ * @returns {string}
+ * @ai.hint pure
+ */
 function encodeKey(key) {
     return IDENTIFIER.test(key) ? key : JSON.stringify(key);
 }
 
+/**
+ * Encode null, a boolean, a finite number, or a string. Safe bare tokens stay unquoted.
+ * @param {null|boolean|number|string} value
+ * @returns {string}
+ * @ai.hint pure
+ */
 function encodePrimitive(value) {
     if (value === null) return 'null';
     if (value === true) return 'true';
@@ -32,12 +44,24 @@ function encodePrimitive(value) {
     throw fail('unsupported value');
 }
 
+/**
+ * Reject holes. A sparse array cannot be written as a length-prefixed list.
+ * @param {Array} items
+ * @returns {void}
+ * @ai.hint pure
+ */
 function assertDense(items) {
     for (let i = 0; i < items.length; i++) {
         if (!Object.hasOwn(items, i)) throw fail('sparse array');
     }
 }
 
+/**
+ * True when every item has the same keys, in the same order, and every cell is primitive.
+ * @param {Array} items
+ * @returns {boolean}
+ * @ai.hint pure
+ */
 function isTabular(items) {
     if (!items.every(isPlainObject)) return false;
     const fields = Object.keys(items[0]);
@@ -48,11 +72,26 @@ function isTabular(items) {
     });
 }
 
+/**
+ * True for null, string, boolean, or a finite number.
+ * @param {*} value
+ * @returns {boolean}
+ * @ai.hint pure
+ */
 function isPrimitiveCell(value) {
     if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
     return typeof value === 'number' && Number.isFinite(value);
 }
 
+/**
+ * Write a dense array as an inline list, or as a table when every row shares primitive fields.
+ * Row indent is two spaces past `indent`.
+ * @param {string} key
+ * @param {Array} items
+ * @param {number} indent
+ * @returns {string[]}
+ * @ai.hint pure
+ */
 function encodeArray(key, items, indent) {
     assertDense(items);
     if (items.some((item) => isPlainObject(item) && Object.getOwnPropertySymbols(item).length > 0)) {
@@ -77,6 +116,13 @@ function encodeArray(key, items, indent) {
     return [header, ...rows];
 }
 
+/**
+ * Write object fields at `indent`. Nested objects are indented two more spaces.
+ * @param {object} value
+ * @param {number} indent
+ * @returns {string[]}
+ * @ai.hint pure
+ */
 function encodeObject(value, indent) {
     if (Object.getOwnPropertySymbols(value).length > 0) throw fail('unsupported value');
     const pad = ' '.repeat(indent);
@@ -95,6 +141,13 @@ function encodeObject(value, indent) {
     return lines;
 }
 
+/**
+ * Encode a plain object as one TOON document with a trailing newline.
+ * @param {object} value
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
 export function encodeToon(value) {
     if (!isPlainObject(value)) throw fail('expected a plain object');
     return `${encodeObject(value, 0).join('\n')}\n`;

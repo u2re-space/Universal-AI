@@ -1,3 +1,14 @@
+/**
+ * @file src/openai/http.js
+ * @module openai/http
+ * @purpose HTTPS transport with an explicit idle timeout, plus a capped body reader.
+ * @depends node:http, node:https, openai/errors
+ * @usedBy openai/client
+ * @exports createHttp, readBody
+ * @ai.tags http
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import http from 'node:http';
 import https from 'node:https';
 import { ApiError } from './errors.js';
@@ -21,12 +32,24 @@ export function createHttp({
         'http:': new http.Agent({ keepAlive, maxSockets: 8 }),
     };
 
+    /**
+     * `https` for normal hosts. `http` only for localhost.
+     * @param {URL} url
+     * @returns {typeof import('node:http')|typeof import('node:https')}
+     * @ai.hint pure
+     */
     function moduleFor(url) {
         if (url.protocol === 'https:') return https;
         if (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) return http;
         throw new TypeError('Разрешены только HTTPS-адреса (HTTP — только для localhost).');
     }
 
+    /**
+     * Send one request and resolve when response headers arrive. The body is an async iterable.
+     * @param {{ url: URL|string, method?: string, headers?: object, body?: string, signal?: AbortSignal, idleTimeout?: number }} options
+     * @returns {Promise<{ status: number, headers: object, body: AsyncGenerator<Buffer>, destroy: () => void }>}
+     * @ai.hint io
+     */
     function request({ url, method = 'GET', headers = {}, body, signal, idleTimeout = idleTimeoutMs }) {
         const target = url instanceof URL ? url : new URL(url);
         const transport = moduleFor(target);
@@ -40,16 +63,32 @@ export function createHttp({
                 headers: { 'User-Agent': userAgent, Accept: 'application/json', ...headers,
                     ...(body !== undefined ? { 'Content-Length': Buffer.byteLength(body) } : {}) },
             });
+            /**
+             * Record the first failure, destroy the request, and reject if headers have not arrived.
+             * @param {Error} error
+             * @returns {void}
+             * @ai.hint io
+             */
             const fail = (error) => {
                 failure ??= error;
                 req.destroy(error);
                 if (!settled) { settled = true; cleanup(); reject(error); }
             };
+            /**
+             * Turn the abort signal into the first failure.
+             * @returns {void}
+             * @ai.hint io
+             */
             const onAbort = () => fail(signal.reason instanceof Error ? signal.reason
                 : new ApiError('Запрос отменён.', { code: 'ABORTED' }));
             const connectTimer = setTimeout(() => fail(new ApiError(
                 `Не удалось подключиться к ${target.host} за ${connectTimeoutMs} ms.`,
                 { code: 'CONNECT_TIMEOUT', retryable: true })), connectTimeoutMs);
+            /**
+             * Clear the connect timer and drop the abort listener.
+             * @returns {void}
+             * @ai.hint io
+             */
             function cleanup() {
                 clearTimeout(connectTimer);
                 signal?.removeEventListener('abort', onAbort);
@@ -72,6 +111,11 @@ export function createHttp({
                 settled = true;
                 res.once('error', () => { /* surfaced via the async iterator below */ });
                 res.once('close', () => { if (res.complete) { signal?.removeEventListener('abort', onAbort); } });
+                /**
+                 * Yield response chunks. A short body or a later socket error becomes an ApiError.
+                 * @returns {AsyncGenerator<Buffer>}
+                 * @ai.hint io
+                 */
                 async function* iterate() {
                     try {
                         for await (const chunk of res) yield chunk;
@@ -94,6 +138,11 @@ export function createHttp({
         });
     }
 
+    /**
+     * Destroy the keep-alive agents.
+     * @returns {void}
+     * @ai.hint io
+     */
     function close() {
         for (const agent of Object.values(agents)) agent.destroy();
     }

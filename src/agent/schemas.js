@@ -1,8 +1,25 @@
-/** Strict JSON schemas for structured role outputs (Responses API text.format = json_schema). */
+/**
+ * @file src/agent/schemas.js
+ * @module agent/schemas
+ * @purpose Strict JSON schemas for structured role outputs (Responses API text.format = json_schema).
+ * @usedBy agent/team, agent/roles
+ * @exports PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA
+ * @ai.tags schema, roles
+ * @ai.hint pure
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 const string = { type: 'string' };
 const strings = { type: 'array', items: string };
 const nullableString = { type: ['string', 'null'] };
 const nullableInteger = { type: ['integer', 'null'] };
+/**
+ * Build a strict object schema: every property is required and extras are rejected.
+ * Each exported role schema is built with this.
+ * @param {object} properties
+ * @returns {object}
+ * @ai.hint pure
+ */
 const object = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
 
 export const PLAN_SCHEMA = object({

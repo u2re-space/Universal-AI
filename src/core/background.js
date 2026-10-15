@@ -1,3 +1,14 @@
+/**
+ * @file src/core/background.js
+ * @module core/background
+ * @purpose Poll or reattach to a Responses API call created with background:true.
+ * @depends node:timers/promises, openai/errors
+ * @usedBy agent/loop, commands/misc
+ * @exports TERMINAL_STATUSES, awaitBackground, attachBackground
+ * @ai.tags background, stream
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import { setTimeout as sleep } from 'node:timers/promises';
 import { ApiError } from '../openai/errors.js';
 

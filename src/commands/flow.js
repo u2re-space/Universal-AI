@@ -1,3 +1,14 @@
+/**
+ * @file src/commands/flow.js
+ * @module commands/flow
+ * @purpose Shared one-shot flow: open a session, run one turn, print the summary, and return an exit code.
+ * @depends node:path, node:fs/promises, core/attachments, agent/loop, util/text, commands/shared
+ * @usedBy commands/ask, commands/run, commands/image
+ * @exports loadTextFormat, runOnce
+ * @ai.tags cli, turn
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { buildUserMessage } from '../core/attachments.js';
@@ -6,7 +17,14 @@ import { formatBytes } from '../util/text.js';
 import { UsageError, createClientFor, createLedgerFor, openSession, writeOutput, resultObject, exitCodeFor, STATUS_LABELS,
     usageRow, describeChanges } from './shared.js';
 
-/** Load a JSON schema file for structured output (--schema). */
+/**
+ * Load a JSON schema file for structured output (--schema).
+ * @param {string|undefined} file Path relative to cwd. A falsy value skips the schema.
+ * @param {string} cwd Working directory.
+ * @returns {Promise<object|null>} json_schema text format, or null.
+ * @exports
+ * @ai.hint io
+ */
 export async function loadTextFormat(file, cwd) {
     if (!file) return null;
     const target = path.resolve(cwd, file);
@@ -20,6 +38,11 @@ export async function loadTextFormat(file, cwd) {
 /**
  * Shared single-prompt flow for `ask`, `run` and `image`:
  * open session → add the user message → runTurn → print/save → summary → exit code.
+ * @param {object} ctx Command context. client and ledger are created when absent.
+ * @param {{ prompt: string, parts?: object[], instructions: string, toolset?: object|null, toolChoice?: object|null, textFormat?: object|null, imageTarget?: string, maxTurns?: number, summaryTitle?: string, extraRows?: Function, builtin?: object[] }} flow Turn inputs. extraRows adds summary lines.
+ * @returns {Promise<number>} Exit code from exitCodeFor.
+ * @exports
+ * @ai.hint io
  */
 export async function runOnce(ctx, {
     prompt, parts = [], instructions, toolset = null, toolChoice = null, textFormat = null, imageTarget,

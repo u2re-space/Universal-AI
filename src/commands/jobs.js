@@ -1,3 +1,14 @@
+/**
+ * @file src/commands/jobs.js
+ * @module commands/jobs
+ * @purpose List, follow, wait, cancel, and delete detached local background jobs.
+ * @depends jobs/manager, ui/sanitize, util/text, commands/shared
+ * @usedBy cli
+ * @exports jobs
+ * @ai.tags cli, jobs
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import { createJobManager } from '../jobs/manager.js';
 import { sanitizeTerminal } from '../ui/sanitize.js';
 import { formatDuration, formatNumber, formatUsd, truncate } from '../util/text.js';
@@ -5,6 +16,12 @@ import { UsageError } from './shared.js';
 
 const STATUS_RU = { created: 'создана', running: 'выполняется', completed: 'завершена', failed: 'ошибка', cancelled: 'отменена', unknown: '?' };
 
+/**
+ * Elapsed time, token line, and current phase for one job record.
+ * @param {{ meta: object, status: object|null, result: object|null }} job Record from the job manager.
+ * @returns {{ elapsed: string, tokens: string, phase: string }}
+ * @ai.hint pure
+ */
 function describeJob(job) {
     const { meta, status, result } = job;
     const started = meta.startedAt ? new Date(meta.startedAt) : null;
@@ -18,6 +35,10 @@ function describeJob(job) {
 /**
  * `ai jobs <list|status|log|result|wait|cancel|rm> [id]` — manage detached background jobs
  * started with --detach. Ids may be abbreviated to a unique prefix.
+ * @param {object} ctx Command context from cli.main.
+ * @returns {Promise<number>} 0 for a finished job action, 1 when result or wait is not completed.
+ * @exports
+ * @ai.hint io
  */
 export async function jobs(ctx) {
     const { config, renderer, positionals, values, signal } = ctx;

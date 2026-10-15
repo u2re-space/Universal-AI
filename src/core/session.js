@@ -1,3 +1,14 @@
+/**
+ * @file src/core/session.js
+ * @module core/session
+ * @purpose Conversation state: replay items, usage totals, and JSON files under the agent home.
+ * @depends node:path, node:crypto, node:fs/promises, util/text
+ * @usedBy commands/shared, agent/roles, agent/team
+ * @exports createSession, loadSession, sessionFile
+ * @ai.tags session
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
@@ -21,8 +32,19 @@ export function createSession({ store = false, model = null, name = null, instru
         usage: { input: 0, cached: 0, output: 0, reasoning: 0, total: 0, costUsd: 0, requests: 0 },
     };
 
+    /**
+     * Stamp updatedAt with the current time.
+     * @returns {void}
+     * @ai.hint pure
+     */
     function touch() { state.updatedAt = new Date().toISOString(); }
 
+    /**
+     * Append plain input items and stamp updatedAt.
+     * @param {object[]} items
+     * @returns {void}
+     * @ai.hint pure
+     */
     function addItems(items) {
         for (const item of items) if (isRecord(item)) state.items.push(item);
         touch();
@@ -63,6 +85,13 @@ export function createSession({ store = false, model = null, name = null, instru
         }
     }
 
+    /**
+     * Append replayable output items and remember the response id.
+     * @param {object} response
+     * @param {{ imagePaths?: Map<string, string> }} [options]
+     * @returns {void}
+     * @ai.hint pure
+     */
     function recordResponse(response, { imagePaths } = {}) {
         if (!isRecord(response)) return;
         const items = (response.output ?? []).map((item) => replayable(item, { imagePaths })).filter(Boolean);
@@ -73,6 +102,12 @@ export function createSession({ store = false, model = null, name = null, instru
         touch();
     }
 
+    /**
+     * Add one ledger entry into the session usage totals.
+     * @param {{ usage?: object, costUsd?: number }} entry
+     * @returns {void}
+     * @ai.hint pure
+     */
     function recordUsage(entry) {
         if (!entry?.usage) return;
         for (const key of ['input', 'cached', 'output', 'reasoning', 'total']) state.usage[key] += entry.usage[key] ?? 0;
@@ -88,6 +123,13 @@ export function createSession({ store = false, model = null, name = null, instru
         return { input: [...state.items] };
     }
 
+    /**
+     * Replace the item list. Drops lastResponseId unless keepLastResponse is set.
+     * @param {object[]} items
+     * @param {{ keepLastResponse?: boolean }} [options]
+     * @returns {void}
+     * @ai.hint pure
+     */
     function replace(items, { keepLastResponse = false } = {}) {
         state.items = items.filter(isRecord);
         if (!keepLastResponse) state.lastResponseId = null;
@@ -95,6 +137,11 @@ export function createSession({ store = false, model = null, name = null, instru
         touch();
     }
 
+    /**
+     * Drop items, the last response id, and the turn count.
+     * @returns {void}
+     * @ai.hint pure
+     */
     function clear() {
         state.items = []; state.lastResponseId = null; state.pendingFrom = 0; state.turns = 0;
         touch();
@@ -111,8 +158,19 @@ export function createSession({ store = false, model = null, name = null, instru
         return lines.join('\n\n');
     }
 
+    /**
+     * Deep copy of the session state.
+     * @returns {object}
+     * @ai.hint pure
+     */
     function toJSON() { return structuredClone(state); }
 
+    /**
+     * Write the session as JSON via a temp file in the same directory, mode 0600.
+     * @param {string} file
+     * @returns {Promise<string>}
+     * @ai.hint io
+     */
     async function save(file) {
         await mkdir(path.dirname(file), { recursive: true });
         const temp = `${file}.${process.pid}.tmp`;
@@ -121,6 +179,12 @@ export function createSession({ store = false, model = null, name = null, instru
         return file;
     }
 
+    /**
+     * Load a version-1 session object into this instance.
+     * @param {object} data
+     * @returns {object}
+     * @ai.hint pure
+     */
     function restore(data) {
         if (!isRecord(data) || data.version !== SESSION_VERSION || !Array.isArray(data.items)) {
             throw new Error('Файл сессии имеет неизвестный формат.');
@@ -134,22 +198,112 @@ export function createSession({ store = false, model = null, name = null, instru
         addUserMessage: (message) => addItems([message]),
         addItems, recordResponse, recordUsage, requestInput, replace, clear, transcript, toJSON, save, restore,
         bumpTurn: () => { state.turns++; touch(); },
-        get id() { return state.id; }, get name() { return state.name; }, set name(value) { state.name = value; },
-        get items() { return state.items; }, get store() { return store; }, get model() { return state.model; },
+        /**
+         * Session id.
+         * @returns {string}
+         * @ai.hint pure
+         */
+        get id() { return state.id; },
+        /**
+         * Optional display name.
+         * @returns {string|null}
+         * @ai.hint pure
+         */
+        get name() { return state.name; },
+        /**
+         * Set the display name.
+         * @param {string|null} value
+         * @returns {void}
+         * @ai.hint pure
+         */
+        set name(value) { state.name = value; },
+        /**
+         * Live item list. Callers can mutate it.
+         * @returns {object[]}
+         * @ai.hint pure
+         */
+        get items() { return state.items; },
+        /**
+         * Whether OpenAI stores the conversation.
+         * @returns {boolean}
+         * @ai.hint pure
+         */
+        get store() { return store; },
+        /**
+         * Model id last seen, or the one passed at creation.
+         * @returns {string|null}
+         * @ai.hint pure
+         */
+        get model() { return state.model; },
+        /**
+         * Set the model id stored on the session.
+         * @param {string|null} value
+         * @returns {void}
+         * @ai.hint pure
+         */
         set model(value) { state.model = value; },
-        get lastResponseId() { return state.lastResponseId; }, get turns() { return state.turns; },
-        get usage() { return { ...state.usage }; }, get instructions() { return state.instructions; },
+        /**
+         * Id of the last recorded response.
+         * @returns {string|null}
+         * @ai.hint pure
+         */
+        get lastResponseId() { return state.lastResponseId; },
+        /**
+         * Completed turn count.
+         * @returns {number}
+         * @ai.hint pure
+         */
+        get turns() { return state.turns; },
+        /**
+         * Copy of accumulated usage.
+         * @returns {object}
+         * @ai.hint pure
+         */
+        get usage() { return { ...state.usage }; },
+        /**
+         * Session instructions, if any.
+         * @returns {string|null}
+         * @ai.hint pure
+         */
+        get instructions() { return state.instructions; },
+        /**
+         * Set the instructions stored on the session.
+         * @param {string|null} value
+         * @returns {void}
+         * @ai.hint pure
+         */
         set instructions(value) { state.instructions = value; },
+        /**
+         * Number of stored items.
+         * @returns {number}
+         * @ai.hint pure
+         */
         get size() { return state.items.length; },
     };
     return api;
 }
 
+/**
+ * Read a session file and restore it into a new session.
+ * @param {string} file
+ * @param {object} [options] Passed to createSession before restore.
+ * @returns {Promise<object>}
+ * @exports
+ * @ai.hint io
+ */
 export async function loadSession(file, options = {}) {
     const raw = await readFile(file, 'utf8');
     return createSession(options).restore(JSON.parse(raw));
 }
 
+/**
+ * Path of `<home>/sessions/<name>.json`. The name is restricted to 1–64 word characters, dots, and hyphens.
+ * @param {string} home
+ * @param {string} name
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
 export function sessionFile(home, name) {
     if (!/^[\w.-]{1,64}$/.test(name)) throw new Error('Имя сессии: буквы, цифры, точка, дефис, подчёркивание (до 64 символов).');
     return path.join(home, 'sessions', `${name}.json`);

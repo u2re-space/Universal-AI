@@ -1,3 +1,14 @@
+/**
+ * @file src/core/config.js
+ * @module core/config
+ * @purpose Load, validate, and redact configuration, and resolve per-role settings.
+ * @depends node:os, node:path, node:fs/promises, util/text, core/config-defaults
+ * @usedBy cli, commands/shared, commands/flags, commands/ask, commands/run, commands/chat, commands/misc, agent/loop, agent/roles
+ * @exports APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, defaults, resolveRole, defaultHome, loadConfig, isReasoningModel, supportsVerbosity, redactConfig
+ * @ai.tags config
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import os from 'node:os';
 import path from 'node:path';
 import { readFile, mkdir } from 'node:fs/promises';
@@ -48,10 +59,24 @@ export function resolveRole(config, name = 'default') {
     };
 }
 
+/**
+ * Agent home directory: AI_AGENT_HOME, or ~/.ai-agent.
+ * @param {object} [env]
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
 export function defaultHome(env = process.env) {
     return env.AI_AGENT_HOME ? path.resolve(env.AI_AGENT_HOME) : path.join(os.homedir(), '.ai-agent');
 }
 
+/**
+ * Read one config JSON object. Unknown keys are rejected. A missing file is `{}` when optional.
+ * @param {string} file
+ * @param {{ optional?: boolean }} [options]
+ * @returns {Promise<object>}
+ * @ai.hint io
+ */
 async function readJsonFile(file, { optional = false } = {}) {
     let raw;
     try { raw = await readFile(file, 'utf8'); }
@@ -70,6 +95,12 @@ async function readJsonFile(file, { optional = false } = {}) {
     return parsed;
 }
 
+/**
+ * Configuration fields taken from process environment variables.
+ * @param {object} env
+ * @returns {object}
+ * @ai.hint pure
+ */
 function fromEnv(env) {
     const result = {};
     if (env.AI_MODEL) result.model = env.AI_MODEL;
@@ -100,6 +131,12 @@ export async function loadConfig({ configPath = null, overrides = {}, env = proc
     return config;
 }
 
+/**
+ * Throw when a merged config value is outside the accepted enums and ranges.
+ * @param {object} c
+ * @returns {void}
+ * @ai.hint pure
+ */
 function validateConfig(c) {
     const fail = (message) => { throw new Error(`Конфигурация: ${message}`); };
     if (typeof c.model !== 'string' || !c.model.trim()) fail('укажите model (или AI_MODEL / --model).');

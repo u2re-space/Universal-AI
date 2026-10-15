@@ -1,3 +1,14 @@
+/**
+ * @file src/core/images.js
+ * @module core/images
+ * @purpose Write generated images to disk, one file per item, partials then the final.
+ * @depends node:path, node:fs/promises, util/text
+ * @usedBy agent/loop
+ * @exports createImageSink
+ * @ai.tags images
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import path from 'node:path';
 import { mkdir, writeFile, stat } from 'node:fs/promises';
 import { timestampSlug } from '../util/text.js';
@@ -17,12 +28,24 @@ export function createImageSink({ target = '.', format = 'png', prefix = 'ai-ima
     let targetIsFile = null;
     const stamp = timestampSlug();
 
+    /**
+     * Decide once whether `target` is a file path or a directory.
+     * @returns {Promise<void>}
+     * @ai.hint io
+     */
     async function resolveTarget() {
         if (targetIsFile !== null) return;
         const info = await stat(target).catch(() => null);
         targetIsFile = info ? !info.isDirectory() : /\.(png|jpe?g|webp)$/i.test(target);
     }
 
+    /**
+     * Absolute path for an item. The same id always returns the path assigned on the first call.
+     * @param {string} itemId
+     * @param {string} [outputFormat]
+     * @returns {Promise<string>}
+     * @ai.hint io
+     */
     async function fileFor(itemId, outputFormat) {
         await resolveTarget();
         if (paths.has(itemId)) return paths.get(itemId);
@@ -40,6 +63,14 @@ export function createImageSink({ target = '.', format = 'png', prefix = 'ai-ima
         return file;
     }
 
+    /**
+     * Decode base64 and write it. Writes for one item run in order so a late partial cannot pass the final.
+     * @param {string|null} itemId
+     * @param {string} b64
+     * @param {string} [outputFormat]
+     * @returns {Promise<{ file: string, bytes: number }|null>}
+     * @ai.hint io
+     */
     function write(itemId, b64, outputFormat) {
         if (!b64) return Promise.resolve(null);
         const key = itemId ?? `#${counter + 1}`;
@@ -56,7 +87,17 @@ export function createImageSink({ target = '.', format = 'png', prefix = 'ai-ima
     return {
         savePartial: (itemId, b64, outputFormat) => write(itemId, b64, outputFormat),
         saveFinal: (itemId, b64, outputFormat) => write(itemId, b64, outputFormat),
+        /**
+         * Copy of item id to absolute path.
+         * @returns {Map<string, string>}
+         * @ai.hint pure
+         */
         get paths() { return new Map(paths); },
+        /**
+         * Absolute paths written so far, in assignment order.
+         * @returns {string[]}
+         * @ai.hint pure
+         */
         get files() { return [...paths.values()]; },
     };
 }

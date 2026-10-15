@@ -1,3 +1,14 @@
+/**
+ * @file src/commands/chat.js
+ * @module commands/chat
+ * @purpose Interactive multi-turn REPL with slash commands, attachments, and optional local tools.
+ * @depends node:util, core/attachments, agent/loop, agent/tools, core/config, util/text, commands/instructions, commands/shared
+ * @usedBy cli
+ * @exports chat
+ * @ai.tags cli, repl
+ * @ai.hint io
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
 import { styleText } from 'node:util';
 import { buildUserMessage } from '../core/attachments.js';
 import { runTurn, builtinTools, compactSession } from '../agent/loop.js';
@@ -31,6 +42,10 @@ const HELP = `Команды чата:
 /**
  * `ai chat` — interactive multi-turn REPL with slash commands, attachments, optional local
  * tools, web search and image generation. Named sessions (--session) persist between runs.
+ * @param {object} ctx Command context from cli.main. Requires an interactive renderer.
+ * @returns {Promise<number>} 130 when the run signal is aborted, otherwise 0.
+ * @exports
+ * @ai.hint io
  */
 export async function chat(ctx) {
     const { renderer, values, signal, emit } = ctx;
@@ -51,6 +66,12 @@ export async function chat(ctx) {
     const tty = renderer.mode === 'tty';
     const paint = (format, text) => (tty ? styleText(format, text, { stream: process.stderr }) : text);
 
+    /**
+     * Turn local tools on or off for later messages. Opens project memory the first time tools are enabled.
+     * @param {string|boolean|null|undefined} list on, none, off, or a comma list such as fs,shell,fetch.
+     * @returns {string} Status line for the renderer.
+     * @ai.hint io
+     */
     function enableLocalTools(list) {
         if (!list || list === 'none' || list === 'off') { toolset = null; return 'локальные инструменты выключены'; }
         const selection = list === 'on' || list === true ? { fs: true, shell: true, fetch: true, askUser: true }
@@ -70,6 +91,11 @@ export async function chat(ctx) {
 
     renderer.line('info', `Чат · модель ${model} · сессия ${values.session ? `${values.session}${resumed ? ` (продолжена, ${session.size} элементов)` : ' (новая)'}` : 'временная'} · /help — команды`, { dim: true });
 
+    /**
+     * Read one user message. A trailing backslash continues the line. A """ fence reads until the closing fence.
+     * @returns {Promise<string>}
+     * @ai.hint io
+     */
     async function readMessage() {
         let text = await rl.question(paint('bold', 'вы › '), { signal });
         if (text.startsWith('"""')) {
@@ -81,6 +107,12 @@ export async function chat(ctx) {
         return text;
     }
 
+    /**
+     * Handle one slash command. False ends the chat loop.
+     * @param {string} line Full input line, including the leading slash.
+     * @returns {Promise<boolean>}
+     * @ai.hint io
+     */
     async function slash(line) {
         const [command, ...rest] = line.slice(1).trim().split(/\s+/);
         const arg = rest.join(' ').trim();

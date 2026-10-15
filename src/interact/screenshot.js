@@ -1,3 +1,14 @@
+/**
+ * @file src/interact/screenshot.js
+ * @module interact/screenshot
+ * @purpose AutoHotkey v2 source that saves the virtual screen to a PNG.
+ * @usedBy interact/ahk-script
+ * @exports CAPTURE_LIBRARY
+ * @ai.tags desktop, screenshot, autohotkey
+ * @ai.hint pure
+ * @changed 2026-10-15 JSDoc card, 4-space indent.
+ */
+
 /** GDI+ virtual-screen PNG capture, inlined into every wrapped script. */
 export const CAPTURE_LIBRARY = `SaveScreenshot(filePath) {
     ; SM_XVIRTUALSCREEN 76, SM_YVIRTUALSCREEN 77, SM_CXVIRTUALSCREEN 78, SM_CYVIRTUALSCREEN 79

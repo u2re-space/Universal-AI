@@ -11,10 +11,28 @@
  */
 import { APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES } from '../core/config.js';
 
+/**
+ * Error for invalid arguments or configuration. Command handlers map it to exit code 2.
+ * @exports
+ * @ai.hint pure
+ */
 export class UsageError extends Error {
+    /**
+     * @param {string} message Text shown to the user.
+     * @returns {UsageError}
+     * @ai.hint pure
+     */
     constructor(message) { super(message); this.name = 'UsageError'; this.exitCode = 2; }
 }
 
+/**
+ * Parse a numeric CLI flag or throw UsageError.
+ * @param {string} value Raw flag text.
+ * @param {string} name Flag name without dashes, used in the error.
+ * @param {{ integer?: boolean, min?: number }} [options] integer requires a safe integer; min is the inclusive lower bound.
+ * @returns {number}
+ * @ai.hint pure
+ */
 function number(value, name, { integer = false, min = 0 } = {}) {
     const parsed = Number(value);
     if (typeof value !== 'string' || !value.trim() || !Number.isFinite(parsed) || parsed < min || (integer && !Number.isSafeInteger(parsed))) {
@@ -23,7 +41,13 @@ function number(value, name, { integer = false, min = 0 } = {}) {
     return parsed;
 }
 
-/** Translate CLI flags into configuration overrides. */
+/**
+ * Translate CLI flags into configuration overrides.
+ * @param {object} values Flags from node:util parseArgs.
+ * @returns {object} Partial config: model, limits, reasoning, image, tools, roles, agent, memory.
+ * @exports
+ * @ai.hint pure
+ */
 export function overridesFrom(values) {
     const o = { limits: {}, reasoning: {}, image: {}, tools: {} };
     if (values.model) o.model = values.model;
