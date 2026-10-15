@@ -168,8 +168,9 @@ export const defaults = Object.freeze({
     },
     /**
      * Inline completion for editors (`ai complete`, HTTP and WebSocket).
-     * A fast model and low effort; the file context is shortened, and a line
-     * over maxLineBytes (0.5 MiB, typical of base64) is left out.
+     * A fast model and low effort. Only the lines around the cursor are sent;
+     * the rest of the file is not added on the next request. A line over
+     * maxLineBytes (0.5 MiB, typical of base64) is left out.
      */
     completion: {
         model: 'gpt-5.3-codex-spark',

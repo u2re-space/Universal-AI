@@ -1,13 +1,13 @@
 /**
  * @file src/complete/context.js
  * @module complete/context
- * @purpose Build a short completion prompt from a file, a cursor, and the nearest lines.
+ * @purpose Build a fixed completion window around the cursor. The rest of the file is not added on later requests.
  * @depends node:fs, complete/errors
  * @usedBy complete/complete, test/complete.test.js
  * @exports MAX_LINE_BYTES, buildCompletionContext, readCompletionWindow
  * @ai.tags complete, context
  * @ai.hint pure
- * @changed 2026-10-15 Cursor context with oversized lines left out.
+ * @changed 2026-10-15 Tab completion sends only the lines around the cursor.
  */
 
 import { createReadStream } from 'node:fs';
@@ -211,45 +211,16 @@ function renderFocus(lines, cursor, neighborLines, startLine) {
 }
 
 /**
- * File text outside the focus window, cut to a byte budget. Lines are kept whole.
- * @param {object[]} lines
+ * File text outside the focus is not sent. A later keystroke does not add more of the file.
  * @param {number} focusStart
  * @param {number} focusEnd
- * @param {number} maxContextBytes
- * @param {number} startLine
+ * @param {number} lineCount
  * @returns {{ excerpt: string, truncated: boolean }}
  * @ai.hint pure
  */
-function renderExcerpt(lines, focusStart, focusEnd, maxContextBytes, startLine) {
-    const beforeBudget = Math.floor(maxContextBytes * 0.7);
-    const before = [];
-    let beforeBytes = 0;
-    let skipped = false;
-    for (let i = focusStart - 1; i >= 0; i--) {
-        const piece = visibleLine(lines[i], startLine);
-        const size = Buffer.byteLength(piece, 'utf8') + 1;
-        if (beforeBytes + size > beforeBudget && before.length) { skipped = true; break; }
-        if (size > beforeBudget && before.length === 0 && !lines[i].omitted) { skipped = true; break; }
-        before.push(piece);
-        beforeBytes += size;
-    }
-    before.reverse();
-    const after = [];
-    let afterBytes = 0;
-    const afterBudget = Math.max(0, maxContextBytes - beforeBytes);
-    for (let i = focusEnd + 1; i < lines.length; i++) {
-        const piece = visibleLine(lines[i], startLine);
-        const size = Buffer.byteLength(piece, 'utf8') + 1;
-        if ((afterBytes + size > afterBudget && after.length) || (size > afterBudget && after.length === 0 && !lines[i].omitted)) {
-            skipped = true;
-            break;
-        }
-        after.push(piece);
-        afterBytes += size;
-    }
-    const outside = focusStart + Math.max(0, lines.length - 1 - focusEnd);
-    const included = before.length + after.length;
-    return { excerpt: [...before, ...after].join('\n'), truncated: skipped || included < outside };
+function windowOnly(focusStart, focusEnd, lineCount) {
+    const covered = Math.max(0, focusEnd - focusStart + 1);
+    return { excerpt: '', truncated: covered < lineCount };
 }
 
 /**
@@ -275,13 +246,13 @@ function renderPrompt(built) {
         rows.push(`Replace this selection: ${clip}`);
     }
     rows.push('', 'Focus (| is the cursor):', built.focus);
-    if (built.excerpt) rows.push('', 'Other context:', built.excerpt);
     return rows.join('\n');
 }
 
 /**
- * Shorten a file around the cursor and mark the insertion point with `|`.
- * Positions are 0-based. A line over maxLineBytes is omitted; the nearest kept lines stay.
+ * Shorten a file to the lines around the cursor and mark the insertion point with `|`.
+ * Positions are 0-based. A line over maxLineBytes is omitted. Lines outside the window are not sent,
+ * so a longer file does not make the next completion request larger.
  * @param {object} input content or prefix/suffix, optional cursor, selection, path, language, and limits.
  * @returns {object} Prompt fields: focus, excerpt, prompt, omittedLines, truncated, cursorLineOmitted.
  * @exports
@@ -289,15 +260,16 @@ function renderPrompt(built) {
  */
 export function buildCompletionContext(input = {}) {
     const maxLineBytes = input.maxLineBytes ?? MAX_LINE_BYTES;
-    const maxContextBytes = input.maxContextBytes ?? 24 * 1024;
     const neighborLines = input.neighborLines ?? 2;
     const startLine = input.startLine ?? 0;
     const { text, cursor, replaced } = resolveText({ ...input, maxLineBytes });
     const lines = classifyLines(text, maxLineBytes, input.omitLines ?? []);
     const cursorLine = Math.min(cursor.line, Math.max(0, lines.length - 1));
     const { focus, focusStart, focusEnd } = renderFocus(lines, { ...cursor, line: cursorLine }, neighborLines, startLine);
-    const { excerpt, truncated } = renderExcerpt(lines, focusStart, focusEnd, maxContextBytes, startLine);
-    const omittedLines = lines.filter((line) => line.omitted).map((line) => line.number + startLine);
+    const { excerpt, truncated } = windowOnly(focusStart, focusEnd, lines.length);
+    const omittedLines = lines
+        .filter((line) => line.omitted && line.number >= focusStart && line.number <= focusEnd)
+        .map((line) => line.number + startLine);
     const built = {
         path: typeof input.path === 'string' && input.path.trim() ? input.path : null,
         language: typeof input.language === 'string' && input.language.trim() ? input.language : null,

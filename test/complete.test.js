@@ -83,6 +83,19 @@ test('prefix and suffix meet at the cursor', () => {
     assert.match(built.focus, /const a = \|;/);
 });
 
+test('a longer file does not add lines outside the cursor window', () => {
+    const around = 'const left = 1;\nconst cursor = |;\nconst right = 2;\n';
+    const short = buildCompletionContext({ content: around, neighborLines: 1 });
+    const pad = Array.from({ length: 200 }, (_, i) => `const pad${i} = ${i};`).join('\n');
+    const tail = Array.from({ length: 200 }, (_, i) => `const tail${i} = ${i};`).join('\n');
+    const long = buildCompletionContext({ content: `${pad}\n${around}${tail}`, neighborLines: 1 });
+    assert.match(long.focus, /const cursor = \|/);
+    assert.equal(long.prompt.includes('pad0'), false);
+    assert.equal(long.prompt.includes('tail0'), false);
+    assert.equal(long.prompt.includes('Other context'), false);
+    assert.ok(Buffer.byteLength(long.prompt) <= Buffer.byteLength(short.prompt) + 80);
+});
+
 test('a line over 0.5 MiB is omitted and the nearest lines stay', () => {
     const fat = `PAYLOAD${'B'.repeat(MAX_LINE_BYTES)}`;
     const built = buildCompletionContext({
