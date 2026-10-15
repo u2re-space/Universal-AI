@@ -76,3 +76,25 @@ test('executeBatch asks before each action and stops on denial', async () => {
   }), /отклонено/);
   assert.deepEqual(seen, ['screenshot']);
 });
+
+import { enabledToolNames, createToolset } from '../src/agent/tools.js';
+import { defaults } from '../src/core/config.js';
+
+test('desktop tools follow the exec approval gate', async () => {
+  assert.equal(enabledToolNames({ ...defaults.tools, desktop: false }).includes('click'), false);
+  const names = enabledToolNames({ ...defaults.tools, desktop: true });
+  for (const name of ['screenshot', 'click', 'type', 'run_ahk', 'run_batch', 'delegate_role']) assert.equal(names.includes(name), true);
+  const toolset = createToolset({
+    root: os.tmpdir(), config: defaults, names: ['click'], approvalLevel: 'read', approve: async () => 'yes',
+  });
+  const denied = await toolset.execute({ name: 'click', arguments: JSON.stringify({ mode: 'coord', x: 1, y: 2, button: 'left', clicks: 1, title: '', control: '', image: '' }) });
+  assert.match(denied.output, /отклонена/);
+  let performed = 0;
+  const allowed = createToolset({
+    root: os.tmpdir(), config: defaults, names: ['screenshot'], approvalLevel: 'all', approve: async () => 'no',
+    performDesktop: async () => { performed += 1; return { message: 'ok', screenshotAbs: null, screenshotRel: null }; },
+  });
+  const shot = await allowed.execute({ name: 'screenshot', arguments: '{}' });
+  assert.equal(performed, 1);
+  assert.match(shot.output, /ok/);
+});

@@ -73,19 +73,20 @@ export function overridesFrom(values) {
   if (values.memory === false) o.memory = { enabled: false };
   if (values.web) o.tools.web = true;
   if (values.images) o.tools.images = true;
+  if (values.desktop) o.tools.desktop = true;
   if (values.tools !== undefined) {
     const list = values.tools.split(',').map((s) => s.trim()).filter(Boolean);
-    const all = { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false };
+    const all = { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false };
     if (!(list.length === 1 && list[0] === 'none')) {
       for (const name of list) {
-        if (!(name in all)) throw new UsageError(`--tools: неизвестный инструмент "${name}" (fs, shell, fetch, web, images, askUser, none)`);
+        if (!(name in all)) throw new UsageError(`--tools: неизвестный инструмент "${name}" (fs, shell, fetch, web, images, askUser, desktop, none)`);
         all[name] = true;
       }
       if (list.length) all.askUser = true;
     }
     Object.assign(o.tools, all);
   }
-  if (values['no-tools']) Object.assign(o.tools, { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false });
+  if (values['no-tools']) Object.assign(o.tools, { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false });
   if (values.detail && !IMAGE_DETAILS.includes(values.detail)) throw new UsageError(`--detail: ${IMAGE_DETAILS.join(' | ')}`);
   return o;
 }
