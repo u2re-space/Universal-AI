@@ -85,6 +85,9 @@ ai run "исправь падающий тест в test/"
 ai run --role planner=gpt-6.1-sol:high --role reviewer=gpt-6.1-sol --role worker=gpt-6-luna \
        --role collector=gpt-6-luna --role summarizer=gpt-6-luna "добавь кеширование в src/api.js"
 
+# рабочий стол Windows: --desktop включает screenshot, click, type, run_ahk, run_batch и delegate_role для worker и reviewer
+ai run --desktop --approve ask "посмотри экран и закрой лишний диалог"
+
 # один агент вместо команды (как раньше), без долговременной памяти
 ai run --single --no-memory "переименуй getCwd в getCurrentWorkingDirectory"
 
@@ -130,6 +133,12 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 | `reviewer` | независимо проверить результат по diff и критериям приёмки; `accept` или `revise` с конкретными замечаниями → worker исправляет (до `agent.maxReviewRounds` раундов) | чтение + `run_command` | старшая модель |
 | `vision` | описывать изображения для других ролей (`view_image` делегирует ей, когда у неё своя модель — `agent.visionDelegate`) | — | — |
 | `summarizer` | сводки больших файлов (`summarize_file`, кешируются по хешу), извлечение фактов в память после задачи | — | самая дешёвая модель, без рассуждений |
+| `scanner` | решить, что снимать; может вернуть координаты | `screenshot` | общая `model`, effort `low` |
+| `solver` | решить шаг, включая арифметику и капчи; мышью не пользуется | `screenshot` | общая `model`, effort `high` |
+| `clicker` | кликнуть | `click`, `screenshot` | общая `model`, effort `low` |
+| `typer` | ввести текст в поле | `type`, `screenshot` | общая `model`, effort `low` |
+| `encoder` | вернуть пакет действий | `screenshot` | общая `model`, effort `medium` |
+| `tester` | проверить результат, в том числе по экрану | `screenshot` | общая `model`, effort `medium` |
 | `default` | `ask`, `chat`, `run --single` | — | общая `model` |
 
 Поток: память + заметки проекта → **план** → (если задача не тривиальная) **сбор контекста** → **выполнение**
@@ -137,6 +146,16 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 заметки `AGENTS.md`, релевантные записи памяти, план, находки коллектора, отчёты по шагам, diff изменений);
 при переполнении бюджета `agent.maxContextBytes` менее важные разделы обрезаются. Планировщик помечает
 простые задачи как `trivial` — тогда сбор контекста и ревью пропускаются. `--single` возвращает одиночный цикл.
+
+### Рабочий стол
+
+`--desktop` включает `screenshot`, `click`, `type`, `run_ahk`, `run_batch` и `delegate_role` для worker и reviewer.
+`delegate_role` передаёт один шаг роли `scanner`, `solver`, `clicker`, `typer`, `encoder` или `tester`.
+Нужен AutoHotkey v2: установленный `AutoHotkey64.exe`, либо `desktop.ahkPath` указывает на него.
+`--approve ask` подтверждает каждое действие рабочего стола. `--approve read` и `--approve write` рабочий стол не разрешают. `--approve all` разрешает.
+Снимки попадают в `.ai/desktop/`; роль `vision` описывает их как TOON.
+Роль `encoder` записывает пакет. `run_batch` его выполняет.
+Клик — по координатам, заголовку окна, элементу управления или картинке.
 
 ## Память
 
@@ -183,7 +202,8 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
   "store": false,
   "approve": "ask",
   "shell": null,
-  "tools": { "fs": true, "shell": true, "fetch": true, "web": false, "images": false, "askUser": true },
+  "tools": { "fs": true, "shell": true, "fetch": true, "web": false, "images": false, "askUser": true, "desktop": false },
+  "desktop": { "ahkPath": null },
   "limits": { "maxTurns": 60, "budgetUsd": null, "budgetTokens": null, "commandTimeoutMs": 180000 },
   "roles": {
     "planner":    { "model": "gpt-6.1-sol", "effort": "high" },
@@ -220,18 +240,19 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 
 Локальные инструменты (строгие function tools): `list_files`, `read_file`, `search_files`, `write_file`,
 `replace_text`, `delete_file`, `make_dir`, `view_image`, `summarize_file`, `run_command`, `fetch_url`,
-`recall`, `remember`, `ask_user`; встроенные инструменты API: `web_search` (`--web`), `image_generation` (`--images`).
+`recall`, `remember`, `ask_user`; с `--desktop` у worker и reviewer — `screenshot`, `click`, `type`, `run_ahk`, `run_batch`, `delegate_role`; встроенные инструменты API: `web_search` (`--web`), `image_generation` (`--images`).
 
 Политика подтверждений `--approve`:
 
-| Уровень | Чтение, память | Запись файлов | Команды, сеть |
-| --- | --- | --- | --- |
-| `ask` (терминал по умолчанию) | да | спросить (`y`/`n`/`a` — всегда для инструмента/`q`) | спросить |
-| `read` (без терминала по умолчанию) | да | нет | нет |
-| `write` | да | да | нет |
-| `all` / `--yes` | да | да | да |
+| Уровень | Чтение, память | Запись файлов | Команды, сеть | Рабочий стол |
+| --- | --- | --- | --- | --- |
+| `ask` (терминал по умолчанию) | да | спросить (`y`/`n`/`a` — всегда для инструмента/`q`) | спросить | спросить |
+| `read` (без терминала по умолчанию) | да | нет | нет | нет |
+| `write` | да | да | нет | нет |
+| `all` / `--yes` | да | да | да | да |
 
 Коллектор всегда работает в режиме только чтения; ревьюер — чтение плюс `run_command` по той же политике.
+`--approve ask` подтверждает каждое действие рабочего стола. `--approve read` и `--approve write` рабочий стол не разрешают. `--approve all` разрешает.
 
 Инструменты работают только внутри `--cwd` (по умолчанию текущий каталог): выход за его пределы,
 в том числе через символические ссылки, запрещён; `.env*`, ключи и сертификаты, `.ssh`, `.aws` и т. п.
