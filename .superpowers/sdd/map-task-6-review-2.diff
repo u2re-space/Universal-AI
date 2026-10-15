@@ -1,0 +1,702 @@
+30488aa chore: align default model names with the test fixtures
+ff77cce feat: add the ai map command for the project index
+ .gitignore                  |  1 +
+ README.md                   | 39 ++++++++++++++++++++++++---------------
+ sketches/models-native.js   |  2 +-
+ src/cli.js                  |  7 +++++--
+ src/commands/map.js         | 18 ++++++++++++++++++
+ src/commands/misc.js        |  4 ++--
+ src/core/config.js          |  8 ++++----
+ test/cli.test.js            | 29 +++++++++++++++++++++--------
+ test/core.test.js           | 16 ++++++++--------
+ test/helpers/mock-server.js |  2 +-
+ test/loop.test.js           |  8 ++++----
+ 11 files changed, 89 insertions(+), 45 deletions(-)
+diff --git a/.gitignore b/.gitignore
+index 006b1f4..bb85fa3 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -143,14 +143,15 @@ vite.config.ts.timestamp-*
+ .vite/
+ 
+ # Astro generated types
+ .astro/
+ 
+ # Turbo Repo
+ .turbo
+ 
+ node_modules/
+ .ai-agent/
++.ai/
+ *.log
+ ai-image-*.png
+ ai-image-*.jpg
+ ai-image-*.webp
+diff --git a/README.md b/README.md
+index 18ff283..35c7a9a 100644
+--- a/README.md
++++ b/README.md
+@@ -10,54 +10,63 @@
+ ## Возможности
+ 
+ | Что | Как |
+ | --- | --- |
+ | Один запрос → ответ | `ai "объясни event loop в Node"` |
+ | Чат с историей | `ai chat --session work` (сессии сохраняются между запусками) |
+ | Код, документы, тексты | `ai "напиши README для проекта" --out README.md`, структурированный вывод `--schema` |
+ | Картинки | `ai image "кот-космонавт" --size 1024x1024 --quality high` (инструмент `image_generation`, черновики пишутся по мере генерации) |
+ | Изображения и файлы во входе | `ai --image screenshot.png "что не так на экране?"`, `ai -f spec.pdf "сделай план"` |
+ | Автономные задачи | `ai run "добавь тесты для src/utils.js и прогони их"` — инструменты: файлы, команды, URL, web-поиск, картинки |
+-| Разные модели под роли | старшая модель планирует и проверяет, младшие собирают контекст и генерируют вызовы инструментов, отдельная модель читает картинки: `--role planner=gpt-5.5:high --role worker=gpt-5.4-mini --role vision=gpt-5.4-mini` |
++| Разные модели под роли | старшая модель планирует и проверяет, младшие собирают контекст и генерируют вызовы инструментов, отдельная модель читает картинки: `--role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna` |
+ | Память и общий контекст | долговременная память в SQLite (факты, соглашения, решения — по проекту и глобально), заметки проекта `AGENTS.md`, история задач, кеш сводок файлов; один общий контекст для всех ролей |
+ | Фон | `--background` (сервер считает, можно переподключиться `ai resume`) и `--detach` (локальная фоновая задача, `ai jobs …`) |
+ | Что происходит | строка статуса: роль и модель, фаза («думает», «выполняется read_file», «генерирует изображение»), время, токены ↑↓, стоимость; краткие рассуждения модели; журнал этапов, шагов и действий; итоговая сводка с расходом по ролям и моделям |
+ 
+ ## Установка
+ 
+ ```bash
+ # Node.js ≥ 26, внешних зависимостей нет
+ npm link               # делает команду `ai` доступной глобально (или запускайте `node bin/ai.js`)
+ export OPENAI_API_KEY=sk-...   # PowerShell: $env:OPENAI_API_KEY = "sk-..."
+ ai config init         # создаст ~/.ai-agent/config.json
+ ```
+ 
+-Модель по умолчанию — `gpt-5.5`; меняется флагом `--model`, переменной `AI_MODEL` или в конфигурации.
++Модель по умолчанию — `gpt-6.1-sol`; меняется флагом `--model`, переменной `AI_MODEL` или в конфигурации.
+ `ai models` покажет доступные ключу модели.
+ 
+ ## Команды
+ 
+ ```
+ ai [ask] "запрос"            один запрос → ответ
+ ai chat                      интерактивный чат (/help — команды чата)
+ ai run "задача"              автономный агент в текущем каталоге
+ ai image "описание"          генерация изображения
+ ai resume <resp_id>          подключиться к фоновому ответу API
+ ai cancel <resp_id>          отменить фоновый ответ API
+ ai jobs list|status|log|result|wait|cancel|rm [id]    локальные фоновые задачи
+ ai memory list|search|add|forget|clear|tasks|stats|path   долговременная память
+ ai models [фильтр]           список моделей
+ ai config show|init|path     конфигурация
++ai map [path]                индекс файлов и символов (.ai/map.json)
+ ```
+ 
+ Полный список флагов — `ai --help`.
+ 
++### Карта проекта
++
++`ai map` строит `.ai/map.json`: пути, время изменения и символы. Повторный поиск читает эту карту из памяти процесса. `ai map path` печатает путь и число файлов и символов.
++
++`search_files` принимает `scope`: `path`, `symbol`, `content` или `all`.
++
++В `ai run` правила намечают файлы как `read`, `edit` или `scan`. Planner подтверждает список. Запись в файл вне `edit` выполняется, а ответ инструмента начинается с пометки, что пути не было в карте правок.
++
+ ### Примеры
+ 
+ ```bash
+ # текст из stdin как контекст
+ git diff | ai "напиши сообщение коммита"
+ 
+ # документ в файл, с заданным уровнем рассуждений
+ ai --effort high "спроектируй REST API для заметок, формат Markdown" --out docs/api.md
+ 
+ # структурированный ответ по JSON-схеме (strict)
+@@ -66,22 +75,22 @@ ai --schema schema.json "извлеки данные из текста: ..." --q
+ # картинка во входе + поиск в интернете
+ ai --image chart.png --web "что это за график и актуальны ли данные?"
+ 
+ # правка картинки (image-to-image)
+ ai image --image logo.png "сделай фон прозрачным" --image-background transparent --out logo2.png
+ 
+ # команда агентов с подтверждением каждой записи/команды (по умолчанию в терминале)
+ ai run "исправь падающий тест в test/"
+ 
+ # свои модели под роли: старшая планирует и ревьюит, младшая делает, самая дешёвая пишет сводки и память
+-ai run --role planner=gpt-5.5:high --role reviewer=gpt-5.5 --role worker=gpt-5.4-mini \
+-       --role collector=gpt-5.4-mini --role summarizer=gpt-5.4-nano "добавь кеширование в src/api.js"
++ai run --role planner=gpt-6.1-sol:high --role reviewer=gpt-6.1-sol --role worker=gpt-6-luna \
++       --role collector=gpt-6-luna --role summarizer=gpt-6-luna "добавь кеширование в src/api.js"
+ 
+ # один агент вместо команды (как раньше), без долговременной памяти
+ ai run --single --no-memory "переименуй getCwd в getCurrentWorkingDirectory"
+ 
+ # агент без вопросов, только файлы (команды и сеть запрещены)
+ ai run --approve write "переведи комментарии в src/ на английский"
+ 
+ # память: посмотреть, что агент запомнил о проекте, добавить своё, история задач
+ ai memory list
+ ai memory add "Деплой только через make release, не руками" --kind convention --tags deploy
+@@ -139,63 +148,63 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
+ * **Как наполняется** — после задачи роль `summarizer` извлекает 0–6 устойчивых фактов (`memory.autoSave`);
+   агент может сам вызывать `remember`/`recall`; пользователь — `ai memory add/forget/clear`.
+ * **Как используется** — перед планированием ищутся релевантные записи (`memory.maxRecall`), в чате и `ask`
+   с `--tools` доступны инструменты `recall`/`remember`. `--no-memory` отключает всё это.
+ 
+ ## Что показывается во время работы
+ 
+ В терминале (stderr) идёт строка статуса, обновляемая несколько раз в секунду:
+ 
+ ```
+-⠹ [worker · gpt-5.4-mini] выполняется read_file… · 12.3 s · ↑ 14,210 ↓ 1,082 +~120 · $0.031 · ход 3/25
++⠹ [worker · gpt-6-luna] выполняется read_file… · 12.3 s · ↑ 14,210 ↓ 1,082 +~120 · $0.031 · ход 3/25
+ ```
+ 
+ роль и модель · фаза · время · токены (вход/выход по завершённым запросам, `+~N` — оценка текущего ответа) · стоимость · ход агента.
+-В журнале видны этапы (`этап «план» — planner · gpt-5.5`), план, шаги, вердикт ревью, найденные и сохранённые записи памяти;
++В журнале видны этапы (`этап «план» — planner · gpt-6.1-sol`), план, шаги, вердикт ревью, найденные и сохранённые записи памяти;
+ итоговая сводка показывает расход токенов по ролям и по моделям.
+ Выше — журнал: `∙` краткие рассуждения модели (`--no-reasoning` скрывает), `▸`/`✓`/`✗` вызовы инструментов,
+ `▣` сохранённые изображения, `≡` usage каждого ответа. Ответ модели идёт в stdout, поэтому его можно
+ перенаправлять в файл или канал. Без терминала (пайп, CI, фоновые задачи) — те же строки без курсорных
+ управляющих кодов; `--json` — поток событий JSON Lines; `--quiet` — только ответ.
+ 
+ Стоимость считается по ценам из конфигурации (`prices`, USD за 1M токенов; поддерживаются шаблоны вида
+-`"gpt-5.4*"`). Встроенных таблиц цен нет — они устаревают. Токены показываются всегда; плата за
++`"gpt-6.1-sol*"`). Встроенных таблиц цен нет — они устаревают. Токены показываются всегда; плата за
+ встроенные инструменты (генерация картинок, web-поиск) в сумму не входит.
+ 
+ ## Конфигурация
+ 
+ `~/.ai-agent/config.json` (каталог меняется `AI_AGENT_HOME`), затем `--config файл`, затем переменные
+ окружения, затем флаги. Все поля и значения по умолчанию — в `src/core/config.js`; ключевые:
+ 
+ ```json
+ {
+-  "model": "gpt-5.5",
++  "model": "gpt-6.1-sol",
+   "imageModel": null,
+   "reasoning": { "effort": "medium", "summary": "auto" },
+   "store": false,
+   "approve": "ask",
+   "shell": null,
+   "tools": { "fs": true, "shell": true, "fetch": true, "web": false, "images": false, "askUser": true },
+   "limits": { "maxTurns": 60, "budgetUsd": null, "budgetTokens": null, "commandTimeoutMs": 180000 },
+   "roles": {
+-    "planner":    { "model": "gpt-5.5", "effort": "high" },
+-    "reviewer":   { "model": "gpt-5.5", "effort": "medium" },
+-    "collector":  { "model": "gpt-5.4-mini", "effort": "low" },
+-    "worker":     { "model": "gpt-5.4-mini", "effort": "medium" },
+-    "vision":     { "model": "gpt-5.4-mini" },
+-    "summarizer": { "model": "gpt-5.4-nano", "summary": "none" }
++    "planner":    { "model": "gpt-6.1-sol", "effort": "high" },
++    "reviewer":   { "model": "gpt-6.1-sol", "effort": "medium" },
++    "collector":  { "model": "gpt-6-luna", "effort": "low" },
++    "worker":     { "model": "gpt-6-luna", "effort": "medium" },
++    "vision":     { "model": "gpt-6-luna" },
++    "summarizer": { "model": "gpt-6-luna", "summary": "none" }
+   },
+   "agent": { "mode": "team", "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": 98304, "visionDelegate": "auto" },
+   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
+   "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": "." },
+   "compaction": { "auto": false, "afterInputTokens": 200000 },
+-  "prices": { "gpt-5.5": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-5.4-mini*": { "input": 0.25, "output": 2 } },
++  "prices": { "gpt-6.1-sol": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-6-luna*": { "input": 0.25, "output": 2 } },
+   "instructions": "Отвечай кратко."
+ }
+ ```
+ 
+ Поля роли: `model`, `effort`, `summary`, `verbosity`, `maxOutputTokens`, `temperature`, `instructions`
+ (дополнительные инструкции только для этой роли); `null` — наследовать от `roles.default`, затем от общих настроек.
+ Цены в примере условные — проверьте актуальные.
+ 
+ Переменные окружения: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID`,
+ `AI_MODEL`, `AI_IMAGE_MODEL`, `AI_AGENT_HOME`, `AI_ASCII=1` (без Unicode-символов в журнале).
+diff --git a/sketches/models-native.js b/sketches/models-native.js
+index 3e1a5f2..45a909f 100644
+--- a/sketches/models-native.js
++++ b/sketches/models-native.js
+@@ -2,21 +2,21 @@ import Ajv from 'ajv';
+ import { randomUUID } from 'node:crypto';
+ 
+ /**
+  * Node.js 26+, ESM. Responses API over native fetch; no OpenAI SDK.
+  * Dependencies: ajv (local validation of the completed structured output).
+  * No retries, tools, prompt logging, or budget enforcement in this transport.
+  * Dollar reservation and accounting belong to the calling orchestrator.
+  */
+ const MiB = 1024 * 1024;
+ const defaults = Object.freeze({
+-  baseURL: 'https://api.openai.com/v1/',
++  baseURL: 'https://api.proxyapi.ru/v1',
+   timeoutMs: 180_000,
+   maxRequestBytes: 512 * 1024,
+   maxResponseBytes: 16 * MiB,
+   maxEventBytes: 8 * MiB,
+   maxOutputBytes: 2 * MiB,
+   maxEvents: 100_000,
+   maxErrorBytes: 64 * 1024,
+ });
+ const byteLength = (text) => Buffer.byteLength(text, 'utf8');
+ const positiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
+diff --git a/src/cli.js b/src/cli.js
+index 331720b..1620c6f 100644
+--- a/src/cli.js
++++ b/src/cli.js
+@@ -8,66 +8,69 @@ import { createRenderer, detectMode } from './ui/renderer.js';
+ import { createJobManager } from './jobs/manager.js';
+ import { ApiError, BudgetError, CancelledError, isAbortError } from './openai/errors.js';
+ import { UsageError, overridesFrom } from './commands/shared.js';
+ import { ask } from './commands/ask.js';
+ import { chat } from './commands/chat.js';
+ import { run } from './commands/run.js';
+ import { image } from './commands/image.js';
+ import { jobs } from './commands/jobs.js';
+ import { memoryCommand } from './commands/memory.js';
+ import { resume, cancel, models, configCommand } from './commands/misc.js';
++import { mapCommand } from './commands/map.js';
+ 
+ const pkg = createRequire(import.meta.url)('../package.json');
+ 
+ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
+ 
+ Использование:
+   ai [ask] "запрос"                 один запрос → ответ (текст, код, документ)
+   ai chat                           интерактивный чат (/help — команды чата)
+   ai run "задача"                   автономный агент: файлы, команды, URL, web, картинки
+   ai image "описание"               генерация изображения (image_generation)
+   ai resume <resp_id>               подключиться к фоновому ответу API
+   ai cancel <resp_id>               отменить фоновый ответ API
+   ai jobs [list|status|log|result|wait|cancel|rm] [id]   локальные фоновые задачи
+   ai memory [list|search|add|forget|clear|tasks|stats|path] …   долговременная память (SQLite)
+   ai models [фильтр]                список доступных моделей
+   ai config [show|init|path]        конфигурация (~/.ai-agent/config.json)
++  ai map [path]                     карта проекта .ai/map.json (файлы и символы). Черновик read/edit/scan подтверждает planner; запись вне edit выполняется и помечается
+ 
+ Ввод:
+   --image <путь|url>     приложить изображение (можно несколько)   --detail auto|low|high|original
+   --file, -f <путь>      приложить файл: PDF, текст (можно несколько)
+   stdin                  текст из канала добавляется как контекст (или становится запросом)
+   --instructions, -i <текст|@файл>   дополнительные инструкции модели
+   --schema <файл.json>   структурированный вывод по JSON-схеме (ask)
+ 
+ Модель и вывод:
+   --model, -m <id>       модель (по умолчанию из конфигурации / AI_MODEL)
+   --effort <уровень>     reasoning: none|minimal|low|medium|high|xhigh|max
+   --summary <режим>      показ рассуждений: auto|concise|detailed|none      --no-reasoning  скрыть
+   --verbosity low|medium|high   --temperature <n>   --max-output-tokens <n>
+   --out, -o <путь>       сохранить ответ в файл (для image — путь/каталог изображений)
+   --session, -s <имя>    постоянная сессия (история сохраняется в ~/.ai-agent/sessions)
+   --store                хранить состояние на сервере (previous_response_id) вместо локальной истории
+   --no-stream            без потоковой передачи
+ 
+ Инструменты и автономность:
+   --tools fs,shell,fetch  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
++  search_files scope=path|symbol|content|all читает карту проекта.
+   --web                  поиск в интернете (web_search)       --images   генерация картинок в ответах
+   --approve ask|read|write|all   политика подтверждений (по умолчанию: ask в терминале, read без него)
+   --yes, -y              = --approve all (без вопросов; осторожно)
+   --cwd, -C <каталог>    рабочий каталог для инструментов (по умолчанию текущий)
+   --max-turns <n>        лимит ходов агента          --shell powershell|pwsh|bash|sh|cmd
+   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
+ 
+ Роли и память (run):
+   --role <роль=модель[:effort]>  модель для роли: planner, collector, worker, reviewer, vision, summarizer, default, all
+-                         (например: --role planner=gpt-5.5:high --role worker=gpt-5.4-mini --role vision=gpt-5.4-mini)
++                         (например: --role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
+   --team / --single      команда ролей (план → сбор контекста → исполнение → ревью → память) / один агент
+   --no-memory            не использовать долговременную память (SQLite в ~/.ai-agent/memory.db)
+   --global               memory: работать с глобальными записями   --kind <вид>  --tags a,b
+ 
+ Фон:
+   --background, -b       фоновый режим Responses API (сервер считает, можно переподключиться: ai resume)
+   --detach, -d           запустить как локальную фоновую задачу (ai jobs …)
+   --follow               jobs log: следить за журналом
+ 
+ Изображения (image / --images):
+@@ -97,21 +100,21 @@ const OPTIONS = {
+   background: { type: 'boolean', short: 'b', default: false }, detach: { type: 'boolean', short: 'd', default: false }, job: { type: 'string' },
+   json: { type: 'boolean', default: false }, quiet: { type: 'boolean', short: 'q', default: false }, verbose: { type: 'boolean', short: 'v', default: false },
+   stream: { type: 'boolean', default: true }, config: { type: 'string' }, 'base-url': { type: 'string' }, timeout: { type: 'string' },
+   size: { type: 'string' }, quality: { type: 'string' }, format: { type: 'string' }, 'image-background': { type: 'string' },
+   partials: { type: 'string' }, 'image-model': { type: 'string' }, count: { type: 'string', short: 'n' }, schema: { type: 'string' },
+   follow: { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h', default: false }, version: { type: 'boolean', short: 'V', default: false },
+   role: { type: 'string', multiple: true }, single: { type: 'boolean', default: false }, team: { type: 'boolean', default: false },
+   memory: { type: 'boolean', default: true }, global: { type: 'boolean', default: false }, kind: { type: 'string' }, tags: { type: 'string' },
+ };
+ 
+-const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand };
++const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand, map: mapCommand };
+ const NEEDS_API_KEY = new Set(['ask', 'chat', 'run', 'image', 'resume', 'cancel', 'models']);
+ const DETACHABLE = new Set(['ask', 'run', 'image']);
+ 
+ /** Remove --detach / -d (also inside combined short groups like -dv) from the raw argv. */
+ export function stripDetach(argv) {
+   const result = [];
+   for (const arg of argv) {
+     if (arg === '--detach') continue;
+     if (/^-[a-zA-Z]+$/.test(arg) && arg.includes('d')) {
+       const rest = arg.slice(1).replace('d', '');
+diff --git a/src/commands/map.js b/src/commands/map.js
+new file mode 100644
+index 0000000..5e7e41f
+--- /dev/null
++++ b/src/commands/map.js
+@@ -0,0 +1,18 @@
++import { buildProjectMap, loadProjectMap, projectMapFile, countProjectMap } from '../agent/map.js';
++import { UsageError } from './shared.js';
++
++export async function mapCommand(ctx) {
++  const { renderer, positionals, cwd } = ctx;
++  const sub = positionals[0] ?? '';
++  if (positionals.length > 1 || (sub && sub !== 'path')) throw new UsageError('Доступно: ai map | ai map path');
++  if (sub === 'path') {
++    const projectMap = await loadProjectMap(cwd);
++    const counts = projectMap ? countProjectMap(projectMap) : { files: 0, symbols: 0 };
++    renderer.write(`${projectMapFile(cwd)}\nфайлов: ${counts.files}, символов: ${counts.symbols}\n`);
++    return 0;
++  }
++  const projectMap = await buildProjectMap(cwd);
++  const counts = countProjectMap(projectMap);
++  renderer.write(`Карта записана: ${projectMapFile(cwd)}\nфайлов: ${counts.files}, символов: ${counts.symbols}\n`);
++  return 0;
++}
+diff --git a/src/commands/misc.js b/src/commands/misc.js
+index 0d9d9f3..0275de1 100644
+--- a/src/commands/misc.js
++++ b/src/commands/misc.js
+@@ -88,23 +88,23 @@ export async function configCommand(ctx) {
+         vision: { model: null, effort: 'low' },
+         summarizer: { model: null, effort: 'low' },
+       },
+       agent: { mode: 'team', maxSteps: 12, maxReviewRounds: 2 },
+       memory: { enabled: true, autoSave: true, maxRecall: 8, notesFile: 'AGENTS.md' },
+       image: { ...defaults.image }, prices: {},
+       instructions: null,
+     };
+     await writeFile(file, `${JSON.stringify(template, null, 2)}\n`, { mode: 0o600 });
+     renderer.write(`Создан ${file}\n` +
+-      `Роли: укажите модели в roles.* (null = общая model). Например: "planner": { "model": "${defaults.model}", "effort": "high" }, "worker": { "model": "gpt-5.4-mini" }.\n` +
++      `Роли: укажите модели в roles.* (null = общая model). Например: "planner": { "model": "${defaults.model}", "effort": "high" }, "worker": { "model": "gpt-6-luna" }.\n` +
+       `Чтобы видеть стоимость, добавьте актуальные цены (USD за 1M токенов), например:\n` +
+-      `  "prices": { "${defaults.model}": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-5.4-mini*": { "input": 0.25, "output": 2 } }\n`);
++      `  "prices": { "${defaults.model}": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-6-luna*": { "input": 0.25, "output": 2 } }\n`);
+     return 0;
+   }
+   if (sub !== 'show') throw new UsageError('Доступно: ai config show | init | path');
+   const shown = redactConfig(config);
+   delete shown.configFiles;
+   if (renderer.mode === 'json') { renderer.json({ type: 'config', config: shown, files: config.configFiles }); return 0; }
+   renderer.write(`${JSON.stringify(shown, null, 2)}\n`);
+   renderer.line('info', `файлы конфигурации: ${config.configFiles.join(', ')} · ключ: ${config.apiKey ? 'задан' : 'НЕ задан (OPENAI_API_KEY)'}`, { dim: true });
+   return 0;
+ }
+diff --git a/src/core/config.js b/src/core/config.js
+index 9bb8fa8..f595505 100644
+--- a/src/core/config.js
++++ b/src/core/config.js
+@@ -10,28 +10,28 @@ export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'x
+ export const REASONING_SUMMARIES = ['auto', 'concise', 'detailed', 'none'];
+ export const APPROVAL_LEVELS = ['ask', 'read', 'write', 'all'];
+ export const IMAGE_DETAILS = ['auto', 'low', 'high', 'original'];
+ 
+ /**
+  * Defaults. Everything here may be overridden by ~/.ai-agent/config.json, --config <file>,
+  * environment variables (OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_ORG_ID, OPENAI_PROJECT_ID,
+  * AI_MODEL, AI_AGENT_HOME) and finally CLI flags.
+  */
+ export const defaults = Object.freeze({
+-  model: 'gpt-5.5',
++  model: 'gpt-6.1-sol',
+   imageModel: null,                 // null → let the image_generation tool use its default model
+-  baseURL: null,                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
++  baseURL: "https://api.proxyapi.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
+   apiKey: null,                     // prefer the OPENAI_API_KEY environment variable
+   organization: null,
+   project: null,
+   instructions: null,               // extra system instructions appended to the built-in ones
+-  reasoning: { effort: null, summary: 'auto' },
++  reasoning: { effort: "low", summary: 'auto' },
+   verbosity: null,                  // low | medium | high (GPT-5 family)
+   temperature: null,
+   maxOutputTokens: null,
+   store: false,                     // false → stateless history with encrypted reasoning; true → previous_response_id
+   truncation: 'auto',
+   serviceTier: null,                // auto | default | flex | priority | fast
+   promptCacheKey: null,
+   stream: true,
+   retries: 2,
+   approve: null,                    // ask | read | write | all; null → ask (TTY) or read (no TTY)
+@@ -92,21 +92,21 @@ export const defaults = Object.freeze({
+     visionDelegate: 'auto',         // auto (when roles.vision has its own model) | always | never
+   },
+   /** Long-term memory (SQLite, node:sqlite) and project notes. */
+   memory: {
+     enabled: true,
+     autoSave: true,                 // extract durable facts after a team run (summarizer role)
+     maxRecall: 8,                   // memories injected into the shared context
+     notesFile: 'AGENTS.md',         // project notes file included in the context when present
+     dbFile: null,                   // null → <home>/memory.db
+   },
+-  /** Prices in USD per 1M tokens, e.g. { "gpt-5.5": { "input": 1.25, "cachedInput": 0.125, "output": 10 } }. */
++  /** Prices in USD per 1M tokens, e.g. { "gpt-6.1-sol": { "input": 1.25, "cachedInput": 0.125, "output": 10 } }. */
+   prices: {},
+   home: null,
+ });
+ 
+ export const ROLE_NAMES = Object.keys(defaults.roles);
+ 
+ /**
+  * Effective settings for a role: role → roles.default → top-level configuration.
+  * Returns a config-like object usable by runTurn (same shape as the main config).
+  */
+diff --git a/test/cli.test.js b/test/cli.test.js
+index af10ee9..aebbe14 100644
+--- a/test/cli.test.js
++++ b/test/cli.test.js
+@@ -1,16 +1,16 @@
+ import { test, after, before, beforeEach } from 'node:test';
+ import assert from 'node:assert/strict';
+ import path from 'node:path';
+ import os from 'node:os';
+ import { spawn } from 'node:child_process';
+-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
++import { mkdtemp, readdir, rm, readFile, writeFile } from 'node:fs/promises';
+ import { fileURLToPath } from 'node:url';
+ import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
+ import { createJobManager } from '../src/jobs/manager.js';
+ import { stripDetach } from '../src/cli.js';
+ 
+ const bin = fileURLToPath(new URL('../bin/ai.js', import.meta.url));
+ let server;
+ let script = () => ({ text: 'ok' });
+ let home;
+ let work;
+@@ -171,38 +171,38 @@ test('--detach starts a job that can be inspected with jobs status/result', asyn
+   assert.match(status.stdout, /статус: завершена/);
+   const result = await runCli(['jobs', 'result', id]);
+   assert.match(result.stdout, /результат фоновой задачи/);
+   const list = await runCli(['jobs', 'list']);
+   assert.match(list.stdout, new RegExp(id));
+   const log = await runCli(['jobs', 'log', id]);
+   assert.match(log.stdout, /результат: completed/);
+ });
+ 
+ test('run (team mode): roles use their own models; memory command sees what was saved', async () => {
+-  const roleOf = (body) => body.text?.format?.name ?? (body.model === 'gpt-5.4-nano' ? 'summarizer-file' : 'worker');
++  const roleOf = (body) => body.text?.format?.name ?? (body.model === 'gpt-6-luna-nano' ? 'summarizer-file' : 'worker');
+   const models = {};
+   script = (body) => {
+     const role = roleOf(body);
+     models[role] = body.model;
+     if (role === 'plan') return { text: JSON.stringify({ summary: 'Создать файл заметки', complexity: 'trivial', steps: [{ goal: 'Создать note.txt', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+     if (role === 'memory_update') return { text: JSON.stringify({ taskSummary: 'Создан note.txt', memories: [{ scope: 'project', kind: 'convention', content: 'Заметки хранятся в note.txt в корне', tags: ['notes'] }] }) };
+     const outputs = body.input.filter((i) => i.type === 'function_call_output');
+     if (!outputs.length) return { calls: [{ name: 'write_file', arguments: { path: 'note.txt', content: 'привет\n', overwrite: true } }] };
+     return { text: 'Файл note.txt создан.' };
+   };
+-  const { code, stdout, stderr } = await runCli(['run', 'создай note.txt', '--approve', 'write', '--role', 'planner=gpt-5.5:high', '--role', 'worker=gpt-5.4-mini', '--role', 'summarizer=gpt-5.4-nano']);
++  const { code, stdout, stderr } = await runCli(['run', 'создай note.txt', '--approve', 'write', '--role', 'planner=gpt-6.1-sol:high', '--role', 'worker=gpt-6-luna', '--role', 'summarizer=gpt-6-luna-nano']);
+   assert.equal(code, 0, stderr);
+-  assert.equal(models.plan, 'gpt-5.5');
+-  assert.equal(models.worker, 'gpt-5.4-mini');
+-  assert.equal(models.memory_update, 'gpt-5.4-nano');
++  assert.equal(models.plan, 'gpt-6.1-sol');
++  assert.equal(models.worker, 'gpt-6-luna');
++  assert.equal(models.memory_update, 'gpt-6-luna-nano');
+   assert.match(stdout, /note\.txt создан/);
+-  assert.match(stderr, /этап «план» — planner · gpt-5\.5/);
++  assert.match(stderr, /этап «план» — planner · gpt-6\.1-sol/);
+   assert.match(stderr, /шаг 1\/1/);
+   assert.match(stderr, /память: сохранено 1/);
+   assert.match(stderr, /по ролям/);
+   assert.equal(await readFile(path.join(work, 'note.txt'), 'utf8'), 'привет\n');
+ 
+   const list = await runCli(['memory', 'list']);
+   assert.equal(list.code, 0);
+   assert.match(list.stdout, /Заметки хранятся в note\.txt/);
+   const search = await runCli(['memory', 'search', 'заметки', '--json']);
+   assert.equal(jsonLines(search.stdout).find((l) => l.type === 'memories').items.length, 1);
+@@ -213,20 +213,33 @@ test('run (team mode): roles use their own models; memory command sees what was
+   assert.match(tasks.stdout, /создай note\.txt/);
+   const forgotten = await runCli(['memory', 'forget', String(item.id)]);
+   assert.equal(forgotten.code, 0);
+   const stats = await runCli(['memory', 'stats', '--json']);
+   assert.equal(jsonLines(stats.stdout).find((l) => l.type === 'memory.stats').memories, 1);
+ });
+ 
+ test('models and config commands work', async () => {
+   const models = await runCli(['models', 'gpt']);
+   assert.equal(models.code, 0);
+-  assert.match(models.stdout, /gpt-5\.5/);
++  assert.match(models.stdout, /gpt-6\.1-sol/);
+   const config = await runCli(['config', 'show', '--json']);
+   const data = jsonLines(config.stdout).find((l) => l.type === 'config');
+   assert.equal(data.config.model, 'mock-model');
+   assert.match(data.config.apiKey, /…/);
+ });
+ 
+ test('stripDetach removes the flag from raw argv including short groups', () => {
+   assert.deepEqual(stripDetach(['run', 'x', '--detach', '-dv', '-d', '--yes']), ['run', 'x', '-v', '--yes']);
+ });
++
++test('map writes .ai/map.json without an API key', async () => {
++  for (const name of await readdir(work)) await rm(path.join(work, name), { recursive: true, force: true });
++  await writeFile(path.join(work, 'a.js'), 'export function hello() {}\n');
++  const built = await runCli(['map'], { env: { OPENAI_API_KEY: '' } });
++  assert.equal(built.code, 0, built.stderr);
++  const shown = await runCli(['map', 'path'], { env: { OPENAI_API_KEY: '' } });
++  assert.equal(shown.code, 0, shown.stderr);
++  assert.match(shown.stdout, /\.ai[/\\]map\.json/);
++  assert.match(shown.stdout, /файлов: 1/);
++  const unknown = await runCli(['map', 'nope'], { env: { OPENAI_API_KEY: '' } });
++  assert.equal(unknown.code, 2);
++});
+diff --git a/test/core.test.js b/test/core.test.js
+index 77266a2..f7ebab9 100644
+--- a/test/core.test.js
++++ b/test/core.test.js
+@@ -42,33 +42,33 @@ test('session: save and load round trip', async () => {
+     await session.save(file);
+     const loaded = await loadSession(file, { store: false, model: 'm' });
+     assert.equal(loaded.name, 'work');
+     assert.equal(loaded.size, 1);
+     assert.equal(loaded.usage.total, 15);
+     assert.match(loaded.transcript(), /Вы: hello/);
+   } finally { await rm(dir, { recursive: true, force: true }); }
+ });
+ 
+ test('ledger: price matching, cost and budgets', () => {
+-  const prices = { 'gpt-5.5': { input: 1.25, cachedInput: 0.125, output: 10 }, 'gpt-5*': { input: 2, output: 20 } };
+-  assert.equal(priceFor(prices, 'gpt-5.5').input, 1.25);
+-  assert.equal(priceFor(prices, 'gpt-5.4-mini').input, 2);
++  const prices = { 'gpt-6.1-sol': { input: 1.25, cachedInput: 0.125, output: 10 }, 'gpt-6*': { input: 2, output: 20 } };
++  assert.equal(priceFor(prices, 'gpt-6.1-sol').input, 1.25);
++  assert.equal(priceFor(prices, 'gpt-6-luna').input, 2);
+   assert.equal(priceFor(prices, 'o3'), null);
+   const usage = normalizeUsage({ input_tokens: 1_000_000, input_tokens_details: { cached_tokens: 200_000 }, output_tokens: 100_000, output_tokens_details: { reasoning_tokens: 50_000 }, total_tokens: 1_100_000 });
+-  assert.equal(costOf(prices['gpt-5.5'], usage), 800_000 * 1.25 / 1e6 + 200_000 * 0.125 / 1e6 + 100_000 * 10 / 1e6);
++  assert.equal(costOf(prices['gpt-6.1-sol'], usage), 800_000 * 1.25 / 1e6 + 200_000 * 0.125 / 1e6 + 100_000 * 10 / 1e6);
+   const ledger = createLedger({ prices, budgetUsd: 1.5 });
+-  ledger.record({ model: 'gpt-5.5', usage: { input_tokens: 400_000, output_tokens: 50_000 } }); // $1.00
++  ledger.record({ model: 'gpt-6.1-sol', usage: { input_tokens: 400_000, output_tokens: 50_000 } }); // $1.00
+   assert.ok(ledger.snapshot().costKnown);
+   assert.equal(ledger.snapshot().costUsd, 1);
+-  assert.doesNotThrow(() => ledger.assertBudget({ estimatedTokens: 1000, model: 'gpt-5.5' }));
+-  ledger.record({ model: 'gpt-5.5', usage: { input_tokens: 400_000, output_tokens: 50_000 } }); // $2.00 > $1.50
+-  assert.throws(() => ledger.assertBudget({ model: 'gpt-5.5' }), /бюджет/);
++  assert.doesNotThrow(() => ledger.assertBudget({ estimatedTokens: 1000, model: 'gpt-6.1-sol' }));
++  ledger.record({ model: 'gpt-6.1-sol', usage: { input_tokens: 400_000, output_tokens: 50_000 } }); // $2.00 > $1.50
++  assert.throws(() => ledger.assertBudget({ model: 'gpt-6.1-sol' }), /бюджет/);
+   const unknown = createLedger({ prices: {}, budgetUsd: 1 });
+   unknown.record({ model: 'o3', usage: { input_tokens: 1, output_tokens: 1 } });
+   assert.throws(() => unknown.assertBudget({ model: 'o3' }), /цены/);
+   assert.equal(normalizeUsage({ input_tokens: 'x' }), null);
+ });
+ 
+ test('attachments: images become data URLs, PDFs input_file, text input_text', async () => {
+   const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-agent-att-'));
+   try {
+     await writeFile(path.join(dir, 'pic.png'), Buffer.from(TINY_PNG, 'base64'));
+diff --git a/test/helpers/mock-server.js b/test/helpers/mock-server.js
+index 5ff1c4a..ee58dcc 100644
+--- a/test/helpers/mock-server.js
++++ b/test/helpers/mock-server.js
+@@ -104,21 +104,21 @@ export async function startMockServer({ script, backgroundPolls = 2 } = {}) {
+ 
+   const server = http.createServer(async (req, res) => {
+     const chunks = [];
+     for await (const chunk of req) chunks.push(chunk);
+     const raw = Buffer.concat(chunks).toString('utf8');
+     const body = raw ? JSON.parse(raw) : null;
+     const url = new URL(req.url, 'http://localhost');
+     const json = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json', 'x-request-id': `req_${randomUUID().slice(0, 8)}` }); res.end(JSON.stringify(data)); };
+     requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers: req.headers, body });
+ 
+-    if (req.method === 'GET' && url.pathname === '/v1/models') return json(200, { object: 'list', data: [{ id: 'mock-model' }, { id: 'gpt-5.5' }, { id: 'gpt-image-2' }] });
++    if (req.method === 'GET' && url.pathname === '/v1/models') return json(200, { object: 'list', data: [{ id: 'mock-model' }, { id: 'gpt-6.1-sol' }, { id: 'gpt-image-2' }] });
+     if (req.method === 'POST' && url.pathname === '/v1/responses/input_tokens') return json(200, { object: 'response.input_tokens', input_tokens: JSON.stringify(body.input).length });
+     if (req.method === 'POST' && url.pathname === '/v1/responses/compact') {
+       return json(200, { id: `cmp_${++counter}`, object: 'response.compaction', output: [{ type: 'compaction', id: `cmp_item_${counter}`, encrypted_content: 'enc_compacted' }], usage: usageOf({}) });
+     }
+     const match = /^\/v1\/responses\/([^/]+)(\/cancel)?$/.exec(url.pathname);
+     if (match) {
+       const stored = responses.get(match[1]);
+       if (!stored) return json(404, { error: { message: 'not found', type: 'invalid_request_error', code: 'not_found' } });
+       if (match[2]) { stored.cancelled = true; return json(200, finalResponse(stored.body, stored.scenario, match[1], 'cancelled')); }
+       stored.polls++;
+diff --git a/test/loop.test.js b/test/loop.test.js
+index b1bcc26..6cb3d21 100644
+--- a/test/loop.test.js
++++ b/test/loop.test.js
+@@ -21,42 +21,42 @@ before(async () => {
+ });
+ beforeEach(() => server.reset());
+ after(async () => { await server.close(); await rm(root, { recursive: true, force: true }); });
+ 
+ const config = () => structuredClone({ ...defaults, model: 'mock-model', home: root, baseURL: server.baseURL, image: { ...defaults.image, outputDir: root } });
+ const client = () => createClient({ apiKey: 'sk-test', baseURL: server.baseURL });
+ 
+ function setup({ approvalLevel = 'all', prompt = 'do it', cfg = config() } = {}) {
+   const session = createSession({ store: false, model: 'mock-model' });
+   session.addUserMessage(buildUserMessage({ text: prompt }));
+-  const ledger = createLedger({ prices: { 'mock-model': { input: 1, cachedInput: 0.5, output: 10 }, 'gpt-5.5': { input: 1, cachedInput: 0.5, output: 10 } } });
++  const ledger = createLedger({ prices: { 'mock-model': { input: 1, cachedInput: 0.5, output: 10 }, 'gpt-6.1-sol': { input: 1, cachedInput: 0.5, output: 10 } } });
+   const toolset = createToolset({ root, config: cfg, names: enabledToolNames(cfg.tools), approvalLevel, signal: undefined });
+   const events = [];
+   return { session, ledger, toolset, events, emit: (e) => events.push(e), cfg };
+ }
+ 
+ test('tool loop: write_file → read_file → final answer; history stays replayable', async () => {
+   script = (body, index) => {
+     if (index === 0) return { calls: [{ name: 'write_file', arguments: { path: 'notes/hello.txt', content: 'hello world\n', overwrite: true } }], reasoning: 'need to write' };
+     if (index === 1) {
+       const outputs = body.input.filter((i) => i.type === 'function_call_output');
+       assert.equal(outputs.length, 1);
+       assert.match(outputs[0].output, /Создан notes\/hello.txt/);
+       return { calls: [{ name: 'read_file', arguments: { path: 'notes/hello.txt', start_line: null, end_line: null } }] };
+     }
+     const lastOutput = body.input.filter((i) => i.type === 'function_call_output').at(-1).output;
+     assert.match(lastOutput, /1\| hello world/);
+     assert.ok(body.input.some((i) => i.type === 'reasoning' && i.encrypted_content), 'encrypted reasoning is replayed');
+     assert.deepEqual(body.include, ['reasoning.encrypted_content']);
+     return { text: 'Файл создан и проверен.' };
+   };
+-  const { session, ledger, toolset, events, emit, cfg } = setup({ cfg: { ...config(), model: 'gpt-5.5' } });
++  const { session, ledger, toolset, events, emit, cfg } = setup({ cfg: { ...config(), model: 'gpt-6.1-sol' } });
+   const result = await runTurn({ client: client(), config: cfg, session, ledger, toolset, emit });
+   assert.equal(result.status, 'completed', result.error?.message);
+   assert.equal(result.turns, 3);
+   assert.equal(result.toolCalls, 2);
+   assert.equal(result.text, 'Файл создан и проверен.');
+   assert.equal(await readFile(path.join(root, 'notes/hello.txt'), 'utf8'), 'hello world\n');
+   assert.equal(ledger.snapshot().requests, 3);
+   assert.ok(ledger.snapshot().costUsd > 0);
+   assert.ok(events.some((e) => e.type === 'tool.exec.done' && e.name === 'write_file' && e.ok));
+   assert.deepEqual(toolset.stats().changes.map((c) => c.path), ['notes/hello.txt']);
+@@ -151,33 +151,33 @@ test('background mode without streaming polls until completion', async () => {
+   const result = await runTurn({ client: client(), config: ctx.cfg, session: ctx.session, ledger: ctx.ledger, emit: ctx.emit, background: true });
+   assert.equal(result.status, 'completed');
+   assert.equal(result.text, 'background done');
+   const statuses = ctx.events.filter((e) => e.type === 'response.status').map((e) => e.status);
+   assert.ok(statuses.includes('queued') || statuses.includes('in_progress'));
+   assert.equal(server.requests.find((r) => r.method === 'POST' && r.path === '/v1/responses' && r.body.background).body.store, true);
+ });
+ 
+ test('buildRequestBody respects model capabilities and configuration', () => {
+   const cfg = { ...config(), temperature: 0.3, verbosity: 'low', reasoning: { effort: 'high', summary: 'detailed' }, maxOutputTokens: 500, serviceTier: 'flex' };
+-  const reasoning = buildRequestBody({ config: cfg, model: 'gpt-5.5', input: [], tools: [{ type: 'web_search' }] });
++  const reasoning = buildRequestBody({ config: cfg, model: 'gpt-6.1-sol', input: [], tools: [{ type: 'web_search' }] });
+   assert.deepEqual(reasoning.reasoning, { effort: 'high', summary: 'detailed' });
+   assert.equal(reasoning.temperature, undefined);
+   assert.deepEqual(reasoning.text, { verbosity: 'low' });
+   assert.deepEqual(reasoning.include, ['reasoning.encrypted_content']);
+   assert.equal(reasoning.parallel_tool_calls, true);
+   assert.equal(reasoning.max_output_tokens, 500);
+   assert.equal(reasoning.service_tier, 'flex');
+   const classic = buildRequestBody({ config: cfg, model: 'gpt-4.1', input: [] });
+   assert.equal(classic.reasoning, undefined);
+   assert.equal(classic.temperature, 0.3);
+   assert.equal(classic.text, undefined);
+-  const stored = buildRequestBody({ config: { ...cfg, store: true }, model: 'gpt-5.5', input: [], previousResponseId: 'resp_1' });
++  const stored = buildRequestBody({ config: { ...cfg, store: true }, model: 'gpt-6.1-sol', input: [], previousResponseId: 'resp_1' });
+   assert.equal(stored.previous_response_id, 'resp_1');
+   assert.equal(stored.include, undefined);
+ });
+ 
+ test('session store mode sends only new items with previous_response_id', async () => {
+   const seen = [];
+   script = (body) => { seen.push(body); return { text: `answer ${seen.length}` }; };
+   const cfg = { ...config(), store: true };
+   const session = createSession({ store: true, model: 'mock-model' });
+   const ledger = createLedger();

@@ -1,0 +1,610 @@
+# Review package: 95008354d02418eb04c198a1b3885f40c5065f4a..HEAD
+
+## Commits
+a9cd010 fix: take node from PATH and forward launcher input
+
+## Files changed
+ bin/ai.cmd                                         |   9 +-
+ bin/ai.ps1                                         |   8 +-
+ bin/ai.sh                                          |   0
+ docs/superpowers/plans/2026-10-15-global-cli.md    | 255 +++++++++++++++++++++
+ .../specs/2026-10-15-global-cli-design.md          | 103 +++++++++
+ test/cli.test.js                                   | 124 +++++++++-
+ 6 files changed, 493 insertions(+), 6 deletions(-)
+
+## Diff
+diff --git a/bin/ai.cmd b/bin/ai.cmd
+index 81f1ee4..5f15dc1 100644
+--- a/bin/ai.cmd
++++ b/bin/ai.cmd
+@@ -1,3 +1,10 @@
+ @echo off
+-node "%~dp0ai.js" %*
++setlocal
++set "NODE_EXE="
++for %%I in (node.exe) do set "NODE_EXE=%%~$PATH:I"
++if not defined NODE_EXE (
++  echo ai: node.exe not found on PATH 1>&2
++  exit /b 9009
++)
++endlocal & "%NODE_EXE%" "%~dp0ai.js" %*
+ exit /b %ERRORLEVEL%
+diff --git a/bin/ai.ps1 b/bin/ai.ps1
+index 895df91..c6c5a6d 100644
+--- a/bin/ai.ps1
++++ b/bin/ai.ps1
+@@ -1,2 +1,8 @@
+-& node (Join-Path $PSScriptRoot 'ai.js') @args
++$ai = Join-Path $PSScriptRoot 'ai.js'
++try {
++  if ($MyInvocation.ExpectingInput) { $input | & node $ai @args } else { & node $ai @args }
++} catch {
++  Write-Error $_
++  exit 1
++}
+ exit $LASTEXITCODE
+diff --git a/bin/ai.sh b/bin/ai.sh
+old mode 100644
+new mode 100755
+diff --git a/docs/superpowers/plans/2026-10-15-global-cli.md b/docs/superpowers/plans/2026-10-15-global-cli.md
+new file mode 100644
+index 0000000..730432e
+--- /dev/null
++++ b/docs/superpowers/plans/2026-10-15-global-cli.md
+@@ -0,0 +1,255 @@
++# Global CLI Launch Implementation Plan
++
++> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
++
++**Goal:** Make `ai` start from any working directory by locating the package next to its launchers, and name the package `universal-ai` so `npm install -g universal-ai` installs the command `ai`.
++
++**Architecture:** `bin/ai.cmd`, `bin/ai.sh`, and `bin/ai.ps1` compute their own directory and run `node` on the neighboring `bin/ai.js`, leaving the caller's working directory unchanged. `bin/ai.js` and `src/cli.js` already resolve `src` and `package.json` from `import.meta.url`. The npm `bin` target stays `./bin/ai.js`.
++
++**Tech Stack:** Node.js 26 ESM, `node:test`, `node:child_process`. No new dependencies.
++
++## Global Constraints
++
++- Node.js built-in modules only. No new dependencies.
++- Package `name` is `universal-ai`. Command name stays `ai`. `bin` stays `{ "ai": "./bin/ai.js" }`.
++- `files` stays `bin`, `src`, `index.js`, `README.md`. `engines` stays `node >= 26`.
++- `bin/ai.js` is unchanged.
++- Each wrapper passes arguments through, does not change the process working directory, and exits with the exit code of `node`.
++- Wrappers do not resolve symlinks. `ai.cmd` uses `%~dp0`, `ai.sh` uses `dirname "$0"`, `ai.ps1` uses `$PSScriptRoot`.
++- If `node` is not on `PATH`, the shell reports that and the wrapper exits non-zero.
++- The agent keeps using the caller's working directory, or `--cwd`.
++- `User-Agent` strings that say `ai-agent-cli` stay as they are.
++- Do not publish the package. Do not run `npm install -g` in tests or during implementation.
++- `ai --version` prints `universal-ai 1.0.0` and does not need `OPENAI_API_KEY`.
++
++---
++
++## File structure
++
++- Modify `package.json` — `name` only.
++- Modify `bin/ai.cmd`, `bin/ai.sh`, `bin/ai.ps1` — one launcher each. No other file finds the package root.
++- Modify `test/cli.test.js` — manifest assertion and launcher `--version` from a directory outside the repository.
++- Modify `README.md` — install block only.
++- Do not modify `bin/ai.js` or `src/cli.js`.
++
++---
++
++### Task 1: Package name
++
++**Files:**
++- Modify: `package.json` (`name`)
++- Test: `test/cli.test.js` (append)
++
++**Interfaces:**
++- Consumes: nothing
++- Produces: `package.json` `name` equal to `universal-ai` and `bin.ai` equal to `./bin/ai.js`. `ai --version` then prints `universal-ai 1.0.0` because `src/cli.js` prints `pkg.name` and `pkg.version`.
++
++- [ ] **Step 1: Write the failing test**
++
++Append this test to `test/cli.test.js`:
++
++```javascript
++test('package manifest name is universal-ai', async () => {
++  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
++  assert.equal(pkg.name, 'universal-ai');
++  assert.equal(pkg.bin.ai, './bin/ai.js');
++});
++```
++
++`readFile` and `assert` are already imported in that file.
++
++- [ ] **Step 2: Run the test to verify it fails**
++
++Run:
++
++```bash
++node --test --test-timeout=60000 --test-name-pattern "package manifest name is universal-ai" test/cli.test.js
++```
++
++Expected: FAIL. The assertion reports `'ai-agent-cli' !== 'universal-ai'`.
++
++- [ ] **Step 3: Change the package name**
++
++In `package.json`, replace `"name": "ai-agent-cli"` with `"name": "universal-ai"`. Leave `bin`, `files`, `engines`, and `version` as they are.
++
++- [ ] **Step 4: Run the test to verify it passes**
++
++Run:
++
++```bash
++node --test --test-timeout=60000 --test-name-pattern "package manifest name is universal-ai" test/cli.test.js
++```
++
++Expected: PASS.
++
++- [ ] **Step 5: Commit**
++
++```bash
++git add package.json test/cli.test.js
++git commit -m "$(cat <<'EOF'
++feat: name the package universal-ai
++
++EOF
++)"
++```
++
++---
++
++### Task 2: Launchers
++
++**Files:**
++- Modify: `bin/ai.cmd`
++- Modify: `bin/ai.sh`
++- Modify: `bin/ai.ps1`
++- Modify: `test/cli.test.js` (append the helper and the test)
++- Modify: `README.md` (fenced install block under `## Установка`, lines 27–32)
++
++**Interfaces:**
++- Consumes: Task 1's package name. `ai --version` writes `universal-ai 1.0.0\n` and returns 0 before any API-key check.
++- Produces: `bin/ai.cmd`, `bin/ai.sh`, and `bin/ai.ps1`. Each runs `node` on `ai.js` in the same directory as the wrapper. Later callers invoke those files by absolute path; the working directory of the process is the caller's directory.
++
++- [ ] **Step 1: Write the failing test**
++
++Append this helper and test to `test/cli.test.js`. `spawn`, `path`, `os`, and `fileURLToPath` are already imported.
++
++```javascript
++function runLauncher(launcher, args, cwd) {
++  const ext = path.extname(launcher).toLowerCase();
++  let command;
++  let commandArgs;
++  let windowsVerbatimArguments = false;
++  if (ext === '.cmd') {
++    command = process.env.ComSpec || 'cmd.exe';
++    const quotedArgs = args.map((arg) => `"${arg.replaceAll('"', '')}"`).join(' ');
++    commandArgs = ['/d', '/s', '/c', `""${launcher}" ${quotedArgs}"`];
++    windowsVerbatimArguments = true;
++  } else if (ext === '.ps1') {
++    command = 'powershell.exe';
++    commandArgs = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcher, ...args];
++  } else {
++    command = 'sh';
++    commandArgs = [launcher, ...args];
++  }
++  return new Promise((resolve) => {
++    const child = spawn(command, commandArgs, {
++      cwd, windowsVerbatimArguments, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
++    });
++    let stdout = '', stderr = '';
++    child.stdout.on('data', (d) => { stdout += d; });
++    child.stderr.on('data', (d) => { stderr += d; });
++    child.once('close', (code) => resolve({ code, stdout, stderr }));
++  });
++}
++
++test('launchers print version from outside the repository', async () => {
++  const root = fileURLToPath(new URL('..', import.meta.url));
++  const cwd = os.tmpdir();
++  assert.notEqual(path.resolve(cwd), path.resolve(root));
++  const launchers = process.platform === 'win32'
++    ? [path.join(root, 'bin', 'ai.cmd'), path.join(root, 'bin', 'ai.ps1')]
++    : [path.join(root, 'bin', 'ai.sh')];
++  for (const launcher of launchers) {
++    const { code, stdout, stderr } = await runLauncher(launcher, ['--version'], cwd);
++    assert.equal(code, 0, stderr);
++    assert.equal(stdout, 'universal-ai 1.0.0\n');
++  }
++});
++```
++
++The helper does not set `OPENAI_API_KEY`. It does not pass `process.execPath`. The launcher path is absolute, and `cwd` is the OS temp directory.
++
++- [ ] **Step 2: Run the test to verify it fails**
++
++Run:
++
++```bash
++node --test --test-timeout=60000 --test-name-pattern "launchers print version from outside the repository" test/cli.test.js
++```
++
++Expected: FAIL because stdout is not `universal-ai 1.0.0\n`. The wrappers are empty, so this is the missing behavior. If the process fails to spawn, fix only the helper's spawn arguments until the failure is that assertion, then re-run.
++
++- [ ] **Step 3: Write the three wrappers**
++
++Replace `bin/ai.cmd` with:
++
++```bat
++@echo off
++setlocal
++set "NODE_EXE="
++for %%I in (node.exe) do set "NODE_EXE=%%~$PATH:I"
++if not defined NODE_EXE (
++  echo ai: node.exe not found on PATH 1>&2
++  exit /b 9009
++)
++endlocal & "%NODE_EXE%" "%~dp0ai.js" %*
++exit /b %ERRORLEVEL%
++```
++
++Replace `bin/ai.sh` with:
++
++```sh
++#!/bin/sh
++dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
++exec node "$dir/ai.js" "$@"
++```
++
++Replace `bin/ai.ps1` with:
++
++```powershell
++$ai = Join-Path $PSScriptRoot 'ai.js'
++try {
++  if ($MyInvocation.ExpectingInput) { $input | & node $ai @args } else { & node $ai @args }
++} catch {
++  Write-Error $_
++  exit 1
++}
++exit $LASTEXITCODE
++```
++
++Do not edit `bin/ai.js`.
++
++- [ ] **Step 4: Run the launcher test to verify it passes**
++
++Run:
++
++```bash
++node --test --test-timeout=60000 --test-name-pattern "launchers print version from outside the repository" test/cli.test.js
++```
++
++Expected: PASS. On Windows both `ai.cmd` and `ai.ps1` pass. On other platforms `ai.sh` passes.
++
++- [ ] **Step 5: Update the install block**
++
++In `README.md`, replace the install block with:
++
++```bash
++# Node.js ≥ 26, внешних зависимостей нет
++npm install -g .       # из клона: команда `ai` в PATH
++# npm install -g universal-ai   # то же после публикации пакета
++# либо из любого каталога: bin/ai.cmd, bin/ai.sh, bin/ai.ps1, или node <путь>/bin/ai.js
++export OPENAI_API_KEY=sk-...   # PowerShell: $env:OPENAI_API_KEY = "sk-..."
++ai config init         # создаст ~/.ai-agent/config.json
++```
++
++Leave the surrounding `## Установка` heading and the following paragraph in place.
++
++- [ ] **Step 6: Run the full test suite**
++
++Run:
++
++```bash
++npm test
++```
++
++Expected: PASS, including `package manifest name is universal-ai` and `launchers print version from outside the repository`.
++
++- [ ] **Step 7: Commit**
++
++```bash
++git add bin/ai.cmd bin/ai.sh bin/ai.ps1 test/cli.test.js README.md
++git commit -m "$(cat <<'EOF'
++feat: launch ai from the directory that holds the scripts
++
++EOF
++)"
++```
+diff --git a/docs/superpowers/specs/2026-10-15-global-cli-design.md b/docs/superpowers/specs/2026-10-15-global-cli-design.md
+new file mode 100644
+index 0000000..fa0ed6f
+--- /dev/null
++++ b/docs/superpowers/specs/2026-10-15-global-cli-design.md
+@@ -0,0 +1,103 @@
++# Global CLI launch
++
++The `ai` command runs from any working directory. The launchers find the package next to themselves. The agent still uses the directory from which the command was started. The package name is `universal-ai`, so `npm install -g universal-ai` installs the command `ai` once the package is published. From a clone, `npm install -g .` installs that same command.
++
++Node.js built-in modules only. No new dependencies.
++
++## Non-goals
++
++- Publishing the package to the npm registry.
++- Running `npm install -g` inside the test suite.
++- Renaming the command from `ai` to `universal-ai`.
++- Changing where the agent reads and writes project files. That stays the caller's working directory, or `--cwd`.
++- Changing `User-Agent` strings that still say `ai-agent-cli`.
++- Resolving symlinks. Each wrapper uses the path of the script file that was invoked.
++
++## Launchers
++
++`bin/ai.js` stays the npm bin target and is unchanged. It already imports `../src/cli.js`, and `src/cli.js` already loads `package.json` and respawns `bin/ai.js` through `import.meta.url`. Those paths follow the installed files, not the working directory.
++
++`bin/ai.cmd`:
++
++```bat
++@echo off
++setlocal
++set "NODE_EXE="
++for %%I in (node.exe) do set "NODE_EXE=%%~$PATH:I"
++if not defined NODE_EXE (
++  echo ai: node.exe not found on PATH 1>&2
++  exit /b 9009
++)
++endlocal & "%NODE_EXE%" "%~dp0ai.js" %*
++exit /b %ERRORLEVEL%
++```
++
++`bin/ai.sh`:
++
++```sh
++#!/bin/sh
++dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
++exec node "$dir/ai.js" "$@"
++```
++
++`bin/ai.ps1`:
++
++```powershell
++$ai = Join-Path $PSScriptRoot 'ai.js'
++try {
++  if ($MyInvocation.ExpectingInput) { $input | & node $ai @args } else { & node $ai @args }
++} catch {
++  Write-Error $_
++  exit 1
++}
++exit $LASTEXITCODE
++```
++
++Each wrapper passes the arguments through and leaves the process working directory unchanged. The process exit code is the exit code of `node`. `bin/ai.sh` is executable (`100755`).
++
++`ai.cmd` resolves `node.exe` from `PATH` and does not search the caller's directory. A `node.cmd`, `node.exe`, or `node.js` sitting in the caller's directory does not run. If `node.exe` is not on `PATH`, the wrapper writes an error to stderr and exits 9009.
++
++`ai.ps1` forwards pipeline input to `node` and exits 1 when `node` cannot be started.
++
++## Package
++
++`package.json` `name` becomes `universal-ai`. `bin` stays `{ "ai": "./bin/ai.js" }`. `files` already lists `bin`, `src`, `index.js`, and `README.md`. `engines` stays `node >= 26`.
++
++`ai --version` prints `universal-ai 1.0.0` because it prints `name` and `version` from `package.json`. It does this before the API-key check and before the Node version check.
++
++## Docs
++
++The install block in `README.md` becomes:
++
++```bash
++# Node.js ≥ 26, внешних зависимостей нет
++npm install -g .       # из клона: команда `ai` в PATH
++# npm install -g universal-ai   # то же после публикации пакета
++# либо из любого каталога: bin/ai.cmd, bin/ai.sh, bin/ai.ps1, или node <путь>/bin/ai.js
++export OPENAI_API_KEY=sk-...   # PowerShell: $env:OPENAI_API_KEY = "sk-..."
++ai config init         # создаст ~/.ai-agent/config.json
++```
++
++## Tests
++
++`test/cli.test.js` checks the package manifest and the launchers.
++
++The package manifest check reads `package.json` and expects `name` to be `universal-ai` and `bin.ai` to be `./bin/ai.js`.
++
++The launcher check starts the wrapper with a working directory outside the repository and the argument `--version`. On Windows it runs `bin/ai.cmd` and `bin/ai.ps1`. On other platforms it runs `bin/ai.sh`. The script path passed to the shell is absolute. Expected result: exit code 0 and stdout `universal-ai 1.0.0\n`. The test does not set `OPENAI_API_KEY` for this run. `node` is resolved from `PATH` by the wrapper, not by passing `process.execPath`.
++
++The spaced-path check junctions the repository root to a temp directory named `ua review space` and runs `bin/ai.cmd --version` through that junction. Expected result: exit code 0 and stdout `universal-ai 1.0.0\n`.
++
++The planted `node.cmd` check writes `node.cmd` containing `@echo PLANTED& exit /b 42` in a fresh temp directory and runs `bin/ai.cmd --version` with that directory as the working directory. Expected result: exit code 0, stdout `universal-ai 1.0.0\n`, and no `PLANTED` in stdout or stderr.
++
++The map check, for each launcher the version check runs, creates a fresh temp directory containing `a.js` with `export function hello() {}\n`, sets `AI_AGENT_HOME` to another fresh temp directory and `OPENAI_API_KEY` to empty, and runs `map`. Expected result: exit code 0 and `.ai/map.json` inside that directory. It then runs `map nope` and expects exit code 2.
++
++The missing-`node` check runs absolute `bin/ai.ps1 --version` with `PATH` pointing at a directory that does not contain `node.exe`. Expected result: a non-zero exit code.
++
++The pipeline check starts a mock Responses server that records the request body and returns `{ text: 'ok' }`. It runs a real PowerShell pipeline, not stdin of `powershell -File`:
++
++```text
++powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "& { 'hello from pipe' | & '<absolute ai.ps1>' ask 'two words' }"
++```
++
++The child receives `OPENAI_API_KEY=sk-test`, `OPENAI_BASE_URL` set to the mock `baseURL`, `AI_MODEL=mock-model`, `AI_AGENT_HOME` set to a fresh temp directory, and `NO_COLOR=1`. Expected result: the recorded body contains `hello from pipe`, the process exits 0, and stdout contains `ok`.
+diff --git a/test/cli.test.js b/test/cli.test.js
+index 9761f82..e8f6509 100644
+--- a/test/cli.test.js
++++ b/test/cli.test.js
+@@ -1,16 +1,16 @@
+ import { test, after, before, beforeEach } from 'node:test';
+ import assert from 'node:assert/strict';
+ import path from 'node:path';
+ import os from 'node:os';
+ import { spawn } from 'node:child_process';
+-import { mkdtemp, readdir, rm, readFile, writeFile } from 'node:fs/promises';
++import { mkdtemp, readdir, rm, readFile, writeFile, symlink } from 'node:fs/promises';
+ import { fileURLToPath } from 'node:url';
+ import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
+ import { createJobManager } from '../src/jobs/manager.js';
+ import { stripDetach } from '../src/cli.js';
+ 
+ const bin = fileURLToPath(new URL('../bin/ai.js', import.meta.url));
+ let server;
+ let script = () => ({ text: 'ok' });
+ let home;
+ let work;
+@@ -243,50 +243,166 @@ test('map writes .ai/map.json without an API key', async () => {
+   const unknown = await runCli(['map', 'nope'], { env: { OPENAI_API_KEY: '' } });
+   assert.equal(unknown.code, 2);
+ });
+ 
+ test('package manifest name is universal-ai', async () => {
+   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+   assert.equal(pkg.name, 'universal-ai');
+   assert.equal(pkg.bin.ai, './bin/ai.js');
+ });
+ 
+-function runLauncher(launcher, args, cwd) {
++function runLauncher(launcher, args, cwd, { env = {}, input = null } = {}) {
+   const ext = path.extname(launcher).toLowerCase();
+   let command;
+   let commandArgs;
+   let windowsVerbatimArguments = false;
+   if (ext === '.cmd') {
+     command = process.env.ComSpec || 'cmd.exe';
+-    commandArgs = ['/d', '/s', '/c', `"${launcher}"`, ...args];
++    const quotedArgs = args.map((arg) => `"${arg.replaceAll('"', '')}"`).join(' ');
++    commandArgs = ['/d', '/s', '/c', `""${launcher}" ${quotedArgs}"`];
+     windowsVerbatimArguments = true;
+   } else if (ext === '.ps1') {
+     command = 'powershell.exe';
+     commandArgs = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcher, ...args];
+   } else {
+     command = 'sh';
+     commandArgs = [launcher, ...args];
+   }
+   return new Promise((resolve) => {
+     const child = spawn(command, commandArgs, {
+-      cwd, windowsVerbatimArguments, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
++      cwd, env: { ...process.env, ...env }, windowsVerbatimArguments,
++      stdio: [input === null ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true,
+     });
+     let stdout = '', stderr = '';
+     child.stdout.on('data', (d) => { stdout += d; });
+     child.stderr.on('data', (d) => { stderr += d; });
+     child.once('close', (code) => resolve({ code, stdout, stderr }));
++    if (input !== null) child.stdin.end(input);
+   });
+ }
+ 
+ test('launchers print version from outside the repository', async () => {
+   const root = fileURLToPath(new URL('..', import.meta.url));
+   const cwd = os.tmpdir();
+   assert.notEqual(path.resolve(cwd), path.resolve(root));
+   const launchers = process.platform === 'win32'
+     ? [path.join(root, 'bin', 'ai.cmd'), path.join(root, 'bin', 'ai.ps1')]
+     : [path.join(root, 'bin', 'ai.sh')];
+   for (const launcher of launchers) {
+     const { code, stdout, stderr } = await runLauncher(launcher, ['--version'], cwd);
+     assert.equal(code, 0, stderr);
+     assert.equal(stdout, 'universal-ai 1.0.0\n');
+   }
+ });
++
++test('launcher spaced path prints version', async () => {
++  if (process.platform !== 'win32') return;
++  const root = fileURLToPath(new URL('..', import.meta.url));
++  const link = path.join(os.tmpdir(), 'ua review space');
++  await rm(link, { force: true }).catch(() => {});
++  await symlink(root, link, 'junction');
++  try {
++    const { code, stdout, stderr } = await runLauncher(path.join(link, 'bin', 'ai.cmd'), ['--version'], os.tmpdir());
++    assert.equal(code, 0, stderr);
++    assert.equal(stdout, 'universal-ai 1.0.0\n');
++  } finally {
++    await rm(link, { force: true });
++  }
++});
++
++test('launcher ignores caller node.cmd', async () => {
++  if (process.platform !== 'win32') return;
++  const root = fileURLToPath(new URL('..', import.meta.url));
++  const cwd = await mkdtemp(path.join(os.tmpdir(), 'ai-planted-node-'));
++  try {
++    await writeFile(path.join(cwd, 'node.cmd'), '@echo PLANTED& exit /b 42');
++    const { code, stdout, stderr } = await runLauncher(path.join(root, 'bin', 'ai.cmd'), ['--version'], cwd);
++    assert.equal(code, 0, stderr);
++    assert.equal(stdout, 'universal-ai 1.0.0\n');
++    assert.doesNotMatch(stdout, /PLANTED/);
++    assert.doesNotMatch(stderr, /PLANTED/);
++  } finally {
++    await rm(cwd, { recursive: true, force: true });
++  }
++});
++
++test('launchers map the caller directory and reject an unknown target', async () => {
++  const root = fileURLToPath(new URL('..', import.meta.url));
++  const launchers = process.platform === 'win32'
++    ? [path.join(root, 'bin', 'ai.cmd'), path.join(root, 'bin', 'ai.ps1')]
++    : [path.join(root, 'bin', 'ai.sh')];
++  for (const launcher of launchers) {
++    const cwd = await mkdtemp(path.join(os.tmpdir(), 'ai-map-work-'));
++    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-map-home-'));
++    try {
++      await writeFile(path.join(cwd, 'a.js'), 'export function hello() {}\n');
++      const env = { AI_AGENT_HOME: home, OPENAI_API_KEY: '' };
++      const built = await runLauncher(launcher, ['map'], cwd, { env });
++      assert.equal(built.code, 0, built.stderr);
++      await readFile(path.join(cwd, '.ai', 'map.json'), 'utf8');
++      const unknown = await runLauncher(launcher, ['map', 'nope'], cwd, { env });
++      assert.equal(unknown.code, 2, unknown.stderr);
++    } finally {
++      await rm(cwd, { recursive: true, force: true });
++      await rm(home, { recursive: true, force: true });
++    }
++  }
++});
++
++test('launcher exits non-zero when node is missing from PATH', async () => {
++  if (process.platform !== 'win32') return;
++  const root = fileURLToPath(new URL('..', import.meta.url));
++  const empty = await mkdtemp(path.join(os.tmpdir(), 'ai-no-node-'));
++  const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
++  try {
++    const env = { ...process.env };
++    for (const key of Object.keys(env)) if (key.toLowerCase() === 'path') delete env[key];
++    env.PATH = empty;
++    const { code, stderr } = await new Promise((resolve) => {
++      const child = spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'bin', 'ai.ps1'), '--version'], {
++        cwd: empty, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
++      });
++      let err = '';
++      child.stderr.on('data', (d) => { err += d; });
++      child.stdout.on('data', () => {});
++      child.once('close', (c) => resolve({ code: c, stderr: err }));
++    });
++    assert.notEqual(code, 0, stderr);
++  } finally {
++    await rm(empty, { recursive: true, force: true });
++  }
++});
++
++test('launcher forwards a PowerShell pipeline', async () => {
++  if (process.platform !== 'win32') return;
++  const root = fileURLToPath(new URL('..', import.meta.url));
++  const ps1 = path.join(root, 'bin', 'ai.ps1');
++  const home = await mkdtemp(path.join(os.tmpdir(), 'ai-pipe-home-'));
++  const mock = await startMockServer({ script: () => ({ text: 'ok' }) });
++  try {
++    const env = {
++      ...process.env,
++      OPENAI_API_KEY: 'sk-test',
++      OPENAI_BASE_URL: mock.baseURL,
++      AI_MODEL: 'mock-model',
++      AI_AGENT_HOME: home,
++      NO_COLOR: '1',
++    };
++    const command = `& { 'hello from pipe' | & '${ps1}' ask 'two words' }`;
++    const { code, stdout, stderr } = await new Promise((resolve) => {
++      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command], {
++        env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
++      });
++      let out = '', err = '';
++      child.stdout.on('data', (d) => { out += d; });
++      child.stderr.on('data', (d) => { err += d; });
++      child.once('close', (c) => resolve({ code: c, stdout: out, stderr: err }));
++    });
++    const body = JSON.stringify(mock.requests.map((r) => r.body));
++    assert.match(body, /hello from pipe/, `${stderr}\n${stdout}`);
++    assert.equal(code, 0, stderr);
++    assert.match(stdout, /ok/);
++  } finally {
++    await mock.close();
++    await rm(home, { recursive: true, force: true });
++  }
++});

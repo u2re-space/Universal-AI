@@ -1,0 +1,125 @@
+# Review package: c5b4d76d6f0f3c2b4c4b633de4c794ad07297309..HEAD
+
+## Commits
+9500835 feat: launch ai from the directory that holds the scripts
+
+## Files changed
+ README.md        |  4 +++-
+ bin/ai.cmd       |  3 +++
+ bin/ai.ps1       |  2 ++
+ bin/ai.sh        |  3 +++
+ test/cli.test.js | 41 +++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 52 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/README.md b/README.md
+index 35c7a9a..86278b3 100644
+--- a/README.md
++++ b/README.md
+@@ -19,21 +19,23 @@
+ | Автономные задачи | `ai run "добавь тесты для src/utils.js и прогони их"` — инструменты: файлы, команды, URL, web-поиск, картинки |
+ | Разные модели под роли | старшая модель планирует и проверяет, младшие собирают контекст и генерируют вызовы инструментов, отдельная модель читает картинки: `--role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna` |
+ | Память и общий контекст | долговременная память в SQLite (факты, соглашения, решения — по проекту и глобально), заметки проекта `AGENTS.md`, история задач, кеш сводок файлов; один общий контекст для всех ролей |
+ | Фон | `--background` (сервер считает, можно переподключиться `ai resume`) и `--detach` (локальная фоновая задача, `ai jobs …`) |
+ | Что происходит | строка статуса: роль и модель, фаза («думает», «выполняется read_file», «генерирует изображение»), время, токены ↑↓, стоимость; краткие рассуждения модели; журнал этапов, шагов и действий; итоговая сводка с расходом по ролям и моделям |
+ 
+ ## Установка
+ 
+ ```bash
+ # Node.js ≥ 26, внешних зависимостей нет
+-npm link               # делает команду `ai` доступной глобально (или запускайте `node bin/ai.js`)
++npm install -g .       # из клона: команда `ai` в PATH
++# npm install -g universal-ai   # то же после публикации пакета
++# либо из любого каталога: bin/ai.cmd, bin/ai.sh, bin/ai.ps1, или node <путь>/bin/ai.js
+ export OPENAI_API_KEY=sk-...   # PowerShell: $env:OPENAI_API_KEY = "sk-..."
+ ai config init         # создаст ~/.ai-agent/config.json
+ ```
+ 
+ Модель по умолчанию — `gpt-6.1-sol`; меняется флагом `--model`, переменной `AI_MODEL` или в конфигурации.
+ `ai models` покажет доступные ключу модели.
+ 
+ ## Команды
+ 
+ ```
+diff --git a/bin/ai.cmd b/bin/ai.cmd
+new file mode 100644
+index 0000000..81f1ee4
+--- /dev/null
++++ b/bin/ai.cmd
+@@ -0,0 +1,3 @@
++@echo off
++node "%~dp0ai.js" %*
++exit /b %ERRORLEVEL%
+diff --git a/bin/ai.ps1 b/bin/ai.ps1
+new file mode 100644
+index 0000000..895df91
+--- /dev/null
++++ b/bin/ai.ps1
+@@ -0,0 +1,2 @@
++& node (Join-Path $PSScriptRoot 'ai.js') @args
++exit $LASTEXITCODE
+diff --git a/bin/ai.sh b/bin/ai.sh
+new file mode 100644
+index 0000000..365bafb
+--- /dev/null
++++ b/bin/ai.sh
+@@ -0,0 +1,3 @@
++#!/bin/sh
++dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
++exec node "$dir/ai.js" "$@"
+diff --git a/test/cli.test.js b/test/cli.test.js
+index 8cceb41..9761f82 100644
+--- a/test/cli.test.js
++++ b/test/cli.test.js
+@@ -242,10 +242,51 @@ test('map writes .ai/map.json without an API key', async () => {
+   assert.match(shown.stdout, /файлов: 1/);
+   const unknown = await runCli(['map', 'nope'], { env: { OPENAI_API_KEY: '' } });
+   assert.equal(unknown.code, 2);
+ });
+ 
+ test('package manifest name is universal-ai', async () => {
+   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+   assert.equal(pkg.name, 'universal-ai');
+   assert.equal(pkg.bin.ai, './bin/ai.js');
+ });
++
++function runLauncher(launcher, args, cwd) {
++  const ext = path.extname(launcher).toLowerCase();
++  let command;
++  let commandArgs;
++  let windowsVerbatimArguments = false;
++  if (ext === '.cmd') {
++    command = process.env.ComSpec || 'cmd.exe';
++    commandArgs = ['/d', '/s', '/c', `"${launcher}"`, ...args];
++    windowsVerbatimArguments = true;
++  } else if (ext === '.ps1') {
++    command = 'powershell.exe';
++    commandArgs = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcher, ...args];
++  } else {
++    command = 'sh';
++    commandArgs = [launcher, ...args];
++  }
++  return new Promise((resolve) => {
++    const child = spawn(command, commandArgs, {
++      cwd, windowsVerbatimArguments, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
++    });
++    let stdout = '', stderr = '';
++    child.stdout.on('data', (d) => { stdout += d; });
++    child.stderr.on('data', (d) => { stderr += d; });
++    child.once('close', (code) => resolve({ code, stdout, stderr }));
++  });
++}
++
++test('launchers print version from outside the repository', async () => {
++  const root = fileURLToPath(new URL('..', import.meta.url));
++  const cwd = os.tmpdir();
++  assert.notEqual(path.resolve(cwd), path.resolve(root));
++  const launchers = process.platform === 'win32'
++    ? [path.join(root, 'bin', 'ai.cmd'), path.join(root, 'bin', 'ai.ps1')]
++    : [path.join(root, 'bin', 'ai.sh')];
++  for (const launcher of launchers) {
++    const { code, stdout, stderr } = await runLauncher(launcher, ['--version'], cwd);
++    assert.equal(code, 0, stderr);
++    assert.equal(stdout, 'universal-ai 1.0.0\n');
++  }
++});

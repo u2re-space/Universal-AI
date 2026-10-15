@@ -1,0 +1,115 @@
+b293147 feat: search the project map before reading file bytes
+ src/agent/tools.js | 13 +++++++++++--
+ test/map.test.js   | 12 ++++++++++++
+ 2 files changed, 23 insertions(+), 2 deletions(-)
+diff --git a/src/agent/tools.js b/src/agent/tools.js
+index 8b6bd7a..d3927b8 100644
+--- a/src/agent/tools.js
++++ b/src/agent/tools.js
+@@ -1,18 +1,19 @@
+ import path from 'node:path';
+ import { createHash } from 'node:crypto';
+ import { readFile, stat } from 'node:fs/promises';
+ import { CancelledError } from '../openai/errors.js';
+ import { detectImageMime } from '../core/attachments.js';
+ import { errorMessage, formatBytes, truncate, clipMiddle } from '../util/text.js';
+ import { resolveInside } from './paths.js';
+ import { listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory } from './fs-tools.js';
++import { loadProjectMap, searchMapped } from './map.js';
+ import { runCommand } from './shell.js';
+ 
+ const str = (description) => ({ type: 'string', description });
+ const nullableInt = (description) => ({ type: ['integer', 'null'], description });
+ const nullableStr = (description) => ({ type: ['string', 'null'], description });
+ const bool = (description) => ({ type: 'boolean', description });
+ const schema = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
+ 
+ /**
+  * Local tools exposed to the model as strict function tools.
+@@ -32,25 +33,26 @@ export const TOOL_SPECS = {
+     category: 'read', group: 'fs',
+     description: 'Read a UTF-8 text file. Returns numbered lines ("N| text"). Use start_line/end_line for big files.',
+     parameters: schema({
+       path: str('File path relative to the working directory.'),
+       start_line: nullableInt('First line to return (1-based). Null = from the beginning.'),
+       end_line: nullableInt('Last line to return (inclusive). Null = to the end (bounded by a size limit).'),
+     }),
+   },
+   search_files: {
+     category: 'read', group: 'fs',
+-    description: 'Search text files for a literal string (or a regular expression). Returns "path:line: text" matches.',
++    description: 'Search text files for a literal string (or a regular expression) using the project map when .ai/map.json is present. Returns "path:line: text" matches.',
+     parameters: schema({
+       query: str('Literal text (case-insensitive) or a JavaScript regular expression when regex=true.'),
+       path: nullableStr('Directory to search in, relative to the working directory. Null = whole working directory.'),
+       regex: bool('Interpret query as a regular expression.'),
++      scope: { type: 'string', enum: ['path', 'symbol', 'content', 'all'], description: 'path and symbol read the map only. content reads file text. all (use this unless a narrower scope is enough) returns path, then symbol, then content.' },
+     }),
+   },
+   write_file: {
+     category: 'write', group: 'fs',
+     description: 'Create or overwrite a UTF-8 text file with the full content. Parent directories are created. Overwritten files are backed up.',
+     parameters: schema({
+       path: str('File path relative to the working directory.'),
+       content: str('Complete new content of the file.'),
+       overwrite: bool('Allow replacing an existing file. Use false when creating a file that must not exist yet.'),
+     }),
+@@ -221,22 +223,29 @@ export function createToolset({
+     async list_files(args) {
+       const result = await listFiles({ root, dir: args.path || '.', depth: Math.min(6, Math.max(1, args.depth ?? 2)),
+         includeHidden: Boolean(args.include_hidden), maxEntries: limits.maxListEntries });
+       return { output: result.text, summary: `${result.count} записей` };
+     },
+     async read_file(args) {
+       const result = await readTextFile({ root, file: args.path, startLine: args.start_line, endLine: args.end_line, maxBytes: limits.maxFileReadBytes });
+       return { output: result.text, summary: `${args.path}: строки ${result.from}-${result.to}/${result.totalLines}` };
+     },
+     async search_files(args) {
++      const scope = args.scope ?? 'all';
++      if (!['path', 'symbol', 'content', 'all'].includes(scope)) throw new Error('scope: path, symbol, content или all.');
++      const projectMap = await loadProjectMap(root);
++      if (projectMap) {
++        const result = await searchMapped(projectMap, { query: args.query, dir: args.path || '.', scope, regex: Boolean(args.regex), maxResults: limits.maxSearchResults });
++        return { output: result.text, summary: `${result.count} совпадений` };
++      }
+       const result = await searchFiles({ root, query: args.query, dir: args.path || '.', regex: Boolean(args.regex), maxResults: limits.maxSearchResults });
+-      return { output: result.text, summary: `${result.count} совпадений` };
++      return { output: `Карта проекта недоступна; поиск по дереву.\n${result.text}`, summary: `${result.count} совпадений` };
+     },
+     async write_file(args) {
+       const result = await writeTextFile({ root, file: args.path, content: args.content, overwrite: args.overwrite !== false,
+         maxBytes: limits.maxFileWriteBytes, backupDir });
+       stats.changes.push({ op: result.created ? 'create' : 'overwrite', path: result.rel, backupPath: result.backupPath });
+       return { output: `${result.created ? 'Создан' : 'Перезаписан'} ${result.rel} (${formatBytes(result.bytes)}).`, summary: `${result.created ? '+' : '~'} ${result.rel}` };
+     },
+     async replace_text(args) {
+       const result = await replaceInFile({ root, file: args.path, search: args.search, replacement: args.replacement, all: Boolean(args.all),
+         maxBytes: limits.maxFileWriteBytes, backupDir });
+diff --git a/test/map.test.js b/test/map.test.js
+index 3087758..bd970a6 100644
+--- a/test/map.test.js
++++ b/test/map.test.js
+@@ -65,11 +65,23 @@ test('project map', async (t) => {
+     const result = await searchMapped(projectMap, { query: 'goodbye', scope: 'content' });
+     assert.match(result.text, /lib\.js:\d+:/);
+   });
+ 
+   await t.test('a file under .ssh is not indexed', async () => {
+     await mkdir(path.join(root, '.ssh'), { recursive: true });
+     await writeFile(path.join(root, '.ssh', 'config'), 'Host example\n');
+     const built = await buildProjectMap(root);
+     assert.equal(built.files.has('.ssh/config'), false);
+   });
++
++  await t.test('searchMapped answers path and symbol from RAM and content from the file', async () => {
++    const projectMap = await loadProjectMap(root);
++    const byPath = await searchMapped(projectMap, { query: 'lib.js', scope: 'path' });
++    assert.match(byPath.text, /^lib\.js$/m);
++    const bySymbol = await searchMapped(projectMap, { query: 'goodbye', scope: 'symbol' });
++    assert.match(bySymbol.text, /lib\.js:\d+: export goodbye/);
++    const byContent = await searchMapped(projectMap, { query: 'clip', scope: 'content' });
++    assert.match(byContent.text, /lib\.js:\d+:/);
++    const again = await searchMapped(projectMap, { query: 'clip', scope: 'content' });
++    assert.equal(again.text, byContent.text);
++  });
+ });

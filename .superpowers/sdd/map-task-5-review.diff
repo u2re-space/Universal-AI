@@ -1,0 +1,536 @@
+f271c47 feat: confirm read, edit, and scan marks in the team plan
+ src/agent/schemas.js |  9 +++++++++
+ src/agent/team.js    | 28 ++++++++++++++++++++++++----
+ src/agent/tools.js   | 17 +++++++++++++----
+ src/commands/run.js  |  3 +++
+ test/map.test.js     | 12 +++++++++++-
+ test/team.test.js    | 49 ++++++++++++++++++++++++++++++++++---------------
+ 6 files changed, 94 insertions(+), 24 deletions(-)
+diff --git a/src/agent/schemas.js b/src/agent/schemas.js
+index fa9f03c..0706dd1 100644
+--- a/src/agent/schemas.js
++++ b/src/agent/schemas.js
+@@ -15,20 +15,29 @@ export const PLAN_SCHEMA = object({
+       verify: { ...string, description: 'How the worker should verify this step (command, check, re-read).' },
+     }),
+   },
+   filesOfInterest: { ...strings, description: 'Paths (relative) the collector should read or summarize first.' },
+   searchQueries: { ...strings, description: 'Literal strings worth searching for in the codebase.' },
+   questionsForCollector: { ...strings, description: 'Specific questions the context collector should answer from the files.' },
+   acceptanceCriteria: strings,
+   needsReview: { type: 'boolean', description: 'Whether an independent review of the result is worth its cost.' },
+   imageNotes: { ...nullableString, description: 'What the attached images show that matters for the task (null if none).' },
+   risks: strings,
++  taskMap: {
++    type: 'array',
++    description: 'Final read/edit/scan marks. Empty array when nothing applies.',
++    items: object({
++      path: string,
++      role: { type: 'string', enum: ['read', 'edit', 'scan'] },
++      reason: { ...string, description: 'Why this file has this role.' },
++    }),
++  },
+ });
+ 
+ export const COLLECTOR_SCHEMA = object({
+   findings: {
+     type: 'array',
+     items: object({
+       path: string,
+       purpose: { ...string, description: 'What this file is for.' },
+       relevant: { ...string, description: 'The parts relevant to the task: symbols, line ranges, snippets, conventions.' },
+     }),
+diff --git a/src/agent/team.js b/src/agent/team.js
+index 8a1df8b..d6beb7a 100644
+--- a/src/agent/team.js
++++ b/src/agent/team.js
+@@ -5,20 +5,22 @@ import { createSharedContext } from '../core/context.js';
+ import { renderMemories } from '../core/memory.js';
+ import { isAbortError, CancelledError } from '../openai/errors.js';
+ import { clipMiddle, errorMessage } from '../util/text.js';
+ import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
+ import { createToolset, enabledToolNames, READ_ONLY_TOOLS } from './tools.js';
+ import { listFiles } from './fs-tools.js';
+ import { describeChangeSet } from './diff.js';
+ import { createRoleRunner } from './roles.js';
+ import { builtinTools } from './loop.js';
+ import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA } from './schemas.js';
++import { ensureProjectMap, loadProjectMap } from './map.js';
++import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
+ 
+ const HARD_STOP = new Set(['cancelled', 'budget']);
+ 
+ function renderPlan(plan) {
+   const steps = plan.steps.map((s, i) => `${i + 1}. ${s.goal}\n   details: ${s.details}\n   verify: ${s.verify}`).join('\n');
+   return `${plan.summary}\nComplexity: ${plan.complexity}\n\nSteps:\n${steps}\n\nAcceptance criteria:\n${plan.acceptanceCriteria.map((c) => `- ${c}`).join('\n') || '- (none)'}` +
+     `${plan.risks.length ? `\n\nRisks:\n${plan.risks.map((r) => `- ${r}`).join('\n')}` : ''}`;
+ }
+ 
+ function renderFindings(report) {
+@@ -47,21 +49,23 @@ export async function runTeam({
+   const ctx = createSharedContext({ task, root });
+   const maxBytes = config.agent.maxContextBytes;
+   const result = { status: 'failed', text: '', plan: null, review: null, steps: [], images: [], changes: [], stats: null,
+     recalled: [], memoriesSaved: [], reviewRounds: 0, error: null };
+ 
+   const toolBase = { root, config, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile };
+   const allNames = enabledToolNames(config.tools, { interactive, memory: Boolean(memory), summarize: true });
+   const readNames = allNames.filter((n) => READ_ONLY_TOOLS.includes(n));
+   const reviewerNames = allNames.filter((n) => READ_ONLY_TOOLS.includes(n) || n === 'run_command');
+   const vision = (role) => (roles.shouldDelegateVision(role) ? roles.describeImage : null);
+-  const workerTools = createToolset({ ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker') });
++  const taskMarks = { edit: null };
++  let marks = [];
++  const workerTools = createToolset({ ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker'), editPaths: () => taskMarks.edit });
+   const collectorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('collector') });
+   const reviewerTools = createToolset({ ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer') });
+   const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images });
+   const finish = () => {
+     result.changes = workerTools.stats().changes;
+     result.stats = { worker: workerTools.stats(), collector: collectorTools.stats(), reviewer: reviewerTools.stats() };
+     return result;
+   };
+   const stop = (roleResult, stage) => {
+     result.status = roleResult.status === 'completed' ? 'failed' : roleResult.status;
+@@ -82,42 +86,58 @@ export async function runTeam({
+         notify({ type: 'memory.recalled', count: result.recalled.length, items: result.recalled });
+       }
+     }
+     if (config.memory.notesFile) {
+       const notes = await readFile(path.join(root, config.memory.notesFile), 'utf8').catch(() => null);
+       if (notes?.trim()) ctx.set('notes', `Project notes (${config.memory.notesFile})`, clipMiddle(notes, 16 * 1024), { priority: 8 });
+     }
+     const tree = await listFiles({ root, dir: '.', depth: 2, maxEntries: 150 }).catch(() => null);
+     if (tree) ctx.set('tree', 'Directory listing (depth 2)', tree.text, { priority: 3 });
+ 
++    let projectMap = await loadProjectMap(root);
++    if (!projectMap) {
++      const ensured = await ensureProjectMap(root);
++      projectMap = ensured?.error ? null : ensured;
++    }
++    const draft = formatDraft(draftTaskMap(task, projectMap));
++
+     // 1. Planner.
+     notify({ type: 'stage.start', stage: 'plan', role: 'planner', model: roles.resolve('planner').model });
+     const planned = await roles.run('planner', {
+-      text: `${ctx.render({ maxBytes })}\n\n# Task\n${task}`, parts,
++      text: `${ctx.render({ maxBytes })}\n\n${draft}\n\n# Task\n${task}`, parts,
+       instructions: ROLE_INSTRUCTIONS.planner.replace('{maxSteps}', String(config.agent.maxSteps)), schema: PLAN_SCHEMA, schemaName: 'plan',
+     });
+     if (planned.status !== 'completed') return stop(planned, 'план');
+     const plan = planned.data;
+     plan.steps = plan.steps.slice(0, config.agent.maxSteps);
+     if (!plan.steps.length) plan.steps = [{ goal: task, details: 'Complete the task as described.', verify: 'Re-read the result.' }];
++    marks = filterTaskMap(plan.taskMap, projectMap);
++    taskMarks.edit = new Set(marks.filter((item) => item.role === 'edit').map((item) => item.path));
++    ctx.set('taskMap', 'Task map', formatMarks(marks), { priority: 8 });
++    const scan = formatScan(projectMap, marks);
++    if (scan) ctx.set('scan', 'Symbols (scan)', scan, { priority: 4 });
+     result.plan = plan;
+     ctx.set('plan', 'Plan', renderPlan(plan), { priority: 8 });
+     if (plan.imageNotes) ctx.set('images', 'Attached images (planner notes)', plan.imageNotes, { priority: 7 });
+     notify({ type: 'plan.ready', summary: plan.summary, complexity: plan.complexity, steps: plan.steps.map((s) => s.goal),
+       acceptanceCriteria: plan.acceptanceCriteria, needsReview: plan.needsReview, risks: plan.risks });
+     notify({ type: 'stage.done', stage: 'plan', status: 'completed' });
+ 
+     // 2. Collector (cheap model, read-only).
+-    const wantsContext = plan.complexity !== 'trivial' && (plan.filesOfInterest.length || plan.searchQueries.length || plan.questionsForCollector.length);
++    const wantsContext = plan.complexity !== 'trivial' && (
++      plan.filesOfInterest.length || plan.searchQueries.length || plan.questionsForCollector.length
++      || marks.some((item) => item.role === 'read' || item.role === 'edit')
++    );
+     if (wantsContext && readNames.length) {
+       notify({ type: 'stage.start', stage: 'collect', role: 'collector', model: roles.resolve('collector').model });
+-      const brief = `# Collector brief\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`;
++      const focus = marks.filter((item) => item.role === 'read' || item.role === 'edit').map((item) => `${item.role} ${item.path} — ${item.reason}`);
++      const brief = `# Collector brief\nTask map (read/edit):\n${bullets(focus)}\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`;
+       const collected = await roles.run('collector', {
+         text: `${ctx.render({ maxBytes })}\n\n${brief}`, instructions: ROLE_INSTRUCTIONS.collector, toolset: collectorTools,
+         schema: COLLECTOR_SCHEMA, schemaName: 'context_report', maxTurns: config.agent.collectorMaxTurns,
+       });
+       if (HARD_STOP.has(collected.status)) return stop(collected, 'сбор контекста');
+       if (collected.status === 'completed' && collected.data) ctx.set('findings', 'Collected context (by the collector)', renderFindings(collected.data), { priority: 6 });
+       else notify({ type: 'warning', message: `Сбор контекста не завершён (${collected.status}${collected.error ? `: ${errorMessage(collected.error)}` : ''}); продолжаем без него.` });
+       notify({ type: 'stage.done', stage: 'collect', status: collected.status });
+     }
+ 
+diff --git a/src/agent/tools.js b/src/agent/tools.js
+index 85cb19b..cd5d347 100644
+--- a/src/agent/tools.js
++++ b/src/agent/tools.js
+@@ -171,21 +171,21 @@ function htmlToText(html) {
+  * approvalLevel: 'ask' | 'read' | 'write' | 'all'.
+  * approve({ name, category, args, preview }) → 'yes' | 'no' | 'always' | 'abort' (used for 'ask').
+  * askUser(question) → string | null (optional; enables the ask_user tool).
+  * memory / projectKey / projectName — long-term memory store (enables recall / remember).
+  * describeImage({ part, question }) → string — vision role delegation for view_image (optional).
+  * summarizeFile({ rel, text, focus }) → string — summarizer role for summarize_file (optional).
+  */
+ export function createToolset({
+   root = process.cwd(), config, names, approvalLevel = 'read', approve = async () => 'no', askUser = null,
+   backupDir = null, signal, emit = () => {}, memory = null, projectKey = null, projectName = null,
+-  describeImage = null, summarizeFile = null,
++  describeImage = null, summarizeFile = null, editPaths = () => null,
+ }) {
+   const limits = config.limits;
+   const allowed = new Set(names);
+   if (!memory) { allowed.delete('recall'); allowed.delete('remember'); }
+   if (!summarizeFile) allowed.delete('summarize_file');
+   const alwaysAllowed = new Set();
+   const stats = { calls: 0, byTool: {}, changes: [], commands: [], denied: 0, errors: 0, memories: [] };
+   const notify = (event) => { try { emit(event); } catch { /* observer */ } };
+ 
+   async function decide(name, category, args, preview) {
+@@ -212,20 +212,26 @@ export function createToolset({
+       case 'replace_text':
+         return `Изменить ${args.path}${args.all ? ' (все вхождения)' : ''}\n--- было ---\n${truncate(args.search, 400, { singleLine: false })}\n--- станет ---\n${truncate(args.replacement, 400, { singleLine: false })}`;
+       case 'delete_file': return `Удалить файл ${args.path} (копия сохранится в резервном каталоге)`;
+       case 'make_dir': return `Создать каталог ${args.path}`;
+       case 'run_command': return `Команда: ${args.command}\nКаталог: ${args.cwd ?? '.'}\nПричина: ${args.reason ?? '—'}`;
+       case 'fetch_url': return `Загрузить ${args.url}`;
+       default: return `${name} ${JSON.stringify(args)}`;
+     }
+   }
+ 
++  function labelOutsideEdit(rel, output) {
++    const allowed = typeof editPaths === 'function' ? editPaths() : editPaths;
++    if (allowed && !allowed.has(rel)) return `Не в карте правок (${rel}): ${output}`;
++    return output;
++  }
++
+   const handlers = {
+     async list_files(args) {
+       const result = await listFiles({ root, dir: args.path || '.', depth: Math.min(6, Math.max(1, args.depth ?? 2)),
+         includeHidden: Boolean(args.include_hidden), maxEntries: limits.maxListEntries });
+       return { output: result.text, summary: `${result.count} записей` };
+     },
+     async read_file(args) {
+       const result = await readTextFile({ root, file: args.path, startLine: args.start_line, endLine: args.end_line, maxBytes: limits.maxFileReadBytes });
+       return { output: result.text, summary: `${args.path}: строки ${result.from}-${result.to}/${result.totalLines}` };
+     },
+@@ -239,36 +245,39 @@ export function createToolset({
+       }
+       const result = await searchFiles({ root, query: args.query, dir: args.path || '.', regex: Boolean(args.regex), maxResults: limits.maxSearchResults });
+       return { output: `Карта проекта недоступна; поиск по дереву.\n${result.text}`, summary: `${result.count} совпадений` };
+     },
+     async write_file(args) {
+       const result = await writeTextFile({ root, file: args.path, content: args.content, overwrite: args.overwrite !== false,
+         maxBytes: limits.maxFileWriteBytes, backupDir });
+       stats.changes.push({ op: result.created ? 'create' : 'overwrite', path: result.rel, backupPath: result.backupPath });
+       try { await updateProjectMapPath(root, result.rel); }
+       catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
+-      return { output: `${result.created ? 'Создан' : 'Перезаписан'} ${result.rel} (${formatBytes(result.bytes)}).`, summary: `${result.created ? '+' : '~'} ${result.rel}` };
++      const output = labelOutsideEdit(result.rel, `${result.created ? 'Создан' : 'Перезаписан'} ${result.rel} (${formatBytes(result.bytes)}).`);
++      return { output, summary: `${result.created ? '+' : '~'} ${result.rel}` };
+     },
+     async replace_text(args) {
+       const result = await replaceInFile({ root, file: args.path, search: args.search, replacement: args.replacement, all: Boolean(args.all),
+         maxBytes: limits.maxFileWriteBytes, backupDir });
+       stats.changes.push({ op: 'edit', path: result.rel, backupPath: result.backupPath });
+       try { await updateProjectMapPath(root, result.rel); }
+       catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
+-      return { output: `Изменён ${result.rel}: замен ${result.replacements}.`, summary: `~ ${result.rel}` };
++      const output = labelOutsideEdit(result.rel, `Изменён ${result.rel}: замен ${result.replacements}.`);
++      return { output, summary: `~ ${result.rel}` };
+     },
+     async delete_file(args) {
+       const result = await deleteFile({ root, file: args.path, backupDir });
+       stats.changes.push({ op: 'delete', path: result.rel, backupPath: result.backupPath });
+       try { await updateProjectMapPath(root, result.rel); }
+       catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
+-      return { output: `Удалён ${result.rel}.`, summary: `- ${result.rel}` };
++      const output = labelOutsideEdit(result.rel, `Удалён ${result.rel}.`);
++      return { output, summary: `- ${result.rel}` };
+     },
+     async make_dir(args) {
+       const result = await makeDirectory({ root, dir: args.path });
+       return { output: `Каталог ${result.rel} создан.`, summary: result.rel };
+     },
+     async run_command(args) {
+       if (typeof args.command !== 'string' || !args.command.trim()) throw new Error('Пустая команда.');
+       const cwd = args.cwd ? (await resolveInside(root, args.cwd)).abs : root;
+       const timeoutMs = Math.min(900, Math.max(1, args.timeout_seconds ?? Math.round(limits.commandTimeoutMs / 1000))) * 1000;
+       const result = await runCommand({ command: args.command, cwd, timeoutMs, maxOutputBytes: limits.maxCommandOutputBytes, signal, shell: config.shell ?? null });
+diff --git a/src/commands/run.js b/src/commands/run.js
+index a1d51a4..fca69b4 100644
+--- a/src/commands/run.js
++++ b/src/commands/run.js
+@@ -1,10 +1,11 @@
++import { ensureProjectMap } from '../agent/map.js';
+ import { createToolset, enabledToolNames } from '../agent/tools.js';
+ import { createRoleRunner } from '../agent/roles.js';
+ import { runTeam } from '../agent/team.js';
+ import { resolveRole, ROLE_NAMES } from '../core/config.js';
+ import { formatBytes, truncate } from '../util/text.js';
+ import { agentBase } from './instructions.js';
+ import { runOnce } from './flow.js';
+ import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstructions, approvalLevel, backupDirFor, openMemoryFor,
+   describeRoles, usageRow, usageBreakdownRows, describeChanges, createClientFor, createLedgerFor, writeOutput, exitCodeFor, STATUS_LABELS } from './shared.js';
+ 
+@@ -31,20 +32,22 @@ export async function run(ctx) {
+   const store = openMemoryFor(config, ctx.cwd, renderer);
+   const names = enabledToolNames(config.tools, { interactive, memory: Boolean(store), summarize: true });
+   if (!names.length && !config.tools.web && !config.tools.images) {
+     throw new UsageError('Все инструменты отключены; для run нужен хотя бы один (fs, shell, fetch, web, images).');
+   }
+   ctx.backupDir = backupDirFor(config);
+   const extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
+   if (level === 'read' && !interactive) renderer.line('warn', 'Неинтерактивный режим без --approve write|all: агент сможет только читать файлы.');
+ 
+   try {
++    const ensured = await ensureProjectMap(ctx.cwd);
++    if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
+     if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra });
+     return await runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra });
+   } finally {
+     store?.memory.close();
+   }
+ }
+ 
+ async function runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra }) {
+   const { config, renderer, signal, emit } = ctx;
+   const role = resolveRole(config, 'default');
+diff --git a/test/map.test.js b/test/map.test.js
+index 444150e..8ff28e5 100644
+--- a/test/map.test.js
++++ b/test/map.test.js
+@@ -1,15 +1,15 @@
+ import { test } from 'node:test';
+ import assert from 'node:assert/strict';
+ import path from 'node:path';
+ import os from 'node:os';
+-import { mkdtemp, mkdir, writeFile, rm, stat, utimes } from 'node:fs/promises';
++import { mkdtemp, mkdir, readFile, writeFile, rm, stat, utimes } from 'node:fs/promises';
+ import { buildProjectMap, loadProjectMap, updateProjectMapPath, projectMapFile, searchMapped } from '../src/agent/map.js';
+ import { createToolset } from '../src/agent/tools.js';
+ 
+ test('project map', async (t) => {
+   const root = await mkdtemp(path.join(os.tmpdir(), 'ai-map-'));
+   t.after(async () => { await rm(root, { recursive: true, force: true }); });
+ 
+   await t.test('build indexes source symbols and imports, and skips binary files and node_modules', async () => {
+     await mkdir(path.join(root, 'util'), { recursive: true });
+     await mkdir(path.join(root, 'node_modules', 'pkg'), { recursive: true });
+@@ -97,11 +97,21 @@ test('project map', async (t) => {
+       root, config: { limits: { maxFileWriteBytes: 1024 * 1024, maxFileReadBytes: 1024 * 1024, maxSearchResults: 20, maxListEntries: 50, maxCommandOutputBytes: 1000, commandTimeoutMs: 1000, maxFetchBytes: 1000, maxImageBytes: 1000 }, tools: { fs: true }, shell: null, image: {} },
+       names: ['write_file'], approvalLevel: 'all', emit: (event) => events.push(event),
+     });
+     const written = await toolset.execute({ name: 'write_file', arguments: JSON.stringify({ path: 'fresh.js', content: 'export function fresh() {}\n', overwrite: true }) });
+     assert.equal(written.ok !== false, true);
+     const loaded = await loadProjectMap(root);
+     assert.ok(loaded.files.get('fresh.js').symbols.some((symbol) => symbol.name === 'fresh'));
+     assert.equal(loaded.files.has('widget.py'), true);
+     assert.equal(events.some((event) => event.type === 'warning'), false);
+   });
++
++  await t.test('a write outside the edit set is labeled and still writes', async () => {
++    const toolset = createToolset({
++      root, config: { limits: { maxFileWriteBytes: 1024 * 1024, maxFileReadBytes: 1024, maxSearchResults: 20, maxListEntries: 50, maxCommandOutputBytes: 1000, commandTimeoutMs: 1000, maxFetchBytes: 1000, maxImageBytes: 1000 }, tools: { fs: true }, shell: null, image: {} },
++      names: ['write_file'], approvalLevel: 'all', editPaths: () => new Set(['widget.py']),
++    });
++    const written = await toolset.execute({ name: 'write_file', arguments: JSON.stringify({ path: 'extra.js', content: 'export const extra = 1;\n', overwrite: true }) });
++    assert.match(written.output, /^Не в карте правок \(extra\.js\): /);
++    assert.equal(await readFile(path.join(root, 'extra.js'), 'utf8'), 'export const extra = 1;\n');
++  });
+ });
+diff --git a/test/team.test.js b/test/team.test.js
+index d90ae74..3db2c73 100644
+--- a/test/team.test.js
++++ b/test/team.test.js
+@@ -1,15 +1,15 @@
+ import { test, after, before, beforeEach } from 'node:test';
+ import assert from 'node:assert/strict';
+ import path from 'node:path';
+ import os from 'node:os';
+-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
++import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+ import { createClient } from '../src/openai/client.js';
+ import { createLedger } from '../src/core/usage.js';
+ import { defaults, resolveRole } from '../src/core/config.js';
+ import { openMemory, projectKey } from '../src/core/memory.js';
+ import { createSharedContext } from '../src/core/context.js';
+ import { createRoleRunner } from '../src/agent/roles.js';
+ import { runTeam } from '../src/agent/team.js';
+ import { diffHunk, describeChangeSet } from '../src/agent/diff.js';
+ import { overridesFrom } from '../src/commands/shared.js';
+ import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
+@@ -18,49 +18,49 @@ let server;
+ let script = () => ({ text: 'ok' });
+ let root;
+ before(async () => {
+   server = await startMockServer({ script: (body, index) => script(body, index) });
+   root = await mkdtemp(path.join(os.tmpdir(), 'ai-agent-team-'));
+ });
+ beforeEach(() => server.reset());
+ after(async () => { await server.close(); await rm(root, { recursive: true, force: true }); });
+ 
+ const baseConfig = () => structuredClone({
+-  ...defaults, model: 'gpt-5.5', home: root, baseURL: server.baseURL,
+-  roles: { ...defaults.roles, worker: { ...defaults.roles.worker, model: 'gpt-5.4-mini' }, collector: { ...defaults.roles.collector, model: 'gpt-5.4-mini' },
+-    vision: { ...defaults.roles.vision, model: 'gpt-5.4-mini-vision' }, summarizer: { ...defaults.roles.summarizer, model: 'gpt-5.4-nano' } },
++  ...defaults, model: 'gpt-6.1-sol', home: root, baseURL: server.baseURL,
++  roles: { ...defaults.roles, worker: { ...defaults.roles.worker, model: 'gpt-6-luna' }, collector: { ...defaults.roles.collector, model: 'gpt-6-luna' },
++    vision: { ...defaults.roles.vision, model: 'gpt-6-luna-vision' }, summarizer: { ...defaults.roles.summarizer, model: 'gpt-6-luna-nano' } },
+   memory: { ...defaults.memory, dbFile: ':memory:' },
+ });
+ const client = () => createClient({ apiKey: 'sk-test', baseURL: server.baseURL });
+ 
+ /** Decide the scenario from the request: role is recognisable by the strict schema name / tools. */
+ function roleOf(body) {
+   const format = body.text?.format?.name;
+   if (format === 'plan') return 'planner';
+   if (format === 'context_report') return 'collector';
+   if (format === 'review') return 'reviewer';
+   if (format === 'memory_update') return 'summarizer';
+   if (body.input.some((i) => i.type === 'message' && i.content?.some?.((c) => c.type === 'input_image'))) return 'vision';
+-  if (body.model === 'gpt-5.4-nano') return 'summarizer-file';
++  if (body.model === 'gpt-6-luna-nano') return 'summarizer-file';
+   return 'worker';
+ }
+ 
+ test('resolveRole merges role, default role and top-level settings; --role flags parse', () => {
+   const cfg = { ...baseConfig(), reasoning: { effort: 'medium', summary: 'auto' } };
+   cfg.roles.default = { ...cfg.roles.default, model: 'default-model' };
+   assert.equal(resolveRole(cfg, 'planner').model, 'default-model');
+   assert.equal(resolveRole(cfg, 'planner').effort, 'high');
+-  assert.equal(resolveRole(cfg, 'worker').model, 'gpt-5.4-mini');
++  assert.equal(resolveRole(cfg, 'worker').model, 'gpt-6-luna');
+   assert.equal(resolveRole(cfg, 'default').config.model, 'default-model');
+   assert.equal(resolveRole(cfg, 'summarizer').config.reasoning.summary, 'none');
+-  const overrides = overridesFrom({ role: ['planner=gpt-5.5:high', 'worker=gpt-5.4-mini'], single: true, memory: false });
+-  assert.deepEqual(overrides.roles, { planner: { model: 'gpt-5.5', effort: 'high' }, worker: { model: 'gpt-5.4-mini' } });
++  const overrides = overridesFrom({ role: ['planner=gpt-6.1-sol:high', 'worker=gpt-6-luna'], single: true, memory: false });
++  assert.deepEqual(overrides.roles, { planner: { model: 'gpt-6.1-sol', effort: 'high' }, worker: { model: 'gpt-6-luna' } });
+   assert.deepEqual(overrides.agent, { mode: 'single' });
+   assert.deepEqual(overrides.memory, { enabled: false });
+   assert.throws(() => overridesFrom({ role: ['nobody=x'] }), /неизвестная роль/);
+   assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 7);
+ });
+ 
+ test('memory store: remember / recall (FTS) / list / forget / tasks / file summaries', () => {
+   const memory = openMemory({ file: ':memory:' });
+   const project = projectKey(root);
+   const a = memory.remember({ scope: 'project', project, projectName: 'demo', kind: 'convention', content: 'Тесты запускаются через vitest, не jest', tags: ['tests'] });
+@@ -69,21 +69,21 @@ test('memory store: remember / recall (FTS) / list / forget / tasks / file summa
+   const hits = memory.recall('как запускать тесты vitest?', { project, limit: 5 });
+   assert.ok(hits.some((h) => h.id === a.id), 'project memory found');
+   assert.ok(!hits.some((h) => h.project === 'other'), 'other projects are not visible');
+   assert.ok(memory.recall('русском', { project }).length === 1, 'global memory visible from any project');
+   assert.equal(memory.list({ project }).length, 2);
+   // duplicate content updates instead of duplicating
+   memory.remember({ scope: 'project', project, kind: 'fact', content: 'Тесты запускаются через vitest, не jest' });
+   assert.equal(memory.list({ project }).length, 2);
+   assert.ok(memory.forget(a.id));
+   assert.equal(memory.list({ project }).length, 1);
+-  memory.putFileSummary(project, 'src/a.js', 'sha1', 'summary text', 'gpt-5.4-nano');
++  memory.putFileSummary(project, 'src/a.js', 'sha1', 'summary text', 'gpt-6-luna');
+   assert.equal(memory.getFileSummary(project, 'src/a.js', 'sha1').summary, 'summary text');
+   assert.equal(memory.getFileSummary(project, 'src/a.js', 'sha2'), null, 'stale hash misses');
+   memory.recordTask({ project, projectName: 'demo', task: 'do x', status: 'completed', summary: 'done', changes: ['a.js'] });
+   assert.equal(memory.listTasks({ project }).length, 1);
+   assert.equal(memory.stats().memories, 2);
+   memory.close();
+ });
+ 
+ test('shared context clips low-priority sections to fit the byte budget', () => {
+   const ctx = createSharedContext({ task: 't', root: '/r' });
+@@ -156,41 +156,41 @@ test('team run: planner → collector → worker steps → reviewer (revise →
+           { scope: 'project', kind: 'convention', content: 'Тесты в проекте запускаются через node --test', tags: ['tests'] },
+           { scope: 'global', kind: 'preference', content: 'Пользователь просит отчёты по-русски', tags: [] } ] }) };
+       default:
+         return { text: 'unexpected' };
+     }
+   };
+   const config = baseConfig();
+   const memory = openMemory({ file: ':memory:' });
+   const key = projectKey(root);
+   memory.remember({ scope: 'project', project: key, kind: 'fact', content: 'Тесты в проекте пишутся на node:test; функции экспортируются как ESM', tags: ['esm'] });
+-  const ledger = createLedger({ prices: { 'gpt-5.5': { input: 10, output: 30 }, 'gpt-5.4-mini': { input: 1, output: 2 }, 'gpt-5.4-nano': { input: 0.1, output: 0.4 } } });
++  const ledger = createLedger({ prices: { 'gpt-6.1-sol': { input: 10, output: 30 }, 'gpt-6-luna': { input: 1, output: 2 }, 'gpt-6-luna-nano': { input: 0.1, output: 0.4 } } });
+   const events = [];
+   const result = await runTeam({ client: client(), config, ledger, task: 'Добавь функцию sum с тестом', root, approvalLevel: 'all', memory, projectKey: key,
+     projectName: 'demo', emit: (e) => events.push(e) });
+   assert.equal(result.status, 'completed', result.error?.message);
+   assert.equal(result.plan.steps.length, 2);
+   assert.equal(result.steps.length, 3, 'two steps + one fix round');
+   assert.equal(result.review.verdict, 'accept');
+   assert.equal(result.reviewRounds, 2);
+   assert.equal(await readFile(path.join(root, 'src/sum.js'), 'utf8'), 'export const sum = (a, b) => Number(a) + Number(b);\n');
+   assert.deepEqual(result.changes.map((c) => c.path), ['src/sum.js', 'test/sum.test.js', 'src/sum.js']);
+   assert.equal(result.memoriesSaved.length, 2);
+   assert.equal(memory.listTasks({ project: key }).length, 1);
+   assert.equal(result.recalled.length, 1);
+   // Every role used its own model and effort.
+   const planner = seen.find((s) => s.role === 'planner');
+-  assert.equal(planner.model, 'gpt-5.5');
++  assert.equal(planner.model, 'gpt-6.1-sol');
+   assert.equal(planner.effort, 'high');
+-  assert.ok(seen.filter((s) => s.role === 'worker').every((s) => s.model === 'gpt-5.4-mini' && s.effort === 'medium'));
+-  assert.equal(seen.find((s) => s.role === 'collector').model, 'gpt-5.4-mini');
+-  assert.equal(seen.find((s) => s.role === 'summarizer').model, 'gpt-5.4-nano');
++  assert.ok(seen.filter((s) => s.role === 'worker').every((s) => s.model === 'gpt-6-luna' && s.effort === 'medium'));
++  assert.equal(seen.find((s) => s.role === 'collector').model, 'gpt-6-luna');
++  assert.equal(seen.find((s) => s.role === 'summarizer').model, 'gpt-6-luna-nano');
+   const stages = events.filter((e) => e.type === 'stage.start').map((e) => e.stage);
+   assert.deepEqual(stages, ['plan', 'collect', 'work', 'review', 'fix', 'review', 'memory']);
+   assert.ok(events.some((e) => e.type === 'plan.ready' && e.steps.length === 2));
+   assert.ok(events.some((e) => e.type === 'memory.saved' && e.count === 2));
+   const byRole = Object.fromEntries(ledger.snapshot().byRole.map((r) => [r.role, r]));
+   assert.ok(byRole.planner.requests === 1 && byRole.worker.requests >= 5 && byRole.reviewer.requests === 2 && byRole.summarizer.requests === 1);
+   assert.ok(ledger.snapshot().costKnown);
+   // Structured role outputs were not streamed as answer text.
+   assert.ok(!events.some((e) => e.type === 'text.delta' && /"verdict"/.test(e.text)));
+   memory.close();
+@@ -218,21 +218,21 @@ test('team run stops on budget and reports the stage', async () => {
+   assert.equal(result.status, 'budget');
+   assert.match(result.error.message, /лимит токенов/i);
+ });
+ 
+ test('role runner: vision delegation and file summaries with cache', async () => {
+   await writeFile(path.join(root, 'pic.png'), Buffer.from(TINY_PNG, 'base64'));
+   await writeFile(path.join(root, 'big.js'), 'export function a() {}\n'.repeat(50));
+   let visionCalls = 0, summaryCalls = 0;
+   script = (body) => {
+     const role = roleOf(body);
+-    if (role === 'vision') { visionCalls++; assert.equal(body.model, 'gpt-5.4-mini-vision'); return { text: 'Красная точка 1×1.' }; }
++    if (role === 'vision') { visionCalls++; assert.equal(body.model, 'gpt-6-luna-vision'); return { text: 'Красная точка 1×1.' }; }
+     if (role === 'summarizer-file') { summaryCalls++; return { text: 'Файл экспортирует функцию a.' }; }
+     const outputs = body.input.filter((i) => i.type === 'function_call_output');
+     if (outputs.length === 0) return { calls: [{ name: 'view_image', arguments: { path: 'pic.png', detail: 'auto', question: 'что на картинке?' } }, { name: 'summarize_file', arguments: { path: 'big.js', focus: null } }] };
+     if (outputs.length === 2) {
+       assert.match(outputs[0].output, /модель vision/);
+       assert.match(outputs[0].output, /Красная точка/);
+       assert.match(outputs[1].output, /экспортирует функцию a/);
+       return { calls: [{ name: 'summarize_file', arguments: { path: 'big.js', focus: null } }] };
+     }
+     assert.match(outputs[2].output, /из кеша/);
+@@ -246,10 +246,29 @@ test('role runner: vision delegation and file summaries with cache', async () =>
+   assert.equal(roles.shouldDelegateVision('worker'), true);
+   const toolset = createToolset({ root, config, names: ['view_image', 'summarize_file'], approvalLevel: 'read', memory, projectKey: projectKey(root),
+     describeImage: roles.describeImage, summarizeFile: roles.summarizeFile });
+   const result = await roles.run('worker', { text: 'посмотри картинку и файл', toolset, maxTurns: 5 });
+   assert.equal(result.status, 'completed', result.error?.message);
+   assert.equal(visionCalls, 1);
+   assert.equal(summaryCalls, 1, 'second summary served from cache');
+   assert.equal(memory.stats().fileSummaries, 1);
+   memory.close();
+ });
++
++test('team run puts the confirmed read file in the collector brief', async () => {
++  await mkdir(path.join(root, 'src'), { recursive: true });
++  await writeFile(path.join(root, 'src', 'sum.js'), 'export function sum(a, b) { return a + b; }\n');
++  const seen = [];
++  script = (body) => {
++    const role = roleOf(body);
++    seen.push(body);
++    if (role === 'planner') return { text: JSON.stringify({ summary: 's', complexity: 'normal', steps: [{ goal: 'прочитать', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [], taskMap: [{ path: 'src/sum.js', role: 'read', reason: 'функция sum' }, { path: 'missing.js', role: 'edit', reason: 'нет файла' }] }) };
++    if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
++    if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
++    return { text: 'ok' };
++  };
++  const result = await runTeam({ client: client(), config: baseConfig(), ledger: createLedger(), task: 'sum', root, approvalLevel: 'read', emit() {} });
++  assert.equal(result.status, 'completed', result.error?.message);
++  const collector = seen.find((body) => roleOf(body) === 'collector');
++  assert.match(collector.input[0].content[0].text, /src\/sum\.js/);
++  assert.equal(/missing\.js/.test(collector.input[0].content[0].text), false);
++});

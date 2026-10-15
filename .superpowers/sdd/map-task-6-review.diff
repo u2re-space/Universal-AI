@@ -1,0 +1,421 @@
+ff77cce feat: add the ai map command for the project index
+ .gitignore          |  1 +
+ README.md           | 39 ++++++++++++++++++++++++---------------
+ src/cli.js          |  7 +++++--
+ src/commands/map.js | 18 ++++++++++++++++++
+ test/cli.test.js    | 29 +++++++++++++++++++++--------
+ 5 files changed, 69 insertions(+), 25 deletions(-)
+diff --git a/.gitignore b/.gitignore
+index 006b1f4..bb85fa3 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -143,14 +143,15 @@ vite.config.ts.timestamp-*
+ .vite/
+ 
+ # Astro generated types
+ .astro/
+ 
+ # Turbo Repo
+ .turbo
+ 
+ node_modules/
+ .ai-agent/
++.ai/
+ *.log
+ ai-image-*.png
+ ai-image-*.jpg
+ ai-image-*.webp
+diff --git a/README.md b/README.md
+index 18ff283..35c7a9a 100644
+--- a/README.md
++++ b/README.md
+@@ -10,54 +10,63 @@
+ ## Возможности
+ 
+ | Что | Как |
+ | --- | --- |
+ | Один запрос → ответ | `ai "объясни event loop в Node"` |
+ | Чат с историей | `ai chat --session work` (сессии сохраняются между запусками) |
+ | Код, документы, тексты | `ai "напиши README для проекта" --out README.md`, структурированный вывод `--schema` |
+ | Картинки | `ai image "кот-космонавт" --size 1024x1024 --quality high` (инструмент `image_generation`, черновики пишутся по мере генерации) |
+ | Изображения и файлы во входе | `ai --image screenshot.png "что не так на экране?"`, `ai -f spec.pdf "сделай план"` |
+ | Автономные задачи | `ai run "добавь тесты для src/utils.js и прогони их"` — инструменты: файлы, команды, URL, web-поиск, картинки |
+-| Разные модели под роли | старшая модель планирует и проверяет, младшие собирают контекст и генерируют вызовы инструментов, отдельная модель читает картинки: `--role planner=gpt-5.5:high --role worker=gpt-5.4-mini --role vision=gpt-5.4-mini` |
++| Разные модели под роли | старшая модель планирует и проверяет, младшие собирают контекст и генерируют вызовы инструментов, отдельная модель читает картинки: `--role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna` |
+ | Память и общий контекст | долговременная память в SQLite (факты, соглашения, решения — по проекту и глобально), заметки проекта `AGENTS.md`, история задач, кеш сводок файлов; один общий контекст для всех ролей |
+ | Фон | `--background` (сервер считает, можно переподключиться `ai resume`) и `--detach` (локальная фоновая задача, `ai jobs …`) |
+ | Что происходит | строка статуса: роль и модель, фаза («думает», «выполняется read_file», «генерирует изображение»), время, токены ↑↓, стоимость; краткие рассуждения модели; журнал этапов, шагов и действий; итоговая сводка с расходом по ролям и моделям |
+ 
+ ## Установка
+ 
+ ```bash
+ # Node.js ≥ 26, внешних зависимостей нет
+ npm link               # делает команду `ai` доступной глобально (или запускайте `node bin/ai.js`)
+ export OPENAI_API_KEY=sk-...   # PowerShell: $env:OPENAI_API_KEY = "sk-..."
+ ai config init         # создаст ~/.ai-agent/config.json
+ ```
+ 
+-Модель по умолчанию — `gpt-5.5`; меняется флагом `--model`, переменной `AI_MODEL` или в конфигурации.
++Модель по умолчанию — `gpt-6.1-sol`; меняется флагом `--model`, переменной `AI_MODEL` или в конфигурации.
+ `ai models` покажет доступные ключу модели.
+ 
+ ## Команды
+ 
+ ```
+ ai [ask] "запрос"            один запрос → ответ
+ ai chat                      интерактивный чат (/help — команды чата)
+ ai run "задача"              автономный агент в текущем каталоге
+ ai image "описание"          генерация изображения
+ ai resume <resp_id>          подключиться к фоновому ответу API
+ ai cancel <resp_id>          отменить фоновый ответ API
+ ai jobs list|status|log|result|wait|cancel|rm [id]    локальные фоновые задачи
+ ai memory list|search|add|forget|clear|tasks|stats|path   долговременная память
+ ai models [фильтр]           список моделей
+ ai config show|init|path     конфигурация
++ai map [path]                индекс файлов и символов (.ai/map.json)
+ ```
+ 
+ Полный список флагов — `ai --help`.
+ 
++### Карта проекта
++
++`ai map` строит `.ai/map.json`: пути, время изменения и символы. Повторный поиск читает эту карту из памяти процесса. `ai map path` печатает путь и число файлов и символов.
++
++`search_files` принимает `scope`: `path`, `symbol`, `content` или `all`.
++
++В `ai run` правила намечают файлы как `read`, `edit` или `scan`. Planner подтверждает список. Запись в файл вне `edit` выполняется, а ответ инструмента начинается с пометки, что пути не было в карте правок.
++
+ ### Примеры
+ 
+ ```bash
+ # текст из stdin как контекст
+ git diff | ai "напиши сообщение коммита"
+ 
+ # документ в файл, с заданным уровнем рассуждений
+ ai --effort high "спроектируй REST API для заметок, формат Markdown" --out docs/api.md
+ 
+ # структурированный ответ по JSON-схеме (strict)
+@@ -66,22 +75,22 @@ ai --schema schema.json "извлеки данные из текста: ..." --q
+ # картинка во входе + поиск в интернете
+ ai --image chart.png --web "что это за график и актуальны ли данные?"
+ 
+ # правка картинки (image-to-image)
+ ai image --image logo.png "сделай фон прозрачным" --image-background transparent --out logo2.png
+ 
+ # команда агентов с подтверждением каждой записи/команды (по умолчанию в терминале)
+ ai run "исправь падающий тест в test/"
+ 
+ # свои модели под роли: старшая планирует и ревьюит, младшая делает, самая дешёвая пишет сводки и память
+-ai run --role planner=gpt-5.5:high --role reviewer=gpt-5.5 --role worker=gpt-5.4-mini \
+-       --role collector=gpt-5.4-mini --role summarizer=gpt-5.4-nano "добавь кеширование в src/api.js"
++ai run --role planner=gpt-6.1-sol:high --role reviewer=gpt-6.1-sol --role worker=gpt-6-luna \
++       --role collector=gpt-6-luna --role summarizer=gpt-6-luna "добавь кеширование в src/api.js"
+ 
+ # один агент вместо команды (как раньше), без долговременной памяти
+ ai run --single --no-memory "переименуй getCwd в getCurrentWorkingDirectory"
+ 
+ # агент без вопросов, только файлы (команды и сеть запрещены)
+ ai run --approve write "переведи комментарии в src/ на английский"
+ 
+ # память: посмотреть, что агент запомнил о проекте, добавить своё, история задач
+ ai memory list
+ ai memory add "Деплой только через make release, не руками" --kind convention --tags deploy
+@@ -139,63 +148,63 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
+ * **Как наполняется** — после задачи роль `summarizer` извлекает 0–6 устойчивых фактов (`memory.autoSave`);
+   агент может сам вызывать `remember`/`recall`; пользователь — `ai memory add/forget/clear`.
+ * **Как используется** — перед планированием ищутся релевантные записи (`memory.maxRecall`), в чате и `ask`
+   с `--tools` доступны инструменты `recall`/`remember`. `--no-memory` отключает всё это.
+ 
+ ## Что показывается во время работы
+ 
+ В терминале (stderr) идёт строка статуса, обновляемая несколько раз в секунду:
+ 
+ ```
+-⠹ [worker · gpt-5.4-mini] выполняется read_file… · 12.3 s · ↑ 14,210 ↓ 1,082 +~120 · $0.031 · ход 3/25
++⠹ [worker · gpt-6-luna] выполняется read_file… · 12.3 s · ↑ 14,210 ↓ 1,082 +~120 · $0.031 · ход 3/25
+ ```
+ 
+ роль и модель · фаза · время · токены (вход/выход по завершённым запросам, `+~N` — оценка текущего ответа) · стоимость · ход агента.
+-В журнале видны этапы (`этап «план» — planner · gpt-5.5`), план, шаги, вердикт ревью, найденные и сохранённые записи памяти;
++В журнале видны этапы (`этап «план» — planner · gpt-6.1-sol`), план, шаги, вердикт ревью, найденные и сохранённые записи памяти;
+ итоговая сводка показывает расход токенов по ролям и по моделям.
+ Выше — журнал: `∙` краткие рассуждения модели (`--no-reasoning` скрывает), `▸`/`✓`/`✗` вызовы инструментов,
+ `▣` сохранённые изображения, `≡` usage каждого ответа. Ответ модели идёт в stdout, поэтому его можно
+ перенаправлять в файл или канал. Без терминала (пайп, CI, фоновые задачи) — те же строки без курсорных
+ управляющих кодов; `--json` — поток событий JSON Lines; `--quiet` — только ответ.
+ 
+ Стоимость считается по ценам из конфигурации (`prices`, USD за 1M токенов; поддерживаются шаблоны вида
+-`"gpt-5.4*"`). Встроенных таблиц цен нет — они устаревают. Токены показываются всегда; плата за
++`"gpt-6.1-sol*"`). Встроенных таблиц цен нет — они устаревают. Токены показываются всегда; плата за
+ встроенные инструменты (генерация картинок, web-поиск) в сумму не входит.
+ 
+ ## Конфигурация
+ 
+ `~/.ai-agent/config.json` (каталог меняется `AI_AGENT_HOME`), затем `--config файл`, затем переменные
+ окружения, затем флаги. Все поля и значения по умолчанию — в `src/core/config.js`; ключевые:
+ 
+ ```json
+ {
+-  "model": "gpt-5.5",
++  "model": "gpt-6.1-sol",
+   "imageModel": null,
+   "reasoning": { "effort": "medium", "summary": "auto" },
+   "store": false,
+   "approve": "ask",
+   "shell": null,
+   "tools": { "fs": true, "shell": true, "fetch": true, "web": false, "images": false, "askUser": true },
+   "limits": { "maxTurns": 60, "budgetUsd": null, "budgetTokens": null, "commandTimeoutMs": 180000 },
+   "roles": {
+-    "planner":    { "model": "gpt-5.5", "effort": "high" },
+-    "reviewer":   { "model": "gpt-5.5", "effort": "medium" },
+-    "collector":  { "model": "gpt-5.4-mini", "effort": "low" },
+-    "worker":     { "model": "gpt-5.4-mini", "effort": "medium" },
+-    "vision":     { "model": "gpt-5.4-mini" },
+-    "summarizer": { "model": "gpt-5.4-nano", "summary": "none" }
++    "planner":    { "model": "gpt-6.1-sol", "effort": "high" },
++    "reviewer":   { "model": "gpt-6.1-sol", "effort": "medium" },
++    "collector":  { "model": "gpt-6-luna", "effort": "low" },
++    "worker":     { "model": "gpt-6-luna", "effort": "medium" },
++    "vision":     { "model": "gpt-6-luna" },
++    "summarizer": { "model": "gpt-6-luna", "summary": "none" }
+   },
+   "agent": { "mode": "team", "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": 98304, "visionDelegate": "auto" },
+   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
+   "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": "." },
+   "compaction": { "auto": false, "afterInputTokens": 200000 },
+-  "prices": { "gpt-5.5": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-5.4-mini*": { "input": 0.25, "output": 2 } },
++  "prices": { "gpt-6.1-sol": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-6-luna*": { "input": 0.25, "output": 2 } },
+   "instructions": "Отвечай кратко."
+ }
+ ```
+ 
+ Поля роли: `model`, `effort`, `summary`, `verbosity`, `maxOutputTokens`, `temperature`, `instructions`
+ (дополнительные инструкции только для этой роли); `null` — наследовать от `roles.default`, затем от общих настроек.
+ Цены в примере условные — проверьте актуальные.
+ 
+ Переменные окружения: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID`,
+ `AI_MODEL`, `AI_IMAGE_MODEL`, `AI_AGENT_HOME`, `AI_ASCII=1` (без Unicode-символов в журнале).
+diff --git a/src/cli.js b/src/cli.js
+index 331720b..1620c6f 100644
+--- a/src/cli.js
++++ b/src/cli.js
+@@ -8,66 +8,69 @@ import { createRenderer, detectMode } from './ui/renderer.js';
+ import { createJobManager } from './jobs/manager.js';
+ import { ApiError, BudgetError, CancelledError, isAbortError } from './openai/errors.js';
+ import { UsageError, overridesFrom } from './commands/shared.js';
+ import { ask } from './commands/ask.js';
+ import { chat } from './commands/chat.js';
+ import { run } from './commands/run.js';
+ import { image } from './commands/image.js';
+ import { jobs } from './commands/jobs.js';
+ import { memoryCommand } from './commands/memory.js';
+ import { resume, cancel, models, configCommand } from './commands/misc.js';
++import { mapCommand } from './commands/map.js';
+ 
+ const pkg = createRequire(import.meta.url)('../package.json');
+ 
+ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
+ 
+ Использование:
+   ai [ask] "запрос"                 один запрос → ответ (текст, код, документ)
+   ai chat                           интерактивный чат (/help — команды чата)
+   ai run "задача"                   автономный агент: файлы, команды, URL, web, картинки
+   ai image "описание"               генерация изображения (image_generation)
+   ai resume <resp_id>               подключиться к фоновому ответу API
+   ai cancel <resp_id>               отменить фоновый ответ API
+   ai jobs [list|status|log|result|wait|cancel|rm] [id]   локальные фоновые задачи
+   ai memory [list|search|add|forget|clear|tasks|stats|path] …   долговременная память (SQLite)
+   ai models [фильтр]                список доступных моделей
+   ai config [show|init|path]        конфигурация (~/.ai-agent/config.json)
++  ai map [path]                     карта проекта .ai/map.json (файлы и символы). Черновик read/edit/scan подтверждает planner; запись вне edit выполняется и помечается
+ 
+ Ввод:
+   --image <путь|url>     приложить изображение (можно несколько)   --detail auto|low|high|original
+   --file, -f <путь>      приложить файл: PDF, текст (можно несколько)
+   stdin                  текст из канала добавляется как контекст (или становится запросом)
+   --instructions, -i <текст|@файл>   дополнительные инструкции модели
+   --schema <файл.json>   структурированный вывод по JSON-схеме (ask)
+ 
+ Модель и вывод:
+   --model, -m <id>       модель (по умолчанию из конфигурации / AI_MODEL)
+   --effort <уровень>     reasoning: none|minimal|low|medium|high|xhigh|max
+   --summary <режим>      показ рассуждений: auto|concise|detailed|none      --no-reasoning  скрыть
+   --verbosity low|medium|high   --temperature <n>   --max-output-tokens <n>
+   --out, -o <путь>       сохранить ответ в файл (для image — путь/каталог изображений)
+   --session, -s <имя>    постоянная сессия (история сохраняется в ~/.ai-agent/sessions)
+   --store                хранить состояние на сервере (previous_response_id) вместо локальной истории
+   --no-stream            без потоковой передачи
+ 
+ Инструменты и автономность:
+   --tools fs,shell,fetch  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
++  search_files scope=path|symbol|content|all читает карту проекта.
+   --web                  поиск в интернете (web_search)       --images   генерация картинок в ответах
+   --approve ask|read|write|all   политика подтверждений (по умолчанию: ask в терминале, read без него)
+   --yes, -y              = --approve all (без вопросов; осторожно)
+   --cwd, -C <каталог>    рабочий каталог для инструментов (по умолчанию текущий)
+   --max-turns <n>        лимит ходов агента          --shell powershell|pwsh|bash|sh|cmd
+   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
+ 
+ Роли и память (run):
+   --role <роль=модель[:effort]>  модель для роли: planner, collector, worker, reviewer, vision, summarizer, default, all
+-                         (например: --role planner=gpt-5.5:high --role worker=gpt-5.4-mini --role vision=gpt-5.4-mini)
++                         (например: --role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
+   --team / --single      команда ролей (план → сбор контекста → исполнение → ревью → память) / один агент
+   --no-memory            не использовать долговременную память (SQLite в ~/.ai-agent/memory.db)
+   --global               memory: работать с глобальными записями   --kind <вид>  --tags a,b
+ 
+ Фон:
+   --background, -b       фоновый режим Responses API (сервер считает, можно переподключиться: ai resume)
+   --detach, -d           запустить как локальную фоновую задачу (ai jobs …)
+   --follow               jobs log: следить за журналом
+ 
+ Изображения (image / --images):
+@@ -97,21 +100,21 @@ const OPTIONS = {
+   background: { type: 'boolean', short: 'b', default: false }, detach: { type: 'boolean', short: 'd', default: false }, job: { type: 'string' },
+   json: { type: 'boolean', default: false }, quiet: { type: 'boolean', short: 'q', default: false }, verbose: { type: 'boolean', short: 'v', default: false },
+   stream: { type: 'boolean', default: true }, config: { type: 'string' }, 'base-url': { type: 'string' }, timeout: { type: 'string' },
+   size: { type: 'string' }, quality: { type: 'string' }, format: { type: 'string' }, 'image-background': { type: 'string' },
+   partials: { type: 'string' }, 'image-model': { type: 'string' }, count: { type: 'string', short: 'n' }, schema: { type: 'string' },
+   follow: { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h', default: false }, version: { type: 'boolean', short: 'V', default: false },
+   role: { type: 'string', multiple: true }, single: { type: 'boolean', default: false }, team: { type: 'boolean', default: false },
+   memory: { type: 'boolean', default: true }, global: { type: 'boolean', default: false }, kind: { type: 'string' }, tags: { type: 'string' },
+ };
+ 
+-const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand };
++const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand, map: mapCommand };
+ const NEEDS_API_KEY = new Set(['ask', 'chat', 'run', 'image', 'resume', 'cancel', 'models']);
+ const DETACHABLE = new Set(['ask', 'run', 'image']);
+ 
+ /** Remove --detach / -d (also inside combined short groups like -dv) from the raw argv. */
+ export function stripDetach(argv) {
+   const result = [];
+   for (const arg of argv) {
+     if (arg === '--detach') continue;
+     if (/^-[a-zA-Z]+$/.test(arg) && arg.includes('d')) {
+       const rest = arg.slice(1).replace('d', '');
+diff --git a/src/commands/map.js b/src/commands/map.js
+new file mode 100644
+index 0000000..5e7e41f
+--- /dev/null
++++ b/src/commands/map.js
+@@ -0,0 +1,18 @@
++import { buildProjectMap, loadProjectMap, projectMapFile, countProjectMap } from '../agent/map.js';
++import { UsageError } from './shared.js';
++
++export async function mapCommand(ctx) {
++  const { renderer, positionals, cwd } = ctx;
++  const sub = positionals[0] ?? '';
++  if (positionals.length > 1 || (sub && sub !== 'path')) throw new UsageError('Доступно: ai map | ai map path');
++  if (sub === 'path') {
++    const projectMap = await loadProjectMap(cwd);
++    const counts = projectMap ? countProjectMap(projectMap) : { files: 0, symbols: 0 };
++    renderer.write(`${projectMapFile(cwd)}\nфайлов: ${counts.files}, символов: ${counts.symbols}\n`);
++    return 0;
++  }
++  const projectMap = await buildProjectMap(cwd);
++  const counts = countProjectMap(projectMap);
++  renderer.write(`Карта записана: ${projectMapFile(cwd)}\nфайлов: ${counts.files}, символов: ${counts.symbols}\n`);
++  return 0;
++}
+diff --git a/test/cli.test.js b/test/cli.test.js
+index af10ee9..aebbe14 100644
+--- a/test/cli.test.js
++++ b/test/cli.test.js
+@@ -1,16 +1,16 @@
+ import { test, after, before, beforeEach } from 'node:test';
+ import assert from 'node:assert/strict';
+ import path from 'node:path';
+ import os from 'node:os';
+ import { spawn } from 'node:child_process';
+-import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
++import { mkdtemp, readdir, rm, readFile, writeFile } from 'node:fs/promises';
+ import { fileURLToPath } from 'node:url';
+ import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
+ import { createJobManager } from '../src/jobs/manager.js';
+ import { stripDetach } from '../src/cli.js';
+ 
+ const bin = fileURLToPath(new URL('../bin/ai.js', import.meta.url));
+ let server;
+ let script = () => ({ text: 'ok' });
+ let home;
+ let work;
+@@ -171,38 +171,38 @@ test('--detach starts a job that can be inspected with jobs status/result', asyn
+   assert.match(status.stdout, /статус: завершена/);
+   const result = await runCli(['jobs', 'result', id]);
+   assert.match(result.stdout, /результат фоновой задачи/);
+   const list = await runCli(['jobs', 'list']);
+   assert.match(list.stdout, new RegExp(id));
+   const log = await runCli(['jobs', 'log', id]);
+   assert.match(log.stdout, /результат: completed/);
+ });
+ 
+ test('run (team mode): roles use their own models; memory command sees what was saved', async () => {
+-  const roleOf = (body) => body.text?.format?.name ?? (body.model === 'gpt-5.4-nano' ? 'summarizer-file' : 'worker');
++  const roleOf = (body) => body.text?.format?.name ?? (body.model === 'gpt-6-luna-nano' ? 'summarizer-file' : 'worker');
+   const models = {};
+   script = (body) => {
+     const role = roleOf(body);
+     models[role] = body.model;
+     if (role === 'plan') return { text: JSON.stringify({ summary: 'Создать файл заметки', complexity: 'trivial', steps: [{ goal: 'Создать note.txt', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+     if (role === 'memory_update') return { text: JSON.stringify({ taskSummary: 'Создан note.txt', memories: [{ scope: 'project', kind: 'convention', content: 'Заметки хранятся в note.txt в корне', tags: ['notes'] }] }) };
+     const outputs = body.input.filter((i) => i.type === 'function_call_output');
+     if (!outputs.length) return { calls: [{ name: 'write_file', arguments: { path: 'note.txt', content: 'привет\n', overwrite: true } }] };
+     return { text: 'Файл note.txt создан.' };
+   };
+-  const { code, stdout, stderr } = await runCli(['run', 'создай note.txt', '--approve', 'write', '--role', 'planner=gpt-5.5:high', '--role', 'worker=gpt-5.4-mini', '--role', 'summarizer=gpt-5.4-nano']);
++  const { code, stdout, stderr } = await runCli(['run', 'создай note.txt', '--approve', 'write', '--role', 'planner=gpt-6.1-sol:high', '--role', 'worker=gpt-6-luna', '--role', 'summarizer=gpt-6-luna-nano']);
+   assert.equal(code, 0, stderr);
+-  assert.equal(models.plan, 'gpt-5.5');
+-  assert.equal(models.worker, 'gpt-5.4-mini');
+-  assert.equal(models.memory_update, 'gpt-5.4-nano');
++  assert.equal(models.plan, 'gpt-6.1-sol');
++  assert.equal(models.worker, 'gpt-6-luna');
++  assert.equal(models.memory_update, 'gpt-6-luna-nano');
+   assert.match(stdout, /note\.txt создан/);
+-  assert.match(stderr, /этап «план» — planner · gpt-5\.5/);
++  assert.match(stderr, /этап «план» — planner · gpt-6\.1-sol/);
+   assert.match(stderr, /шаг 1\/1/);
+   assert.match(stderr, /память: сохранено 1/);
+   assert.match(stderr, /по ролям/);
+   assert.equal(await readFile(path.join(work, 'note.txt'), 'utf8'), 'привет\n');
+ 
+   const list = await runCli(['memory', 'list']);
+   assert.equal(list.code, 0);
+   assert.match(list.stdout, /Заметки хранятся в note\.txt/);
+   const search = await runCli(['memory', 'search', 'заметки', '--json']);
+   assert.equal(jsonLines(search.stdout).find((l) => l.type === 'memories').items.length, 1);
+@@ -213,20 +213,33 @@ test('run (team mode): roles use their own models; memory command sees what was
+   assert.match(tasks.stdout, /создай note\.txt/);
+   const forgotten = await runCli(['memory', 'forget', String(item.id)]);
+   assert.equal(forgotten.code, 0);
+   const stats = await runCli(['memory', 'stats', '--json']);
+   assert.equal(jsonLines(stats.stdout).find((l) => l.type === 'memory.stats').memories, 1);
+ });
+ 
+ test('models and config commands work', async () => {
+   const models = await runCli(['models', 'gpt']);
+   assert.equal(models.code, 0);
+-  assert.match(models.stdout, /gpt-5\.5/);
++  assert.match(models.stdout, /gpt-6\.1-sol/);
+   const config = await runCli(['config', 'show', '--json']);
+   const data = jsonLines(config.stdout).find((l) => l.type === 'config');
+   assert.equal(data.config.model, 'mock-model');
+   assert.match(data.config.apiKey, /…/);
+ });
+ 
+ test('stripDetach removes the flag from raw argv including short groups', () => {
+   assert.deepEqual(stripDetach(['run', 'x', '--detach', '-dv', '-d', '--yes']), ['run', 'x', '-v', '--yes']);
+ });
++
++test('map writes .ai/map.json without an API key', async () => {
++  for (const name of await readdir(work)) await rm(path.join(work, name), { recursive: true, force: true });
++  await writeFile(path.join(work, 'a.js'), 'export function hello() {}\n');
++  const built = await runCli(['map'], { env: { OPENAI_API_KEY: '' } });
++  assert.equal(built.code, 0, built.stderr);
++  const shown = await runCli(['map', 'path'], { env: { OPENAI_API_KEY: '' } });
++  assert.equal(shown.code, 0, shown.stderr);
++  assert.match(shown.stdout, /\.ai[/\\]map\.json/);
++  assert.match(shown.stdout, /файлов: 1/);
++  const unknown = await runCli(['map', 'nope'], { env: { OPENAI_API_KEY: '' } });
++  assert.equal(unknown.code, 2);
++});
