@@ -243,3 +243,9 @@ test('map writes .ai/map.json without an API key', async () => {
   const unknown = await runCli(['map', 'nope'], { env: { OPENAI_API_KEY: '' } });
   assert.equal(unknown.code, 2);
 });
+
+test('package manifest name is universal-ai', async () => {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(pkg.name, 'universal-ai');
+  assert.equal(pkg.bin.ai, './bin/ai.js');
+});
