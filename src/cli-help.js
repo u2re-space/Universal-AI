@@ -6,7 +6,7 @@
  * @exports HELP
  * @ai.tags cli
  * @ai.hint pure
- * @changed 2026-10-15 Help for ai complete.
+ * @changed 2026-10-15 Help for gen and mcp.
  */
 export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
 
@@ -24,6 +24,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai map [path]                     карта проекта .ai/map.json (файлы и символы). Черновик read/edit/scan подтверждает planner; запись вне edit выполняется и помечается
   ai complete                       вставка в месте курсора (JSON из stdin). Модель gpt-5.3-codex-spark, effort low
   ai complete --listen [--port n]   HTTP POST и WebSocket /v1/complete на 127.0.0.1 (для редактора)
+  ai gen <landing|site|backend|app> "задача"   сайт, лендинг, бэкенд или приложение по референсам
+  ai mcp [list|add|remove|probe]    пользовательские MCP-серверы (stdio)
 
 Ввод:
   --image <путь|url>     приложить изображение (можно несколько)   --detail auto|low|high|original
@@ -43,7 +45,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --no-stream            без потоковой передачи
 
 Инструменты и автономность:
-  --tools fs,shell,fetch  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
+  --tools fs,shell,fetch,mcp  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
   search_files scope=path|symbol|content|all читает карту проекта.
   --web                  поиск в интернете (web_search)       --images   генерация картинок в ответах
   --desktop              включает экран Windows, мышь, клавиатуру и AutoHotkey v2
@@ -76,6 +78,19 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --file, --line, --character, --language   файл и курсор, если JSON не передан
   --listen    сервер только на 127.0.0.1. Токен: --token или AI_COMPLETE_TOKEN (Bearer или ?token=)
   Строка длиннее 0.5 МиБ в модель не попадает; берутся ближайшие обычные строки. Контекст файла сокращается.
+
+Генерация (gen):
+  --fidelity <0..100>    цель соответствия референсам (по умолчанию 87). Процент не измеряется.
+  --creativity <0..100>  сколько можно добавить сверх референсов (по умолчанию 20)
+  --platform <id>        профиль платформы (по умолчанию chrome-157-beta, без экспериментальных флагов)
+  --template <путь>      шаблон, можно несколько     --example <путь|url>  пример дизайна, можно несколько
+  Референсы: --image, --file, --template, --example. Контракт пишется в .ai/generation.json (measured: null).
+
+MCP:
+  ai mcp add <id> --mcp-command <команда> [--mcp-arg <аргумент> ...]
+  ai mcp remove <id>     ai mcp probe <id>
+  Серверы — stdio, кадры Content-Length. add/remove правят ~/.ai-agent/config.json и не запускают процесс.
+  Вызовы инструментов MCP подтверждаются как сеть (категория network).
 
 Прочее:
   --json                 события и результат в формате JSON Lines     --quiet, -q   только ответ

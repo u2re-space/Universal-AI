@@ -7,7 +7,7 @@
  * @exports TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory, createToolset, relativeToRoot
  * @ai.tags tools, approval
  * @ai.hint hot
- * @changed 2026-10-15 Handlers for run_script and ssh.
+ * @changed 2026-10-15 Optional extras for MCP tools.
  */
 
 import path from 'node:path';
@@ -136,15 +136,22 @@ function commandReport(result, timeoutMs, limits) {
  * describeScreen({ part, rel }) → string | { toon } — screen vision for a desktop capture (optional).
  * performDesktop(action) → { message, screenshotAbs, screenshotRel } — injected runner; skips AutoHotkey (optional).
  * delegate(role, task) → { output, summary, data? } — specialist call for delegate_role (optional).
+ * extras — additional tools `{ name, description, parameters, category, handler }`, used for MCP.
  */
 export function createToolset({
     root = process.cwd(), config, names, approvalLevel = 'read', approve = async () => 'no', askUser = null,
     backupDir = null, signal, emit = () => {}, memory = null, projectKey = null, projectName = null,
     describeImage = null, summarizeFile = null, editPaths = () => null,
-    describeScreen = null, performDesktop = null, delegate = null,
+    describeScreen = null, performDesktop = null, delegate = null, extras = [],
 }) {
     const limits = config.limits;
     const allowed = new Set(names);
+    const extraByName = new Map();
+    for (const extra of extras) {
+        if (!extra?.name || TOOL_SPECS[extra.name] || extraByName.has(extra.name)) throw new Error(`Имя инструмента занято: ${extra.name}`);
+        extraByName.set(extra.name, extra);
+        allowed.add(extra.name);
+    }
     if (!memory) { allowed.delete('recall'); allowed.delete('remember'); }
     if (!summarizeFile) allowed.delete('summarize_file');
     const alwaysAllowed = new Set();
@@ -186,7 +193,9 @@ export function createToolset({
             case 'type': return `Ввод: ${truncate(args.text ?? '', 400)}`;
             case 'run_ahk': return `Скрипт: ${truncate(args.script ?? '', 400)}`;
             case 'run_batch': return `Пакет: ${truncate(batchSource(args), 400)}`;
-            default: return `${name} ${JSON.stringify(args)}`;
+            default:
+                if (name.startsWith('mcp_')) return `${name} ${truncate(args.arguments_json ?? args.uri ?? '', 400, { singleLine: false })}`;
+                return `${name} ${JSON.stringify(args)}`;
         }
     }
 
@@ -403,6 +412,7 @@ export function createToolset({
         const desktopHandlers = createDesktopHandlers({ root, config, decide, describeScreen, performDesktop, delegate });
         for (const name of desktopNames) handlers[name] = desktopHandlers[name];
     }
+    for (const extra of extraByName.values()) handlers[extra.name] = extra.handler;
 
     /** Execute one function_call item. Never throws for tool errors; throws only on cancellation. */
     async function execute(call) {
@@ -411,11 +421,13 @@ export function createToolset({
         stats.calls++;
         stats.byTool[name] = (stats.byTool[name] ?? 0) + 1;
         let args = {};
-        const fail = (message) => ({ output: `Ошибка: ${message}`, summary: message, ok: false, durationMs: Date.now() - started, category: TOOL_SPECS[name]?.category ?? null });
+        const fail = (message) => ({ output: `Ошибка: ${message}`, summary: message, ok: false, durationMs: Date.now() - started, category: (TOOL_SPECS[name] ?? extraByName.get(name))?.category ?? null });
         if (!allowed.has(name) || !handlers[name]) { stats.errors++; return fail(`инструмент ${name} недоступен.`); }
         try { args = call.arguments ? JSON.parse(call.arguments) : {}; }
         catch { stats.errors++; return fail('аргументы не являются корректным JSON.'); }
-        const { category } = TOOL_SPECS[name];
+        const spec = TOOL_SPECS[name] ?? extraByName.get(name);
+        if (!spec?.category) { stats.errors++; return fail(`инструмент ${name} недоступен.`); }
+        const { category } = spec;
         let permitted;
         try { permitted = await decide(name, category, args, preview(name, args)); }
         catch (error) { if (error instanceof CancelledError) throw error; permitted = false; }
@@ -435,7 +447,12 @@ export function createToolset({
     }
 
     return Object.freeze({
-        definitions: () => toolDefinitions([...allowed]),
+        definitions: () => [
+            ...toolDefinitions([...allowed].filter((name) => TOOL_SPECS[name])),
+            ...[...extraByName.values()].filter((extra) => allowed.has(extra.name)).map((extra) => ({
+                type: 'function', name: extra.name, description: extra.description, parameters: extra.parameters, strict: true,
+            })),
+        ],
         execute,
         names: () => [...allowed],
         stats: () => structuredClone(stats),

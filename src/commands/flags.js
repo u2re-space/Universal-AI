@@ -2,14 +2,15 @@
  * @file src/commands/flags.js
  * @module commands/flags
  * @purpose Turn CLI flags into configuration overrides. Bad flags throw UsageError (exit code 2).
- * @depends core/config
+ * @depends core/config, generate/platform
  * @usedBy commands/shared, cli
  * @exports UsageError, overridesFrom
  * @ai.tags cli, config
  * @ai.hint pure
- * @changed 2026-10-15 Split from commands/shared.js.
+ * @changed 2026-10-15 Fidelity, creativity, platform, and mcp in --tools.
  */
 import { APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES } from '../core/config.js';
+import { PLATFORMS } from '../generate/platform.js';
 
 /**
  * Error for invalid arguments or configuration. Command handlers map it to exit code 2.
@@ -103,17 +104,32 @@ export function overridesFrom(values) {
     if (values.desktop) o.tools.desktop = true;
     if (values.tools !== undefined) {
         const list = values.tools.split(',').map((s) => s.trim()).filter(Boolean);
-        const all = { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false };
+        const all = { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false };
         if (!(list.length === 1 && list[0] === 'none')) {
             for (const name of list) {
-                if (!(name in all)) throw new UsageError(`--tools: неизвестный инструмент "${name}" (fs, shell, fetch, web, images, askUser, desktop, none)`);
+                if (!(name in all)) throw new UsageError(`--tools: неизвестный инструмент "${name}" (fs, shell, fetch, web, images, askUser, desktop, mcp, none)`);
                 all[name] = true;
             }
             if (list.length) all.askUser = true;
         }
         Object.assign(o.tools, all);
     }
-    if (values['no-tools']) Object.assign(o.tools, { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false });
+    if (values['no-tools']) Object.assign(o.tools, { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false });
     if (values.detail && !IMAGE_DETAILS.includes(values.detail)) throw new UsageError(`--detail: ${IMAGE_DETAILS.join(' | ')}`);
+    if (values.fidelity !== undefined || values.creativity !== undefined || values.platform) o.generate = {};
+    if (values.fidelity !== undefined) {
+        const fidelity = number(values.fidelity, 'fidelity', { integer: true, min: 0 });
+        if (fidelity > 100) throw new UsageError('--fidelity: 0..100');
+        o.generate.fidelity = fidelity;
+    }
+    if (values.creativity !== undefined) {
+        const creativity = number(values.creativity, 'creativity', { integer: true, min: 0 });
+        if (creativity > 100) throw new UsageError('--creativity: 0..100');
+        o.generate.creativity = creativity;
+    }
+    if (values.platform) {
+        if (!Object.hasOwn(PLATFORMS, values.platform)) throw new UsageError(`--platform: ${Object.keys(PLATFORMS).join(' | ')}`);
+        o.generate.platform = values.platform;
+    }
     return o;
 }
