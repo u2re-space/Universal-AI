@@ -70,6 +70,12 @@ export const defaults = Object.freeze({
    *   reviewer   — verifies the result (read-only tools, may run tests)
    *   vision     — describes images for other roles (view_image delegation)
    *   summarizer — compaction, file summaries, memory extraction (cheapest model)
+   *   scanner    — decides what to capture; may return coordinates
+   *   solver     — solves the step, including math and captchas
+   *   clicker    — clicks one UI target
+   *   typer      — types into a named UI field
+   *   encoder    — returns a batch for later execution
+   *   tester     — checks whether the step result is true
    */
   roles: {
     default: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
@@ -79,6 +85,12 @@ export const defaults = Object.freeze({
     reviewer: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
     vision: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
     summarizer: { model: null, effort: 'low', summary: 'none', verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
+    scanner: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+    solver: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+    clicker: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+    typer: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+    encoder: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+    tester: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
   },
   /** Multi-role orchestration used by `ai run`. */
   agent: {
