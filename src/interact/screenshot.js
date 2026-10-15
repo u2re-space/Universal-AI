@@ -10,7 +10,7 @@ export const CAPTURE_LIBRARY = `SaveScreenshot(filePath) {
     token := 0
     status := DllCall("gdiplus\\GdiplusStartup", "Ptr*", &token, "Ptr", si, "Ptr", 0, "Int")
     if (status != 0)
-        throw Error("screenshot failed")
+        throw Error("screenshot failed: " . status)
     hdc := 0
     mdc := 0
     hbm := 0
@@ -31,13 +31,13 @@ export const CAPTURE_LIBRARY = `SaveScreenshot(filePath) {
             throw Error("screenshot failed")
         status := DllCall("gdiplus\\GdipCreateBitmapFromHBITMAP", "Ptr", hbm, "Ptr", 0, "Ptr*", &pBitmap, "Int")
         if (status != 0)
-            throw Error("screenshot failed")
+            throw Error("screenshot failed: " . status)
         clsid := Buffer(16, 0)
         if DllCall("ole32\\CLSIDFromString", "WStr", "{557CF406-1A04-11D3-9A73-0000F81EF32E}", "Ptr", clsid, "Int")
             throw Error("screenshot failed")
         status := DllCall("gdiplus\\GdipSaveImageToFile", "Ptr", pBitmap, "WStr", filePath, "Ptr", clsid, "Ptr", 0, "Int")
         if (status != 0)
-            throw Error("screenshot failed")
+            throw Error("screenshot failed: " . status)
     } finally {
         if pBitmap
             DllCall("gdiplus\\GdipDisposeImage", "Ptr", pBitmap)

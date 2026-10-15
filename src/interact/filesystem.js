@@ -2,6 +2,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { childEnvironment } from '../agent/shell.js';
 import { clickBody } from './mouse.js';
 import { typeBody } from './keyboard.js';
 import { CAPTURE_LIBRARY } from './screenshot.js';
@@ -14,7 +15,7 @@ export function ahkString(value) {
     if (ch === '\r') return '`r';
     if (ch === '\n') return '`n';
     return '`' + '"';
-  });
+  }).replace(/;/g, '`;');
   return `"${escaped}"`;
 }
 
@@ -31,6 +32,8 @@ export function scriptFor(action) {
 export function wrapScript(body) {
   const lines = [
     '#Requires AutoHotkey v2.0',
+    '#Warn All, Off',
+    '#DllLoad "gdiplus"',
     '#SingleInstance Force',
     'resultPath := A_Args[1]',
     'shotPath := A_Args.Length >= 2 ? A_Args[2] : ""',
@@ -42,7 +45,12 @@ export function wrapScript(body) {
   }
   lines.push(
     '    if (shotPath != "") {',
-    '        SaveScreenshot(shotPath)',
+    '        try {',
+    '            SaveScreenshot(shotPath)',
+    '        } catch as shotErr {',
+    '            WriteResult(resultPath, "ok " . shotErr.Message)',
+    '            ExitApp(0)',
+    '        }',
     '    }',
     '    WriteResult(resultPath, "ok")',
     '    ExitApp(0)',
@@ -113,7 +121,7 @@ function runChild({ spawnFn, executable, args, cwd, timeoutMs }) {
       try { child?.kill(); } catch { /* already gone */ }
       reject(new Error(`таймаут AutoHotkey (${timeoutMs} мс)`));
     }, timeoutMs);
-    const options = { windowsHide: true, stdio: 'ignore', shell: false };
+    const options = { windowsHide: true, stdio: 'ignore', shell: false, env: childEnvironment() };
     if (cwd) options.cwd = cwd;
     try {
       child = spawnFn(executable, args, options);
@@ -145,7 +153,8 @@ export async function runScript({
   const resultPath = path.join(dir, 'result.txt');
   try {
     await writeFile(scriptPath, script ?? '', 'utf8');
-    const args = [...prefixArgs, scriptPath, resultPath];
+    const args = prefixArgs.length === 0 ? ['/ErrorStdOut=UTF-8'] : [...prefixArgs];
+    args.push(scriptPath, resultPath);
     if (shotPath != null) args.push(shotPath);
     const exitCode = await runChild({ spawnFn, executable, args, cwd, timeoutMs });
     const resultText = await readResultText(resultPath);
@@ -167,7 +176,7 @@ export async function performAction({
   let screenshotAbs = null;
   let screenshotRel = null;
   if (capture) {
-    const fileName = `${timestampSlug(now)}.png`;
+    const fileName = `${timestampSlug(now)}-${process.hrtime.bigint()}.png`;
     screenshotAbs = path.join(root, '.ai', 'desktop', fileName);
     screenshotRel = `.ai/desktop/${fileName}`;
     await mkdir(path.dirname(screenshotAbs), { recursive: true });
