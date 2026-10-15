@@ -49,3 +49,30 @@ test('performAction runs the fake executable and records a screenshot', async ()
     await rm(root, { recursive: true, force: true });
   }
 });
+
+import { parseBatch, executeBatch } from '../src/interact/batch.js';
+
+test('parseBatch accepts TOON and rejects an unknown action', () => {
+  const text = [
+    'summary: click Save',
+    'actions[1]{type,mode,x,y,button,clicks,text,title,control,image,script}:',
+    '  click,coord,3,4,left,1,null,null,null,null,null',
+  ].join('\n');
+  const batch = parseBatch(text);
+  assert.equal(batch.actions[0].x, 3);
+  assert.equal(batch.actions[0].button, 'Left');
+  assert.throws(() => parseBatch('{"summary":"x","actions":[{"type":"dance"}]}'), /type/);
+});
+
+test('executeBatch asks before each action and stops on denial', async () => {
+  const seen = [];
+  await assert.rejects(executeBatch({
+    batch: { summary: 'two', actions: [
+      { type: 'screenshot', mode: null, x: null, y: null, button: null, clicks: null, text: null, title: null, control: null, image: null, script: null },
+      { type: 'click', mode: 'coord', x: 1, y: 1, button: 'left', clicks: 1, text: null, title: null, control: null, image: null, script: null },
+    ] },
+    approveAction: async (action) => action.type === 'screenshot',
+    perform: async (action) => { seen.push(action.type); return { message: 'ok' }; },
+  }), /отклонено/);
+  assert.deepEqual(seen, ['screenshot']);
+});
