@@ -9,41 +9,41 @@ import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstruct
  * web search / image generation tools, structured output and persistent sessions).
  */
 export async function ask(ctx) {
-  const { config, renderer, values, positionals, signal, emit } = ctx;
-  const stdinText = await readStdin({ maxBytes: config.limits.maxStdinBytes });
-  let prompt = positionals.join(' ').trim();
-  let stdinIsPrompt = false;
-  if (!prompt && stdinText) { prompt = stdinText; stdinIsPrompt = true; }
-  if (!prompt && !values.image?.length && !values.file?.length) {
-    throw new UsageError('Укажите запрос: ai "текст запроса" (или передайте текст через stdin).');
-  }
-  const parts = await loadAttachments({ images: values.image ?? [], files: values.file ?? [], detail: values.detail ?? 'auto', cwd: ctx.cwd, config, renderer });
-  if (stdinText && !stdinIsPrompt) parts.push({ type: 'input_text', text: `--- stdin ---\n${stdinText}\n--- конец stdin ---` });
-  if (!prompt) prompt = 'Опиши вложения.';
-
-  const extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
-  const instructions = composeInstructions(ASSISTANT_BASE, config, extra);
-  const textFormat = await loadTextFormat(values.schema, ctx.cwd);
-
-  // Local tools are opt-in for `ask` (--tools fs,shell,…); built-in web/images follow --web/--images.
-  let toolset = null;
-  let store = null;
-  if (values.tools !== undefined && values.tools !== 'none') {
-    store = openMemoryFor(config, ctx.cwd, renderer);
-    const names = enabledToolNames(config.tools, { interactive: renderer.interactive, memory: Boolean(store) });
-    if (names.length) {
-      ctx.backupDir = backupDirFor(config);
-      toolset = createToolset({
-        root: ctx.cwd, config, names, approvalLevel: approvalLevel(config, renderer.interactive),
-        approve: (request) => renderer.approve(request, { signal }), askUser: renderer.interactive ? (q) => renderer.ask(q, { signal }) : null,
-        backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
-      });
+    const { config, renderer, values, positionals, signal, emit } = ctx;
+    const stdinText = await readStdin({ maxBytes: config.limits.maxStdinBytes });
+    let prompt = positionals.join(' ').trim();
+    let stdinIsPrompt = false;
+    if (!prompt && stdinText) { prompt = stdinText; stdinIsPrompt = true; }
+    if (!prompt && !values.image?.length && !values.file?.length) {
+        throw new UsageError('Укажите запрос: ai "текст запроса" (или передайте текст через stdin).');
     }
-  }
-  try {
-    // `ask` speaks with the default role (roles.default may pin its own model / effort).
-    return await runOnce({ ...ctx, config: resolveRole(config, 'default').config }, { prompt, parts, instructions, toolset, textFormat, maxTurns: toolset ? config.limits.maxTurns : 1 });
-  } finally {
-    store?.memory.close();
-  }
+    const parts = await loadAttachments({ images: values.image ?? [], files: values.file ?? [], detail: values.detail ?? 'auto', cwd: ctx.cwd, config, renderer });
+    if (stdinText && !stdinIsPrompt) parts.push({ type: 'input_text', text: `--- stdin ---\n${stdinText}\n--- конец stdin ---` });
+    if (!prompt) prompt = 'Опиши вложения.';
+
+    const extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
+    const instructions = composeInstructions(ASSISTANT_BASE, config, extra);
+    const textFormat = await loadTextFormat(values.schema, ctx.cwd);
+
+    // Local tools are opt-in for `ask` (--tools fs,shell,…); built-in web/images follow --web/--images.
+    let toolset = null;
+    let store = null;
+    if (values.tools !== undefined && values.tools !== 'none') {
+        store = openMemoryFor(config, ctx.cwd, renderer);
+        const names = enabledToolNames(config.tools, { interactive: renderer.interactive, memory: Boolean(store) });
+        if (names.length) {
+            ctx.backupDir = backupDirFor(config);
+            toolset = createToolset({
+                root: ctx.cwd, config, names, approvalLevel: approvalLevel(config, renderer.interactive),
+                approve: (request) => renderer.approve(request, { signal }), askUser: renderer.interactive ? (q) => renderer.ask(q, { signal }) : null,
+                backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
+            });
+        }
+    }
+    try {
+        // `ask` speaks with the default role (roles.default may pin its own model / effort).
+        return await runOnce({ ...ctx, config: resolveRole(config, 'default').config }, { prompt, parts, instructions, toolset, textFormat, maxTurns: toolset ? config.limits.maxTurns : 1 });
+    } finally {
+        store?.memory.close();
+    }
 }

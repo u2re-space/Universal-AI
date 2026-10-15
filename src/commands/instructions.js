@@ -17,15 +17,15 @@ export { ROLE_INSTRUCTIONS } from '../roles/index.js';
 
 /** Instructions for the autonomous agent (local tools). */
 export function agentBase({ root, approvalLevel, toolNames, interactive, shell }) {
-  const platform = `${process.platform} ${os.release()} (${os.arch()})`;
-  const shellName = shell ?? (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh');
-  const policy = {
-    ask: 'Write, command and network operations require the operator to approve each call (they may deny some).',
-    read: 'Only read-only tools are permitted: you cannot modify files or run commands. Produce proposals (diffs, instructions) instead.',
-    write: 'You may create and edit files inside the working directory without asking. Commands and network access are NOT available.',
-    all: 'File edits, shell commands and network access are pre-approved; still act carefully and reversibly.',
-  }[approvalLevel] ?? '';
-  return `You are an autonomous software/task agent operating in a local working directory through tools.
+    const platform = `${process.platform} ${os.release()} (${os.arch()})`;
+    const shellName = shell ?? (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh');
+    const policy = {
+        ask: 'Write, command and network operations require the operator to approve each call (they may deny some).',
+        read: 'Only read-only tools are permitted: you cannot modify files or run commands. Produce proposals (diffs, instructions) instead.',
+        write: 'You may create and edit files inside the working directory without asking. Commands and network access are NOT available.',
+        all: 'File edits, shell commands and network access are pre-approved; still act carefully and reversibly.',
+    }[approvalLevel] ?? '';
+    return `You are an autonomous software/task agent operating in a local working directory through tools.
 Working directory: ${root}
 Platform: ${platform}; shell for run_command: ${shellName}; current date: ${new Date().toISOString().slice(0, 10)}
 Available tools: ${toolNames.join(', ')}

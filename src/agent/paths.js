@@ -10,20 +10,20 @@ export const NOISY_DIRS = /^(?:\.git|node_modules|\.hg|\.svn|dist|build|coverage
 const READ_ONLY_DIRS = /^(?:\.git|node_modules)$/i;
 
 export function isProtectedFileName(name) {
-  return PROTECTED_FILES.test(name);
+    return PROTECTED_FILES.test(name);
 }
 
 export function isForbiddenDirName(name) {
-  return FORBIDDEN_DIRS.test(name);
+    return FORBIDDEN_DIRS.test(name);
 }
 
 export function toPosix(relative) {
-  return relative.split(path.sep).join('/');
+    return relative.split(path.sep).join('/');
 }
 
 export function isInside(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+    const relative = path.relative(root, candidate);
+    return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
 }
 
 /**
@@ -32,32 +32,32 @@ export function isInside(root, candidate) {
  * writes into read-only directories. Returns { abs, rel } where rel is POSIX and root-relative.
  */
 export async function resolveInside(root, relative, { forWrite = false, allowRoot = true } = {}) {
-  if (typeof relative !== 'string') throw new Error('Путь должен быть строкой.');
-  if (relative.includes('\0')) throw new Error('Путь содержит NUL.');
-  const cleaned = relative.trim() === '' || relative.trim() === '.' ? '.' : relative.trim();
-  const abs = path.resolve(root, cleaned);
-  if (!isInside(root, abs)) throw new Error(`Путь вне рабочего каталога: ${relative}`);
-  const rel = toPosix(path.relative(root, abs));
-  if (rel === '' && !allowRoot) throw new Error('Нужен путь к файлу, а не к корню.');
-  const segments = rel ? rel.split('/') : [];
-  for (const [index, segment] of segments.entries()) {
-    if (FORBIDDEN_DIRS.test(segment)) throw new Error(`Доступ запрещён: ${rel}`);
-    if (index === segments.length - 1 && PROTECTED_FILES.test(segment)) throw new Error(`Файл с секретами недоступен: ${rel}`);
-    if (forWrite && READ_ONLY_DIRS.test(segment)) throw new Error(`Запись в ${segment} запрещена: ${rel}`);
-  }
-  // Symlink escape check on the deepest existing component.
-  let probe = abs;
-  for (;;) {
-    const stat = await lstat(probe).catch(() => null);
-    if (stat) {
-      const real = await realpath(probe).catch(() => probe);
-      const realRoot = await realpath(root).catch(() => root);
-      if (!isInside(realRoot, real)) throw new Error(`Путь через символическую ссылку выходит за рабочий каталог: ${rel}`);
-      break;
+    if (typeof relative !== 'string') throw new Error('Путь должен быть строкой.');
+    if (relative.includes('\0')) throw new Error('Путь содержит NUL.');
+    const cleaned = relative.trim() === '' || relative.trim() === '.' ? '.' : relative.trim();
+    const abs = path.resolve(root, cleaned);
+    if (!isInside(root, abs)) throw new Error(`Путь вне рабочего каталога: ${relative}`);
+    const rel = toPosix(path.relative(root, abs));
+    if (rel === '' && !allowRoot) throw new Error('Нужен путь к файлу, а не к корню.');
+    const segments = rel ? rel.split('/') : [];
+    for (const [index, segment] of segments.entries()) {
+        if (FORBIDDEN_DIRS.test(segment)) throw new Error(`Доступ запрещён: ${rel}`);
+        if (index === segments.length - 1 && PROTECTED_FILES.test(segment)) throw new Error(`Файл с секретами недоступен: ${rel}`);
+        if (forWrite && READ_ONLY_DIRS.test(segment)) throw new Error(`Запись в ${segment} запрещена: ${rel}`);
     }
-    const parent = path.dirname(probe);
-    if (parent === probe) break;
-    probe = parent;
-  }
-  return { abs, rel: rel || '.' };
+    // Symlink escape check on the deepest existing component.
+    let probe = abs;
+    for (;;) {
+        const stat = await lstat(probe).catch(() => null);
+        if (stat) {
+            const real = await realpath(probe).catch(() => probe);
+            const realRoot = await realpath(root).catch(() => root);
+            if (!isInside(realRoot, real)) throw new Error(`Путь через символическую ссылку выходит за рабочий каталог: ${rel}`);
+            break;
+        }
+        const parent = path.dirname(probe);
+        if (parent === probe) break;
+        probe = parent;
+    }
+    return { abs, rel: rel || '.' };
 }
