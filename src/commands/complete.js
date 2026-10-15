@@ -15,6 +15,7 @@ import { UsageError, readStdin, createClientFor } from './shared.js';
 import { completeCode } from '../complete/complete.js';
 import { startCompletionServer } from '../complete/server.js';
 import { CompletionError } from '../complete/errors.js';
+import { structureCode } from '../structure/structure.js';
 
 /**
  * Parse a 0-based cursor flag.
@@ -94,14 +95,18 @@ async function listen(ctx) {
                 client ??= createClientFor(config);
                 return completeCode({ client, config, request, cwd, signal: requestSignal });
             },
+            structure: (request, requestSignal) => structureCode({
+                request, cwd, config, client: config.apiKey ? (client ??= createClientFor(config)) : null, signal: requestSignal,
+            }),
         });
     } catch (error) {
         if (error.code === 'EADDRINUSE') throw new UsageError(`Порт занят: ${port}`);
         throw error;
     }
     renderer.line('info', `дополнение: ${server.httpURL}`);
+    renderer.line('info', `структура: ${server.structureURL}`);
     renderer.line('info', `websocket: ${server.wsURL}`);
-    renderer.json({ type: 'complete.listening', httpURL: server.httpURL, wsURL: server.wsURL, port: server.port });
+    renderer.json({ type: 'complete.listening', httpURL: server.httpURL, structureURL: server.structureURL, wsURL: server.wsURL, port: server.port });
     try {
         await new Promise((resolve) => {
             if (signal.aborted) return resolve();
@@ -124,8 +129,17 @@ async function listen(ctx) {
 export async function complete(ctx) {
     const { config, renderer, values, signal, cwd } = ctx;
     if (values.listen || values.port !== undefined) return listen(ctx);
-    if (!config.apiKey) throw new UsageError('Не задан OPENAI_API_KEY. Экспортируйте переменную окружения или укажите apiKey в ~/.ai-agent/config.json.');
     const request = await requestFromCli(ctx);
+    if (request.kind === 'structure' || request.tasks != null) {
+        const client = config.apiKey ? createClientFor(config) : null;
+        try {
+            const result = await structureCode({ request, cwd, config, client, signal });
+            if (renderer.mode === 'json') renderer.json({ type: 'structured', ...result });
+            else process.stdout.write(result.text);
+            return 0;
+        } finally { client?.close(); }
+    }
+    if (!config.apiKey) throw new UsageError('Не задан OPENAI_API_KEY. Экспортируйте переменную окружения или укажите apiKey в ~/.ai-agent/config.json.');
     const client = createClientFor(config);
     try {
         const result = await completeCode({ client, config, request, cwd, signal });

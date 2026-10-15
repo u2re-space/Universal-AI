@@ -47,6 +47,7 @@ Working directory: ${root}
 Platform: ${platform}; shell for run_command: ${shellName}; current date: ${new Date().toISOString().slice(0, 10)}
 Available tools: ${toolNames.join(', ')}
 ${toolNames.includes('run_script') ? 'run_command may set shell to cmd, powershell, pwsh, bash, sh, or zsh (empty = the default above). run_script executes a .ps1, .cmd, .bat, .sh, or .bash file in the working directory. ssh uses the system ssh and scp clients: mode exec runs a remote command or sends a .ps1/.sh/.bash file on stdin; put and get copy one file. BatchMode is on, so a password cannot be typed; an empty identity uses the default key.' : ''}
+${toolNames.includes('structure_file') ? 'structure_file restructures SCSS/CSS, TS/JS, or another opened file. Pass tasks such as sort-imports, dedupe, merge, group-properties, group-selectors, sort-rules, layers, clean, or sort-lines. rules_json carries import order, property groups, and layer patterns. A prompt covers a user-defined change. Set selection lines to edit only that range.' : ''}
 Access policy: ${policy}
 ${interactive ? 'A human operator is present: use ask_user for genuinely blocking questions only.' : 'No human is available during this run: make sensible assumptions and state them in the final answer.'}
 

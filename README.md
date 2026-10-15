@@ -87,6 +87,8 @@ ai complete --listen --port 8765
 
 Сервер слушает только `127.0.0.1`. Секрет `--token` или `AI_COMPLETE_TOKEN` (либо `completion.token` в конфигурации) передаётся заголовком `Authorization: Bearer` или параметром `?token=`.
 
+Тот же сервер принимает правку структуры: `POST /v1/structure` и кадр WebSocket `{"type":"structure"}`. В `tasks` — `sort-imports`, `dedupe`, `merge`, `group-properties`, `group-selectors`, `sort-rules`, `sort-properties`, `layers`, `clean`, `sort-lines`. В `rules` — свой порядок импортов, группы свойств и слои. `prompt` описывает задачу, которую встроенные шаги не покрывают. `selection` ограничивает правку открытым диапазоном; без `write` сервер только возвращает текст. Агент делает то же самое инструментом `structure_file`.
+
 ### Примеры
 
 ```bash

@@ -180,8 +180,8 @@ function speakWebSocket(socket, head, { onText, signal }) {
  * @exports
  * @ai.hint io
  */
-export async function startCompletionServer({ port = 8765, token = null, handle, signal } = {}) {
-    if (typeof handle !== 'function') throw new TypeError('Нужен handle для запроса дополнения.');
+export async function startCompletionServer({ port = 8765, token = null, handle = null, structure = null, signal } = {}) {
+    if (typeof handle !== 'function' && typeof structure !== 'function') throw new TypeError('Нужен handle или structure.');
     const sockets = new Set();
     const controller = new AbortController();
     /**
@@ -191,6 +191,7 @@ export async function startCompletionServer({ port = 8765, token = null, handle,
      * @ai.hint io
      */
     const run = (request) => handle(request, controller.signal);
+    const runStructure = (request) => structure(request, controller.signal);
     const server = http.createServer(async (req, res) => {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1');
         /**
@@ -207,11 +208,12 @@ export async function startCompletionServer({ port = 8765, token = null, handle,
         };
         try {
             if (req.method === 'GET' && url.pathname === '/health') return json(200, { ok: true });
-            if (url.pathname !== '/v1/complete') return json(404, { error: { code: 'NOT_FOUND', message: 'Неизвестный путь.' } });
-            if (req.method !== 'POST') return json(405, { error: { code: 'METHOD', message: 'Нужен POST /v1/complete.' } });
-            if (!tokenOk(token, tokenFrom(req))) return json(401, { error: { code: 'UNAUTHORIZED', message: 'Неверный токен дополнения.' } });
+            const route = url.pathname === '/v1/complete' ? handle : url.pathname === '/v1/structure' ? structure : null;
+            if (!route) return json(404, { error: { code: 'NOT_FOUND', message: 'Неизвестный путь.' } });
+            if (req.method !== 'POST') return json(405, { error: { code: 'METHOD', message: 'Нужен POST.' } });
+            if (!tokenOk(token, tokenFrom(req))) return json(401, { error: { code: 'UNAUTHORIZED', message: 'Неверный токен.' } });
             const request = await readJson(req);
-            const result = await run(request);
+            const result = url.pathname === '/v1/structure' ? await runStructure(request) : await run(request);
             return json(200, { id: request.id ?? null, ...result });
         } catch (error) {
             const body = publicError(error);
@@ -223,7 +225,7 @@ export async function startCompletionServer({ port = 8765, token = null, handle,
     server.on('upgrade', (req, socket, head) => {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1');
         const key = req.headers['sec-websocket-key'];
-        if (url.pathname !== '/v1/complete' || String(req.headers.upgrade ?? '').toLowerCase() !== 'websocket' || !key) {
+        if (!['/v1/complete', '/v1/structure'].includes(url.pathname) || String(req.headers.upgrade ?? '').toLowerCase() !== 'websocket' || !key) {
             socket.destroy();
             return;
         }
@@ -254,8 +256,21 @@ export async function startCompletionServer({ port = 8765, token = null, handle,
                     socket.write(encodeServerFrame(0x1, JSON.stringify({ type: 'pong', id: message.id ?? null })));
                     return;
                 }
+                if (message.type === 'structure') {
+                    if (typeof structure !== 'function') {
+                        socket.write(encodeServerFrame(0x1, JSON.stringify({ type: 'error', id: message.id ?? null, message: 'Структура не включена.', code: 'NOT_FOUND' })));
+                        return;
+                    }
+                    const result = await runStructure(message);
+                    socket.write(encodeServerFrame(0x1, JSON.stringify({ type: 'structured', id: message.id ?? null, ...result })));
+                    return;
+                }
                 if (message.type && message.type !== 'complete') {
                     socket.write(encodeServerFrame(0x1, JSON.stringify({ type: 'error', id: message.id ?? null, message: 'Неизвестный тип кадра.', code: 'BAD_REQUEST' })));
+                    return;
+                }
+                if (typeof handle !== 'function') {
+                    socket.write(encodeServerFrame(0x1, JSON.stringify({ type: 'error', id: message.id ?? null, message: 'Дополнение не включено.', code: 'NOT_FOUND' })));
                     return;
                 }
                 const result = await run(message);
@@ -286,6 +301,7 @@ export async function startCompletionServer({ port = 8765, token = null, handle,
     return {
         port: bound,
         httpURL: `http://${HOST}:${bound}/v1/complete`,
+        structureURL: `http://${HOST}:${bound}/v1/structure`,
         wsURL: `ws://${HOST}:${bound}/v1/complete`,
         /**
          * Close the listener and open sockets.

@@ -110,6 +110,23 @@ export const TOOL_SPECS = {
         description: 'Create a directory (recursively).',
         parameters: schema({ path: str('Directory path relative to the working directory.') }),
     },
+    structure_file: {
+        category: 'write', group: 'fs',
+        description: 'Restructure a source file or the selected range of an opened file. tasks: sort-imports, sort-rules, sort-properties, group-properties, group-selectors, layers, clean, dedupe, merge, sort-lines (comma-separated; empty = language default). rules_json holds import order, property groups, and layer patterns. prompt is an extra instruction for the model. SCSS/CSS and TS/JS are built in; other languages use clean, sort-lines, and prompt.',
+        parameters: schema({
+            path: str('File path relative to the working directory.'),
+            language: str('Language id such as scss or ts. Empty string uses the file extension.'),
+            tasks: str('Comma-separated task names. Empty string uses the language default.'),
+            rules_json: str('JSON object: importOrder, internalPrefixes, propertyGroups, layers, layerMatch. Empty string uses defaults.'),
+            prompt: str('Extra instruction for a user-defined change. Empty string skips the model.'),
+            selection_start_line: nullableInt('0-based start line of an inline edit. Null = the whole file.'),
+            selection_start_character: nullableInt('0-based start character. Null = 0 when a start line is set.'),
+            selection_end_line: nullableInt('0-based end line. Null = the whole file.'),
+            selection_end_character: nullableInt('0-based end character. Null = 0.'),
+            write: bool('True writes the file. False returns the restructured text only.'),
+            reason: str('One sentence shown when approval is required.'),
+        }),
+    },
     run_command: {
         category: 'exec', group: 'shell',
         description: 'Run one command in the working directory and return the exit code with captured stdout/stderr. Set shell to cmd, powershell, pwsh, bash, sh, or zsh; an empty shell uses the configured default (cmd.exe on Windows, /bin/sh elsewhere). Non-interactive only; output is truncated.',
@@ -269,7 +286,7 @@ export function toolDefinitions(names) {
 /** Which tools are enabled for a config.tools selection. */
 export function enabledToolNames(tools, { interactive = false, memory = false, summarize = false } = {}) {
     const names = [];
-    if (tools.fs) names.push('list_files', 'read_file', 'search_files', 'write_file', 'replace_text', 'delete_file', 'make_dir', 'view_image');
+    if (tools.fs) names.push('list_files', 'read_file', 'search_files', 'write_file', 'replace_text', 'delete_file', 'make_dir', 'view_image', 'structure_file');
     if (tools.fs && summarize) names.push('summarize_file');
     if (tools.shell) names.push(...SHELL_TOOL_NAMES);
     if (tools.fetch) names.push('fetch_url');

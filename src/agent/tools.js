@@ -14,12 +14,14 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { CancelledError } from '../openai/errors.js';
+import { createClient } from '../openai/client.js';
 import { detectImageMime } from '../core/attachments.js';
 import { errorMessage, formatBytes, truncate, clipMiddle } from '../util/text.js';
 import { resolveInside } from './paths.js';
 import { listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory } from './fs-tools.js';
 import { loadProjectMap, searchMapped, updateProjectMapPath } from './map.js';
 import { SHELLS, runCommand, runProgram, scriptLaunch, sshPlan } from './shell.js';
+import { structureCode } from '../structure/structure.js';
 import { DESKTOP_TOOL_NAMES, createDesktopHandlers } from './desktop.js';
 
 import {
@@ -185,6 +187,7 @@ export function createToolset({
                 return `Изменить ${args.path}${args.all ? ' (все вхождения)' : ''}\n--- было ---\n${truncate(args.search, 400, { singleLine: false })}\n--- станет ---\n${truncate(args.replacement, 400, { singleLine: false })}`;
             case 'delete_file': return `Удалить файл ${args.path} (копия сохранится в резервном каталоге)`;
             case 'make_dir': return `Создать каталог ${args.path}`;
+            case 'structure_file': return `Структура ${args.path}: ${args.tasks || 'по умолчанию'}${args.prompt ? `\nПромпт: ${truncate(args.prompt, 200)}` : ''}\nПричина: ${args.reason ?? '—'}`;
             case 'run_command': return `Команда (${args.shell || 'по умолчанию'}): ${args.command}\nКаталог: ${args.cwd ?? '.'}\nПричина: ${args.reason ?? '—'}`;
             case 'run_script': return `Скрипт (${args.shell || 'по расширению'}): ${args.path}\nАргументы: ${(args.args ?? []).join(' ') || '—'}\nПричина: ${args.reason ?? '—'}`;
             case 'ssh': return `SSH ${args.mode} ${args.host}${args.command ? `: ${args.command}` : ''}${args.local_path ? `\nФайл: ${args.local_path}` : ''}${args.remote_path ? `\nУдалённый путь: ${args.remote_path}` : ''}\nПричина: ${args.reason ?? '—'}`;
@@ -263,6 +266,39 @@ export function createToolset({
         async make_dir(args) {
             const result = await makeDirectory({ root, dir: args.path });
             return { output: `Каталог ${result.rel} создан.`, summary: result.rel };
+        },
+        /** Restructure a file or a selected range using tasks, rules, and an optional prompt. */
+        async structure_file(args) {
+            let rules = {};
+            if (typeof args.rules_json === 'string' && args.rules_json.trim()) {
+                try { rules = JSON.parse(args.rules_json); }
+                catch { throw new Error('rules_json не является JSON.'); }
+            }
+            if (rules === null || typeof rules !== 'object' || Array.isArray(rules)) throw new Error('rules_json должен быть объектом.');
+            const prompt = typeof args.prompt === 'string' ? args.prompt : '';
+            const selection = args.selection_start_line == null && args.selection_end_line == null ? null : {
+                start: { line: args.selection_start_line ?? 0, character: args.selection_start_character ?? 0 },
+                end: { line: args.selection_end_line ?? args.selection_start_line ?? 0, character: args.selection_end_character ?? 0 },
+            };
+            const client = prompt.trim() && config.apiKey ? createClient({
+                apiKey: config.apiKey, baseURL: config.baseURL, organization: config.organization, project: config.project,
+            }) : null;
+            try {
+                const result = await structureCode({
+                    request: {
+                        path: args.path, language: args.language || undefined, tasks: args.tasks, rules, prompt, selection,
+                        write: args.write !== false, backupDir,
+                    },
+                    cwd: root, config, client, signal,
+                });
+                if (result.path && args.write !== false) {
+                    try { await updateProjectMapPath(root, result.path); }
+                    catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
+                }
+                const summary = result.changed ? `структура ${result.path ?? args.path}` : 'без изменений';
+                const output = args.write === false ? result.text : `${summary}\nзадачи: ${result.tasks.join(', ') || '—'}`;
+                return { output, summary, ok: true };
+            } finally { client?.close(); }
         },
         /** Run the command under `root` and return a status block. */
         async run_command(args) {
