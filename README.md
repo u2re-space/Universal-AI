@@ -69,12 +69,16 @@ ai serve [--port <n>]        локальная шина WebSocket на 127.0.0.
 
 ### Локальная шина
 
-`ai serve` слушает `ws://127.0.0.1:<порт>` и пишет адрес и токен в `~/.ai-agent/serve.json` (права `0600`). Токен в журнал не попадает. `--port` задаёт порт; без него берётся свободный.
+`ai serve` слушает `ws://127.0.0.1:<порт>` и на том же порту отдаёт дополнение редактора: `POST /v1/complete`, `POST /v1/structure` и WebSocket `/v1/complete`. Адрес шины, адреса дополнения и токен пишутся в `~/.ai-agent/serve.json` (права `0600`). Токен в журнал не попадает. Его же принимает дополнение (`Authorization: Bearer` или `?token=`). Подходит и `AI_COMPLETE_TOKEN`, `--token` или `completion.token`. `--port` задаёт порт; без него берётся свободный.
 
-Дополнительные аргументы запуска — обычные флаги CLI (`--model`, `--approve`, `--web`). Они становятся конфигурацией сервера. Поля одного запуска передаются в кадре `start`: `prompt`, `cwd`, `approve`, `tools`, `files`, `images`, `role`, `single`, `team` и остальные флаги команды.
+Дополнительные аргументы запуска — обычные флаги CLI (`--model`, `--approve`, `--web`). Они становятся конфигурацией сервера и дополнения. Поля одного запуска передаются в кадре `start`: `prompt`, `cwd`, `approve`, `tools`, `files`, `images`, `role`, `single`, `team` и остальные флаги команды.
 
 ```bash
 ai serve --port 8765
+# WS   ws://127.0.0.1:8765            шина ask/run/chat/image
+# POST http://127.0.0.1:8765/v1/complete
+# POST http://127.0.0.1:8765/v1/structure
+# WS   ws://127.0.0.1:8765/v1/complete
 ai run "добавь тест" --serve
 ai run "добавь тест" --serve ws://127.0.0.1:8765
 ```
@@ -102,13 +106,17 @@ ai complete --json
 # stdin: {"path":"src/app.js","language":"javascript","content":"function total(items) {\n  return |\n}\n","cursor":{"line":1,"character":9}}
 
 ai complete --listen --port 8765
+# только дополнение, без шины
+
+ai serve --port 8765
+# тот же POST /v1/complete, /v1/structure и WebSocket, плюс шина на этом порту
 # POST http://127.0.0.1:8765/v1/complete
 # WS   ws://127.0.0.1:8765/v1/complete
 ```
 
 Курсор задаётся полем `cursor` или диапазоном `selection` (номера строк и `character` с нуля, как в LSP). Если координат нет, курсор — первый символ `|` в `content`, либо граница `prefix` и `suffix`. Файл можно не присылать целиком: достаточно `path` внутри рабочего каталога, контекст будет сокращён. Строка длиннее 0.5 МиБ (часто это base64) в модель не отправляется — рядом с курсором остаются ближайшие обычные строки.
 
-Сервер слушает только `127.0.0.1`. Секрет `--token` или `AI_COMPLETE_TOKEN` (либо `completion.token` в конфигурации) передаётся заголовком `Authorization: Bearer` или параметром `?token=`.
+Сервер слушает только `127.0.0.1`. Секрет `--token` или `AI_COMPLETE_TOKEN` (либо `completion.token` в конфигурации) передаётся заголовком `Authorization: Bearer` или параметром `?token=`. У `ai serve` тот же заголовок принимает токен из `serve.json`.
 
 Тот же сервер принимает правку структуры: `POST /v1/structure` и кадр WebSocket `{"type":"structure"}`. В `tasks` — `sort-imports`, `dedupe`, `merge`, `group-properties`, `group-selectors`, `sort-rules`, `sort-properties`, `layers`, `clean`, `sort-lines`. В `rules` — свой порядок импортов, группы свойств и слои. `prompt` описывает задачу, которую встроенные шаги не покрывают. `selection` ограничивает правку открытым диапазоном; без `write` сервер только возвращает текст. Агент делает то же самое инструментом `structure_file`.
 

@@ -4,7 +4,7 @@
  * @purpose Local HTTP and WebSocket API for editor code completion.
  * @depends node:http, node:crypto, openai/errors, complete/errors, complete/ws
  * @usedBy commands/complete, index.js
- * @exports startCompletionServer
+ * @exports startCompletionServer, createCompletionBridge
  * @ai.tags complete, http, websocket
  * @ai.hint io
  * @changed 2026-10-15 IDE completion endpoint.
@@ -34,6 +34,18 @@ function tokenOk(expected, got) {
     const right = Buffer.from(got);
     if (left.length !== right.length) return false;
     return timingSafeEqual(left, right);
+}
+
+/**
+ * True when no token is required, or `got` matches one required token.
+ * @param {string[]} tokens
+ * @param {string|null} got
+ * @returns {boolean}
+ * @ai.hint pure
+ */
+function tokensOk(tokens, got) {
+    if (!tokens.length) return true;
+    return tokens.some((token) => tokenOk(token, got));
 }
 
 /**
@@ -173,29 +185,46 @@ function speakWebSocket(socket, head, { onText, signal }) {
     socket.on('close', () => signal.removeEventListener?.('abort', stop));
 }
 
+const COMPLETION_PATHS = new Set(['/v1/complete', '/v1/structure']);
+
 /**
- * Listen on 127.0.0.1 for POST /v1/complete and a WebSocket on the same path.
- * @param {{ port?: number, token?: string|null, handle: (request: object, signal: AbortSignal) => Promise<object>, signal?: AbortSignal }} options
- * @returns {Promise<{ port: number, httpURL: string, wsURL: string, close: () => Promise<void> }>}
+ * HTTP and WebSocket handlers for editor completion, attachable to any local server.
+ * An empty token list allows every request. Otherwise one of the tokens must match.
+ * @param {{ tokens?: Array<string|null|undefined>, handle?: Function|null, structure?: Function|null, signal?: AbortSignal }} [options]
+ * @returns {{ handleRequest: Function, handleUpgrade: Function, stop: Function }}
  * @exports
  * @ai.hint io
  */
-export async function startCompletionServer({ port = 8765, token = null, handle = null, structure = null, signal } = {}) {
-    if (typeof handle !== 'function' && typeof structure !== 'function') throw new TypeError('Нужен handle или structure.');
+export function createCompletionBridge({ tokens = [], handle = null, structure = null, signal } = {}) {
+    const accepted = tokens.filter((item) => typeof item === 'string' && item);
     const sockets = new Set();
     const controller = new AbortController();
     /**
-     * Run one completion and hide internal failures behind a public error.
-     * @param {object} request
-     * @returns {Promise<object>}
+     * Abort in-flight completions and drop editor sockets.
+     * @returns {void}
      * @ai.hint io
      */
+    const stop = () => {
+        controller.abort();
+        for (const socket of sockets) socket.destroy();
+    };
+    if (signal) {
+        if (signal.aborted) stop();
+        else signal.addEventListener('abort', stop, { once: true });
+    }
     const run = (request) => handle(request, controller.signal);
     const runStructure = (request) => structure(request, controller.signal);
-    const server = http.createServer(async (req, res) => {
+
+    /**
+     * Answer /health, /v1/complete, and /v1/structure. Other paths return false.
+     * @param {import('node:http').IncomingMessage} req
+     * @param {import('node:http').ServerResponse} res
+     * @returns {Promise<boolean>}
+     * @ai.hint io
+     */
+    async function handleRequest(req, res) {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1');
         /**
-         * Write a JSON response.
          * @param {number} status
          * @param {object} body
          * @returns {void}
@@ -206,40 +235,58 @@ export async function startCompletionServer({ port = 8765, token = null, handle 
             res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(payload) });
             res.end(payload);
         };
+        if (req.method === 'GET' && url.pathname === '/health') {
+            json(200, { ok: true });
+            return true;
+        }
+        if (!COMPLETION_PATHS.has(url.pathname)) return false;
         try {
-            if (req.method === 'GET' && url.pathname === '/health') return json(200, { ok: true });
-            const route = url.pathname === '/v1/complete' ? handle : url.pathname === '/v1/structure' ? structure : null;
-            if (!route) return json(404, { error: { code: 'NOT_FOUND', message: 'Неизвестный путь.' } });
-            if (req.method !== 'POST') return json(405, { error: { code: 'METHOD', message: 'Нужен POST.' } });
-            if (!tokenOk(token, tokenFrom(req))) return json(401, { error: { code: 'UNAUTHORIZED', message: 'Неверный токен.' } });
+            const route = url.pathname === '/v1/complete' ? handle : structure;
+            if (typeof route !== 'function') {
+                json(404, { error: { code: 'NOT_FOUND', message: 'Неизвестный путь.' } });
+                return true;
+            }
+            if (req.method !== 'POST') {
+                json(405, { error: { code: 'METHOD', message: 'Нужен POST.' } });
+                return true;
+            }
+            if (!tokensOk(accepted, tokenFrom(req))) {
+                json(401, { error: { code: 'UNAUTHORIZED', message: 'Неверный токен.' } });
+                return true;
+            }
             const request = await readJson(req);
             const result = url.pathname === '/v1/structure' ? await runStructure(request) : await run(request);
-            return json(200, { id: request.id ?? null, ...result });
+            json(200, { id: request.id ?? null, ...result });
         } catch (error) {
             const body = publicError(error);
             if (!res.headersSent) json(body.status, { error: { code: body.code, message: body.message } });
             else res.destroy();
         }
-    });
+        return true;
+    }
 
-    server.on('upgrade', (req, socket, head) => {
+    /**
+     * Take a WebSocket upgrade for the editor paths. Other paths return false.
+     * @param {import('node:http').IncomingMessage} req
+     * @param {import('node:net').Socket} socket
+     * @param {Buffer} head
+     * @returns {boolean}
+     * @ai.hint io
+     */
+    function handleUpgrade(req, socket, head) {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+        if (!COMPLETION_PATHS.has(url.pathname)) return false;
         const key = req.headers['sec-websocket-key'];
-        if (!['/v1/complete', '/v1/structure'].includes(url.pathname) || String(req.headers.upgrade ?? '').toLowerCase() !== 'websocket' || !key) {
+        if (String(req.headers.upgrade ?? '').toLowerCase() !== 'websocket' || !key) {
             socket.destroy();
-            return;
+            return true;
         }
-        if (!tokenOk(token, tokenFrom(req))) {
+        if (!tokensOk(accepted, tokenFrom(req))) {
             socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
             socket.destroy();
-            return;
+            return true;
         }
-        socket.write(
-            'HTTP/1.1 101 Switching Protocols\r\n' +
-            'Upgrade: websocket\r\n' +
-            'Connection: Upgrade\r\n' +
-            `Sec-WebSocket-Accept: ${acceptKey(key)}\r\n\r\n`,
-        );
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${acceptKey(key)}\r\n\r\n`);
         sockets.add(socket);
         socket.on('close', () => sockets.delete(socket));
         speakWebSocket(socket, head, {
@@ -277,22 +324,32 @@ export async function startCompletionServer({ port = 8765, token = null, handle 
                 socket.write(encodeServerFrame(0x1, JSON.stringify({ type: 'completion', id: message.id ?? null, ...result })));
             },
         });
-    });
-
-    /**
-     * Stop accepting and close every socket.
-     * @returns {void}
-     * @ai.hint io
-     */
-    const shutdown = () => {
-        controller.abort();
-        for (const socket of sockets) socket.destroy();
-    };
-    if (signal) {
-        if (signal.aborted) shutdown();
-        else signal.addEventListener('abort', shutdown, { once: true });
+        return true;
     }
 
+    return { handleRequest, handleUpgrade, stop };
+}
+
+/**
+ * Listen on 127.0.0.1 for POST /v1/complete and a WebSocket on the same path.
+ * @param {{ port?: number, token?: string|null, handle: (request: object, signal: AbortSignal) => Promise<object>, structure?: Function|null, signal?: AbortSignal }} options
+ * @returns {Promise<{ port: number, httpURL: string, wsURL: string, close: () => Promise<void> }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function startCompletionServer({ port = 8765, token = null, handle = null, structure = null, signal } = {}) {
+    if (typeof handle !== 'function' && typeof structure !== 'function') throw new TypeError('Нужен handle или structure.');
+    const bridge = createCompletionBridge({ tokens: token ? [token] : [], handle, structure, signal });
+    const server = http.createServer(async (req, res) => {
+        const handled = await bridge.handleRequest(req, res);
+        if (handled) return;
+        const payload = JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Неизвестный путь.' } });
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(payload) });
+        res.end(payload);
+    });
+    server.on('upgrade', (req, socket, head) => {
+        if (!bridge.handleUpgrade(req, socket, head)) socket.destroy();
+    });
     await new Promise((resolve, reject) => {
         server.once('error', reject);
         server.listen(port, HOST, resolve);
@@ -309,7 +366,7 @@ export async function startCompletionServer({ port = 8765, token = null, handle 
          * @ai.hint io
          */
         close: () => new Promise((resolve) => {
-            shutdown();
+            bridge.stop();
             server.close(() => resolve());
         }),
     };

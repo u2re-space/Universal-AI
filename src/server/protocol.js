@@ -164,19 +164,31 @@ function attachSocket(socket, { onConnection, pingIntervalMs, idleMs, maxFrameBy
 
 /**
  * Listen on 127.0.0.1 and accept WebSocket upgrades. `pingIntervalMs` 0 disables pings.
- * @param {{ port?: number, host?: string, onConnection: Function, pingIntervalMs?: number, idleMs?: number, maxFrameBytes?: number }} [options]
+ * @param {{ port?: number, host?: string, onConnection: Function, onRequest?: Function, onUpgrade?: Function, pingIntervalMs?: number, idleMs?: number, maxFrameBytes?: number }} [options]
  * @returns {Promise<{ url: string, port: number, close: () => Promise<void> }>}
  * @exports
  * @ai.hint io
  */
-export function listenProtocol({ port = 0, host = '127.0.0.1', onConnection, pingIntervalMs = 30_000, idleMs = 90_000, maxFrameBytes = MAX_FRAME_BYTES } = {}) {
+export function listenProtocol({ port = 0, host = '127.0.0.1', onConnection, onRequest = null, onUpgrade = null, pingIntervalMs = 30_000, idleMs = 90_000, maxFrameBytes = MAX_FRAME_BYTES } = {}) {
     if (host !== '127.0.0.1') return Promise.reject(new Error('WebSocket-сервер слушает только 127.0.0.1.'));
     const sockets = new Set();
-    const server = http.createServer((_req, res) => {
-        res.writeHead(426, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Требуется WebSocket.\n');
+    const server = http.createServer(async (req, res) => {
+        try {
+            if (onRequest && await onRequest(req, res)) return;
+        } catch {
+            if (!res.headersSent) {
+                res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+                res.end('Ошибка сервера.\n');
+            }
+            return;
+        }
+        if (!res.headersSent) {
+            res.writeHead(426, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end('Требуется WebSocket.\n');
+        }
     });
-    server.on('upgrade', (req, socket) => {
+    server.on('upgrade', (req, socket, head) => {
+        if (onUpgrade?.(req, socket, head)) return;
         const key = req.headers['sec-websocket-key'];
         const connection = String(req.headers.connection ?? '');
         if (String(req.headers.upgrade ?? '').toLowerCase() !== 'websocket' || !/upgrade/i.test(connection) || !key) {

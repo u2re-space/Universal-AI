@@ -2,7 +2,7 @@
  * @file src/commands/serve.js
  * @module commands/serve
  * @purpose `ai serve` — localhost WebSocket bus for ask, run, chat, and image.
- * @depends node:path, node:fs/promises, node:crypto, node:stream, server/protocol, server/hub, ui/sanitize, ui/renderer, core/config, util/text, commands/shared, commands/flags, commands/ask, commands/run, commands/chat, commands/image
+ * @depends node:path, node:fs/promises, node:crypto, node:stream, server/protocol, server/hub, ui/sanitize, ui/renderer, core/config, util/text, commands/shared, commands/flags, commands/ask, commands/run, commands/chat, commands/image, complete/server, complete/complete, complete/errors, structure/structure
  * @usedBy cli
  * @exports pidAlive, startServe, serve
  * @ai.tags cli, websocket
@@ -20,12 +20,16 @@ import { sanitizeValue } from '../ui/sanitize.js';
 import { createRenderer } from '../ui/renderer.js';
 import { loadConfig } from '../core/config.js';
 import { deepMerge } from '../util/text.js';
-import { UsageError } from './shared.js';
+import { UsageError, createClientFor } from './shared.js';
 import { overridesFrom } from './flags.js';
 import { ask } from './ask.js';
 import { run } from './run.js';
 import { chat } from './chat.js';
 import { image } from './image.js';
+import { createCompletionBridge } from '../complete/server.js';
+import { completeCode } from '../complete/complete.js';
+import { structureCode } from '../structure/structure.js';
+import { CompletionError } from '../complete/errors.js';
 
 const COMMANDS = { ask, run, chat, image };
 const FIELD_MAP = {
@@ -163,12 +167,12 @@ function commandRunner({ hub, baseConfig = null }) {
 
 /**
  * Bind the bus, write serve.json, and return a close handle.
- * @param {{ home: string, port?: number, token?: string, onStart?: Function, signal?: AbortSignal, baseConfig?: object | null }} options
- * @returns {Promise<{ url: string, token: string, port: number, file: string, close: () => Promise<void> }>}
+ * @param {{ home: string, port?: number, token?: string, onStart?: Function, signal?: AbortSignal, baseConfig?: object | null, cwd?: string, completionTokens?: string[] }} options
+ * @returns {Promise<{ url: string, token: string, port: number, file: string, httpURL: string, structureURL: string, completeWsURL: string, close: () => Promise<void> }>}
  * @exports
  * @ai.hint io
  */
-export async function startServe({ home, port = 0, token = randomBytes(32).toString('hex'), onStart, signal, baseConfig = null }) {
+export async function startServe({ home, port = 0, token = randomBytes(32).toString('hex'), onStart, signal, baseConfig = null, cwd = process.cwd(), completionTokens = [] }) {
     const file = path.join(home, 'serve.json');
     let existing = null;
     try { existing = JSON.parse(await readFile(file, 'utf8')); } catch { /* absent or stale */ }
@@ -177,16 +181,28 @@ export async function startServe({ home, port = 0, token = randomBytes(32).toStr
         token,
         onStart: onStart ?? ((run, frame) => commandRunner({ get hub() { return hub; }, baseConfig })(run, frame)),
     });
+    const completion = editorCompletion({ baseConfig, cwd, tokens: [token, ...completionTokens] });
     let listener;
     try {
-        listener = await listenProtocol({ port, host: '127.0.0.1', onConnection: (conn) => bindConnection(hub, conn) });
+        listener = await listenProtocol({
+            port, host: '127.0.0.1',
+            onConnection: (conn) => bindConnection(hub, conn),
+            onRequest: (req, res) => completion.handleRequest(req, res),
+            onUpgrade: (req, socket, head) => completion.handleUpgrade(req, socket, head),
+        });
     } catch (error) {
+        completion.stop();
         if (error?.code === 'EADDRINUSE') throw new UsageError(`Порт ${port} занят.`);
         throw error;
     }
+    const httpOrigin = listener.url.replace(/^ws:/, 'http:');
+    const record = {
+        pid: process.pid, url: listener.url, token, startedAt: new Date().toISOString(),
+        complete: `${httpOrigin}/v1/complete`, structure: `${httpOrigin}/v1/structure`, completeWs: `${listener.url}/v1/complete`,
+    };
     await mkdir(home, { recursive: true });
-    await writeFile(file, `${JSON.stringify({ pid: process.pid, url: listener.url, token, startedAt: new Date().toISOString() }, null, 2)}\n`, { mode: 0o600 });
-    process.stderr.write(`WebSocket: ${listener.url}\nФайл: ${file}\n`);
+    await writeFile(file, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+    process.stderr.write(`WebSocket: ${listener.url}\nДополнение: ${record.complete}\nСтруктура: ${record.structure}\nФайл: ${file}\n`);
     let closed = false;
     /**
      * @returns {Promise<void>}
@@ -196,6 +212,7 @@ export async function startServe({ home, port = 0, token = randomBytes(32).toStr
         if (closed) return;
         closed = true;
         hub.shutdown();
+        completion.stop();
         await listener.close();
         await rm(file, { force: true });
     };
@@ -203,7 +220,39 @@ export async function startServe({ home, port = 0, token = randomBytes(32).toStr
         if (signal.aborted) await close();
         else signal.addEventListener('abort', () => { void close(); }, { once: true });
     }
-    return { url: listener.url, token, port: listener.port, file, close };
+    return {
+        url: listener.url, token, port: listener.port, file, close,
+        httpURL: record.complete, structureURL: record.structure, completeWsURL: record.completeWs,
+    };
+}
+
+/**
+ * Editor completion on the same port as the bus. The serve token and any extra completion tokens are accepted.
+ * @param {{ baseConfig: object | null, cwd: string, tokens: string[] }} options
+ * @returns {{ handleRequest: Function, handleUpgrade: Function, stop: Function }}
+ * @ai.hint io
+ */
+function editorCompletion({ baseConfig, cwd, tokens }) {
+    let client = null;
+    /**
+     * @returns {Promise<object>}
+     * @ai.hint io
+     */
+    const configOf = async () => baseConfig ?? await loadConfig({ env: process.env, ensureHome: false });
+    return createCompletionBridge({
+        tokens,
+        handle: async (request, requestSignal) => {
+            const config = await configOf();
+            if (!config.apiKey) throw new CompletionError('Не задан OPENAI_API_KEY.', { status: 401, code: 'NO_API_KEY' });
+            client ??= createClientFor(config);
+            return completeCode({ client, config, request, cwd, signal: requestSignal });
+        },
+        structure: async (request, requestSignal) => {
+            const config = await configOf();
+            if (config.apiKey) client ??= createClientFor(config);
+            return structureCode({ request, cwd, config, client, signal: requestSignal });
+        },
+    });
 }
 
 /**
@@ -249,7 +298,10 @@ export async function serve(ctx) {
         port = Number(ctx.values.port);
         if (!Number.isInteger(port) || port < 0 || port > 65535) throw new UsageError('--port: 0..65535');
     }
-    const handle = await startServe({ home: ctx.config.home, port, signal: ctx.signal, baseConfig: ctx.config });
+    const extraTokens = [ctx.values.token, process.env.AI_COMPLETE_TOKEN, ctx.config.completion?.token].filter((item) => typeof item === 'string' && item);
+    const handle = await startServe({
+        home: ctx.config.home, port, signal: ctx.signal, baseConfig: ctx.config, cwd: ctx.cwd, completionTokens: extraTokens,
+    });
     if (ctx.signal.aborted) {
         await handle.close();
         return 0;

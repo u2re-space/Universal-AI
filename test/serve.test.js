@@ -137,6 +137,53 @@ test('ask over the socket waits for the owner approval and ignores a watcher', a
     }
 });
 
+test('the same port serves editor completion next to the bus', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-serve-complete-'));
+    const server = await startMockServer({ script: () => ({ text: 'total' }) });
+    const saved = {
+        OPENAI_API_KEY: process.env.OPENAI_API_KEY, OPENAI_BASE_URL: process.env.OPENAI_BASE_URL, AI_MODEL: process.env.AI_MODEL,
+    };
+    process.env.OPENAI_API_KEY = 'sk-test';
+    process.env.OPENAI_BASE_URL = server.baseURL;
+    process.env.AI_MODEL = 'mock-model';
+    const handle = await startServe({ home, onStart() {} });
+    const httpURL = handle.url.replace(/^ws:/, 'http:');
+    try {
+        const file = JSON.parse(await readFile(handle.file, 'utf8'));
+        assert.equal(file.complete, `${httpURL}/v1/complete`);
+        const health = await fetch(`${httpURL}/health`);
+        assert.equal((await health.json()).ok, true);
+        const denied = await fetch(`${httpURL}/v1/complete`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"content":"const n = |"}',
+        });
+        assert.equal(denied.status, 401);
+        const response = await fetch(`${httpURL}/v1/complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${handle.token}` },
+            body: JSON.stringify({ content: 'const n = |', language: 'js' }),
+        });
+        const body = await response.json();
+        assert.equal(response.status, 200, JSON.stringify(body));
+        assert.equal(body.text, 'total');
+        const ws = new WebSocket(`${handle.completeWsURL}?token=${handle.token}`);
+        const frames = [];
+        framesOf(ws, frames);
+        await once(ws, 'open');
+        ws.send(JSON.stringify({ type: 'complete', content: 'const n = |' }));
+        const done = await waitFor(frames, (frame) => frame.type === 'completion' || frame.type === 'error');
+        assert.equal(done.text, 'total');
+        ws.close();
+    } finally {
+        await handle.close();
+        for (const [key, value] of Object.entries(saved)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+        await server.close();
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
 test('ai serve CLI accepts --port and a publisher event', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-serve-cli-'));
     const work = await mkdtemp(path.join(os.tmpdir(), 'ai-serve-cli-work-'));

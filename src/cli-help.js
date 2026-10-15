@@ -31,7 +31,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai channels --listen [--port n]   HTTP и WebSocket: /v1/decisions, /v1/moderate, /v1/chats/reply, /v1/channels
   ai telegram poll                  длинный опрос Telegram: модерация групп, каналов и личных чатов
   ai telegram send <chat_id> "текст"  отправить сообщение ботом
-  ai serve [--port n]               шина WebSocket на 127.0.0.1. Кадр start принимает дополнительные поля (prompt, tools, approve, model через конфиг, files, images и остальные флаги). approval.request отвечает сокет, отправивший start
+  ai serve [--port n]               шина и дополнение кода на одном порту 127.0.0.1: WebSocket шины, POST /v1/complete, POST /v1/structure и их WebSocket. Токен из ~/.ai-agent/serve.json (или --token / AI_COMPLETE_TOKEN). Кадр start принимает дополнительные поля. approval.request отвечает сокет, отправивший start
 
 Ввод:
   --image <путь|url>     приложить изображение (можно несколько)   --detail auto|low|high|original
