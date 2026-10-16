@@ -14,6 +14,7 @@ import { resolveRole } from '../core/config.js';
 import { ASSISTANT_BASE } from './instructions.js';
 import { runOnce, loadTextFormat } from './flow.js';
 import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstructions, approvalLevel, backupDirFor, openMemoryFor } from './shared.js';
+import { stdinFence } from '../core/attachments.js';
 
 /**
  * `ai ask [prompt…]` — one prompt, one answer (plus optional attachments, stdin context,
@@ -33,7 +34,7 @@ export async function ask(ctx) {
         throw new UsageError('Укажите запрос: ai "текст запроса" (или передайте текст через stdin).');
     }
     const parts = await loadAttachments({ images: values.image ?? [], files: values.file ?? [], detail: values.detail ?? 'auto', cwd: ctx.cwd, config, renderer });
-    if (stdinText && !stdinIsPrompt) parts.push({ type: 'input_text', text: `--- stdin ---\n${stdinText}\n--- конец stdin ---` });
+    if (stdinText && !stdinIsPrompt) parts.push({ type: 'input_text', text: stdinFence(stdinText) });
     if (!prompt) prompt = 'Опиши вложения.';
 
     const extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });

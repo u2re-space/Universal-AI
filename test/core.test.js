@@ -5,7 +5,7 @@ import os from 'node:os';
 import { mkdtemp, writeFile, rm, symlink, mkdir } from 'node:fs/promises';
 import { createSession, loadSession } from '../src/core/session.js';
 import { createLedger, priceFor, costOf } from '../src/core/usage.js';
-import { loadImageAttachment, loadFileAttachment, buildUserMessage, detectImageMime } from '../src/core/attachments.js';
+import { loadImageAttachment, loadFileAttachment, buildUserMessage, detectImageMime, stdinFence } from '../src/core/attachments.js';
 import { resolveInside } from '../src/agent/paths.js';
 import { runCommand } from '../src/agent/shell.js';
 import { sanitizeTerminal } from '../src/ui/sanitize.js';
@@ -89,6 +89,8 @@ test('attachments: images become data URLs, PDFs input_file, text input_text', a
         const text = await loadFileAttachment('notes.md', { cwd: dir });
         assert.equal(text.part.type, 'input_text');
         assert.match(text.part.text, /# hello/);
+        assert.match(text.part.text, /--- File: notes\.md /);
+        assert.match(text.part.text, /--- End of file: notes\.md ---/);
         await assert.rejects(loadFileAttachment('blob.bin', { cwd: dir }), /Бинарный/);
         await assert.rejects(loadImageAttachment('missing.png', { cwd: dir }), /не найдено/);
         assert.equal(detectImageMime(Buffer.from([0xff, 0xd8, 0xff, 0xe0])), 'image/jpeg');
@@ -97,6 +99,10 @@ test('attachments: images become data URLs, PDFs input_file, text input_text', a
         assert.deepEqual(message.content.map((c) => c.type), ['input_text', 'input_image']);
         assert.throws(() => buildUserMessage({ text: '   ' }), /пустое/);
     } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('stdin fence is English', () => {
+    assert.equal(stdinFence('hello'), '--- stdin ---\nhello\n--- end stdin ---');
 });
 
 test('paths: confinement, protected names, symlink escape', async () => {

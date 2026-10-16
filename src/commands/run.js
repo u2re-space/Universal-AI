@@ -27,6 +27,7 @@ import { imageTransport } from '../openai/images.js';
 import { formatWorkspace, scanWorkspace } from '../agent/workspace-scan.js';
 import { buildGenerationBrief, writeGenerationManifest } from '../generate/brief.js';
 import { resolvePlatform } from '../generate/platform.js';
+import { stdinFence } from '../core/attachments.js';
 
 const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло результат', incomplete: 'шаги выполнены не полностью' };
 
@@ -46,7 +47,7 @@ export async function run(ctx) {
     const prepared = await prepareTeamInvocation({ positionals, values, cwd: ctx.cwd, stdinText: stdinText ?? '' });
     let task = prepared.task;
     const parts = await loadAttachments({ images: values.image ?? [], files: values.file ?? [], detail: values.detail ?? 'auto', cwd: ctx.cwd, config, renderer });
-    if (stdinText && task !== stdinText) parts.push({ type: 'input_text', text: `--- stdin ---\n${stdinText}\n--- конец stdin ---` });
+    if (stdinText && task !== stdinText) parts.push({ type: 'input_text', text: stdinFence(stdinText) });
 
     const interactive = renderer.interactive;
     const level = approvalLevel(config, interactive);

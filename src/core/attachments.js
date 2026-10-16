@@ -4,10 +4,10 @@
  * @purpose Turn local files, URLs, and data URLs into Responses API input parts.
  * @depends node:path, node:fs/promises, util/text
  * @usedBy commands/shared, commands/flow, commands/chat, agent/roles, agent/tools, agent/desktop
- * @exports detectImageMime, loadImageAttachment, loadFileAttachment, buildUserMessage
+ * @exports detectImageMime, loadImageAttachment, loadFileAttachment, buildUserMessage, stdinFence
  * @ai.tags attachments, images
  * @ai.hint io
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-16 File and stdin fences are English.
  */
 import path from 'node:path';
 import { readFile, stat } from 'node:fs/promises';
@@ -88,7 +88,7 @@ export async function loadFileAttachment(ref, { maxBytes = 32 * 1024 * 1024, cwd
     catch { throw new Error(`Файл ${ref} не в кодировке UTF-8.`); }
     const relative = path.relative(cwd, file) || name;
     return {
-        part: { type: 'input_text', text: `--- Файл: ${relative} (${formatBytes(buffer.length)}) ---\n${text}\n--- Конец файла: ${relative} ---` },
+        part: { type: 'input_text', text: `--- File: ${relative} (${formatBytes(buffer.length)}) ---\n${text}\n--- End of file: ${relative} ---` },
         meta: { source: file, bytes: buffer.length, kind: 'text' },
     };
 }
@@ -103,4 +103,15 @@ export function buildUserMessage({ text = '', parts = [] } = {}) {
     }
     if (!content.length) throw new Error('Сообщение пустое: нужен текст или вложение.');
     return { type: 'message', role: 'user', content };
+}
+
+/**
+ * English fence around stdin that is context rather than the prompt itself.
+ * @param {string} text
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function stdinFence(text) {
+    return `--- stdin ---\n${text}\n--- end stdin ---`;
 }
