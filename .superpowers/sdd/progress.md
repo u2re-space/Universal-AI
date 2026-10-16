@@ -30,4 +30,5 @@ Worktree: C:\Projects\Universal-AI (feature branch in the main checkout)
 Task 1 (catalog): complete (commits 37909d5..8aa00ac, review clean). Minors: catalog row objects are not frozen; alias test does not assert object identity.
 Task 2 (wiring): complete (commits 8aa00ac..f90eafc, review clean). Minors: unused pickString; stale test title "low effort"; buildCompletionBody JSDoc says effort is string; BAD_MODEL test does not assert the full choice list; omit rows other than Qwen and invalid effort are not separately tested.
 Task 3 (editor): complete (commits 57e7f2b..51d6b85 on C:\Projects\VSCodeExtension branch feat/completion-model, review clean after windowed-model assertion fix). Minors: no settings round-trip for a valid selected id; choice ids are duplicated in package.json and settings.mjs by plan.
+Final review: With fixes. Fixed in 76df8d9 (structure omit-row reasoning) and 7fdedca (no reconnect; settings round-trip). Re-review approved. Suites: Universal-AI 235 pass, extension 56 pass.
 
