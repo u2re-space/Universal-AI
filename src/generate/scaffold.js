@@ -4,7 +4,7 @@
  * @purpose Stack, package.json, recommendations, and the safe scaffold merge for generation.
  * @depends node:path
  * @usedBy generate/brief, agent/tools
- * @exports filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack
+ * @exports filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, stackDocuments, kindRules, renderGenerationTask
  * @ai.tags generate
  * @ai.hint pure
  * @changed 2026-10-16 Scaffold contract for Vite, rules, and safe npx.
@@ -201,4 +201,172 @@ export function recommendStack({ kind, prompt = '', references = {} }) {
     if (/shadcn/i.test(hay)) bases.push({ name: 'shadcn', reason: 'named component base' });
     if (/\bradix\b/i.test(hay)) bases.push({ name: 'radix', reason: 'named component base' });
     return { libraries, templates, bases };
+}
+
+/**
+ * Source of scripts/generate.js for a generated project. It does not import this repository.
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function scaffoldScript() {
+    return [
+        "import { spawn } from 'node:child_process';",
+        "import { mkdtemp, rm, readFile, writeFile, mkdir, readdir, copyFile, stat } from 'node:fs/promises';",
+        "import os from 'node:os';",
+        "import path from 'node:path';",
+        "import { fileURLToPath } from 'node:url';",
+        "",
+        "const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');",
+        "const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));",
+        "const command = typeof pkg.generate?.command === 'string' ? pkg.generate.command.trim() : '';",
+        "const protect = new Set([...(Array.isArray(pkg.generate?.protect) ? pkg.generate.protect : [])].map((item) => String(item).replace(/\\\\/g, '/')));",
+        "if (!command) {",
+        "    process.stdout.write('The skeleton is already written.\\n');",
+        "    process.exit(0);",
+        "}",
+        "const temp = await mkdtemp(path.join(os.tmpdir(), 'scaffold-'));",
+        "let code = 1;",
+        "try {",
+        "    const child = spawn(command, { cwd: temp, shell: true, stdio: 'inherit', windowsHide: true });",
+        "    code = await new Promise((resolve) => child.once('close', resolve)) ?? 1;",
+        "    if (code !== 0) {",
+        "        /* a failed generator copies nothing */",
+        "    } else {",
+        "        const files = [];",
+        "        const walk = async (dir) => {",
+        "            for (const entry of await readdir(dir, { withFileTypes: true })) {",
+        "                if (entry.name === 'node_modules' || entry.name === '.git') continue;",
+        "                const abs = path.join(dir, entry.name);",
+        "                if (entry.isDirectory()) await walk(abs);",
+        "                else files.push(path.relative(temp, abs).replace(/\\\\/g, '/'));",
+        "            }",
+        "        };",
+        "        await walk(temp);",
+        "        for (const rel of files) {",
+        "            if (rel === 'package.json' || protect.has(rel)) continue;",
+        "            const dest = path.join(root, rel);",
+        "            if (await stat(dest).then(() => true).catch(() => false)) continue;",
+        "            await mkdir(path.dirname(dest), { recursive: true });",
+        "            await copyFile(path.join(temp, rel), dest);",
+        "        }",
+        "        const incomingPath = path.join(temp, 'package.json');",
+        "        if (await stat(incomingPath).then(() => true).catch(() => false) && !protect.has('package.json')) {",
+        "            const dest = path.join(root, 'package.json');",
+        "            const have = await stat(dest).then(() => true).catch(() => false);",
+        "            if (!have) await copyFile(incomingPath, dest);",
+        "            else {",
+        "                let current;",
+        "                try { current = JSON.parse(await readFile(dest, 'utf8')); } catch { current = null; }",
+        "                if (current && typeof current === 'object' && !Array.isArray(current)) {",
+        "                    const incoming = JSON.parse(await readFile(incomingPath, 'utf8'));",
+        "                    for (const section of ['scripts', 'dependencies', 'devDependencies']) {",
+        "                        const prior = current[section] && typeof current[section] === 'object' ? current[section] : {};",
+        "                        const extra = incoming[section] && typeof incoming[section] === 'object' ? incoming[section] : {};",
+        "                        current[section] = { ...prior };",
+        "                        for (const [key, value] of Object.entries(extra)) if (!(key in current[section])) current[section][key] = value;",
+        "                    }",
+        "                    await writeFile(dest, JSON.stringify(current, null, 2) + '\\n');",
+        "                }",
+        "            }",
+        "        }",
+        "    }",
+        "} finally {",
+        "    await rm(temp, { recursive: true, force: true });",
+        "}",
+        "process.exit(code);",
+        "",
+    ].join('\n');
+}
+
+/**
+ * English rule and skill bodies.
+ * @param {string | null} kind
+ * @param {{ id: string, ecma: { edition: number } }} platform
+ * @returns {Record<string, string>}
+ * @exports
+ * @ai.hint pure
+ */
+export function stackDocuments(kind, platform) {
+    return {
+        '.rules/stack.md': `# Stack\n\n${stackText(kind, platform)}\n`,
+        '.rules/files.md': '# Files\n\nRead existing files. Do not overwrite them. A scaffold command copies only missing paths and adds absent package.json keys.\n',
+        '.skills/scaffold/SKILL.md': '# Scaffold\n\nWrite the skeleton with file tools. Run npm run generate only when package.json generate.command names a generator. The script copies missing files and skips node_modules.\n',
+    };
+}
+
+/**
+ * Operator contract for one kind.
+ * @param {string | null} kind
+ * @param {{ libraries: { name: string, include: boolean }[] }} recommendations
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function kindRules(kind, recommendations) {
+    const fastify = recommendations.libraries.some((item) => item.name === 'fastify' && item.include);
+    const lines = [];
+    if (kind === 'backend') {
+        lines.push('Node.js 26 ESM. Bind 127.0.0.1. Port from PORT or 3000.');
+        lines.push(fastify ? 'Use fastify and the companion packages marked include.' : 'Use node:http. Do not add Fastify unless the recommendation includes it.');
+    } else if (kind === 'landing' || kind === 'site' || kind === 'app') {
+        lines.push('Vite, SCSS, and ESM. Node.js 26.');
+        lines.push(kind === 'app' ? 'server.js serves dist/ after vite build.' : 'No Node server.');
+    } else lines.push('Choose the files the request needs.');
+    lines.push('Read existing .rules/ and .skills/. Create missing stack files. Do not overwrite them.');
+    lines.push('Add absent package.json keys only. Keep existing script bodies and versions.');
+    lines.push('Do not pass --force or -f to a scaffold command. Do not chain a scaffold command with &&, ||, ;, |, or redirection.');
+    return lines.join('\n');
+}
+
+/**
+ * English task wrapper. Fidelity, references, and the customer fence are added by the brief.
+ * @param {{ kind: string | null, prompt?: string, platform: object, recommendations: object, name?: string }} request
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function renderGenerationTask({ kind, prompt = '', platform, recommendations, name = 'app' }) {
+    void prompt;
+    const files = filesForKind(kind);
+    const docs = stackDocuments(kind, platform);
+    const libs = recommendations.libraries.map((item) => {
+        const docsUrl = item.docs ? ` Docs: ${item.docs}.` : '';
+        const types = item.types ? ` Types: ${item.types}.` : '';
+        const confirm = item.docs == null && item.include ? ' Confirm docs and types with web_search when that tool is enabled.' : '';
+        return `- ${item.name} (${item.kind}, ${item.include ? 'include' : 'recommend'}): ${item.reason}${docsUrl}${types}${confirm}`;
+    });
+    return [
+        'Plan the work before changing files.',
+        'Produce an action plan, a file tree, the stack, the components or modules to recreate or reuse, and the standards to follow.',
+        'Prepare scripts for testing, for initial generation, and for installing packages.',
+        'List the recommended libraries. Choose them from the mockup, the attached image, and the design name, with CSS and icons first.',
+        'When the customer names a library or a link, include it, and include its documentation and its type package when they exist.',
+        'When web_search is available, use it to confirm documentation and type packages.',
+        'After the plan, initialize the project and implement the application or its prototype.',
+        '',
+        'Stack:',
+        stackText(kind, platform),
+        '',
+        files.length ? 'Create these files when they are missing:' : 'Create the files the request needs.',
+        ...files.map((file) => `- ${file}`),
+        '',
+        'Recommendations:',
+        ...(libs.length ? libs : ['- (none)']),
+        '',
+        'Write the Vite and SCSS skeleton with file tools when the stack is web. When scripts/generate.js is missing, write the source block below it unchanged.',
+        '```js',
+        scaffoldScript(),
+        '```',
+        'When .rules/stack.md, .rules/files.md, or .skills/scaffold/SKILL.md is missing, write these bodies unchanged:',
+        ...Object.entries(docs).flatMap(([file, body]) => [`##### ${file}`, body.trimEnd()]),
+        'Run npx or npm run generate only for a named generator or template.',
+        'Read .rules/ and .skills/ when they exist. Create the missing stack files and follow them. Do not overwrite them.',
+        'Do not overwrite an existing file. A scaffold command copies only missing paths and adds absent package.json keys.',
+        '',
+        'package.json for a new project. Versions stay *. When the file already exists, add absent keys only:',
+        '```json',
+        JSON.stringify(buildPackageManifest({ kind, name, libraries: recommendations.libraries }), null, 2),
+        '```',
+    ].join('\n');
 }

@@ -2,35 +2,28 @@
  * @file src/generate/brief.js
  * @module generate/brief
  * @purpose Turn a generation request into a team task, operator instructions, and a manifest.
- * @depends node:path, node:fs/promises, generate/fidelity, generate/platform
+ * @depends node:path, node:fs/promises, generate/fidelity, generate/platform, generate/scaffold
  * @usedBy commands/gen
- * @exports GENERATION_KINDS, KIND_OUTPUTS, KIND_RULES, buildGenerationBrief, writeGenerationManifest
+ * @exports GENERATION_KINDS, KIND_OUTPUTS, buildGenerationBrief, writeGenerationManifest
  * @ai.tags generate
  * @ai.hint pure
- * @changed 2026-10-15 Brief for landing, site, backend, and app.
+ * @changed 2026-10-16 English scaffold wrapper.
  */
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { fidelityContract, fidelityInstructions } from './fidelity.js';
 import { platformInstructions } from './platform.js';
+import { filesForKind, stackText, recommendStack, renderGenerationTask, kindRules } from './scaffold.js';
 
 /** Kinds `ai gen` accepts. */
 export const GENERATION_KINDS = Object.freeze(['landing', 'site', 'backend', 'app']);
 
 /** Files the model is asked to create for each kind. */
 export const KIND_OUTPUTS = Object.freeze({
-    landing: Object.freeze(['index.html', 'styles.css']),
-    site: Object.freeze(['index.html', 'styles.css', 'about.html']),
-    backend: Object.freeze(['server.js']),
-    app: Object.freeze(['server.js', 'public/index.html', 'public/styles.css']),
-});
-
-/** Stack rules. No npm and no bundler. Servers stay on node:http. */
-export const KIND_RULES = Object.freeze({
-    landing: 'One static page. Semantic HTML and one stylesheet. No framework, no bundler, no npm.',
-    site: 'A small multi-page static site sharing one stylesheet. No framework, no bundler, no npm.',
-    backend: 'Node.js 26 ESM. Use node:http only. No npm dependencies. Bind 127.0.0.1. Port from PORT or 3000.',
-    app: 'Node.js 26 ESM server plus static files in public/. Use node:http only. No npm dependencies. Bind 127.0.0.1. Port from PORT or 3000.',
+    landing: Object.freeze(filesForKind('landing')),
+    site: Object.freeze(filesForKind('site')),
+    backend: Object.freeze(filesForKind('backend')),
+    app: Object.freeze(filesForKind('app')),
 });
 
 /**
@@ -47,12 +40,12 @@ function referenceLines(label, items) {
 
 /**
  * Build the task, the operator instructions, and the manifest that is written to disk.
- * @param {{ kind: string, prompt?: string, fidelity: number, creativity: number, platform: object, references?: { images?: string[], files?: string[], templates?: string[], examples?: string[] } }} request
+ * @param {{ kind: string, prompt?: string, name?: string, fidelity: number, creativity: number, platform: object, references?: { images?: string[], files?: string[], templates?: string[], examples?: string[] } }} request
  * @returns {{ task: string, instructions: string, manifest: object }}
  * @exports
  * @ai.hint pure
  */
-export function buildGenerationBrief({ kind = null, prompt = '', fidelity, creativity, platform, references = {} }) {
+export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', fidelity, creativity, platform, references = {} }) {
     if (kind != null && !GENERATION_KINDS.includes(kind)) throw new Error(`Вид генерации: ${GENERATION_KINDS.join('|')}`);
     const contract = fidelityContract({ fidelity, creativity });
     const refs = {
@@ -67,24 +60,15 @@ export function buildGenerationBrief({ kind = null, prompt = '', fidelity, creat
         ...referenceLines('Templates', refs.templates),
         ...referenceLines('Design examples', refs.examples),
     ];
+    const recommendations = recommendStack({ kind, prompt, references: refs });
+    const outputs = kind ? [...filesForKind(kind)] : [];
     const manifest = {
-        kind,
-        prompt,
-        fidelity: contract.fidelity,
-        creativity: contract.creativity,
-        measured: null,
-        method: 'unmeasured',
-        reason: contract.reason,
-        platform: platform.id,
-        experimentalFlags: false,
-        references: refs,
-        outputs: kind ? [...KIND_OUTPUTS[kind]] : [],
+        kind, prompt, fidelity: contract.fidelity, creativity: contract.creativity, measured: null,
+        method: 'unmeasured', reason: contract.reason, platform: platform.id, experimentalFlags: false,
+        references: refs, outputs, stack: { kind, text: stackText(kind, platform) }, recommendations,
     };
     const task = [
-        kind ? `Generate a ${kind}.` : 'Generate from the request and the references.',
-        '',
-        'User request:',
-        prompt.trim() || '(no text; follow the references)',
+        renderGenerationTask({ kind, prompt, platform, recommendations, name }),
         '',
         `Fidelity target: ${contract.fidelity}%. Measured match: unmeasured. Do not invent a percentage.`,
         `Creativity for elements that are not in the references: ${contract.creativity}%.`,
@@ -92,16 +76,19 @@ export function buildGenerationBrief({ kind = null, prompt = '', fidelity, creat
         listed.length ? 'References:' : 'References: none attached.',
         ...listed,
         '',
-        manifest.outputs.length ? 'Create these files:' : 'Create the files the request needs.',
-        ...manifest.outputs.map((file) => `- ${file}`),
-        '',
         'A contract file .ai/generation.json is already written. You may add the paths you created. Leave measured null.',
         ...(refs.images.length ? ['', 'Reference images are mockups. Recreate their photographs, illustrations, and textures with generate_image, or change a reference file with edit_image. If the only image tool is image_generation, use that. Point the page at the new files. Do not use a reference image as the page background or as a screenshot of the whole layout. Type, controls, and layout are HTML and CSS.'] : []),
+        '',
+        'Customer task:',
+        '',
+        '```md',
+        prompt.trim() || '(no text; follow the references)',
+        '```',
     ].join('\n');
     const instructions = [
         platformInstructions(platform),
         '',
-        kind ? KIND_RULES[kind] : 'Choose the files the request needs.',
+        kindRules(kind, recommendations),
         '',
         fidelityInstructions(contract),
         ...(refs.images.length ? ['', 'The worker must create each artwork region with generate_image or edit_image before the page is finished. The saved image paths belong in the HTML and CSS.'] : []),

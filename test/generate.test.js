@@ -70,13 +70,26 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
     assert.equal(brief.manifest.method, 'unmeasured');
     assert.equal(brief.manifest.platform, 'chrome-157-beta');
     assert.equal(brief.manifest.experimentalFlags, false);
-    assert.deepEqual(brief.manifest.outputs, ['index.html', 'styles.css']);
+    assert.deepEqual(brief.manifest.outputs, [
+        'package.json', 'vite.config.js', 'index.html', 'src/main.js', 'src/styles.scss', 'scripts/generate.js',
+        '.rules/stack.md', '.rules/files.md', '.skills/scaffold/SKILL.md',
+    ]);
     assert.match(brief.task, /87%/);
     assert.match(brief.task, /landing\.png/);
     assert.match(brief.task, /templates\/base/);
     assert.match(brief.task, /https:\/\/css-tricks\.com\//);
+    assert.match(brief.task, /Plan the work before changing files/);
+    assert.match(brief.task, /```md\nПовтори макет Tilda Publishing\n```/);
+    assert.match(brief.task, /lucide/);
+    assert.match(brief.task, /"vite": "\*"/);
+    assert.doesNotMatch(brief.task, /tailwindcss/);
+    assert.equal(brief.manifest.measured, null);
+    assert.equal(brief.manifest.stack.kind, 'landing');
+    assert.equal(brief.manifest.recommendations.libraries.some((item) => item.name === 'lucide'), true);
     assert.match(brief.instructions, /Experimental flags: off/);
-    assert.match(brief.instructions, /No framework, no bundler, no npm/);
+    assert.doesNotMatch(brief.instructions, /No framework, no bundler, no npm/);
+    assert.match(brief.instructions, /Vite, SCSS/);
+    assert.match(brief.instructions, /Do not pass --force/);
     assert.match(brief.instructions, /Leave measured null|Leave measured null|measured null/);
     assert.match(brief.task, /image_generation/);
     assert.match(brief.task, /Do not use a reference image as the page background/);
@@ -85,6 +98,7 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
     const backend = buildGenerationBrief({ kind: 'backend', prompt: 'api', fidelity: 87, creativity: 0, platform: resolvePlatform(), references: {} });
     assert.match(backend.instructions, /node:http/);
     assert.match(backend.instructions, /127\.0\.0\.1/);
+    assert.equal(backend.manifest.recommendations.libraries.some((item) => item.include && item.name === 'fastify'), false);
     assert.throws(() => buildGenerationBrief({ kind: 'mobile', prompt: 'x', fidelity: 87, creativity: 20, platform: resolvePlatform() }), /Вид генерации/);
 });
 
@@ -161,6 +175,8 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
         const code = await new Promise((resolve) => child.once('close', resolve));
         assert.equal(code, 0, stderr);
         assert.match(planner, /87%/);
+        assert.match(planner, /Plan the work before changing files/);
+        assert.match(planner, /Customer task:/);
         assert.match(planner, /chrome-157-beta/);
         assert.match(planner, /landing\.png/);
         assert.match(planner, /image_generation/);

@@ -2,13 +2,14 @@
  * @file src/commands/run.js
  * @module commands/run
  * @purpose Run an autonomous task as a role team or as a single tool loop.
- * @depends agent/map, agent/tools, agent/roles, agent/team, agent/workspace-scan, core/config, util/text, commands/instructions, commands/flow, commands/shared, mcp/session
+ * @depends agent/map, agent/tools, agent/roles, agent/team, agent/workspace-scan, core/config, util/text, commands/instructions, commands/flow, commands/shared, mcp/session, node:path
  * @usedBy cli
  * @exports run
  * @ai.tags cli, agent, team
  * @ai.hint io
- * @changed 2026-10-15 Single-agent runs include a Node or frontend workspace scan.
+ * @changed 2026-10-16 Generation brief receives the directory name.
  */
+import path from 'node:path';
 import { ensureProjectMap } from '../agent/map.js';
 import { createToolset, enabledToolNames } from '../agent/tools.js';
 import { builtinTools } from '../agent/loop.js';
@@ -66,6 +67,7 @@ export async function run(ctx) {
             kind: prepared.kind, prompt: task, fidelity: config.generate.fidelity, creativity: config.generate.creativity,
             platform: resolvePlatform(config.generate.platform),
             references: { images: values.image ?? [], files: values.file ?? [], examples: values.example ?? [] },
+            name: path.basename(ctx.cwd),
         });
         await writeGenerationManifest(ctx.cwd, brief.manifest);
         renderer.line('info', `Контракт генерации: .ai/generation.json · точность ${brief.manifest.fidelity}% · креативность ${brief.manifest.creativity}%`, { dim: true });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack } from '../src/generate/scaffold.js';
+import { filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, renderGenerationTask } from '../src/generate/scaffold.js';
 
 const platform = { id: 'chrome-157-beta', ecma: { edition: 2026 } };
 
@@ -85,4 +85,23 @@ test('Tailwind is included and Express replaces Fastify', () => {
     assert.equal(kit.include, true);
     assert.equal(kit.docs, null);
     assert.equal(kit.types, null);
+});
+
+test('generate script is standalone English and the wrapper quotes the customer', () => {
+    const source = scaffoldScript();
+    assert.match(source, /The skeleton is already written/);
+    assert.match(source, /node_modules/);
+    assert.match(source, /if \(!\(key in current\[section\]\)\)/);
+    assert.doesNotMatch(source, /from ['"]\.\.\/src/);
+    const task = renderGenerationTask({
+        kind: 'landing',
+        prompt: 'Повтори макет',
+        platform,
+        recommendations: recommendStack({ kind: 'landing', prompt: 'Повтори макет', references: {} }),
+    });
+    assert.match(task, /Plan the work before changing files/);
+    assert.match(task, /When web_search is available/);
+    assert.match(task, /scripts\/generate\.js/);
+    assert.match(task, /The skeleton is already written/);
+    assert.equal(task.includes('Повтори макет'), false);
 });
