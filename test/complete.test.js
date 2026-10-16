@@ -9,7 +9,7 @@ import { startMockServer } from './helpers/mock-server.js';
 import { defaults, loadConfig } from '../src/core/config.js';
 import { createClient } from '../src/openai/client.js';
 import { MAX_LINE_BYTES, buildCompletionContext, formatCompletionTree, readCompletionWindow } from '../src/complete/context.js';
-import { completeCode, stripCompletion, stripDoubledClosers } from '../src/complete/complete.js';
+import { acceptInsertion, completeCode, stripCompletion, stripDoubledClosers } from '../src/complete/complete.js';
 import { startCompletionServer } from '../src/complete/server.js';
 import { readClientFrames } from '../src/complete/ws.js';
 import { CompletionError } from '../src/complete/errors.js';
@@ -185,24 +185,26 @@ test('the focused file around the cursor is the code to complete', () => {
     assert.match(built.prompt, /^function total/m);
 });
 
-test('problems, validation, and the workspace tree join the focused file', () => {
+test('nearby problems stay and the workspace tree is not sent to the model', () => {
     const files = ['src/app.js', 'src/util.js', 'node_modules/left-pad/index.js', '.git/config'];
     for (let i = 0; i < 45; i++) files.push(`src/extra/f${String(i).padStart(2, '0')}.js`);
     const built = buildCompletionContext({
         content: 'const n = |',
-        problems: [{ line: 0, character: 6, severity: 'error', source: 'eslint', message: 'Unexpected token' }],
+        problems: [
+            { line: 0, character: 6, severity: 'error', source: 'eslint', message: 'Unexpected token' },
+            { line: 40, character: 0, severity: 'warning', source: 'eslint', message: 'far away' },
+        ],
         validation: [{ line: 2, character: 0, severity: 'error', source: 'typescript', message: "'}' expected" }],
         files,
     });
-    assert.match(built.prompt, /Problems \(syntax and lint\):/);
+    assert.match(built.prompt, /Problems on nearby lines:/);
     assert.match(built.prompt, /L1:C7 error eslint: Unexpected token/);
-    assert.match(built.prompt, /Validation:/);
+    assert.match(built.prompt, /Validation on nearby lines:/);
     assert.match(built.prompt, /typescript: '\}' expected/);
-    assert.match(built.prompt, /src\/\n {2}extra\//);
-    assert.match(built.prompt, / {2}app\.js/);
+    assert.equal(built.prompt.includes('far away'), false);
+    assert.equal(built.prompt.includes('Workspace file'), false);
+    assert.equal(built.prompt.includes('extra/'), false);
     assert.equal(built.prompt.includes('node_modules'), false);
-    assert.equal(built.prompt.includes('.git/'), false);
-    assert.match(built.prompt, /… \(\d+ more\)/);
 });
 
 test('a crowded directory keeps a short listing', () => {
@@ -212,6 +214,16 @@ test('a crowded directory keeps a short listing', () => {
     assert.match(tree, /f00\.js/);
     assert.match(tree, /… \(45 more\)/);
     assert.equal(tree.includes('f49.js'), false);
+});
+
+test('a planning paragraph is not an insertion', () => {
+    const plan = 'We need infer import target likely inspect nearest context absent. They want fill from import {} from . Need likely module package. Best likely \'vscode\'.';
+    assert.equal(acceptInsertion(plan), '');
+    assert.equal(acceptInsertion("'vscode'"), "'vscode'");
+    assert.equal(acceptInsertion("'./imports/api.ts'"), "'./imports/api.ts'");
+    assert.equal(acceptInsertion('  items.length'), '  items.length');
+    assert.equal(acceptInsertion('fs:write src/app.js'), '');
+    assert.equal(acceptInsertion('{"summary":"edit","actions":[]}'), '');
 });
 
 test('stripDoubledClosers drops a repeated closer the file already has', () => {
@@ -317,6 +329,47 @@ test('grok uses low effort and 512 tokens even when config asks for none and 80'
             client: http, config: next,
             request: { content: 'const n = |', model: 'x-ai/grok-4.7', effort: 'none' },
         });
+    } finally { http.close(); }
+});
+
+test('completion does not use the encoder cache and ignores a far problem', async () => {
+    script = (body) => {
+        assert.equal(body.prompt_cache_key, undefined);
+        assert.match(body.instructions, /not the encoder role/);
+        assert.equal(body.input.includes('far away'), false);
+        assert.equal(body.input.includes('src/extra'), false);
+        assert.match(body.input, /return items\.\|/);
+        return { text: '.length' };
+    };
+    const http = client();
+    try {
+        const next = config();
+        next.promptCacheKey = 'encoder-cache';
+        const result = await completeCode({
+            client: http,
+            config: next,
+            request: {
+                content: 'function total(items) {\n  return items.;\n}\n',
+                cursor: { line: 1, character: 15 },
+                path: 'src/app.js',
+                problems: [{ line: 40, character: 0, severity: 'error', source: 'eslint', message: 'far away' }],
+                files: ['src/extra/api.ts', 'src/app.js'],
+            },
+        });
+        assert.equal(result.text, '.length');
+    } finally { http.close(); }
+});
+
+test('a completion that explains the import is not shown', async () => {
+    script = () => ({ text: 'We need infer import target likely inspect nearest context. Need likely module package. Best likely vscode.' });
+    const http = client();
+    try {
+        const result = await completeCode({
+            client: http,
+            config: config(),
+            request: { content: 'import {} from |', language: 'javascript' },
+        });
+        assert.equal(result.text, '');
     } finally { http.close(); }
 });
 

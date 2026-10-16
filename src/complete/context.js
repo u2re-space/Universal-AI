@@ -327,7 +327,7 @@ function renderPrompt(built) {
     rows.push(`Cursor: line ${built.cursorLine + 1}, character ${built.cursorCharacter + 1}.`);
     rows.push('The | marks the cursor in this file. Code before | and code after | are already in the buffer.');
     if (built.cursorLineOmitted) rows.push('The cursor line is omitted because it is larger than 0.5 MiB. Insert at the | between the nearest lines.');
-    if (built.truncated) rows.push('Only the lines around the cursor are shown.');
+    if (built.truncated) rows.push('Lines far from the cursor are omitted. The lines shown are the file.');
     if (built.omittedLines.length) {
         const shown = built.omittedLines.slice(0, 20).map((n) => n + 1).join(', ');
         const more = built.omittedLines.length > 20 ? ` (+${built.omittedLines.length - 20} more)` : '';
@@ -338,12 +338,11 @@ function renderPrompt(built) {
         rows.push(`Replace this selection: ${clip}`);
     }
     rows.push('', built.focus);
-    const problems = formatCompletionProblems(built.problems);
-    if (problems) rows.push('', 'Problems (syntax and lint):', problems);
-    const validation = formatCompletionProblems(built.validation);
-    if (validation && validation !== problems) rows.push('', 'Validation:', validation);
-    const tree = formatCompletionTree(built.files);
-    if (tree) rows.push('', 'Workspace files:', tree);
+    const near = (items) => (Array.isArray(items) ? items.filter((item) => Number.isSafeInteger(item?.line) && Math.abs(item.line - built.cursorLine) <= 3) : items);
+    const problems = formatCompletionProblems(near(built.problems));
+    if (problems) rows.push('', 'Problems on nearby lines:', problems);
+    const validation = formatCompletionProblems(near(built.validation));
+    if (validation && validation !== problems) rows.push('', 'Validation on nearby lines:', validation);
     return rows.join('\n');
 }
 
