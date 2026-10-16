@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, renderGenerationTask } from '../src/generate/scaffold.js';
+import { filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, renderGenerationTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge } from '../src/generate/scaffold.js';
 
 const platform = { id: 'chrome-157-beta', ecma: { edition: 2026 } };
 
@@ -104,4 +104,43 @@ test('generate script is standalone English and the wrapper quotes the customer'
     assert.match(task, /scripts\/generate\.js/);
     assert.match(task, /The skeleton is already written/);
     assert.equal(task.includes('Повтори макет'), false);
+});
+
+test('scaffold commands are classified before spawn', () => {
+    assert.equal(isScaffoldCommand('npx vite'), false);
+    assert.equal(isScaffoldCommand('npm install'), false);
+    assert.equal(isScaffoldCommand('npx --yes create-vite@latest .'), true);
+    assert.equal(isScaffoldCommand('npm create vite@latest client'), true);
+    assert.equal(isScaffoldCommand('npm init -y'), true);
+    assert.throws(() => scaffoldCommandError('npx create-vite@latest . --force'), /Run one scaffold command/);
+    assert.throws(() => scaffoldCommandError('npx create-vite@latest . && npm install'), /Run one scaffold command/);
+    assert.doesNotThrow(() => scaffoldCommandError('npx vite'));
+    assert.doesNotThrow(() => scaffoldCommandError('npx --yes create-vite@latest .'));
+});
+
+test('merge keeps existing files, named paths, and package.json scripts', () => {
+    const plan = planScaffoldMerge({
+        incoming: ['index.html', 'src/main.js', 'node_modules/left.js', 'package-lock.json', 'package.json'],
+        existing: ['index.html', 'package.json', 'package-lock.json'],
+        task: 'Write `src/main.js` from the mockup.',
+        existingPackageText: JSON.stringify({ scripts: { test: 'node --test test/old.test.js' }, devDependencies: { vite: '*' } }),
+        incomingPackageText: JSON.stringify({ scripts: { test: 'node --test', generate: 'node scripts/generate.js' }, devDependencies: { sass: '*' } }),
+        protect: [],
+    });
+    assert.ok(plan.skip.includes('index.html'));
+    assert.ok(plan.skip.includes('src/main.js'));
+    assert.ok(plan.skip.includes('node_modules/left.js'));
+    assert.ok(plan.skip.includes('package-lock.json'));
+    assert.equal(plan.copy.includes('src/main.js'), false);
+    assert.equal(plan.packageJson.action, 'merge');
+    assert.ok(plan.packageJson.added.includes('scripts.generate'));
+    assert.ok(plan.packageJson.added.includes('devDependencies.sass'));
+    const merged = JSON.parse(plan.packageJson.text);
+    assert.equal(merged.scripts.test, 'node --test test/old.test.js');
+    const broken = planScaffoldMerge({
+        incoming: ['package.json'], existing: ['package.json'], task: '',
+        existingPackageText: '{', incomingPackageText: '{}', protect: [],
+    });
+    assert.equal(broken.packageJson.action, 'invalid');
+    assert.equal(broken.packageJson.text, undefined);
 });

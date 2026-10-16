@@ -4,7 +4,7 @@
  * @purpose Stack, package.json, recommendations, and the safe scaffold merge for generation.
  * @depends node:path
  * @usedBy generate/brief, agent/tools
- * @exports filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, stackDocuments, kindRules, renderGenerationTask
+ * @exports filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, stackDocuments, kindRules, renderGenerationTask, pathsNamedInTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge
  * @ai.tags generate
  * @ai.hint pure
  * @changed 2026-10-16 Scaffold contract for Vite, rules, and safe npx.
@@ -369,4 +369,105 @@ export function renderGenerationTask({ kind, prompt = '', platform, recommendati
         JSON.stringify(buildPackageManifest({ kind, name, libraries: recommendations.libraries }), null, 2),
         '```',
     ].join('\n');
+}
+
+const NAMED_FILE = /(?:^|[\s"'`(])((?:\.rules|\.skills)\/[\w./-]+|(?:[\w.-]+\/)*[\w.-]+\.(?:html|js|mjs|cjs|scss|css|json|md))\b/;
+
+/**
+ * Relative paths named in the customer task.
+ * @param {string} text
+ * @returns {string[]}
+ * @exports
+ * @ai.hint pure
+ */
+export function pathsNamedInTask(text) {
+    const found = new Set();
+    const source = String(text ?? '');
+    const keep = (token) => {
+        const rel = token.trim().replace(/\\/g, '/').replace(/^\.\//, '');
+        if (!rel || rel.includes('..')) return;
+        found.add(rel);
+    };
+    for (const match of source.matchAll(/`([^`\n]+)`/g)) {
+        const token = match[1];
+        if (token.startsWith('.rules/') || token.startsWith('.skills/') || path.extname(token)) keep(token);
+    }
+    for (const match of source.matchAll(new RegExp(NAMED_FILE.source, 'g'))) keep(match[1]);
+    return [...found];
+}
+
+const SCAFFOLD_START = /(?:^|&&|\|\||;|\n)\s*(?:npm\s+init\b|npm\s+create\b|npm\s+exec\s+(?:--yes\s+|--no-install\s+)*create-|npx\s+(?:--yes\s+|--no-install\s+)*(?:create-|@[A-Za-z0-9._-]+\/create-))/;
+
+/**
+ * True when the command string is, or contains, a project scaffold.
+ * @param {string} command
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function isScaffoldCommand(command) {
+    return SCAFFOLD_START.test(String(command ?? '').trim());
+}
+
+/**
+ * Throw when a scaffold command is compound or forced. Other commands return.
+ * @param {string} command
+ * @returns {void}
+ * @exports
+ * @ai.hint pure
+ */
+export function scaffoldCommandError(command) {
+    const text = String(command ?? '').trim();
+    if (!isScaffoldCommand(text)) return;
+    if (/&&|\|\||;|\||\n|>>?/.test(text) || /(^|\s)--force(?=\s|$)/.test(text) || /(^|\s)-f(?=\s|$)/.test(text)) {
+        throw new Error('Run one scaffold command. Do not use --force, -f, or a compound command.');
+    }
+}
+
+/**
+ * Decide which scaffold files may be copied. Does not touch the disk.
+ * @param {{ incoming: string[], existing: string[], task?: string, existingPackageText?: string, incomingPackageText?: string, protect?: string[] }} request
+ * @returns {{ copy: string[], skip: string[], packageJson: { action: string, added: string[], text?: string } }}
+ * @exports
+ * @ai.hint pure
+ */
+export function planScaffoldMerge({ incoming, existing, task = '', existingPackageText = '', incomingPackageText = '', protect = [] }) {
+    const named = new Set([...pathsNamedInTask(task), ...protect.map((item) => String(item).replace(/\\/g, '/'))]);
+    const have = new Set(existing.map((item) => item.replace(/\\/g, '/')));
+    const copy = [];
+    const skip = [];
+    for (const raw of incoming) {
+        const rel = raw.replace(/\\/g, '/');
+        if (rel.split('/').some((part) => part === 'node_modules' || part === '.git')) { skip.push(rel); continue; }
+        if (rel === 'package.json') continue;
+        if (rel === 'package-lock.json') { (have.has(rel) ? skip : copy).push(rel); continue; }
+        if (have.has(rel) || named.has(rel)) skip.push(rel);
+        else copy.push(rel);
+    }
+    let packageJson = { action: 'absent', added: [] };
+    if (!incoming.some((item) => item.replace(/\\/g, '/') === 'package.json')) return { copy, skip, packageJson };
+    if (!have.has('package.json')) {
+        packageJson = named.has('package.json') ? { action: 'skip', added: [] } : { action: 'copy', added: [] };
+        if (packageJson.action === 'skip') skip.push('package.json');
+        return { copy, skip, packageJson };
+    }
+    let current;
+    try { current = JSON.parse(existingPackageText); }
+    catch { return { copy, skip, packageJson: { action: 'invalid', added: [] } }; }
+    if (current === null || typeof current !== 'object' || Array.isArray(current)) return { copy, skip, packageJson: { action: 'invalid', added: [] } };
+    let incomingJson;
+    try { incomingJson = JSON.parse(incomingPackageText); }
+    catch { return { copy, skip, packageJson: { action: 'invalid', added: [] } }; }
+    const next = { ...current };
+    const added = [];
+    for (const section of ['scripts', 'dependencies', 'devDependencies']) {
+        const prior = current[section] && typeof current[section] === 'object' && !Array.isArray(current[section]) ? current[section] : {};
+        const extra = incomingJson?.[section] && typeof incomingJson[section] === 'object' && !Array.isArray(incomingJson[section]) ? incomingJson[section] : {};
+        const merged = { ...prior };
+        for (const [key, value] of Object.entries(extra)) {
+            if (!(key in merged)) { merged[key] = value; added.push(`${section}.${key}`); }
+        }
+        if (Object.keys(merged).length) next[section] = merged;
+    }
+    return { copy, skip, packageJson: { action: 'merge', added, text: `${JSON.stringify(next, null, 2)}\n` } };
 }
