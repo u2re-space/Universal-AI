@@ -4,10 +4,10 @@
  * @purpose Spill an answer into `.tmp` and choose encoder or planner.
  * @depends node:path, node:crypto, node:fs/promises
  * @usedBy agent/team, agent/file-commands
- * @exports ANSWER_INSTRUCTIONS, INLINE_BYTES, spillFences, stripRoute, chooseRoute, referenceLine, renderArtifactRef, openHandoff, seedTextFile, readDirectory, seedDirectory
+ * @exports ANSWER_INSTRUCTIONS, INLINE_BYTES, spillFences, stripRoute, chooseRoute, referenceLine, renderArtifactRef, openHandoff, loadHandoff, seedTextFile, readDirectory, seedDirectory
  * @ai.tags handoff, tmp
  * @ai.hint io
- * @changed 2026-10-15 First answer follows a workspace scan when one is present.
+ * @changed 2026-10-16 Load a handoff document when a run resumes.
  */
 
 import path from 'node:path';
@@ -179,6 +179,25 @@ export async function openHandoff(root, { profile = null } = {}) {
     };
     await saveHandoff(root, state);
     return state;
+}
+
+/**
+ * Read `.tmp/<id>/handoff.json`, or null when this run has no handoff.
+ * @param {string} root
+ * @param {string} id
+ * @returns {Promise<object | null>}
+ * @exports
+ * @ai.hint io
+ */
+export async function loadHandoff(root, id) {
+    if (!/^[0-9a-f]{8}$/.test(String(id ?? ''))) return null;
+    try {
+        const state = JSON.parse(await readFile(path.join(root, '.tmp', id, 'handoff.json'), 'utf8'));
+        if (!state || state.id !== id || !Array.isArray(state.artifacts)) return null;
+        return state;
+    } catch {
+        return null;
+    }
 }
 
 /**

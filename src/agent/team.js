@@ -2,16 +2,16 @@
  * @file src/agent/team.js
  * @module agent/team
  * @purpose Run planner, collector, worker, reviewer, and summarizer over one shared context.
- * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, mcp/session, channels/decide, channels/questions, channels/verdict
+ * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, agent/work-plan, agent/handoff, mcp/session, channels/decide, channels/questions, channels/verdict
  * @usedBy commands/run, index.js
  * @exports toolNamesForRole, runTeam
  * @ai.tags team, roles
  * @ai.hint keep
- * @changed 2026-10-15 Workspace scanner before the answer, encoder, and planner.
+ * @changed 2026-10-16 Plan and progress are stored in `.tmp`; a run resumes from the newest unfinished progress.
  */
 
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { createSession } from '../core/session.js';
 import { createSharedContext } from '../core/context.js';
 import { renderMemories } from '../core/memory.js';
@@ -32,14 +32,15 @@ import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } fro
 import { formatWorkspace, mergeTaskDraft, scanWorkspace } from './workspace-scan.js';
 import { SHELL_TOOL_NAMES } from './tool-specs.js';
 import { openMcpSources } from '../mcp/session.js';
-import { ANSWER_INSTRUCTIONS, chooseRoute, openHandoff, readDirectory, saveHandoff, seedDirectory, seedTextFile, spillAnswer } from './handoff.js';
+import { ANSWER_INSTRUCTIONS, chooseRoute, loadHandoff, openHandoff, readDirectory, saveHandoff, seedDirectory, seedTextFile, spillAnswer } from './handoff.js';
+import { applyPlanUpdate, briefPlan, briefProgress, createProgress, expandPlan, findResumable, newWorkId, parsePlanUpdate, recordStep, saveWork, syncProgress } from './work-plan.js';
 import { CommandBatchError, executeFileCommands, FILE_COMMANDS_SCHEMA } from './file-commands.js';
 import { fileInstructions } from '../roles/encoder.js';
 import { requestDecision } from '../channels/decide.js';
 import { questionsFor } from '../channels/questions.js';
 import { routeFlag } from '../channels/verdict.js';
 
-import { bullets, renderFindings, renderPlan } from './team-text.js';
+import { bullets, renderFindings } from './team-text.js';
 const HARD_STOP = new Set(['cancelled', 'budget']);
 
 
@@ -112,15 +113,24 @@ export async function runTeam({
     const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi });
     /** Copy tool stats onto the team result and return it. */
     const fileChanges = [];
+    let work = null;
     const finish = () => {
         result.changes = [...fileChanges, ...workerTools.stats().changes];
         result.stats = { worker: workerTools.stats(), collector: collectorTools.stats(), reviewer: reviewerTools.stats() };
         return result;
     };
+    /** Write the current plan and progress. A missing work record is a no-op. */
+    const persist = async (status) => {
+        if (!work) return;
+        if (status) work.progress.status = status;
+        try { await saveWork(root, work); }
+        catch (error) { notify({ type: 'warning', message: `План не сохранён: ${errorMessage(error)}` }); }
+    };
     /** Store this stage's status as the team error and return the finished result. */
-    const stop = (roleResult, stage) => {
+    const stop = async (roleResult, stage) => {
         result.status = roleResult.status === 'completed' ? 'failed' : roleResult.status;
         result.error = roleResult.error ?? new Error(`Этап «${stage}» завершился со статусом ${roleResult.status}.`);
+        await persist(result.status);
         return finish();
     };
 
@@ -175,6 +185,7 @@ export async function runTeam({
                 result.status = error.fatal ? 'failed' : 'incomplete';
                 result.error = error;
                 result.text = handoff?.text ?? '';
+                await persist(result.status);
                 return { ok: false, done: finish() };
             }
         }
@@ -198,7 +209,84 @@ export async function runTeam({
         try { directoryTree = (await readDirectory({ root, dir: '.', depth: 2, mode: 'tree' })).text; }
         catch { /* a missing root is reported by later file commands */ }
 
-        if (config.agent.chain !== false) {
+        let plan = null;
+        let progress = null;
+        const resumedWork = config.agent.resume !== false ? await findResumable(root, task) : null;
+        /** Put the short plan and the latest reports into the shared context. Bodies stay in `.tmp`. */
+        const publish = () => {
+            if (!plan || !progress) return;
+            ctx.set('plan', 'Plan', briefPlan(plan, progress), { priority: 8 });
+            ctx.set('progress', 'Progress (worker reports)', briefProgress(progress), { priority: 6 });
+        };
+        /** Confirmed read/edit/scan marks for the worker and the collector. */
+        const applyMarks = (source) => {
+            marks = filterTaskMap(source?.taskMap, projectMap);
+            taskMarks.edit = new Set(marks.filter((item) => item.role === 'edit').map((item) => item.path));
+            ctx.set('taskMap', 'Task map', formatMarks(marks), { priority: 8 });
+            const scan = formatScan(projectMap, marks);
+            ctx.set('scan', 'Symbols (scan)', scan, { priority: 4 });
+        };
+        const showPlan = () => notify({
+            type: 'plan.ready', summary: plan.summary, complexity: plan.complexity, steps: plan.steps.map((step) => step.goal),
+            acceptanceCriteria: plan.acceptanceCriteria, needsReview: plan.needsReview, risks: plan.risks,
+        });
+        let seenChanges = workerTools.stats().changes.length;
+        /** Paths written since the previous worker pass. */
+        const takeFiles = () => {
+            const paths = workerTools.stats().changes.slice(seenChanges).map((change) => change.path);
+            seenChanges = workerTools.stats().changes.length;
+            return paths;
+        };
+        let workerSession = createSession({ store: false, model: roles.resolve('worker').model });
+        let contextSent = false;
+        /** Send one worker turn, reusing the session until it grows past 160 items. */
+        const runWorker = async (title, body) => {
+            if (workerSession.size > 160) { workerSession = createSession({ store: false, model: roles.resolve('worker').model }); contextSent = false; }
+            const header = contextSent ? `# Context updates\n${ctx.get('progress') ? clipMiddle(ctx.get('progress'), 12 * 1024) : '(none)'}` : ctx.render({ maxBytes, exclude: ['tree'] });
+            contextSent = true;
+            return roles.run('worker', { text: `${header}\n\n# ${title}\n${body}`, instructions: ROLE_INSTRUCTIONS.worker, toolset: workerTools, builtin,
+                maxTurns: config.agent.workerMaxTurnsPerStep, session: workerSession, imageTarget: config.image.outputDir });
+        };
+        /**
+         * Remember the live plan. `expose` is false for an encode compatibility plan so `result.plan` stays null.
+         * @param {object} nextPlan
+         * @param {object} nextProgress
+         * @param {{ expose?: boolean }} [options]
+         */
+        const bind = (nextPlan, nextProgress, { expose = true } = {}) => {
+            plan = nextPlan;
+            progress = nextProgress;
+            work = { id: progress.id, plan, progress };
+            if (expose) result.plan = plan;
+            result.workId = work.id;
+            applyMarks(plan);
+            if (plan.imageNotes) ctx.set('images', 'Attached images (planner notes)', plan.imageNotes, { priority: 7 });
+            publish();
+        };
+        /** Fill lists the planner schema always sends, so a resumed file cannot crash the collector. */
+        const lists = (source) => {
+            for (const key of ['filesOfInterest', 'searchQueries', 'questionsForCollector', 'acceptanceCriteria', 'risks']) {
+                if (!Array.isArray(source[key])) source[key] = [];
+            }
+            if (!Array.isArray(source.fileActions)) source.fileActions = [];
+            if (!Array.isArray(source.taskMap)) source.taskMap = [];
+            return source;
+        };
+
+        if (resumedWork) {
+            handoff = await loadHandoff(root, resumedWork.id);
+            bind(lists(resumedWork.plan), resumedWork.progress);
+            if (handoff?.text) {
+                ctx.set('answer', 'First answer', handoff.text, { priority: 5 });
+                ctx.set('artifacts', 'Artifacts', handoff.artifacts.map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''}`.trim()).join('\n') || '(none)', { priority: 8 });
+            }
+            const findings = await readFile(path.join(root, '.tmp', work.id, 'findings.md'), 'utf8').catch(() => '');
+            if (findings.trim()) ctx.set('findings', 'Collected context (by the collector)', findings, { priority: 6 });
+            notify({ type: 'plan.resume', id: work.id, cursor: progress.cursor, steps: plan.steps.length });
+            showPlan();
+        }
+
+        if (!resumedWork && config.agent.chain !== false) {
             handoff = await openHandoff(root);
             for (const file of seedFiles) {
                 const seeded = await seedTextFile({ root, state: handoff, file, maxBytes: config.limits.maxFileReadBytes });
@@ -242,15 +330,61 @@ export async function runTeam({
             if (route === 'encode') {
                 const encoded = await encodeHandoff();
                 if (!encoded.ok) return encoded.done;
+                if (encoded.written.length >= 2) {
+                    const filePlan = lists(expandPlan({
+                        summary: 'Запись файлов', complexity: 'normal',
+                        steps: encoded.written.map((file) => ({ goal: `Записать ${file}`, details: file, verify: `Прочитать ${file}.` })),
+                        filesOfInterest: [], searchQueries: [], questionsForCollector: [],
+                        acceptanceCriteria: ['Файлы согласованы между собой.'], needsReview: false, imageNotes: null, risks: [],
+                        fileActions: [], taskMap: [],
+                    }, { maxSteps: config.agent.maxSteps }));
+                    let fileProgress = createProgress({ id: handoff.id, task, plan: filePlan });
+                    for (let index = 0; index < filePlan.steps.length; index++) {
+                        if (filePlan.steps[index].kind === 'compat') break;
+                        fileProgress = recordStep(fileProgress, {
+                            index, status: 'completed', report: `записан ${filePlan.steps[index].files?.[0] ?? ''}`,
+                            files: filePlan.steps[index].files ?? [],
+                        });
+                    }
+                    bind(filePlan, fileProgress, { expose: false });
+                    await persist('running');
+                    const compatIndex = plan.steps.findIndex((step) => step.kind === 'compat');
+                    if (compatIndex >= 0) {
+                        const step = plan.steps[compatIndex];
+                        notify({ type: 'step.start', index: compatIndex + 1, total: plan.steps.length, goal: step.goal });
+                        const outcome = await runWorker(`Compatibility pass (step ${compatIndex + 1} of ${plan.steps.length})`,
+                            `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}`);
+                        result.images.push(...outcome.images);
+                        progress = recordStep(progress, {
+                            index: compatIndex, status: outcome.status, report: outcome.text.trim() || '(отчёт отсутствует)', files: takeFiles(),
+                        });
+                        work.progress = progress;
+                        publish();
+                        await persist(outcome.status === 'completed' ? 'running' : outcome.status);
+                        notify({ type: 'step.done', index: compatIndex + 1, total: plan.steps.length, status: outcome.status, summary: outcome.text.trim() });
+                        if (HARD_STOP.has(outcome.status)) return stop(outcome, 'согласование');
+                        if (outcome.status !== 'completed') {
+                            result.status = 'incomplete';
+                            result.text = handoff.text;
+                            await persist('incomplete');
+                            return finish();
+                        }
+                    }
+                    work.progress.stage = 'done';
+                    await persist('completed');
+                }
                 result.status = 'completed';
                 const files = encoded.written.length ? `## Файлы\n${encoded.written.map((item) => `- ${item}`).join('\n')}` : '';
-                result.text = [handoff.text, files].filter(Boolean).join('\n\n');
+                const compatReport = progress?.steps?.find((step) => step.kind === 'compat' && step.report)?.report;
+                const compat = compatReport ? `## Согласование\n${compatReport}` : '';
+                result.text = [handoff.text, files, compat].filter(Boolean).join('\n\n');
                 result.finalNote = encoded.written.length ? `Записаны файлы: ${encoded.written.join(', ')}` : handoff.text;
                 return finish();
             }
         }
 
-        // 1. Planner.
+        // 1. Planner. A resumed plan is already bound.
+        if (!plan) {
         notify({ type: 'stage.start', stage: 'plan', role: 'planner', model: roles.resolve('planner').model });
         const planned = await roles.run('planner', {
             text: `${ctx.render({ maxBytes })}\n\n# Directory tree\n${directoryTree}\n\n${draft}\n\n# Task\n${task}`, parts: handoff ? [] : parts,
@@ -258,21 +392,15 @@ export async function runTeam({
             builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
         });
         if (planned.status !== 'completed') return stop(planned, 'план');
-        const plan = planned.data;
-        plan.steps = plan.steps.slice(0, config.agent.maxSteps);
-        if (!plan.steps.length) plan.steps = [{ goal: task, details: 'Complete the task as described.', verify: 'Re-read the result.' }];
-        marks = filterTaskMap(plan.taskMap, projectMap);
-        taskMarks.edit = new Set(marks.filter((item) => item.role === 'edit').map((item) => item.path));
-        ctx.set('taskMap', 'Task map', formatMarks(marks), { priority: 8 });
-        const scan = formatScan(projectMap, marks);
-        if (scan) ctx.set('scan', 'Symbols (scan)', scan, { priority: 4 });
-        result.plan = plan;
-        ctx.set('plan', 'Plan', renderPlan(plan), { priority: 8 });
-        if (plan.imageNotes) ctx.set('images', 'Attached images (planner notes)', plan.imageNotes, { priority: 7 });
-        notify({ type: 'plan.ready', summary: plan.summary, complexity: plan.complexity, steps: plan.steps.map((s) => s.goal),
-            acceptanceCriteria: plan.acceptanceCriteria, needsReview: plan.needsReview, risks: plan.risks });
+        const drafted = lists(planned.data);
+        drafted.steps = drafted.steps.slice(0, config.agent.maxSteps);
+        if (!drafted.steps.length) drafted.steps = [{ goal: task, details: 'Complete the task as described.', verify: 'Re-read the result.' }];
+        const expanded = lists(expandPlan(drafted, { maxSteps: config.agent.maxSteps }));
+        const id = handoff?.id ?? newWorkId();
+        bind(expanded, createProgress({ id, task, plan: expanded }));
+        await persist('running');
+        showPlan();
         notify({ type: 'stage.done', stage: 'plan', status: 'completed' });
-        plan.fileActions = Array.isArray(plan.fileActions) ? plan.fileActions : [];
         if (handoff) {
             for (const action of plan.fileActions) {
                 if (action?.action === 'encode') {
@@ -300,13 +428,14 @@ export async function runTeam({
             ctx.set('answer', 'First answer', handoff.text, { priority: 5 });
             ctx.set('artifacts', 'Artifacts', handoff.artifacts.map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''}`.trim()).join('\n') || '(none)', { priority: 8 });
         }
+        }
 
-        // 2. Collector (cheap model, read-only).
+        // 2. Collector (cheap model, read-only). Skipped when this run already moved past it.
         const wantsContext = plan.complexity !== 'trivial' && (
             plan.filesOfInterest.length || plan.searchQueries.length || plan.questionsForCollector.length
             || marks.some((item) => item.role === 'read' || item.role === 'edit')
         );
-        if (wantsContext && readNames.length) {
+        if (!(resumedWork && progress.cursor > 0) && wantsContext && readNames.length) {
             notify({ type: 'stage.start', stage: 'collect', role: 'collector', model: roles.resolve('collector').model });
             const focus = marks.filter((item) => item.role === 'read' || item.role === 'edit').map((item) => `${item.role} ${item.path} — ${item.reason}`);
             const brief = `# Collector brief\nTask map (read/edit):\n${bullets(focus)}\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`;
@@ -315,36 +444,94 @@ export async function runTeam({
                 schema: COLLECTOR_SCHEMA, schemaName: 'context_report', maxTurns: config.agent.collectorMaxTurns,
             });
             if (HARD_STOP.has(collected.status)) return stop(collected, 'сбор контекста');
-            if (collected.status === 'completed' && collected.data) ctx.set('findings', 'Collected context (by the collector)', renderFindings(collected.data), { priority: 6 });
-            else notify({ type: 'warning', message: `Сбор контекста не завершён (${collected.status}${collected.error ? `: ${errorMessage(collected.error)}` : ''}); продолжаем без него.` });
+            if (collected.status === 'completed' && collected.data) {
+                const text = renderFindings(collected.data);
+                ctx.set('findings', 'Collected context (by the collector)', text, { priority: 6 });
+                await writeFile(path.join(root, '.tmp', work.id, 'findings.md'), text, 'utf8').catch(() => {});
+            } else notify({ type: 'warning', message: `Сбор контекста не завершён (${collected.status}${collected.error ? `: ${errorMessage(collected.error)}` : ''}); продолжаем без него.` });
             notify({ type: 'stage.done', stage: 'collect', status: collected.status });
         }
 
-        // 3. Worker: one conversation, one step at a time.
+        // 3. Worker: one conversation, one step at a time, starting at the saved cursor.
         notify({ type: 'stage.start', stage: 'work', role: 'worker', model: roles.resolve('worker').model });
-        let workerSession = createSession({ store: false, model: roles.resolve('worker').model });
+        progress.stage = 'work';
         let workIncomplete = false;
-        let contextSent = false;
-        /** Send one worker step, reusing the session until it grows past 160 items. */
-        const runWorker = async (title, body) => {
-            if (workerSession.size > 160) { workerSession = createSession({ store: false, model: roles.resolve('worker').model }); contextSent = false; }
-            const header = contextSent ? `# Context updates\n${ctx.get('progress') ? clipMiddle(ctx.get('progress'), 12 * 1024) : '(none)'}` : ctx.render({ maxBytes, exclude: ['tree'] });
-            contextSent = true;
-            return roles.run('worker', { text: `${header}\n\n# ${title}\n${body}`, instructions: ROLE_INSTRUCTIONS.worker, toolset: workerTools, builtin,
-                maxTurns: config.agent.workerMaxTurnsPerStep, session: workerSession, imageTarget: config.image.outputDir });
+        /**
+         * Run one plan step. A file step is two turns: the public surface, then the bodies.
+         * @param {number} index
+         * @returns {Promise<{ outcome: object, report: string, files: string[] }>}
+         */
+        const runStep = async (index) => {
+            const step = plan.steps[index];
+            const number = index + 1;
+            const staged = plan.complexity !== 'trivial' && step.kind !== 'compat' && step.files?.length === 1;
+            const file = step.files?.[0];
+            const title = step.kind === 'compat'
+                ? `Compatibility pass (step ${number} of ${plan.steps.length})`
+                : `Your step ${number} of ${plan.steps.length}`;
+            const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}`;
+            const passes = [];
+            if (!staged) passes.push(base);
+            else {
+                if (progress.steps[index]?.phase !== 'body') {
+                    passes.push(`Write only the public surface of ${file}: exports, signatures, and headings. Leave bodies as short stubs. Do not edit other files.\n${base}`);
+                }
+                passes.push(`Fill in ${file} so this step is complete. Keep the public surface already written. Do not edit other files.\n${base}`);
+            }
+            let outcome = null;
+            const reports = [];
+            const files = [];
+            for (const [passIndex, body] of passes.entries()) {
+                outcome = await runWorker(title, body);
+                result.images.push(...outcome.images);
+                reports.push(outcome.text.trim());
+                files.push(...takeFiles());
+                if (outcome.status !== 'completed') break;
+                if (staged && passIndex === 0 && passes.length === 2) {
+                    progress.steps[index].phase = 'body';
+                    progress.steps[index].report = reports.filter(Boolean).join('\n\n');
+                    progress.steps[index].files = [...new Set(files)];
+                    work.progress = progress;
+                    await persist('running');
+                }
+            }
+            return {
+                outcome, files: [...new Set(files)],
+                report: reports.filter(Boolean).join('\n\n') || '(отчёт отсутствует)',
+            };
         };
-        for (const [index, step] of plan.steps.entries()) {
+        for (let index = progress.cursor; index < plan.steps.length; index++) {
+            const step = plan.steps[index];
             const number = index + 1;
             notify({ type: 'step.start', index: number, total: plan.steps.length, goal: step.goal });
-            const outcome = await runWorker(`Your step ${number} of ${plan.steps.length}`, `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}`);
-            result.images.push(...outcome.images);
-            const report = outcome.text.trim() || '(отчёт отсутствует)';
-            result.steps.push({ index: number, goal: step.goal, status: outcome.status, report });
-            ctx.append('progress', 'Progress (worker reports)', `### Step ${number}: ${step.goal}\nStatus: ${outcome.status}\n${report}`, { priority: 6 });
-            notify({ type: 'step.done', index: number, total: plan.steps.length, status: outcome.status, summary: report });
-            if (HARD_STOP.has(outcome.status)) return stop(outcome, `шаг ${number}`);
-            if (outcome.status !== 'completed') {
-                notify({ type: 'warning', message: `Шаг ${number} не завершён (${outcome.status}${outcome.error ? `: ${errorMessage(outcome.error)}` : ''}); дальнейшие шаги пропущены.` });
+            const ran = await runStep(index);
+            const update = parsePlanUpdate(ran.report);
+            if (update) {
+                const applied = applyPlanUpdate(plan, update, { maxSteps: config.agent.maxSteps, afterId: step.id });
+                plan = applied.plan;
+                progress = syncProgress(progress, plan);
+                progress.notes ??= [];
+                if (applied.note) progress.notes.push({ kind: 'plan', note: applied.note });
+                work.plan = plan;
+                result.plan = plan;
+            }
+            const recordAt = plan.steps.findIndex((item) => item.id === step.id);
+            if (recordAt < 0) {
+                workIncomplete = true;
+                notify({ type: 'warning', message: `Шаг ${number} пропал из плана после обновления.` });
+                break;
+            }
+            progress = recordStep(progress, { index: recordAt, status: ran.outcome.status, report: ran.report, files: ran.files });
+            work.plan = plan;
+            work.progress = progress;
+            publish();
+            await persist();
+            index = recordAt;
+            result.steps.push({ index: recordAt + 1, goal: step.goal, status: ran.outcome.status, report: ran.report });
+            notify({ type: 'step.done', index: recordAt + 1, total: plan.steps.length, status: ran.outcome.status, summary: ran.report });
+            if (HARD_STOP.has(ran.outcome.status)) return stop(ran.outcome, `шаг ${number}`);
+            if (ran.outcome.status !== 'completed') {
+                notify({ type: 'warning', message: `Шаг ${number} не завершён (${ran.outcome.status}${ran.outcome.error ? `: ${errorMessage(ran.outcome.error)}` : ''}); дальнейшие шаги пропущены.` });
                 workIncomplete = true;
                 break;
             }
@@ -378,7 +565,11 @@ export async function runTeam({
             const fixed = await runWorker(`Review round ${round}: changes requested`, `${review.summary}\n${issues}\n\nAddress every issue, verify, and report what you changed.`);
             result.images.push(...fixed.images);
             result.steps.push({ index: `fix-${round}`, goal: 'Устранение замечаний ревью', status: fixed.status, report: fixed.text.trim() });
-            ctx.append('progress', 'Progress (worker reports)', `### Fix round ${round}\nStatus: ${fixed.status}\n${fixed.text.trim()}`, { priority: 6 });
+            progress.notes ??= [];
+            progress.notes.push({ kind: 'fix', round, status: fixed.status, report: fixed.text.trim() });
+            work.progress = progress;
+            publish();
+            await persist();
             notify({ type: 'stage.done', stage: 'fix', status: fixed.status });
             if (HARD_STOP.has(fixed.status)) return stop(fixed, 'исправления');
         }
@@ -418,10 +609,16 @@ export async function runTeam({
             memory.recordTask({ project: projectKey, projectName, task, status: result.status, summary: result.taskSummary ?? plan.summary,
                 changes: workerTools.stats().changes.map((c) => c.path), usage: ledger.snapshot() });
         }
+        if (work) {
+            work.progress.status = result.status;
+            work.progress.stage = 'done';
+            await persist();
+        }
         return finish();
     } catch (error) {
         result.status = isAbortError(error) || signal?.aborted || error instanceof CancelledError ? 'cancelled' : 'failed';
         result.error = error;
+        await persist(result.status);
         return finish();
     } finally {
         await mcp.close();

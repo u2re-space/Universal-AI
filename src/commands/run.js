@@ -168,6 +168,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         rows: [
             ['статус', TEAM_STATUS[result.status] ?? result.status],
             ...(result.plan ? [['план', `${result.plan.complexity} · ${truncate(result.plan.summary, 200)}`]] : []),
+            ...(result.workId ? [['план на диске', `.tmp/${result.workId}/`]] : []),
             ['шагов', result.steps.length ? `${result.steps.length} (${result.steps.map((s) => `${s.index}: ${s.status}`).join(', ')})` : '0'],
             ...(result.review ? [['ревью', `${result.review.verdict === 'accept' ? 'принято' : 'правки'} после ${result.reviewRounds} раунд(а/ов) · ${truncate(result.review.summary, 200)}`]] : []),
             ['вызовов инструментов', toolCalls ? `${toolCalls} (worker ${worker.calls}, collector ${result.stats.collector.calls}, reviewer ${result.stats.reviewer.calls})${worker.denied ? `, отклонено ${worker.denied}` : ''}` : '0'],
@@ -181,6 +182,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
     });
     const summary = {
         type: 'result', status: result.status, text: result.text, plan: result.plan, review: result.review, steps: result.steps,
+        workId: result.workId ?? null,
         images: result.images, changes: result.changes, memoriesSaved: result.memoriesSaved.map((m) => ({ id: m.id, scope: m.scope, kind: m.kind, content: m.content })),
         outFile, usage: ledger.snapshot(), tools: result.stats, error: result.error ? { message: result.error.message, code: result.error.code ?? null } : null,
     };

@@ -182,6 +182,9 @@ export function handleRendererEvent(event, api) {
         case 'stage.done':
             if (verbose) line('info', `этап «${STAGES[event.stage] ?? event.stage}»: ${event.status}`, { dim: true });
             break;
+        case 'plan.resume':
+            line('info', `продолжение .tmp/${event.id}: шаг ${event.cursor + 1} из ${event.steps}`, { dim: true });
+            break;
         case 'plan.ready':
             line('ok', `план (${event.complexity}${event.needsReview ? ', с ревью' : ''}): ${truncate(event.summary, 300)}`);
             event.steps.forEach((goal, index) => line('info', `  ${index + 1}. ${truncate(goal, 160)}`, { dim: true }));

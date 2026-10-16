@@ -123,7 +123,7 @@ export async function configCommand(ctx) {
                 vision: { model: null, effort: 'low' },
                 summarizer: { model: null, effort: 'low' },
             },
-            agent: { mode: 'team', maxSteps: 12, maxReviewRounds: 2 },
+            agent: { mode: 'team', maxSteps: 12, maxReviewRounds: 2, resume: true },
             memory: { enabled: true, autoSave: true, maxRecall: 8, notesFile: 'AGENTS.md' },
             generate: { fidelity: defaults.generate.fidelity, creativity: defaults.generate.creativity, platform: defaults.generate.platform },
             mcp: { servers: [] },

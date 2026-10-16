@@ -68,6 +68,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
                          scanner, solver, clicker, typer, encoder, tester, default, all
                          (например: --role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
   --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
+  --no-resume            не продолжать незавершённый план из .tmp (по умолчанию тот же текст задачи продолжается)
   --route encoder|planner|decisions  куда отдать первый ответ. decisions спрашивает модель решений. Без флага решает метка ответа
   В каталоге Node.js или фронтенда сканер (до ответа, encoder и planner) кладёт в контекст package.json, tsconfig.json или jsconfig.json, import map и найденные по ним файлы. Корневой index.html целиком — если он до 8 КиБ или задача про страницу.
   --template <файл>      текст задачи из файла. {{message}} заменяется целью. Можно несколько

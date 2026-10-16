@@ -172,8 +172,9 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
     const result = await runTeam({ client: client(), config, ledger, task: 'Добавь функцию sum с тестом', root, approvalLevel: 'all', memory, projectKey: key,
         projectName: 'demo', emit: (e) => events.push(e) });
     assert.equal(result.status, 'completed', result.error?.message);
-    assert.equal(result.plan.steps.length, 2);
-    assert.equal(result.steps.length, 3, 'two steps + one fix round');
+    assert.equal(result.plan.steps.length, 3);
+    assert.equal(result.plan.steps.at(-1).kind, 'compat');
+    assert.equal(result.steps.length, 4, 'two file steps + compatibility + one fix round');
     assert.equal(result.review.verdict, 'accept');
     assert.equal(result.reviewRounds, 2);
     assert.equal(await readFile(path.join(root, 'src/sum.js'), 'utf8'), 'export const sum = (a, b) => Number(a) + Number(b);\n');
@@ -190,7 +191,17 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
     assert.equal(seen.find((s) => s.role === 'summarizer').model, 'gpt-6-luna-nano');
     const stages = events.filter((e) => e.type === 'stage.start').map((e) => e.stage);
     assert.deepEqual(stages, ['answer', 'plan', 'collect', 'work', 'review', 'fix', 'review', 'memory']);
-    assert.ok(events.some((e) => e.type === 'plan.ready' && e.steps.length === 2));
+    assert.ok(events.some((e) => e.type === 'plan.ready' && e.steps.length === 3));
+    const { readdir } = await import('node:fs/promises');
+    const progresses = [];
+    for (const id of await readdir(path.join(root, '.tmp'))) {
+        const file = path.join(root, '.tmp', id, 'progress.json');
+        const saved = JSON.parse(await readFile(file, 'utf8').catch(() => 'null'));
+        if (saved?.task === 'Добавь функцию sum с тестом') progresses.push(saved);
+    }
+    assert.equal(progresses.at(-1)?.status, 'completed');
+    assert.equal(progresses.at(-1).files.some((file) => file.path === 'src/sum.js'), true);
+    assert.equal(progresses.at(-1).files.some((file) => file.path === 'test/sum.test.js'), true);
     assert.ok(events.some((e) => e.type === 'memory.saved' && e.count === 2));
     const byRole = Object.fromEntries(ledger.snapshot().byRole.map((r) => [r.role, r]));
     assert.ok(byRole.planner.requests === 1 && byRole.worker.requests >= 5 && byRole.reviewer.requests === 2 && byRole.summarizer.requests === 1);
@@ -327,6 +338,7 @@ test('--no-chain starts at the planner', async () => {
     };
     const config = baseConfig();
     config.agent.chain = false;
+    config.agent.resume = false;
     const events = [];
     const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'мелкая правка', root, approvalLevel: 'read', emit: (event) => events.push(event) });
     assert.equal(result.status, 'completed', result.error?.message);
@@ -435,4 +447,112 @@ test('team run puts the confirmed read file in the collector brief', async () =>
     const collector = seen.find((body) => roleOf(body) === 'collector');
     assert.match(collector.input[0].content[0].text, /src\/sum\.js/);
     assert.equal(/missing\.js/.test(collector.input[0].content[0].text), false);
+});
+
+test('an unfinished plan resumes from the next step without a new planner call', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-resume-'));
+    let phase = 'first';
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'answer') return { text: 'нужен план\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({ summary: 'два шага', complexity: 'trivial', steps: [
+                { goal: 'первый', details: 'без файла', verify: 'да' },
+                { goal: 'второй', details: 'тоже текст', verify: 'да' },
+            ], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        }
+        const last = [...body.input].reverse().find((item) => item.role === 'user');
+        const text = last?.content?.[0]?.text ?? '';
+        const title = text.split('\n').find((line) => line.startsWith('# Your step')) ?? '';
+        if (phase === 'first' && /step 2/.test(title)) return { status: 'incomplete', text: 'оборвалось', reason: 'max_output_tokens' };
+        if (/step 1/.test(title)) return { text: 'шаг 1 готов' };
+        return { text: 'шаг 2 готов' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    const task = 'возобнови два шага';
+    try {
+        const first = await runTeam({ client: client(), config, ledger: createLedger(), task, root: dir, approvalLevel: 'read', emit() {} });
+        assert.equal(first.status, 'incomplete', first.error?.message);
+        assert.equal(first.steps.at(-1).status, 'incomplete');
+        phase = 'second';
+        seen.length = 0;
+        const second = await runTeam({ client: client(), config, ledger: createLedger(), task, root: dir, approvalLevel: 'read', emit() {} });
+        assert.equal(second.status, 'completed', second.error?.message);
+        assert.equal(seen.includes('planner'), false);
+        assert.equal(seen.includes('answer'), false);
+        assert.equal(second.steps.map((step) => step.goal).join('\n').includes('второй'), true);
+        const progress = JSON.parse(await readFile(path.join(dir, '.tmp', second.workId, 'progress.json'), 'utf8'));
+        assert.equal(progress.status, 'completed');
+        assert.equal(progress.cursor, 2);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('a worker plan-update inserts the next step and that step runs', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-plan-update-'));
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'план\nroute: plan' };
+        if (role === 'planner') return { text: JSON.stringify({ summary: 'один', complexity: 'trivial', steps: [
+            { goal: 'первый', details: '', verify: '' },
+        ], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        const last = [...body.input].reverse().find((item) => item.role === 'user');
+        const text = last?.content?.[0]?.text ?? '';
+        if (/Your step 1 /.test(text)) {
+            return { text: 'готово первый\n```plan-update\n{"note":"добавлен шаг","addSteps":[{"goal":"второй","details":"без файла","verify":"да"}]}\n```' };
+        }
+        return { text: 'второй готов' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    try {
+        const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'дополни план', root: dir, approvalLevel: 'read', emit() {} });
+        assert.equal(result.status, 'completed', result.error?.message);
+        assert.deepEqual(result.plan.steps.map((step) => step.goal), ['первый', 'второй']);
+        assert.deepEqual(result.steps.map((step) => step.goal), ['первый', 'второй']);
+        const plan = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'plan.json'), 'utf8'));
+        assert.equal(plan.steps[1].goal, 'второй');
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('several encoded files get a compatibility pass and a progress file', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-encode-compat-'));
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'answer') return { text: '```js\nexport const a = 1;\n```\n\n```js\nexport const b = 2;\n```\nroute: encode' };
+        if (role === 'encoder') return { text: JSON.stringify({ summary: 'два', commands: [
+            { command: 'fs:write', path: 'a.js', cwd: '.', type: 'code', language: 'js', content: 'export const a = 1;\n', lines: null, source: null, start: null, end: null },
+            { command: 'fs:write', path: 'b.js', cwd: '.', type: 'code', language: 'js', content: 'export const b = a;\n', lines: null, source: null, start: null, end: null },
+        ] }) };
+        if (role === 'worker') {
+            assert.match(JSON.stringify(body.input), /Compatibility pass/);
+            return { text: 'импорты сходятся' };
+        }
+        return { text: `не ждали ${role}` };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    try {
+        const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'два модуля', root: dir, approvalLevel: 'all', emit() {} });
+        assert.equal(result.status, 'completed', result.error?.message);
+        assert.equal(result.plan, null);
+        assert.equal(seen.includes('planner'), false);
+        assert.equal(seen.includes('worker'), true);
+        assert.equal(await readFile(path.join(dir, 'a.js'), 'utf8'), 'export const a = 1;\n');
+        assert.equal(await readFile(path.join(dir, 'b.js'), 'utf8'), 'export const b = a;\n');
+        const progress = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'progress.json'), 'utf8'));
+        assert.equal(progress.status, 'completed');
+        assert.equal(progress.files.some((file) => file.path === 'a.js'), true);
+        assert.equal(progress.files.some((file) => file.path === 'b.js'), true);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
 });

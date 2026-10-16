@@ -30,6 +30,7 @@ export { createToolset } from './src/agent/tools.js';
 export { runTurn } from './src/agent/loop.js';
 export { createRoleRunner } from './src/agent/roles.js';
 export { runTeam } from './src/agent/team.js';
+export { expandPlan, findResumable } from './src/agent/work-plan.js';
 export { createRenderer } from './src/ui/renderer.js';
 export { createJobManager } from './src/jobs/manager.js';
 export { loadProjectMap } from './src/agent/map.js';

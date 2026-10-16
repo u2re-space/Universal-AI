@@ -209,6 +209,7 @@ function validateConfig(c) {
     }
     if (!['auto', 'always', 'never'].includes(c.agent.visionDelegate)) fail('agent.visionDelegate: auto | always | never');
     if (typeof c.agent.chain !== 'boolean') fail('agent.chain: true | false');
+    if (typeof c.agent.resume !== 'boolean') fail('agent.resume: true | false');
     if (c.agent.route !== null && !['encoder', 'planner', 'decisions'].includes(c.agent.route)) fail('agent.route: encoder | planner | decisions');
     for (const key of ['enabled', 'autoSave']) if (typeof c.memory[key] !== 'boolean') fail(`memory.${key}: true | false`);
     if (!Number.isSafeInteger(c.memory.maxRecall) || c.memory.maxRecall < 0 || c.memory.maxRecall > 50) fail('memory.maxRecall: 0..50');
