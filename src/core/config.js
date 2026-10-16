@@ -286,9 +286,9 @@ function validateConfig(c) {
     if (c.channels.host === '0.0.0.0' && !c.channels.token) fail('channels.host 0.0.0.0 требует channels.token');
 }
 
-/** Heuristic: does this model accept the `reasoning` parameter? */
+/** Heuristic: does this model accept the `reasoning` parameter? DeepSeek V4 thinks unless effort is set. */
 export function isReasoningModel(model) {
-    return /^(o\d|gpt-5|gpt-6|codex|gpt-oss)/i.test(model) && !/chat-latest/i.test(model);
+    return /^(o\d|gpt-5|gpt-6|codex|gpt-oss|deepseek)/i.test(model) && !/chat-latest/i.test(model);
 }
 
 /** Heuristic: does this model accept `text.verbosity`? */

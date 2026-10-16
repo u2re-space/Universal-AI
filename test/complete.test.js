@@ -192,7 +192,7 @@ test('completeCode calls the fast model at low effort and returns the insertion'
     script = (body) => {
         //assert.equal(body.model, 'gpt-6-luna');
         assert.equal(body.model, 'deepseek/deepseek-v4.1-flash');
-        assert.equal(body.reasoning?.effort ?? 'none', 'none');
+        assert.equal(body.reasoning.effort, 'none');
         assert.equal(body.stream, false);
         assert.equal(body.store, false);
         assert.equal(body.tools, undefined);
@@ -312,7 +312,7 @@ test('ai complete --json prints the insertion from stdin', async () => {
     script = (body) => {
         //assert.equal(body.model, 'gpt-6-luna');
         assert.equal(body.model, 'deepseek/deepseek-v4.1-flash');
-        assert.equal(body.reasoning?.effort ?? 'none', 'none');
+        assert.equal(body.reasoning.effort, 'none');
         assert.match(body.input, /alpha \|/);
         return { text: 'beta' };
     };
