@@ -89,7 +89,7 @@ export async function run(ctx) {
     try {
         const ensured = await ensureProjectMap(ctx.cwd);
         if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
-        if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra, seedFiles: prepared.seedFiles });
+        if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra, seedFiles: prepared.seedFiles, generation: prepared.wantsProfile });
         return await runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra });
     } finally {
         store?.memory.close();
@@ -150,7 +150,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
  * @returns {Promise<number>}
  * @ai.hint io
  */
-async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [] }) {
+async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [], generation = false }) {
     const { config, renderer, values, signal, emit } = ctx;
     const client = createClientFor(config);
     const ledger = createLedgerFor(config);
@@ -161,7 +161,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         client, config, ledger, task, parts, root: ctx.cwd, approvalLevel: level, interactive,
         approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
         memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
-        backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles,
+        backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles, generation,
     });
     renderer.idle();
     renderer.ensureNewline();

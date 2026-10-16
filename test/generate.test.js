@@ -92,6 +92,7 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
     assert.doesNotMatch(brief.instructions, /No framework, no bundler, no npm/);
     assert.match(brief.instructions, /Vite, SCSS/);
     assert.match(brief.instructions, /Do not pass --force/);
+    assert.match(brief.instructions, /at most 4 steps/);
     assert.match(brief.instructions, /Leave measured null|Leave measured null|measured null/);
     assert.match(brief.task, /image_generation/);
     assert.match(brief.task, /Do not use a reference image as the page background/);

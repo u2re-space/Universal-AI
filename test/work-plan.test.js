@@ -29,6 +29,15 @@ test('a step that names two files becomes one step per file plus a compatibility
     assert.match(plan.steps[2].details, /src\/a\.js/);
 });
 
+test('a generation plan keeps related files in one step', () => {
+    const plan = expandPlan({
+        ...base,
+        steps: [{ goal: 'страница', details: 'src/app.tsx и src/app.scss', verify: 'сборка' }],
+    }, { maxSteps: 4, splitFiles: false });
+    assert.equal(plan.steps.length, 1);
+    assert.deepEqual(plan.steps[0].files, ['src/app.tsx', 'src/app.scss']);
+});
+
 test('separate file steps keep their goals and gain a compatibility step', () => {
     const plan = expandPlan({
         ...base,

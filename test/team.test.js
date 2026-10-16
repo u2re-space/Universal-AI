@@ -130,7 +130,7 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
             case 'collector': {
                 const outputs = body.input.filter((i) => i.type === 'function_call_output');
                 if (!outputs.length) return { calls: [{ name: 'search_files', arguments: { query: 'sum', path: null, regex: false } }] };
-                assert.ok(body.tools.every((t) => ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall'].includes(t.name)), 'collector is read-only');
+                assert.ok(body.tools.every((t) => ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall', 'list_backups'].includes(t.name)), 'collector is read-only');
                 return { text: JSON.stringify({ findings: [{ path: 'package.json', purpose: 'манифест', relevant: 'нет зависимостей' }], answers: [{ question: 'Какой test runner?', answer: 'node --test' }], conventions: ['ESM'], notes: '' }) };
             }
             case 'worker': {

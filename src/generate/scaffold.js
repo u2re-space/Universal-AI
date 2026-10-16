@@ -377,6 +377,7 @@ export function kindRules(kind, recommendations) {
     lines.push('Add absent package.json keys only. Keep existing script bodies and versions.');
     lines.push('Do not pass --force or -f to a scaffold command. Do not chain a scaffold command with &&, ||, ;, |, or redirection.');
     lines.push('package.json, scripts/generate.js, .rules/stack.md, .rules/files.md, and .skills/scaffold/SKILL.md are already written. Do not plan a step to create or rewrite them.');
+    lines.push('Use at most 4 steps. Group the page, styles, and modules into one step when they belong together.');
     if (recommendations.libraries.some((item) => item.name === 'preact' && item.include && recommendations.libraries.some((entry) => entry.name === 'typescript' && entry.include))) {
         lines.push('Write the interface as Preact TSX modules. Each component has a matching SCSS module. Do not implement the UI as h() calls in src/main.js.');
     } else if (recommendations.libraries.some((item) => item.name === 'preact' && item.include)) {

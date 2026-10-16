@@ -131,7 +131,7 @@ function freshId(steps) {
  * @exports
  * @ai.hint pure
  */
-export function expandPlan(plan, { maxSteps = 12 } = {}) {
+export function expandPlan(plan, { maxSteps = 12, splitFiles = true } = {}) {
     const source = Array.isArray(plan?.steps) ? plan.steps : [];
     const steps = [];
     let split = false;
@@ -139,7 +139,7 @@ export function expandPlan(plan, { maxSteps = 12 } = {}) {
         if (steps.length >= maxSteps) break;
         const files = pathsIn(`${step?.goal ?? ''}\n${step?.details ?? ''}`);
         const room = maxSteps - steps.length;
-        if (step?.kind !== 'compat' && files.length >= 2 && files.length <= room) {
+        if (splitFiles && step?.kind !== 'compat' && files.length >= 2 && files.length <= room) {
             split = true;
             for (const file of files) {
                 steps.push({
@@ -156,7 +156,7 @@ export function expandPlan(plan, { maxSteps = 12 } = {}) {
     }
     const fileCount = new Set(steps.flatMap((step) => step.files ?? [])).size;
     const hasCompat = steps.some((step) => step.kind === 'compat');
-    if ((split || fileCount >= 2) && !hasCompat && steps.length < maxSteps) {
+    if (splitFiles && (split || fileCount >= 2) && !hasCompat && steps.length < maxSteps) {
         const files = [...new Set(steps.flatMap((step) => step.files ?? []))];
         steps.push({
             kind: 'compat',
