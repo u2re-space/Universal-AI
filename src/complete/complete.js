@@ -4,10 +4,10 @@
  * @purpose Ask a fast low-effort model for the text to insert at a cursor.
  * @depends node:fs/promises, core/config, agent/paths, complete/context, complete/errors
  * @usedBy complete/server, commands/complete, index.js
- * @exports COMPLETION_INSTRUCTIONS, stripCompletion, stripDoubledClosers, acceptInsertion, buildCompletionBody, completeCode
+ * @exports COMPLETION_INSTRUCTIONS, stripCompletion, stripDoubledClosers, fitInsertion, acceptInsertion, buildCompletionBody, completeCode
  * @ai.tags complete, openai
  * @ai.hint io
- * @changed 2026-10-16 Editor completion on gpt-6-luna. Spark is not in the ProxyAPI catalog and returns HTTP 400.
+ * @changed 2026-10-16 Drop text the cursor already has, so an insertion is not written twice.
  */
 
 import { readFile, stat } from 'node:fs/promises';
@@ -25,6 +25,7 @@ Reply with only the characters to insert at |. No plan, no alternatives, no sent
 You are not the encoder role. Do not return JSON, a batch, or fs:read, fs:write, or fs:list.
 Do not add markdown or a code fence.
 Stop at a natural end of the current expression, statement, or line.
+Do not repeat characters that are already immediately before or after |.
 Do not close a bracket, brace, or parenthesis that already appears after the cursor. Never insert }
 } when } already follows the cursor.
 If a line was omitted because it was too large, ignore that line and use the nearest visible lines.`;
@@ -45,7 +46,8 @@ export function stripCompletion(text) {
 
 /**
  * Drop a closing brace, bracket, or parenthesis the focused file already has after the cursor.
- * `}\n}` becomes nothing when `}` is the next code. A statement kept in front of that closer stays.
+ * `}\n}` becomes nothing when `}` is the next code. A closer at the end of a statement is dropped too.
+ * A statement kept in front of that closer stays.
  * @param {string} insertion Model insertion.
  * @param {string} afterCursor Text after the cursor, including the next line.
  * @returns {string}
@@ -62,9 +64,104 @@ export function stripDoubledClosers(insertion, afterCursor) {
         while (value.includes(doubled)) value = value.replace(doubled, closer);
         const lines = value.replace(/\n+$/, '').split('\n');
         while (lines.length > 0 && lines.at(-1).trim() === closer) lines.pop();
+        if (lines.length > 0) {
+            const last = lines.at(-1);
+            const stripped = last.replace(new RegExp(`\\${closer}\\s*$`), '');
+            if (stripped !== last) lines[lines.length - 1] = stripped.replace(/[ \t]+$/, '');
+        }
         value = lines.join('\n');
     }
     return value;
+}
+
+/**
+ * Text on the cursor line before the cursor.
+ * @param {string} text
+ * @returns {string}
+ * @ai.hint pure
+ */
+function cursorLineBefore(text) {
+    const value = String(text ?? '');
+    const at = value.lastIndexOf('\n');
+    return at === -1 ? value : value.slice(at + 1);
+}
+
+/**
+ * Text on the cursor line after the cursor, not the following line.
+ * @param {string} text
+ * @returns {string}
+ * @ai.hint pure
+ */
+function cursorLineAfter(text) {
+    const value = String(text ?? '');
+    const at = value.indexOf('\n');
+    return at === -1 ? value : value.slice(0, at);
+}
+
+/**
+ * Drop a copy of the current line, or of the word or punctuation the cursor is on.
+ * @param {string} value
+ * @param {string} linePrefix
+ * @returns {string}
+ * @ai.hint pure
+ */
+function stripEchoedPrefix(value, linePrefix) {
+    if (!value || !linePrefix) return value;
+    if (value.startsWith(linePrefix)) return value.slice(linePrefix.length);
+    const code = linePrefix.trimStart();
+    if (code && value.startsWith(code)) return value.slice(code.length);
+    const word = linePrefix.match(/[\w$]+$/);
+    if (word && value.startsWith(word[0])) return value.slice(word[0].length);
+    // `.` and opening brackets are echoes. `+`, `=`, and `|` are left alone so `++` and `||` can still be inserted.
+    const punct = linePrefix.match(/[.,([{'"`]+$/);
+    if (!punct) return value;
+    const mark = punct[0];
+    const max = Math.min(mark.length, value.length);
+    for (let size = max; size > 0; size--) {
+        const echoed = mark.slice(-size);
+        if (!value.startsWith(echoed)) continue;
+        const next = value[size];
+        if (next && echoed.endsWith(next)) continue;
+        return value.slice(size);
+    }
+    return value;
+}
+
+/**
+ * Drop the start of the same-line suffix when the insertion already ends with it.
+ * @param {string} value
+ * @param {string} lineSuffix
+ * @returns {string}
+ * @ai.hint pure
+ */
+function stripEchoedSuffix(value, lineSuffix) {
+    if (!value || !lineSuffix) return value;
+    const splitAt = value.indexOf('\n');
+    const head = splitAt === -1 ? value : value.slice(0, splitAt);
+    const rest = splitAt === -1 ? '' : value.slice(splitAt);
+    const max = Math.min(head.length, lineSuffix.length);
+    for (let size = max; size > 0; size--) {
+        if (head.slice(-size) === lineSuffix.slice(0, size)) return head.slice(0, -size) + rest;
+    }
+    return value;
+}
+
+/**
+ * Keep only the characters that are not already in the buffer at the cursor.
+ * An empty string means show nothing.
+ * @param {string} insertion Model insertion.
+ * @param {string} beforeCursor Text on the cursor line before the cursor.
+ * @param {string} afterCursor Text after the cursor, including the next line.
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function fitInsertion(insertion, beforeCursor, afterCursor) {
+    let value = String(insertion ?? '').replace(/\r\n/g, '\n');
+    if (!value) return '';
+    value = stripEchoedPrefix(value, cursorLineBefore(beforeCursor));
+    value = stripEchoedSuffix(value, cursorLineAfter(afterCursor));
+    return stripDoubledClosers(value, afterCursor);
 }
 
 /**
@@ -296,7 +393,7 @@ export async function completeCode({ client, config, request, cwd = process.cwd(
         };
     }
     return {
-        text: stripDoubledClosers(acceptInsertion(stripCompletion(response.output_text ?? '')), built.afterCursor),
+        text: fitInsertion(acceptInsertion(stripCompletion(response.output_text ?? '')), built.beforeCursor, built.afterCursor),
         model: response.model ?? prepared.model,
         omittedLines: built.omittedLines,
         truncated: built.truncated,

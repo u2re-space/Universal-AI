@@ -7,7 +7,7 @@
  * @exports MAX_LINE_BYTES, formatCompletionProblems, formatCompletionTree, buildCompletionContext, readCompletionWindow
  * @ai.tags complete, context
  * @ai.hint pure
- * @changed 2026-10-15 Tab completion sends only the lines around the cursor.
+ * @changed 2026-10-16 The cursor line before the cursor is kept so an echoed prefix can be removed.
  */
 
 import { createReadStream } from 'node:fs';
@@ -368,6 +368,9 @@ export function buildCompletionContext(input = {}) {
     const rest = cursorEntry && !cursorEntry.omitted ? cursorEntry.text.slice(Math.min(cursor.character, cursorEntry.text.length)) : '';
     const nextEntry = lines[cursorLine + 1];
     const following = nextEntry && !nextEntry.omitted ? nextEntry.text : '';
+    const beforeCursor = cursorEntry && !cursorEntry.omitted
+        ? cursorEntry.text.slice(0, Math.min(cursor.character, cursorEntry.text.length))
+        : '';
     const afterCursor = following ? `${rest}\n${following}` : rest;
     const omittedLines = lines
         .filter((line) => line.omitted && line.number >= focusStart && line.number <= focusEnd)
@@ -384,6 +387,7 @@ export function buildCompletionContext(input = {}) {
         cursorCharacter: cursor.character,
         replaced,
         startLine,
+        beforeCursor,
         afterCursor,
         problems: input.problems,
         validation: input.validation,

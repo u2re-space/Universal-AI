@@ -7,12 +7,12 @@
  * @exports startCompletionServer, createCompletionBridge
  * @ai.tags complete, http, websocket
  * @ai.hint io
- * @changed 2026-10-15 IDE completion endpoint.
+ * @changed 2026-10-16 A newer completion replaces the one still running. An older result is not returned.
  */
 
 import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
-import { ApiError } from '../openai/errors.js';
+import { ApiError, isAbortError } from '../openai/errors.js';
 import { CompletionError } from './errors.js';
 import { acceptKey, encodeServerFrame, readClientFrames } from './ws.js';
 
@@ -212,25 +212,40 @@ export function createCompletionBridge({ tokens = [], handle = null, structure =
         if (signal.aborted) stop();
         else signal.addEventListener('abort', stop, { once: true });
     }
-    const COMPLETE_GAP_MS = 1000;
-    let lastCompleteAt = 0;
-    let completeBusy = false;
+    let ticket = 0;
+    /** @type {AbortController|null} */
+    let currentAbort = null;
     /**
-     * Allow one model completion per second. A faster repeat returns no insertion.
-     * @returns {boolean}
-     * @ai.hint pure
+     * Run this completion and stop the previous one. A result from an older request is empty.
+     * @param {object} request
+     * @returns {Promise<object>}
+     * @ai.hint io
      */
-    const beginComplete = () => {
-        const now = Date.now();
-        if (completeBusy || now - lastCompleteAt < COMPLETE_GAP_MS) return false;
-        completeBusy = true;
-        lastCompleteAt = now;
-        return true;
-    };
     const run = async (request) => {
-        if (typeof handle !== 'function' || !beginComplete()) return { text: '' };
-        try { return await handle(request, controller.signal); }
-        finally { completeBusy = false; }
+        if (typeof handle !== 'function') return { text: '' };
+        const mine = ++ticket;
+        currentAbort?.abort();
+        const attempt = new AbortController();
+        currentAbort = attempt;
+        /**
+         * Stop this attempt when the server itself is stopping.
+         * @returns {void}
+         * @ai.hint io
+         */
+        const onStop = () => attempt.abort();
+        if (controller.signal.aborted) attempt.abort();
+        else controller.signal.addEventListener('abort', onStop, { once: true });
+        try {
+            const result = await handle(request, attempt.signal);
+            if (mine !== ticket || attempt.signal.aborted) return { text: '' };
+            return result ?? { text: '' };
+        } catch (error) {
+            if (mine !== ticket || attempt.signal.aborted || isAbortError(error) || error?.code === 'ABORTED') return { text: '' };
+            throw error;
+        } finally {
+            controller.signal.removeEventListener('abort', onStop);
+            if (currentAbort === attempt) currentAbort = null;
+        }
     };
     const runStructure = (request) => structure(request, controller.signal);
 

@@ -9,7 +9,7 @@ import { startMockServer } from './helpers/mock-server.js';
 import { defaults, loadConfig } from '../src/core/config.js';
 import { createClient } from '../src/openai/client.js';
 import { MAX_LINE_BYTES, buildCompletionContext, formatCompletionTree, readCompletionWindow } from '../src/complete/context.js';
-import { acceptInsertion, completeCode, stripCompletion, stripDoubledClosers } from '../src/complete/complete.js';
+import { acceptInsertion, completeCode, fitInsertion, stripCompletion, stripDoubledClosers } from '../src/complete/complete.js';
 import { startCompletionServer } from '../src/complete/server.js';
 import { readClientFrames } from '../src/complete/ws.js';
 import { CompletionError } from '../src/complete/errors.js';
@@ -37,9 +37,9 @@ before(async () => {
     endpoint = await startCompletionServer({
         port: 0,
         token: 'test-token',
-        handle: async (request) => {
+        handle: async (request, signal) => {
             const http = client();
-            try { return await completeCode({ client: http, config: config(), request, cwd: work }); }
+            try { return await completeCode({ client: http, config: config(), request, cwd: work, signal }); }
             finally { http.close(); }
         },
     });
@@ -231,6 +231,20 @@ test('stripDoubledClosers drops a repeated closer the file already has', () => {
     assert.equal(stripDoubledClosers('items.length;\n}', '\n}'), 'items.length;');
     assert.equal(stripDoubledClosers('items.length', '\n}'), 'items.length');
     assert.equal(stripDoubledClosers(')\n)', '\n)'), '');
+    assert.equal(stripDoubledClosers('return 1; }', '\n}'), 'return 1;');
+});
+
+test('an insertion does not repeat text already around the cursor', () => {
+    assert.equal(fitInsertion('const name = "Ada";', 'const name = ', ';'), '"Ada"');
+    assert.equal(fitInsertion('.length', '  return items.', '\n}'), 'length');
+    assert.equal(fitInsertion('return 1; }', '  ', '\n}'), 'return 1;');
+    assert.equal(fitInsertion('items.length', '  return ', '\n}'), 'items.length');
+    assert.equal(fitInsertion('urn', 'ret', ''), 'urn');
+    assert.equal(fitInsertion('  items.length', '', ''), '  items.length');
+    assert.equal(fitInsertion('+ b', 'a +', ''), '+ b');
+    assert.equal(fitInsertion('| b', 'a |', ''), '| b');
+    assert.equal(fitInsertion('..rest', 'obj.', ''), '..rest');
+    assert.equal(fitInsertion('.length', 'items.', ''), 'length');
 });
 
 test('stripCompletion removes one wrapping fence', () => {
@@ -356,7 +370,7 @@ test('completion does not use the encoder cache and ignores a far problem', asyn
                 files: ['src/extra/api.ts', 'src/app.js'],
             },
         });
-        assert.equal(result.text, '.length');
+        assert.equal(result.text, 'length');
     } finally { http.close(); }
 });
 
@@ -460,28 +474,30 @@ test('HTTP completion requires the token and returns the insertion', async () =>
     assert.equal(body.model, 'gpt-6-luna');
 });
 
-test('a second completion within one second does not call the model', async () => {
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-    let calls = 0;
-    script = () => {
-        calls += 1;
-        return { text: 'once' };
-    };
+test('a newer completion replaces one that is still running', async () => {
+    const pending = [];
+    script = () => new Promise((resolve) => { pending.push(resolve); });
     const post = (id) => fetch(endpoint.httpURL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-token' },
-        body: JSON.stringify({ id, content: 'const a = |' }),
-    });
-    const first = await (await post('gap-1')).json();
-    const second = await (await post('gap-2')).json();
-    assert.equal(calls, 1);
-    assert.equal(first.text, 'once');
-    assert.equal(second.text, '');
-    assert.equal(second.id, 'gap-2');
+        body: JSON.stringify({ id, content: `const ${id} = |` }),
+    }).then((res) => res.json());
+    const first = post('old');
+    const started = Date.now() + 3000;
+    while (pending.length < 1 && Date.now() < started) await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = post('new');
+    while (pending.length < 2 && Date.now() < started) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(pending.length, 2);
+    pending[1]({ text: 'fresh' });
+    pending[0]({ text: 'stale' });
+    const [oldBody, newBody] = await Promise.all([first, second]);
+    assert.equal(oldBody.id, 'old');
+    assert.equal(oldBody.text, '');
+    assert.equal(newBody.id, 'new');
+    assert.equal(newBody.text, 'fresh');
 });
 
 test('WebSocket completion and ping use the same request', async () => {
-    await new Promise((resolve) => setTimeout(resolve, 1100));
     script = (body) => {
         assert.match(body.input, /return \|/);
         return { text: ' items.length' };
