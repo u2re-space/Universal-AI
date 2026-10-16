@@ -177,7 +177,8 @@ export const defaults = Object.freeze({
      * maxLineBytes (0.5 MiB, typical of base64) is left out.
      */
     completion: {
-        model: 'gpt-6-luna',
+        //model: 'gpt-6-luna',
+        model: 'deepseek/deepseek-v4.1-flash',
         effort: 'none',
         maxOutputTokens: 160,
         maxLineBytes: 512 * 1024,
