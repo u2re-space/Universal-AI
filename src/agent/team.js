@@ -19,6 +19,21 @@ import { isAbortError, CancelledError } from '../openai/errors.js';
 import { clipMiddle, errorMessage } from '../util/text.js';
 import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { SPECIALISTS } from '../roles/index.js';
+import { coderChoice, isCodingStep } from '../roles/coder.js';
+import { writerChoice, isWritingStep } from '../roles/writer.js';
+
+/**
+ * Coder for source files, writer for documents, worker for everything else.
+ * @param {string[]} files
+ * @param {string} goal
+ * @returns {'coder'|'writer'|'worker'}
+ * @ai.hint pure
+ */
+function authorFor(files, goal) {
+    if (isCodingStep(files, goal)) return 'coder';
+    if (isWritingStep(files, goal)) return 'writer';
+    return 'worker';
+}
 import { createToolset, enabledToolNames, READ_ONLY_TOOLS } from './tools.js';
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
 import { listFiles } from './fs-tools.js';
@@ -240,14 +255,26 @@ export async function runTeam({
             return paths;
         };
         let workerSession = createSession({ store: false, model: roles.resolve('worker').model });
+        let sessionModel = workerSession ? roles.resolve('worker').model : null;
         let contextSent = false;
-        /** Send one worker turn, reusing the session until it grows past 160 items. */
-        const runWorker = async (title, body, maxTurns = config.agent.workerMaxTurnsPerStep) => {
-            if (workerSession.size > 160) { workerSession = createSession({ store: false, model: roles.resolve('worker').model }); contextSent = false; }
+        /** Send one worker, coder, or writer turn. A new model starts a fresh session. */
+        const runWorker = async (title, body, maxTurns = config.agent.workerMaxTurnsPerStep, author = 'worker') => {
+            const configured = config.roles?.[author] ?? {};
+            const choice = author === 'coder' ? coderChoice(plan?.complexity, configured)
+                : author === 'writer' ? writerChoice(plan?.complexity, configured) : null;
+            const model = choice?.model ?? roles.resolve(author).model;
+            if (workerSession.size > 160 || sessionModel !== model) {
+                workerSession = createSession({ store: false, model });
+                sessionModel = model;
+                contextSent = false;
+            }
             const header = contextSent ? `# Context updates\n${ctx.get('progress') ? clipMiddle(ctx.get('progress'), 12 * 1024) : '(none)'}` : ctx.render({ maxBytes, exclude: ['tree'] });
             contextSent = true;
-            return roles.run('worker', { text: `${header}\n\n# ${title}\n${body}`, instructions: ROLE_INSTRUCTIONS.worker, toolset: workerTools, builtin,
-                maxTurns, session: workerSession, imageTarget: config.image.outputDir });
+            return roles.run(author, {
+                text: `${header}\n\n# ${title}\n${body}`, instructions: ROLE_INSTRUCTIONS[author], toolset: workerTools, builtin,
+                maxTurns, session: workerSession, imageTarget: config.image.outputDir,
+                model: choice?.model ?? null, effort: choice?.effort ?? null,
+            });
         };
         /**
          * Remember the live plan. `expose` is false for an encode compatibility plan so `result.plan` stays null.
@@ -355,7 +382,7 @@ export async function runTeam({
                         const step = plan.steps[compatIndex];
                         notify({ type: 'step.start', index: compatIndex + 1, total: plan.steps.length, goal: step.goal });
                         const outcome = await runWorker(`Compatibility pass (step ${compatIndex + 1} of ${plan.steps.length})`,
-                            `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}`);
+                            `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}`, config.agent.workerMaxTurnsPerStep, authorFor(step.files, step.goal));
                         result.images.push(...outcome.images);
                         progress = recordStep(progress, {
                             index: compatIndex, status: outcome.status, report: outcome.text.trim() || '(отчёт отсутствует)', files: takeFiles(),
@@ -493,7 +520,7 @@ export async function runTeam({
             const files = [];
             for (const pass of passes) {
                 workerTools.setBackupSlot?.(`${step.id ?? `s${number}`}-${pass.phase}`);
-                outcome = await runWorker(title, pass.body, pass.maxTurns);
+                outcome = await runWorker(title, pass.body, pass.maxTurns, authorFor(step.files, step.goal));
                 result.images.push(...outcome.images);
                 reports.push(outcome.text.trim());
                 files.push(...takeFiles());
@@ -573,7 +600,7 @@ export async function runTeam({
             if (review.verdict === 'accept' || round > config.agent.maxReviewRounds) break;
             notify({ type: 'stage.start', stage: 'fix', role: 'worker', model: roles.resolve('worker').model, round });
             const issues = review.issues.map((i) => `- [${i.severity}] ${i.path ? `${i.path}: ` : ''}${i.message} → ${i.requestedChange}`).join('\n') || '- (see summary)';
-            const fixed = await runWorker(`Review round ${round}: changes requested`, `${review.summary}\n${issues}\n\nAddress every issue, verify, and report what you changed.`);
+            const fixed = await runWorker(`Review round ${round}: changes requested`, `${review.summary}\n${issues}\n\nAddress every issue, verify, and report what you changed.`, config.agent.workerMaxTurnsPerStep, plan.steps.some((step) => authorFor(step.files, step.goal) === 'coder') ? 'coder' : plan.steps.some((step) => authorFor(step.files, step.goal) === 'writer') ? 'writer' : 'worker');
             result.images.push(...fixed.images);
             result.steps.push({ index: `fix-${round}`, goal: 'Устранение замечаний ревью', status: fixed.status, report: fixed.text.trim() });
             progress.notes ??= [];

@@ -59,7 +59,7 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.deepEqual(overrides.agent, { mode: 'single' });
     assert.deepEqual(overrides.memory, { enabled: false });
     assert.throws(() => overridesFrom({ role: ['nobody=x'] }), /неизвестная роль/);
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 13);
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 15);
 });
 
 test('memory store: remember / recall (FTS) / list / forget / tasks / file summaries', () => {
@@ -204,7 +204,7 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
     assert.equal(progresses.at(-1).files.some((file) => file.path === 'test/sum.test.js'), true);
     assert.ok(events.some((e) => e.type === 'memory.saved' && e.count === 2));
     const byRole = Object.fromEntries(ledger.snapshot().byRole.map((r) => [r.role, r]));
-    assert.ok(byRole.planner.requests === 1 && byRole.worker.requests >= 5 && byRole.reviewer.requests === 2 && byRole.summarizer.requests === 1);
+    assert.ok(byRole.planner.requests === 1 && byRole.coder.requests >= 5 && byRole.reviewer.requests === 2 && byRole.summarizer.requests === 1);
     assert.ok(ledger.snapshot().costKnown);
     // Structured role outputs were not streamed as answer text.
     assert.ok(!events.some((e) => e.type === 'text.delta' && /"verdict"/.test(e.text)));

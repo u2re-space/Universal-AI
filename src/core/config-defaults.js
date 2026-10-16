@@ -73,7 +73,9 @@ export const defaults = Object.freeze({
      *   default    — ask / chat / single-agent run
      *   planner    — understands the task, writes the plan (senior model)
      *   collector  — gathers context from files for the others (cheap model, read-only tools)
-     *   worker     — executes plan steps: generates the tool calls (JSON for the local executor)
+     *   worker     — executes plan steps that are not code generation
+     *   coder      — writes code; model and effort follow plan complexity unless config pins them
+     *   writer     — writes documents, reports, and Markdown; stays on the cheaper model, effort follows complexity
      *   reviewer   — verifies the result (read-only tools, may run tests)
      *   vision     — describes images for other roles (view_image delegation)
      *   summarizer — compaction, file summaries, memory extraction (cheapest model)
@@ -89,6 +91,8 @@ export const defaults = Object.freeze({
         planner: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         collector: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         worker: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+        coder: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+        writer: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         reviewer: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         vision: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         summarizer: { model: null, effort: 'low', summary: 'none', verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },

@@ -34,20 +34,26 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
     async function run(name, {
         text, parts = [], instructions = '', toolset = null, builtin = [], schema = null, schemaName = 'result',
         maxTurns = 1, imageTarget = config.image.outputDir, session = null, silent = Boolean(schema), instructionsOnly = false,
+        model: modelOverride = null, effort: effortOverride = null,
     }) {
         const role = resolve(name);
-        const conversation = session ?? createSession({ store: false, model: role.model });
+        const model = modelOverride || role.model;
+        const effort = effortOverride || role.effort;
+        const roleConfig = model === role.model && effort === role.effort ? role.config : {
+            ...role.config, model, reasoning: { ...role.config.reasoning, effort },
+        };
+        const conversation = session ?? createSession({ store: false, model });
         conversation.addUserMessage(buildUserMessage({ text, parts }));
         const fullInstructions = instructionsOnly ? instructions : [instructions, role.instructions].filter((part) => part && part.trim()).join('\n\n');
         const previousRole = ledger.role;
         ledger.setRole(name);
-        notify({ type: 'role.start', role: name, model: role.model, effort: role.effort });
+        notify({ type: 'role.start', role: name, model, effort });
         // Structured (JSON) replies and helper roles are not streamed to the terminal as answer text.
         const roleEmit = silent ? (event) => { if (event.type !== 'text.delta' && event.type !== 'text.done') emit(event); } : emit;
         let result;
         try {
             result = await runTurn({
-                client, config: role.config, session: conversation, ledger, toolset, builtin, instructions: fullInstructions, model: role.model,
+                client, config: roleConfig, session: conversation, ledger, toolset, builtin, instructions: fullInstructions, model,
                 textFormat: schema ? { type: 'json_schema', name: schemaName, strict: true, schema } : null, maxTurns, signal, emit: roleEmit, imageTarget,
             });
         } finally {
@@ -57,7 +63,7 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
             try { result.data = JSON.parse(result.text); }
             catch (error) { result.status = 'failed'; result.error = new Error(`Роль ${name} вернула некорректный JSON: ${error.message}`); }
         }
-        notify({ type: 'role.done', role: name, model: role.model, status: result.status, turns: result.turns, toolCalls: result.toolCalls });
+        notify({ type: 'role.done', role: name, model, status: result.status, turns: result.turns, toolCalls: result.toolCalls });
         return result;
     }
 

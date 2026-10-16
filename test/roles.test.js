@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS } from '../src/roles/index.js';
 import { defaults } from '../src/core/config.js';
 
-const NAMES = ['default', 'planner', 'collector', 'worker', 'reviewer', 'vision', 'summarizer', 'scanner', 'solver', 'clicker', 'typer', 'encoder', 'tester'];
+const NAMES = ['default', 'planner', 'collector', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'scanner', 'solver', 'clicker', 'typer', 'encoder', 'tester'];
 
 test('role modules match config role names', () => {
     assert.deepEqual(Object.keys(ROLE_MODULES).sort(), NAMES.slice().sort());
@@ -19,6 +19,8 @@ test('existing role instructions keep their job', () => {
     assert.match(ROLE_INSTRUCTIONS.planner, /\{maxSteps\}/);
     assert.match(ROLE_INSTRUCTIONS.collector, /context collector/);
     assert.match(ROLE_INSTRUCTIONS.worker, /ONE step/);
+    assert.match(ROLE_INSTRUCTIONS.coder, /generate code/);
+    assert.match(ROLE_INSTRUCTIONS.writer, /documents, documentation, reports, and Markdown/);
     assert.match(ROLE_INSTRUCTIONS.worker, /delegate_role/);
     assert.match(ROLE_INSTRUCTIONS.reviewer, /independent reviewer/);
     assert.match(ROLE_INSTRUCTIONS.reviewer, /delegate_role/);

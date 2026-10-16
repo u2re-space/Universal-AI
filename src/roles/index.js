@@ -2,7 +2,7 @@
  * @file src/roles/index.js
  * @module roles/index
  * @purpose Collect role prompts, settings, and desktop specialist limits.
- * @depends roles/default, roles/planner, roles/collector, roles/worker, roles/reviewer, roles/vision, roles/summarizer, roles/scanner, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester
+ * @depends roles/default, roles/planner, roles/collector, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/scanner, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester
  * @usedBy commands/instructions, agent/team
  * @exports ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS
  * @ai.tags roles, prompts, desktop
@@ -14,6 +14,8 @@ import * as roleDefault from './default.js';
 import * as planner from './planner.js';
 import * as collector from './collector.js';
 import * as worker from './worker.js';
+import * as coder from './coder.js';
+import * as writer from './writer.js';
 import * as reviewer from './reviewer.js';
 import * as vision from './vision.js';
 import * as summarizer from './summarizer.js';
@@ -35,6 +37,8 @@ export const ROLE_MODULES = {
     planner: { instructions: planner.instructions, settings: planner.settings },
     collector: { instructions: collector.instructions, settings: collector.settings },
     worker: { instructions: worker.instructions, settings: worker.settings },
+    coder: { instructions: coder.instructions, settings: coder.settings },
+    writer: { instructions: writer.instructions, settings: writer.settings },
     reviewer: { instructions: reviewer.instructions, settings: reviewer.settings },
     vision: { instructions: vision.instructions, settings: vision.settings },
     summarizer: { instructions: summarizer.fileInstructions, settings: summarizer.settings },
