@@ -7,7 +7,7 @@
  * @exports MAX_LINE_BYTES, formatCompletionProblems, formatCompletionTree, buildCompletionContext, readCompletionWindow
  * @ai.tags complete, context
  * @ai.hint pure
- * @changed 2026-10-16 The cursor line before the cursor is kept so an echoed prefix can be removed.
+ * @changed 2026-10-16 Imports above the cursor window and open-file snippets stay in the prompt.
  */
 
 import { createReadStream } from 'node:fs';
@@ -320,6 +320,64 @@ export function formatCompletionTree(paths, { maxPerDirectory = 40, maxEntries =
     return render(root, '').join('\n');
 }
 
+const HEADER_LINE = /^\s*(?:import\s|import\(|export\s+(?:type\s+|interface\s+|\{|\*)|export\s+[\w$]+\s+from\s|const\s+\w+\s*=\s*require\s*\(|[A-Za-z_$][\w$.]*\s*=\s*require\s*\(|using\s|#include\s|package\s|namespace\s|from\s+\S+\s+import\s)/;
+const HEADER_NOTE = /^\s*(?:\/\/|\/\*|\*(?:\/|\s|$)|#(?!include\s)\s|--)/;
+const HEADER_DIRECTIVE = /^\s*['"]use [\w.]+['"];?\s*$/;
+
+/**
+ * Import block that sits above the cursor window. Empty when the window already includes the top.
+ * @param {{ text: string, omitted: boolean }[]} lines
+ * @param {number} focusStart
+ * @returns {string}
+ * @ai.hint pure
+ */
+function completionPreamble(lines, focusStart) {
+    if (focusStart <= 0) return '';
+    const header = [];
+    let started = false;
+    const stop = Math.min(focusStart, lines.length);
+    for (let i = 0; i < stop && header.length < 24; i++) {
+        if (lines[i].omitted) return '';
+        const line = lines[i].text;
+        if (HEADER_LINE.test(line)) {
+            started = true;
+            header.push(line);
+            continue;
+        }
+        const blank = line.trim() === '';
+        const note = HEADER_NOTE.test(line) || HEADER_DIRECTIVE.test(line) || line.startsWith('#!');
+        if (!started) {
+            if (blank) continue;
+            if (note) { header.push(line); continue; }
+            return '';
+        }
+        if (blank || note) { header.push(line); continue; }
+        break;
+    }
+    if (!started) return '';
+    while (header.length && header[header.length - 1].trim() === '') header.pop();
+    return header.join('\n').trim();
+}
+
+/**
+ * Short snippets from other open editors. A path list is not code and is left out.
+ * @param {unknown} items
+ * @returns {string}
+ * @ai.hint pure
+ */
+function formatReferences(items) {
+    const rows = [];
+    const list = Array.isArray(items) ? items : [];
+    for (const item of list) {
+        if (!item || typeof item !== 'object' || typeof item.content !== 'string' || !item.content.trim()) continue;
+        const file = typeof item.path === 'string' && item.path.trim() ? item.path.trim() : 'open file';
+        const language = typeof item.language === 'string' && item.language.trim() ? ` (${item.language.trim()})` : '';
+        rows.push(`${file}${language}`, item.content.replace(/\r\n/g, '\n').trim().slice(0, 2000));
+        if (rows.length >= 8) break;
+    }
+    return rows.join('\n');
+}
+
 function renderPrompt(built) {
     const rows = [];
     rows.push(built.path ? `Focused file: ${built.path}` : 'Focused file:');
@@ -337,12 +395,15 @@ function renderPrompt(built) {
         const clip = built.replaced.length > 200 ? `${built.replaced.slice(0, 200)}…` : built.replaced;
         rows.push(`Replace this selection: ${clip}`);
     }
+    if (built.preamble) rows.push('', 'Imports already in this file:', built.preamble);
     rows.push('', built.focus);
     const near = (items) => (Array.isArray(items) ? items.filter((item) => Number.isSafeInteger(item?.line) && Math.abs(item.line - built.cursorLine) <= 3) : items);
     const problems = formatCompletionProblems(near(built.problems));
     if (problems) rows.push('', 'Problems on nearby lines:', problems);
     const validation = formatCompletionProblems(near(built.validation));
     if (validation && validation !== problems) rows.push('', 'Validation on nearby lines:', validation);
+    const references = formatReferences(built.references);
+    if (references) rows.push('', 'Other open files. Use them for names. Do not insert them:', references);
     return rows.join('\n');
 }
 
@@ -364,6 +425,10 @@ export function buildCompletionContext(input = {}) {
     const cursorLine = Math.min(cursor.line, Math.max(0, lines.length - 1));
     const { focus, focusStart, focusEnd } = renderFocus(lines, { ...cursor, line: cursorLine }, neighborLines, startLine);
     const { excerpt, truncated } = windowOnly(focusStart, focusEnd, lines.length);
+    let preamble = completionPreamble(lines, focusStart);
+    if (!preamble && focusStart > 0 && typeof input.header === 'string' && input.header.trim()) {
+        preamble = input.header.replace(/\r\n/g, '\n').trim().slice(0, 4000);
+    }
     const cursorEntry = lines[cursorLine];
     const rest = cursorEntry && !cursorEntry.omitted ? cursorEntry.text.slice(Math.min(cursor.character, cursorEntry.text.length)) : '';
     const nextEntry = lines[cursorLine + 1];
@@ -392,6 +457,8 @@ export function buildCompletionContext(input = {}) {
         problems: input.problems,
         validation: input.validation,
         files: input.files,
+        preamble,
+        references: input.references,
     };
     built.prompt = renderPrompt(built);
     return built;

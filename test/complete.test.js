@@ -185,6 +185,41 @@ test('the focused file around the cursor is the code to complete', () => {
     assert.match(built.prompt, /^function total/m);
 });
 
+test('imports above the cursor window stay in the prompt', () => {
+    const lines = ['import { total } from "./util.js";', ''];
+    for (let i = 0; i < 40; i++) lines.push(`const near${String(i).padStart(2, '0')} = ${i};`);
+    lines[22] = 'const cursor = |;';
+    const built = buildCompletionContext({ content: lines.join('\n'), language: 'javascript' });
+    assert.match(built.prompt, /Imports already in this file:/);
+    assert.match(built.prompt, /import \{ total \} from "\.\/util\.js"/);
+    assert.match(built.focus, /const cursor = \|/);
+    assert.equal(built.prompt.includes('near00'), false);
+});
+
+test('a header fills in when the cursor window no longer contains the imports', () => {
+    const built = buildCompletionContext({
+        content: 'const above = 1;\nconst cursor = |;\n',
+        header: 'import { total } from "./util.js";',
+        neighborLines: 0,
+    });
+    assert.match(built.prompt, /Imports already in this file:/);
+    assert.match(built.prompt, /import \{ total \}/);
+    assert.equal(built.focus.includes('import'), false);
+});
+
+test('open file snippets are context and a path list is not', () => {
+    const built = buildCompletionContext({
+        content: 'const cursor = |;',
+        files: ['src/secret-tree.js'],
+        references: [{ path: 'src/util.js', language: 'javascript', content: 'export function total(items) {\n  return items.length;\n}\n' }],
+    });
+    assert.match(built.prompt, /Other open files/);
+    assert.match(built.prompt, /src\/util\.js \(javascript\)/);
+    assert.match(built.prompt, /export function total\(items\)/);
+    assert.equal(built.prompt.includes('secret-tree'), false);
+    assert.equal(built.prompt.split('export function total').length - 1, 1);
+});
+
 test('nearby problems stay and the workspace tree is not sent to the model', () => {
     const files = ['src/app.js', 'src/util.js', 'node_modules/left-pad/index.js', '.git/config'];
     for (let i = 0; i < 45; i++) files.push(`src/extra/f${String(i).padStart(2, '0')}.js`);
