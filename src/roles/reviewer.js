@@ -29,4 +29,4 @@ claims are issues. "accept" only when the task is met with no high-severity issu
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'medium', model: 'gpt-6.1-sol' };
+export const settings = { effort: 'high', model: 'gpt-6-luna' };
