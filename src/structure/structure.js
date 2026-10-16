@@ -2,12 +2,12 @@
  * @file src/structure/structure.js
  * @module structure/structure
  * @purpose Apply structure tasks to a file or a selected range, then an optional prompt.
- * @depends node:fs/promises, agent/paths, agent/fs-tools, complete/errors, complete/complete, structure/imports, structure/style
+ * @depends node:fs/promises, agent/paths, agent/fs-tools, complete/errors, complete/complete, complete/models, core/config, structure/imports, structure/style
  * @usedBy commands/complete, agent/tools, index.js
  * @exports STRUCTURE_TASKS, structureText, structureCode
  * @ai.tags structure, edit
  * @ai.hint io
- * @changed 2026-10-15 User tasks, rules, and prompts for inline structure edits.
+ * @changed 2026-10-16 Structure rewrites omit reasoning for catalog rows that do not accept it.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -15,6 +15,8 @@ import { resolveInside } from '../agent/paths.js';
 import { writeTextFile } from '../agent/fs-tools.js';
 import { CompletionError } from '../complete/errors.js';
 import { buildCompletionBody, stripCompletion } from '../complete/complete.js';
+import { resolveCompletionModel } from '../complete/models.js';
+import { isReasoningModel } from '../core/config.js';
 import { sortImports } from './imports.js';
 import { parseStyle, printStyle, styleTasks } from './style.js';
 
@@ -173,14 +175,31 @@ function splitSelection(text, selection) {
 }
 
 /**
+ * Catalog wire model and the effort a structure rewrite may send.
+ * An omit row sends no effort. A reasoning row keeps the request effort, or low.
+ * An unknown name sends that effort only when the model accepts reasoning.
+ * @param {object} request
+ * @param {object} config
+ * @returns {{ model: string, effort: string | null }}
+ * @ai.hint pure
+ */
+function structureTarget(request, config) {
+    const named = typeof request.model === 'string' && request.model.trim() ? request.model.trim() : config.completion.model;
+    const row = resolveCompletionModel(named);
+    const model = row ? row.wire : named;
+    const requested = typeof request.effort === 'string' && request.effort.trim() ? request.effort.trim() : 'low';
+    if (row) return { model, effort: row.reasoning === null ? null : requested };
+    return { model, effort: isReasoningModel(model) ? requested : null };
+}
+
+/**
  * Ask the model for a structural rewrite of one slice. The reply replaces that slice.
  * @param {object} options
  * @returns {Promise<string>}
  * @ai.hint io
  */
 async function rewriteWithModel({ client, config, request, text, tasks, rules, signal }) {
-    const model = typeof request.model === 'string' && request.model.trim() ? request.model.trim() : config.completion.model;
-    const effort = typeof request.effort === 'string' && request.effort.trim() ? request.effort.trim() : 'low';
+    const { model, effort } = structureTarget(request, config);
     const prompt = [
         request.path ? `File: ${request.path}` : null,
         request.language ? `Language: ${request.language}` : null,

@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { structureText } from '../src/structure/structure.js';
+import { structureCode, structureText } from '../src/structure/structure.js';
 import { startCompletionServer } from '../src/complete/server.js';
 import { createToolset } from '../src/agent/tools.js';
 import { defaults } from '../src/core/config.js';
+import { createClient } from '../src/openai/client.js';
+import { startMockServer } from './helpers/mock-server.js';
 
 let work;
 let endpoint;
@@ -147,4 +149,49 @@ test('structure_file writes the restructured stylesheet', async () => {
     assert.equal(result.ok, true);
     const written = await readFile(path.join(work, 'widget.scss'), 'utf8');
     assert.match(written, /\.a, \.b \{/);
+});
+
+test('a structure rewrite for anthropic/claude-haiku-5-5 omits reasoning', async () => {
+    const mock = await startMockServer({ script: () => ({ text: 'const a = 1;\n' }) });
+    const http = createClient({ apiKey: 'sk-test', baseURL: mock.baseURL });
+    try {
+        const result = await structureCode({
+            client: http,
+            config: { ...defaults, completion: { ...defaults.completion, model: 'anthropic/claude-haiku-5-5' } },
+            request: { content: 'const b = 1;\n', language: 'js', prompt: 'order the declarations', effort: 'high' },
+        });
+        assert.equal(result.modelUsed, true);
+        const posted = mock.requests.find((entry) => entry.method === 'POST' && entry.path === '/v1/responses');
+        assert.equal(posted.body.model, 'anthropic/claude-haiku-5-5');
+        assert.equal(posted.body.reasoning, undefined);
+    } finally {
+        http.close();
+        await mock.close();
+    }
+});
+
+test('a structure rewrite uses the wire model and its own effort', async () => {
+    const mock = await startMockServer({ script: () => ({ text: 'const a = 1;\n' }) });
+    const http = createClient({ apiKey: 'sk-test', baseURL: mock.baseURL });
+    const rewrite = (request) => structureCode({
+        client: http,
+        config: defaults,
+        request: { content: 'const b = 1;\n', language: 'js', prompt: 'order the declarations', ...request },
+    });
+    try {
+        await rewrite({ model: 'openai/gpt-6-luna' });
+        await rewrite({ model: 'x-ai/grok-4.7', effort: 'none' });
+        await rewrite({ model: 'qwen3.8-flash', effort: 'high' });
+        await rewrite({ model: 'custom-editor-model' });
+        await rewrite({ model: 'gpt-6-custom' });
+        const body = (model) => mock.requests.find((entry) => entry.body?.model === model)?.body;
+        assert.equal(body('gpt-6-luna').reasoning.effort, 'low');
+        assert.equal(body('x-ai/grok-4.7').reasoning.effort, 'none');
+        assert.equal(body('qwen/qwen3.8-flash').reasoning, undefined);
+        assert.equal(body('custom-editor-model').reasoning, undefined);
+        assert.equal(body('gpt-6-custom').reasoning.effort, 'low');
+    } finally {
+        http.close();
+        await mock.close();
+    }
 });

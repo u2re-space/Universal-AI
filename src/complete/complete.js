@@ -58,16 +58,6 @@ function pickInt(value, fallback, min, max, name) {
 }
 
 /**
- * @param {*} value
- * @param {string} fallback
- * @returns {string}
- * @ai.hint pure
- */
-function pickString(value, fallback) {
-    return typeof value === 'string' && value.trim() ? value.trim() : fallback;
-}
-
-/**
  * @param {{ line: number, character: number }|null|undefined} position
  * @param {number} startLine
  * @returns {{ line: number, character: number }|null}
@@ -167,7 +157,8 @@ async function prepareCompletionRequest(request, { cwd, config }) {
 
 /**
  * Responses API body for one completion. No tools, no stored reasoning transcript.
- * @param {{ model: string, effort: string, prompt: string, maxOutputTokens: number, config: object }} options
+ * `reasoning` is sent only when `effort` is set.
+ * @param {{ model: string, effort: string | null, prompt: string, maxOutputTokens: number, config: object }} options
  * @returns {object}
  * @exports
  * @ai.hint pure
