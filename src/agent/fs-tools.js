@@ -2,18 +2,19 @@
  * @file src/agent/fs-tools.js
  * @module agent/fs-tools
  * @purpose List, read, search, and edit UTF-8 files inside the working directory.
- * @depends node:path, node:fs/promises, agent/paths, util/text
+ * @depends node:path, node:fs/promises, agent/paths, agent/project-backup, util/text
  * @usedBy agent/tools, agent/team
  * @exports listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory
  * @ai.tags filesystem, tools
  * @ai.hint io
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-16 Overwrite and delete keep a project snapshot in .backup.
  */
 
 import path from 'node:path';
 import { readFile, writeFile, mkdir, stat, readdir, unlink, copyFile, open } from 'node:fs/promises';
 import { resolveInside, NOISY_DIRS } from './paths.js';
 import { formatBytes } from '../util/text.js';
+import { saveProjectBackup } from './project-backup.js';
 
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
@@ -180,37 +181,43 @@ export async function searchFiles({ root, query, dir = '.', regex = false, maxRe
 /**
  * Create or overwrite a UTF-8 file, copying the old bytes into `backupDir` first.
  * The `write_file` tool calls this.
- * @param {{ root: string, file: string, content: string, overwrite?: boolean, maxBytes?: number, backupDir?: string | null }} options
- * @returns {Promise<object>} rel, bytes, created, backupPath.
+ * @param {{ root: string, file: string, content: string, overwrite?: boolean, maxBytes?: number, backupDir?: string | null, backupSlot?: string | null }} options
+ * @returns {Promise<object>} rel, bytes, created, backupPath, projectBackup.
  * @exports
  * @ai.hint io
  */
-export async function writeTextFile({ root, file, content, overwrite = true, maxBytes = 4 * 1024 * 1024, backupDir = null }) {
+export async function writeTextFile({ root, file, content, overwrite = true, maxBytes = 4 * 1024 * 1024, backupDir = null, backupSlot = null }) {
     if (typeof content !== 'string') throw new Error('content должен быть строкой.');
     if (Buffer.byteLength(content) > maxBytes) throw new Error(`Содержимое больше лимита ${formatBytes(maxBytes)}.`);
     const { abs, rel } = await resolveInside(root, file, { forWrite: true, allowRoot: false });
+    if (rel === '.backup' || rel.startsWith('.backup/')) throw new Error(`Запись в .backup запрещена: ${rel}`);
     const existing = await stat(abs).catch(() => null);
     if (existing?.isDirectory()) throw new Error(`По этому пути находится каталог: ${rel}`);
     if (existing && !overwrite) throw new Error(`Файл уже существует: ${rel} (overwrite=false).`);
     let backupPath = null;
-    if (existing) backupPath = await backup(abs, rel, backupDir);
+    let projectBackup = null;
+    if (existing?.isFile()) {
+        backupPath = await backup(abs, rel, backupDir);
+        projectBackup = await saveProjectBackup({ root, rel, abs, slot: backupSlot || 'write' });
+    }
     await mkdir(path.dirname(abs), { recursive: true });
     await writeFile(abs, content, 'utf8');
-    return { rel, bytes: Buffer.byteLength(content), created: !existing, backupPath };
+    return { rel, bytes: Buffer.byteLength(content), created: !existing, backupPath, projectBackup };
 }
 
 /**
  * Replace an exact fragment once, or every time when `all` is set.
  * The `replace_text` tool calls this.
- * @param {{ root: string, file: string, search: string, replacement: string, all?: boolean, maxBytes?: number, backupDir?: string | null }} options
- * @returns {Promise<object>} rel, replacements, bytes, backupPath.
+ * @param {{ root: string, file: string, search: string, replacement: string, all?: boolean, maxBytes?: number, backupDir?: string | null, backupSlot?: string | null }} options
+ * @returns {Promise<object>} rel, replacements, bytes, backupPath, projectBackup.
  * @exports
  * @ai.hint io
  */
-export async function replaceInFile({ root, file, search, replacement, all = false, maxBytes = 4 * 1024 * 1024, backupDir = null }) {
+export async function replaceInFile({ root, file, search, replacement, all = false, maxBytes = 4 * 1024 * 1024, backupDir = null, backupSlot = null }) {
     if (typeof search !== 'string' || !search) throw new Error('search должен быть непустой строкой.');
     if (typeof replacement !== 'string') throw new Error('replacement должен быть строкой.');
     const { abs, rel } = await resolveInside(root, file, { forWrite: true, allowRoot: false });
+    if (rel === '.backup' || rel.startsWith('.backup/')) throw new Error(`Запись в .backup запрещена: ${rel}`);
     const info = await stat(abs).catch(() => null);
     if (!info?.isFile()) throw new Error(`Файл не найден: ${file}`);
     if (info.size > maxBytes) throw new Error(`Файл больше лимита ${formatBytes(maxBytes)}.`);
@@ -228,8 +235,9 @@ export async function replaceInFile({ root, file, search, replacement, all = fal
     if (count > 1 && !all) throw new Error(`Фрагмент встречается ${count} раз(а); уточните контекст или укажите all=true.`);
     const updated = all ? text.split(search).join(replacement) : text.replace(search, () => replacement);
     const backupPath = await backup(abs, rel, backupDir);
+    const projectBackup = await saveProjectBackup({ root, rel, abs, slot: backupSlot || 'write' });
     await writeFile(abs, updated, 'utf8');
-    return { rel, replacements: all ? count : 1, bytes: Buffer.byteLength(updated), backupPath };
+    return { rel, replacements: all ? count : 1, bytes: Buffer.byteLength(updated), backupPath, projectBackup };
 }
 
 /**
@@ -240,14 +248,16 @@ export async function replaceInFile({ root, file, search, replacement, all = fal
  * @exports
  * @ai.hint io
  */
-export async function deleteFile({ root, file, backupDir = null }) {
+export async function deleteFile({ root, file, backupDir = null, backupSlot = null }) {
     const { abs, rel } = await resolveInside(root, file, { forWrite: true, allowRoot: false });
+    if (rel === '.backup' || rel.startsWith('.backup/')) throw new Error(`Запись в .backup запрещена: ${rel}`);
     const info = await stat(abs).catch(() => null);
     if (!info) throw new Error(`Файл не найден: ${file}`);
     if (!info.isFile()) throw new Error('Удалять можно только файлы (не каталоги).');
     const backupPath = await backup(abs, rel, backupDir);
+    const projectBackup = await saveProjectBackup({ root, rel, abs, slot: backupSlot || 'write' });
     await unlink(abs);
-    return { rel, backupPath };
+    return { rel, backupPath, projectBackup };
 }
 
 /**

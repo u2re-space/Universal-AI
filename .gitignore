@@ -150,6 +150,7 @@ vite.config.ts.timestamp-*
 
 node_modules/
 .worktrees/
+.backup/
 .ai-agent/
 .ai/
 *.log

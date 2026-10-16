@@ -105,6 +105,21 @@ export const TOOL_SPECS = {
         description: 'Delete a single file (a backup copy is kept). Directories cannot be deleted.',
         parameters: schema({ path: str('File path relative to the working directory.') }),
     },
+    list_backups: {
+        category: 'read', group: 'fs',
+        description: 'List project snapshots in .backup. Each record is the file contents from before that slot changed it. Pass path to see one file, or null for the latest records.',
+        parameters: schema({
+            path: nullableStr('Project file path. Null lists the latest snapshots in the project.'),
+        }),
+    },
+    restore_backup: {
+        category: 'write', group: 'fs',
+        description: 'Restore a file from a .backup snapshot id. The current contents are snapshotted first. Use this when a step or turn lost a good version, instead of regenerating the file.',
+        parameters: schema({
+            id: str('Snapshot id from list_backups, such as b001.'),
+            path: nullableStr('Expected project path. Null accepts the path stored on the snapshot.'),
+        }),
+    },
     make_dir: {
         category: 'write', group: 'fs',
         description: 'Create a directory (recursively).',
@@ -319,7 +334,7 @@ export const TOOL_SPECS = {
     },
 };
 
-export const READ_ONLY_TOOLS = ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall'];
+export const READ_ONLY_TOOLS = ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall', 'list_backups'];
 
 /** Shell tools enabled together by tools.shell. Reviewer may run these; collector may not. */
 export const SHELL_TOOL_NAMES = ['run_command', 'run_script', 'ssh'];
@@ -341,7 +356,7 @@ export function toolDefinitions(names) {
 /** Which tools are enabled for a config.tools selection. */
 export function enabledToolNames(tools, { interactive = false, memory = false, summarize = false, imageApi = false } = {}) {
     const names = [];
-    if (tools.fs) names.push('list_files', 'read_file', 'search_files', 'write_file', 'replace_text', 'delete_file', 'make_dir', 'view_image', 'structure_file');
+    if (tools.fs) names.push('list_files', 'read_file', 'search_files', 'write_file', 'replace_text', 'delete_file', 'make_dir', 'view_image', 'structure_file', 'list_backups', 'restore_backup');
     if (tools.fs && summarize) names.push('summarize_file');
     if (tools.shell) names.push(...SHELL_TOOL_NAMES);
     if (tools.fetch) names.push('fetch_url');

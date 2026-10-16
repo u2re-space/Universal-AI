@@ -18,6 +18,7 @@ import { createClient } from '../openai/client.js';
 import { detectImageMime } from '../core/attachments.js';
 import { errorMessage, formatBytes, truncate, clipMiddle } from '../util/text.js';
 import { resolveInside } from './paths.js';
+import { listProjectBackups, restoreProjectBackup } from './project-backup.js';
 import { listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory } from './fs-tools.js';
 import { loadProjectMap, searchMapped, updateProjectMapPath } from './map.js';
 import { SHELLS, runCommand, runProgram, scriptLaunch, sshPlan } from './shell.js';
@@ -162,6 +163,7 @@ export function createToolset({
     if (!summarizeFile) allowed.delete('summarize_file');
     const alwaysAllowed = new Set();
     const stats = { calls: 0, byTool: {}, changes: [], commands: [], denied: 0, errors: 0, memories: [] };
+    let backupSlot = 'write';
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
 
     /** Apply the approval level, and throw when the operator aborts. */
@@ -190,6 +192,8 @@ export function createToolset({
             case 'replace_text':
                 return `Изменить ${args.path}${args.all ? ' (все вхождения)' : ''}\n--- было ---\n${truncate(args.search, 400, { singleLine: false })}\n--- станет ---\n${truncate(args.replacement, 400, { singleLine: false })}`;
             case 'delete_file': return `Удалить файл ${args.path} (копия сохранится в резервном каталоге)`;
+            case 'list_backups': return `Снимки ${args.path || 'проекта'}`;
+            case 'restore_backup': return `Вернуть снимок ${args.id}${args.path ? ` в ${args.path}` : ''}`;
             case 'make_dir': return `Создать каталог ${args.path}`;
             case 'structure_file': return `Структура ${args.path}: ${args.tasks || 'по умолчанию'}${args.prompt ? `\nПромпт: ${truncate(args.prompt, 200)}` : ''}\nПричина: ${args.reason ?? '—'}`;
             case 'run_command': return `Команда (${args.shell || 'по умолчанию'}): ${args.command}\nКаталог: ${args.cwd ?? '.'}\nПричина: ${args.reason ?? '—'}`;
@@ -246,17 +250,18 @@ export function createToolset({
         /** Write the file, record the change, and refresh that map path. */
         async write_file(args) {
             const result = await writeTextFile({ root, file: args.path, content: args.content, overwrite: args.overwrite !== false,
-                maxBytes: limits.maxFileWriteBytes, backupDir });
+                maxBytes: limits.maxFileWriteBytes, backupDir, backupSlot });
             stats.changes.push({ op: result.created ? 'create' : 'overwrite', path: result.rel, backupPath: result.backupPath });
             try { await updateProjectMapPath(root, result.rel); }
             catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
-            const output = labelOutsideEdit(result.rel, `${result.created ? 'Создан' : 'Перезаписан'} ${result.rel} (${formatBytes(result.bytes)}).`);
+            const shot = result.projectBackup ? ` Снимок ${result.projectBackup.id} (${result.projectBackup.slot}).` : '';
+            const output = labelOutsideEdit(result.rel, `${result.created ? 'Создан' : 'Перезаписан'} ${result.rel} (${formatBytes(result.bytes)}).${shot}`);
             return { output, summary: `${result.created ? '+' : '~'} ${result.rel}` };
         },
         /** Replace the fragment, record the edit, and refresh that map path. */
         async replace_text(args) {
             const result = await replaceInFile({ root, file: args.path, search: args.search, replacement: args.replacement, all: Boolean(args.all),
-                maxBytes: limits.maxFileWriteBytes, backupDir });
+                maxBytes: limits.maxFileWriteBytes, backupDir, backupSlot });
             stats.changes.push({ op: 'edit', path: result.rel, backupPath: result.backupPath });
             try { await updateProjectMapPath(root, result.rel); }
             catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
@@ -265,7 +270,7 @@ export function createToolset({
         },
         /** Delete the file, record it, and refresh that map path. */
         async delete_file(args) {
-            const result = await deleteFile({ root, file: args.path, backupDir });
+            const result = await deleteFile({ root, file: args.path, backupDir, backupSlot });
             stats.changes.push({ op: 'delete', path: result.rel, backupPath: result.backupPath });
             try { await updateProjectMapPath(root, result.rel); }
             catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
@@ -276,6 +281,21 @@ export function createToolset({
         async make_dir(args) {
             const result = await makeDirectory({ root, dir: args.path });
             return { output: `Каталог ${result.rel} создан.`, summary: result.rel };
+        },
+        /** List snapshots stored in `.backup`. */
+        async list_backups(args) {
+            const records = await listProjectBackups({ root, file: args.path || null });
+            if (!records.length) return { output: 'Снимков нет.', summary: '0 снимков' };
+            const text = records.map((record) => `${record.id} ${record.slot} ${record.path} (${formatBytes(record.bytes)})`).join('\n');
+            return { output: text, summary: `${records.length} снимков` };
+        },
+        /** Put a snapshot back. The current bytes are kept as a new snapshot. */
+        async restore_backup(args) {
+            const result = await restoreProjectBackup({ root, id: args.id, file: args.path || null });
+            try { await updateProjectMapPath(root, result.path); }
+            catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
+            const prior = result.replaced ? ` Текущая версия сохранена как ${result.replaced}.` : '';
+            return { output: `Восстановлен ${result.path} из ${result.id} (${result.slot}).${prior}`, summary: `= ${result.path}` };
         },
         /** Restructure a file or a selected range using tasks, rules, and an optional prompt. */
         async structure_file(args) {
@@ -523,6 +543,7 @@ export function createToolset({
         get approvalLevel() { return approvalLevel; },
         set approvalLevel(value) { approvalLevel = value; },
         root,
+        setBackupSlot(slot) { backupSlot = slot || 'write'; },
     });
 }
 

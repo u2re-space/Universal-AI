@@ -13,7 +13,7 @@ import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { fidelityContract, fidelityInstructions } from './fidelity.js';
 import { platformInstructions } from './platform.js';
-import { filesForKind, stackText, recommendStack, renderGenerationTask, kindRules } from './scaffold.js';
+import { filesForKind, filesForStack, stackText, recommendStack, renderGenerationTask, kindRules } from './scaffold.js';
 
 /** Kinds `ai gen` accepts. */
 export const GENERATION_KINDS = Object.freeze(['landing', 'site', 'backend', 'app']);
@@ -61,11 +61,11 @@ export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', f
         ...referenceLines('Design examples', refs.examples),
     ];
     const recommendations = recommendStack({ kind, prompt, references: refs });
-    const outputs = kind ? [...filesForKind(kind)] : [];
+    const outputs = kind ? [...filesForStack({ kind, libraries: recommendations.libraries })] : [];
     const manifest = {
         kind, prompt, fidelity: contract.fidelity, creativity: contract.creativity, measured: null,
         method: 'unmeasured', reason: contract.reason, platform: platform.id, experimentalFlags: false,
-        references: refs, outputs, stack: { kind, text: stackText(kind, platform) }, recommendations,
+        references: refs, outputs, stack: { kind, text: stackText(kind, platform, recommendations.libraries) }, recommendations,
     };
     const task = [
         renderGenerationTask({ kind, prompt, platform, recommendations, name }),

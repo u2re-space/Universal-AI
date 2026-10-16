@@ -81,7 +81,9 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
     assert.match(brief.task, /Plan the work before changing files/);
     assert.match(brief.task, /```md\nПовтори макет Tilda Publishing\n```/);
     assert.match(brief.task, /lucide/);
-    assert.match(brief.task, /"vite": "\*"/);
+    assert.match(brief.task, /Already written/);
+    assert.match(brief.task, /Do not plan a step/);
+    assert.doesNotMatch(brief.task, /process\.exit/);
     assert.doesNotMatch(brief.task, /tailwindcss/);
     assert.equal(brief.manifest.measured, null);
     assert.equal(brief.manifest.stack.kind, 'landing');

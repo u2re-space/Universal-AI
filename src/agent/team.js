@@ -482,6 +482,8 @@ export async function runTeam({
             const reports = [];
             const files = [];
             for (const [passIndex, body] of passes.entries()) {
+                const phase = staged && passIndex === 0 && passes.length === 2 ? 'surface' : 'body';
+                workerTools.setBackupSlot?.(`${step.id ?? `s${number}`}-${phase}`);
                 outcome = await runWorker(title, body);
                 result.images.push(...outcome.images);
                 reports.push(outcome.text.trim());

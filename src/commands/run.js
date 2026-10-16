@@ -7,7 +7,7 @@
  * @exports run
  * @ai.tags cli, agent, team
  * @ai.hint io
- * @changed 2026-10-16 Generation brief receives the directory name.
+ * @changed 2026-10-16 Prepared scaffold files are written before the model plans.
  */
 import path from 'node:path';
 import { ensureProjectMap } from '../agent/map.js';
@@ -26,6 +26,7 @@ import { prepareTeamInvocation } from './team-args.js';
 import { imageTransport } from '../openai/images.js';
 import { formatWorkspace, scanWorkspace } from '../agent/workspace-scan.js';
 import { buildGenerationBrief, writeGenerationManifest } from '../generate/brief.js';
+import { preparedScaffoldFiles, writePreparedScaffold } from '../generate/scaffold.js';
 import { resolvePlatform } from '../generate/platform.js';
 import { stdinFence } from '../core/attachments.js';
 
@@ -71,6 +72,14 @@ export async function run(ctx) {
             name: path.basename(ctx.cwd),
         });
         await writeGenerationManifest(ctx.cwd, brief.manifest);
+        if (level === 'write' || level === 'all') {
+            const boilerplate = preparedScaffoldFiles({
+                kind: prepared.kind, platform: resolvePlatform(config.generate.platform),
+                recommendations: brief.manifest.recommendations, name: path.basename(ctx.cwd),
+            });
+            const saved = await writePreparedScaffold(ctx.cwd, boilerplate);
+            if (saved.written.length) renderer.line('info', `Каркас уже записан: ${saved.written.join(', ')}`, { dim: true });
+        }
         renderer.line('info', `Контракт генерации: .ai/generation.json · точность ${brief.manifest.fidelity}% · креативность ${brief.manifest.creativity}%`, { dim: true });
         task = brief.task;
         extra = [brief.instructions, extra].filter(Boolean).join('\n\n');

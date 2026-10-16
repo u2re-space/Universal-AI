@@ -18,7 +18,7 @@ const PROTECTED_FILES = /^(?:\.env(?:\..*)?|\.npmrc|\.netrc|\.pypirc|credentials
 /** Directories that are never accessible at all. */
 const FORBIDDEN_DIRS = /^(?:\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.docker)$/i;
 /** Directories that are read-only for the model and skipped by listing / search. */
-export const NOISY_DIRS = /^(?:\.git|node_modules|\.hg|\.svn|dist|build|coverage|\.next|\.nuxt|\.cache|\.venv|venv|__pycache__|target|\.ai-agent)$/i;
+export const NOISY_DIRS = /^(?:\.git|node_modules|\.hg|\.svn|dist|build|coverage|\.next|\.nuxt|\.cache|\.venv|venv|__pycache__|target|\.ai-agent|\.backup)$/i;
 const READ_ONLY_DIRS = /^(?:\.git|node_modules)$/i;
 
 /**

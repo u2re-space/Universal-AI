@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
-import { filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, renderGenerationTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, guardScaffold } from '../src/generate/scaffold.js';
+import { filesForKind, filesForStack, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, renderGenerationTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, guardScaffold, preparedScaffoldFiles, writePreparedScaffold } from '../src/generate/scaffold.js';
 
 const platform = { id: 'chrome-157-beta', ecma: { edition: 2026 } };
 
@@ -90,6 +90,48 @@ test('Tailwind is included and Express replaces Fastify', () => {
     assert.equal(kit.types, null);
 });
 
+const diaryIdea = `
+## Frontend stack
+- https://github.com/preactjs/preact
+- https://github.com/preactjs/signals
+- https://www.typescriptlang.org/download/
+- https://github.com/sass/sass (SCSS)
+- https://vite.dev/
+## Backend stack
+- https://github.com/fastify/fastify
+- https://www.beercss.com/
+- https://github.com/google/material-design-icons
+- https://github.com/material-foundation/material-color-utilities
+- https://m3.material.io/
+`;
+
+test('a Preact and TypeScript idea asks for TSX modules and SCSS modules', () => {
+    const result = recommendStack({ kind: 'app', prompt: diaryIdea, references: {} });
+    const included = names(result, true);
+    for (const name of ['preact', '@preact/signals', '@preact/preset-vite', 'typescript', 'sass', 'fastify', '@fastify/static', 'beercss', 'material-symbols', '@material/material-color-utilities']) {
+        assert.ok(included.includes(name), name);
+    }
+    const design = result.libraries.find((item) => item.name === 'https://m3.material.io/');
+    assert.equal(design.include, false);
+    assert.equal(result.libraries.some((item) => item.name === 'https://github.com/preactjs/preact'), false);
+    const files = filesForStack({ kind: 'app', libraries: result.libraries });
+    assert.ok(files.includes('src/main.tsx'));
+    assert.ok(files.includes('src/app.tsx'));
+    assert.ok(files.includes('src/app.scss'));
+    assert.ok(files.includes('src/styles.scss'));
+    assert.equal(files.includes('src/main.js'), false);
+    const task = renderGenerationTask({
+        kind: 'app', prompt: diaryIdea, platform, recommendations: result, name: 'diary-m',
+    });
+    assert.match(task, /src\/main\.tsx/);
+    assert.match(task, /src\/app\.scss/);
+    assert.match(task, /TSX/);
+    assert.match(task, /SCSS module/);
+    assert.equal(buildPackageManifest({ kind: 'app', name: 'diary-m', libraries: result.libraries }).dependencies.preact, '*');
+    assert.match(task, /Already written/);
+    assert.doesNotMatch(task, /process\.exit/);
+});
+
 test('generate script is standalone English and the wrapper quotes the customer', () => {
     const source = scaffoldScript();
     assert.match(source, /The skeleton is already written/);
@@ -105,8 +147,32 @@ test('generate script is standalone English and the wrapper quotes the customer'
     assert.match(task, /Plan the work before changing files/);
     assert.match(task, /When web_search is available/);
     assert.match(task, /scripts\/generate\.js/);
-    assert.match(task, /The skeleton is already written/);
+    assert.match(task, /Already written/);
+    assert.match(task, /Do not plan a step/);
+    assert.doesNotMatch(task, /The skeleton is already written/);
     assert.equal(task.includes('Повтори макет'), false);
+});
+
+test('prepared scaffold files are written once and an existing file stays', async () => {
+    const recommendations = recommendStack({ kind: 'landing', prompt: 'page', references: {} });
+    const files = preparedScaffoldFiles({ kind: 'landing', platform, recommendations, name: 'widget' });
+    assert.equal(typeof files['scripts/generate.js'], 'string');
+    assert.match(files['package.json'], /"name": "widget"/);
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-prepared-'));
+    try {
+        await mkdir(path.join(root, '.rules'), { recursive: true });
+        await writeFile(path.join(root, '.rules', 'stack.md'), 'keep\n');
+        const first = await writePreparedScaffold(root, files);
+        assert.ok(first.written.includes('scripts/generate.js'));
+        assert.ok(first.written.includes('package.json'));
+        assert.ok(first.kept.includes('.rules/stack.md'));
+        assert.equal(await readFile(path.join(root, '.rules', 'stack.md'), 'utf8'), 'keep\n');
+        const second = await writePreparedScaffold(root, files);
+        assert.deepEqual(second.written, []);
+        assert.ok(second.kept.includes('package.json'));
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
 });
 
 test('scaffold commands are classified before spawn', () => {

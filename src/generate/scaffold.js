@@ -4,10 +4,10 @@
  * @purpose Stack, package.json, recommendations, and the safe scaffold merge for generation.
  * @depends node:path, node:fs/promises, node:os, agent/paths
  * @usedBy generate/brief, agent/tools
- * @exports filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, stackDocuments, kindRules, renderGenerationTask, pathsNamedInTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, scaffoldTarget, retargetScaffold, guardScaffold
+ * @exports filesForKind, filesForStack, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, stackDocuments, kindRules, renderGenerationTask, preparedScaffoldFiles, writePreparedScaffold, pathsNamedInTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, scaffoldTarget, retargetScaffold, guardScaffold
  * @ai.tags generate
  * @ai.hint pure
- * @changed 2026-10-16 Scaffold contract for Vite, rules, and safe npx.
+ * @changed 2026-10-16 Named Preact and TypeScript links select TSX and SCSS modules.
  */
 import path from 'node:path';
 import os from 'node:os';
@@ -30,6 +30,29 @@ export function filesForKind(kind) {
     if (kind === 'app') return ['package.json', 'vite.config.js', 'index.html', ...WEB_TAIL, 'server.js'];
     if (kind === 'backend') return ['package.json', 'server.js', 'scripts/generate.js', ...RULES];
     return [];
+}
+
+/**
+ * File list for a kind after named libraries choose the source language.
+ * Preact with TypeScript uses TSX modules and a matching SCSS module.
+ * @param {{ kind: string | null, libraries?: { name: string, include: boolean }[] }} request
+ * @returns {string[]}
+ * @exports
+ * @ai.hint pure
+ */
+export function filesForStack({ kind, libraries = [] }) {
+    const files = [...filesForKind(kind)];
+    const included = new Set(libraries.filter((item) => item.include).map((item) => item.name));
+    const ui = included.has('preact') || included.has('react');
+    const typed = included.has('typescript');
+    if (!ui && !typed) return files;
+    const ext = typed ? (ui ? 'tsx' : 'ts') : 'jsx';
+    const index = files.indexOf('src/main.js');
+    if (index === -1) return files;
+    const entry = `src/main.${ext}`;
+    files[index] = entry;
+    if (ui) files.splice(index + 1, 0, `src/app.${ext}`, 'src/app.scss');
+    return files;
 }
 
 /**
@@ -82,15 +105,23 @@ export function buildPackageManifest({ kind, name, libraries = [] }) {
  * English stack paragraph for the wrapper.
  * @param {string | null} kind
  * @param {{ id: string, ecma: { edition: number } }} platform
+ * @param {{ name: string, include: boolean }[]} [libraries]
  * @returns {string}
  * @exports
  * @ai.hint pure
  */
-export function stackText(kind, platform) {
-    if (kind === 'backend') return 'Node.js 26, ESM, server.js on node:http, bind 127.0.0.1, port PORT or 3000. No dependencies unless a recommendation includes them.';
-    if (kind === 'landing' || kind === 'site') return `Node.js 26, ESM, Vite, SCSS, ECMAScript ${platform.ecma.edition} (${platform.id}, experimental flags off). No Node server.`;
-    if (kind === 'app') return `Node.js 26, ESM, Vite, SCSS, ECMAScript ${platform.ecma.edition} (${platform.id}, experimental flags off). server.js serves dist/ after vite build.`;
-    return 'If this is web, PWA, or frontend, use Node.js 26, ESM, Vite, and SCSS. If it is a backend, use node:http on 127.0.0.1 and port PORT or 3000. Otherwise choose the files the request needs.';
+export function stackText(kind, platform, libraries = []) {
+    const included = new Set(libraries.filter((item) => item.include).map((item) => item.name));
+    let text;
+    if (kind === 'backend') text = 'Node.js 26, ESM, server.js on node:http, bind 127.0.0.1, port PORT or 3000. No dependencies unless a recommendation includes them.';
+    else if (kind === 'landing' || kind === 'site') text = `Node.js 26, ESM, Vite, SCSS, ECMAScript ${platform.ecma.edition} (${platform.id}, experimental flags off). No Node server.`;
+    else if (kind === 'app') text = `Node.js 26, ESM, Vite, SCSS, ECMAScript ${platform.ecma.edition} (${platform.id}, experimental flags off). server.js serves dist/ after vite build.`;
+    else text = 'If this is web, PWA, or frontend, use Node.js 26, ESM, Vite, and SCSS. If it is a backend, use node:http on 127.0.0.1 and port PORT or 3000. Otherwise choose the files the request needs.';
+    if (included.has('preact') && included.has('typescript')) text += ' Write the interface as Preact TSX modules. Each component has a matching SCSS module. Do not implement the UI as h() calls in src/main.js.';
+    else if (included.has('preact')) text += ' Write the interface as Preact JSX modules. Each component has a matching SCSS module. Do not implement the UI as h() calls in src/main.js.';
+    else if (included.has('typescript')) text += ' Source modules are TypeScript.';
+    if (included.has('fastify')) text += ' The server uses fastify.';
+    return text;
 }
 
 const KNOWN = Object.freeze({
@@ -105,6 +136,14 @@ const KNOWN = Object.freeze({
     '@phosphor-icons/web': { kind: 'icons', docs: 'https://phosphoricons.com/', types: null },
     '@tabler/icons': { kind: 'icons', docs: 'https://tabler.io/icons', types: null },
     'material-symbols': { kind: 'icons', docs: 'https://fonts.google.com/icons', types: null },
+    preact: { kind: 'runtime', docs: 'https://preactjs.com/guide/v10/getting-started', types: null },
+    '@preact/preset-vite': { kind: 'tool', docs: 'https://preactjs.com/guide/v10/getting-started#vite', types: null },
+    '@preact/signals': { kind: 'runtime', docs: 'https://preactjs.com/guide/v10/signals', types: null },
+    typescript: { kind: 'tool', docs: 'https://www.typescriptlang.org/docs/', types: null },
+    sass: { kind: 'tool', docs: 'https://sass-lang.com/documentation/', types: null },
+    vite: { kind: 'tool', docs: 'https://vite.dev/guide/', types: null },
+    beercss: { kind: 'css', docs: 'https://www.beercss.com/', types: null },
+    '@material/material-color-utilities': { kind: 'runtime', docs: 'https://github.com/material-foundation/material-color-utilities', types: null },
     fastify: { kind: 'runtime', docs: 'https://fastify.dev/docs/latest/', types: null },
     '@fastify/static': { kind: 'runtime', docs: 'https://github.com/fastify/fastify-static', types: null },
     '@fastify/cors': { kind: 'runtime', docs: 'https://github.com/fastify/fastify-cors', types: null },
@@ -132,6 +171,17 @@ const SERVERS = [
     { test: /\bexpress\b/i, name: 'express' },
     { test: /\bhono\b/i, name: 'hono' },
     { test: /\bkoa\b/i, name: 'koa' },
+];
+const URL_PACKAGES = [
+    { test: /github\.com\/preactjs\/preact(?:\/|$)/i, names: ['preact', '@preact/preset-vite'] },
+    { test: /github\.com\/preactjs\/signals(?:\/|$)/i, names: ['@preact/signals'] },
+    { test: /typescriptlang\.org/i, names: ['typescript'] },
+    { test: /github\.com\/sass\/sass(?:\/|$)/i, names: ['sass'] },
+    { test: /vite\.dev(?:\/|$)/i, names: ['vite'] },
+    { test: /github\.com\/fastify\/fastify(?:\/|$)/i, names: ['fastify'] },
+    { test: /beercss\.com/i, names: ['beercss'] },
+    { test: /github\.com\/google\/material-design-icons(?:\/|$)/i, names: ['material-symbols'] },
+    { test: /github\.com\/material-foundation\/material-color-utilities(?:\/|$)/i, names: ['@material/material-color-utilities'] },
 ];
 
 /**
@@ -185,9 +235,16 @@ export function recommendStack({ kind, prompt = '', references = {} }) {
     for (const match of String(prompt).matchAll(/https?:\/\/[^\s)]+/gi)) {
         const url = match[0].replace(/[.,]$/, '');
         if (/npmjs\.com\/package\//i.test(url) || seen.has(url)) continue;
+        const mapped = URL_PACKAGES.find((pack) => pack.test.test(url));
+        if (mapped) {
+            seen.add(url);
+            for (const name of mapped.names) add(name, 'Named by the customer.', true);
+            continue;
+        }
         seen.add(url);
         libraries.push({ name: url, kind: 'tool', reason: 'Named link.', docs: url, types: null, include: false });
     }
+    if (seen.has('fastify') && kind === 'app') add('@fastify/static', 'The app server serves the built files.', true);
     const server = SERVERS.find((pack) => pack.test.test(hay));
     if (server) add(server.name, 'Named server library.', true);
     else if (kind === 'backend') {
@@ -290,9 +347,9 @@ export function scaffoldScript() {
  * @exports
  * @ai.hint pure
  */
-export function stackDocuments(kind, platform) {
+export function stackDocuments(kind, platform, libraries = []) {
     return {
-        '.rules/stack.md': `# Stack\n\n${stackText(kind, platform)}\n`,
+        '.rules/stack.md': `# Stack\n\n${stackText(kind, platform, libraries)}\n`,
         '.rules/files.md': '# Files\n\nRead existing files. Do not overwrite them. A scaffold command copies only missing paths and adds absent package.json keys.\n',
         '.skills/scaffold/SKILL.md': '# Scaffold\n\nWrite the skeleton with file tools. Run npm run generate only when package.json generate.command names a generator. The script copies missing files and skips node_modules.\n',
     };
@@ -316,10 +373,57 @@ export function kindRules(kind, recommendations) {
         lines.push('Vite, SCSS, and ESM. Node.js 26.');
         lines.push(kind === 'app' ? 'server.js serves dist/ after vite build.' : 'No Node server.');
     } else lines.push('Choose the files the request needs.');
-    lines.push('Read existing .rules/ and .skills/. Create missing stack files. Do not overwrite them.');
+    lines.push('Read .rules/ and .skills/ and follow them. Do not overwrite them.');
     lines.push('Add absent package.json keys only. Keep existing script bodies and versions.');
     lines.push('Do not pass --force or -f to a scaffold command. Do not chain a scaffold command with &&, ||, ;, |, or redirection.');
+    lines.push('package.json, scripts/generate.js, .rules/stack.md, .rules/files.md, and .skills/scaffold/SKILL.md are already written. Do not plan a step to create or rewrite them.');
+    if (recommendations.libraries.some((item) => item.name === 'preact' && item.include && recommendations.libraries.some((entry) => entry.name === 'typescript' && entry.include))) {
+        lines.push('Write the interface as Preact TSX modules. Each component has a matching SCSS module. Do not implement the UI as h() calls in src/main.js.');
+    } else if (recommendations.libraries.some((item) => item.name === 'preact' && item.include)) {
+        lines.push('Write the interface as Preact JSX modules. Each component has a matching SCSS module. Do not implement the UI as h() calls in src/main.js.');
+    }
     return lines.join('\n');
+}
+
+/**
+ * Verbatim scaffold files. The model must not spend a step copying them.
+ * @param {{ kind: string | null, platform: object, recommendations: { libraries: object[] }, name?: string }} request
+ * @returns {Record<string, string>}
+ * @exports
+ * @ai.hint pure
+ */
+export function preparedScaffoldFiles({ kind, platform, recommendations, name = 'app' }) {
+    const docs = stackDocuments(kind, platform, recommendations.libraries);
+    const manifest = buildPackageManifest({ kind, name, libraries: recommendations.libraries });
+    return {
+        'package.json': `${JSON.stringify(manifest, null, 2)}\n`,
+        'scripts/generate.js': scaffoldScript(),
+        ...docs,
+    };
+}
+
+/**
+ * Write prepared scaffold files that are not already present.
+ * @param {string} root
+ * @param {Record<string, string>} files
+ * @returns {Promise<{ written: string[], kept: string[] }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function writePreparedScaffold(root, files) {
+    const written = [];
+    const kept = [];
+    for (const [rel, content] of Object.entries(files)) {
+        const abs = path.join(root, rel);
+        if (await stat(abs).then((info) => info.isFile()).catch(() => false)) {
+            kept.push(rel);
+            continue;
+        }
+        await mkdir(path.dirname(abs), { recursive: true });
+        await writeFile(abs, content);
+        written.push(rel);
+    }
+    return { written, kept };
 }
 
 /**
@@ -331,8 +435,8 @@ export function kindRules(kind, recommendations) {
  */
 export function renderGenerationTask({ kind, prompt = '', platform, recommendations, name = 'app' }) {
     void prompt;
-    const files = filesForKind(kind);
-    const docs = stackDocuments(kind, platform);
+    const prepared = new Set(Object.keys(preparedScaffoldFiles({ kind, platform, recommendations, name })));
+    const application = filesForStack({ kind, libraries: recommendations.libraries }).filter((file) => !prepared.has(file));
     const libs = recommendations.libraries.map((item) => {
         const docsUrl = item.docs ? ` Docs: ${item.docs}.` : '';
         const types = item.types ? ` Types: ${item.types}.` : '';
@@ -349,28 +453,21 @@ export function renderGenerationTask({ kind, prompt = '', platform, recommendati
         'After the plan, initialize the project and implement the application or its prototype.',
         '',
         'Stack:',
-        stackText(kind, platform),
+        stackText(kind, platform, recommendations.libraries),
         '',
-        files.length ? 'Create these files when they are missing:' : 'Create the files the request needs.',
-        ...files.map((file) => `- ${file}`),
+        'Already written. Do not plan a step to create, copy, or rewrite them:',
+        ...Object.keys(preparedScaffoldFiles({ kind, platform, recommendations, name })).map((file) => `- ${file}`),
+        '',
+        application.length ? 'Create these application files when they are missing:' : 'Create the application files the request needs.',
+        ...application.map((file) => `- ${file}`),
         '',
         'Recommendations:',
         ...(libs.length ? libs : ['- (none)']),
         '',
-        'Write the Vite and SCSS skeleton with file tools when the stack is web. When scripts/generate.js is missing, write the source block below it unchanged.',
-        '```js',
-        scaffoldScript(),
-        '```',
-        'When .rules/stack.md, .rules/files.md, or .skills/scaffold/SKILL.md is missing, write these bodies unchanged:',
-        ...Object.entries(docs).flatMap(([file, body]) => [`##### ${file}`, body.trimEnd()]),
+        'The prepared files are complete. Plan the application, not a step per boilerplate file.',
         'Run npx or npm run generate only for a named generator or template.',
-        'Read .rules/ and .skills/ when they exist. Create the missing stack files and follow them. Do not overwrite them.',
+        'Read .rules/ and .skills/ and follow them. Do not overwrite them.',
         'Do not overwrite an existing file. A scaffold command copies only missing paths and adds absent package.json keys.',
-        '',
-        'package.json for a new project. Versions stay *. When the file already exists, add absent keys only:',
-        '```json',
-        JSON.stringify(buildPackageManifest({ kind, name, libraries: recommendations.libraries }), null, 2),
-        '```',
     ].join('\n');
 }
 
