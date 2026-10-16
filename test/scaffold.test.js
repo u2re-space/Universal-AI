@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filesForKind, npmPackageName, buildPackageManifest, stackText } from '../src/generate/scaffold.js';
+import { filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack } from '../src/generate/scaffold.js';
 
 const platform = { id: 'chrome-157-beta', ecma: { edition: 2026 } };
 
@@ -45,4 +45,44 @@ test('package name and manifest versions', () => {
     assert.match(stackText('landing', platform), /2026/);
     assert.match(stackText('backend', platform), /node:http/);
     assert.match(stackText('app', platform), /dist\//);
+});
+
+function names(result, include) {
+    return result.libraries.filter((item) => include === undefined || item.include === include).map((item) => item.name);
+}
+
+test('Tilda recommends SCSS and Lucide and does not include a CSS framework', () => {
+    const result = recommendStack({
+        kind: 'landing',
+        prompt: 'Повтори макет Tilda Publishing',
+        references: { images: ['landing.png'], files: [], templates: ['templates/base'], examples: ['https://css-tricks.com/'] },
+    });
+    assert.equal(names(result, true).some((name) => /tailwind|bootstrap|bulma|open-props/.test(name)), false);
+    const lucide = result.libraries.find((item) => item.name === 'lucide');
+    assert.equal(lucide.include, false);
+    assert.equal(lucide.kind, 'icons');
+    assert.equal(result.templates.some((item) => item.source === 'templates/base'), true);
+    assert.equal(result.bases.some((item) => item.name === 'vite-scss'), true);
+});
+
+test('Tailwind is included and Express replaces Fastify', () => {
+    const tw = recommendStack({ kind: 'landing', prompt: 'Use Tailwind', references: {} });
+    assert.ok(names(tw, true).includes('tailwindcss'));
+    assert.ok(names(tw, true).includes('@tailwindcss/vite'));
+    const express = recommendStack({ kind: 'backend', prompt: 'Express API with validation', references: {} });
+    assert.ok(names(express, true).includes('express'));
+    assert.ok(names(express, true).includes('@types/express'));
+    assert.equal(names(express, true).includes('fastify'), false);
+    const plain = recommendStack({ kind: 'backend', prompt: 'api', references: {} });
+    assert.deepEqual(names(plain, true), []);
+    const validated = recommendStack({ kind: 'backend', prompt: 'JSON API with validation and plugins', references: {} });
+    assert.ok(names(validated, true).includes('fastify'));
+    const files = recommendStack({ kind: 'backend', prompt: 'Serve files over CORS', references: {} });
+    assert.ok(names(files, true).includes('@fastify/static'));
+    assert.ok(names(files, true).includes('@fastify/cors'));
+    const unknown = recommendStack({ kind: 'app', prompt: 'Use `some-ui-kit`', references: {} });
+    const kit = unknown.libraries.find((item) => item.name === 'some-ui-kit');
+    assert.equal(kit.include, true);
+    assert.equal(kit.docs, null);
+    assert.equal(kit.types, null);
 });
