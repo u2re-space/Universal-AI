@@ -20,3 +20,14 @@ Task 1 (global-cli): complete (commits 3f0456f..c5b4d76, review clean). Minor: m
 Task 2 (global-cli): complete (commits c5b4d76..9500835, review clean). Minors: `test/cli.test.js` grew by the launcher helper; arg passthrough and non-zero exit are not separately tested. Controller checked: task 2 did not touch `bin/ai.js`; `package.json` `files` still includes `bin`; `npm install -g` was not run.
 Final review (3f0456f..9500835): With fixes. Plan-mandated conflicts waiting on the user: ai.cmd cwd `node` lookup, ai.ps1 exit 0 when node is missing, ai.ps1 drops pipeline input, test helper breaks on spaces. Also flagged: no cwd/exit-code test, `bin/ai.sh` mode 100644. Minors not blocking: old `npm link` name collision in README, cmd Ctrl+C prompt, spawn error listener.
 Fix (9500835..a9cd010): complete, re-review approved. Minors left: quoted PATH entry makes ai.cmd exit 9009; Windows PowerShell 5.1 encodes non-ASCII pipe input as ASCII; no planted node.exe test; missing-node test accepts any non-zero; spaced-path temp dir is a fixed name; plan runLauncher signature and line 19 are slightly stale. Main checkout has untracked copies of the spec, plan, and empty bin launchers that block a checkout of this branch there.
+
+## Completion models (`docs/superpowers/plans/2026-10-16-completion-models.md`)
+
+Branch: feat/completion-models
+Base: 37909d5
+Worktree: C:\Projects\Universal-AI (feature branch in the main checkout)
+
+Task 1 (catalog): complete (commits 37909d5..8aa00ac, review clean). Minors: catalog row objects are not frozen; alias test does not assert object identity.
+Task 2 (wiring): complete (commits 8aa00ac..f90eafc, review clean). Minors: unused pickString; stale test title "low effort"; buildCompletionBody JSDoc says effort is string; BAD_MODEL test does not assert the full choice list; omit rows other than Qwen and invalid effort are not separately tested.
+Task 3 (editor): complete (commits 57e7f2b..51d6b85 on C:\Projects\VSCodeExtension branch feat/completion-model, review clean after windowed-model assertion fix). Minors: no settings round-trip for a valid selected id; choice ids are duplicated in package.json and settings.mjs by plan.
+
