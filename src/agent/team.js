@@ -74,7 +74,7 @@ export async function runTeam({
     const result = { status: 'failed', text: '', plan: null, review: null, steps: [], images: [], changes: [], stats: null,
         recalled: [], memoriesSaved: [], reviewRounds: 0, error: null };
 
-    const toolBase = { root, config, client, ledger, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile };
+    const toolBase = { root, config, client, ledger, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile, scaffoldTask: task };
     const mcp = await openMcpSources(config, { signal, notify });
     const mcpRead = mcp.extras.filter((extra) => extra.category === 'read');
     const imageApi = imageTransport(config) === 'images';

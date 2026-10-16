@@ -2,14 +2,17 @@
  * @file src/generate/scaffold.js
  * @module generate/scaffold
  * @purpose Stack, package.json, recommendations, and the safe scaffold merge for generation.
- * @depends node:path
+ * @depends node:path, node:fs/promises, node:os, agent/paths
  * @usedBy generate/brief, agent/tools
- * @exports filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, stackDocuments, kindRules, renderGenerationTask, pathsNamedInTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge
+ * @exports filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, stackDocuments, kindRules, renderGenerationTask, pathsNamedInTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, scaffoldTarget, retargetScaffold, guardScaffold
  * @ai.tags generate
  * @ai.hint pure
  * @changed 2026-10-16 Scaffold contract for Vite, rules, and safe npx.
  */
 import path from 'node:path';
+import os from 'node:os';
+import { mkdtemp, rm, readFile, writeFile, mkdir, readdir, copyFile, stat } from 'node:fs/promises';
+import { resolveInside } from '../agent/paths.js';
 
 const RULES = ['.rules/stack.md', '.rules/files.md', '.skills/scaffold/SKILL.md'];
 const WEB_TAIL = ['src/main.js', 'src/styles.scss', 'scripts/generate.js', ...RULES];
@@ -470,4 +473,107 @@ export function planScaffoldMerge({ incoming, existing, task = '', existingPacka
         if (Object.keys(merged).length) next[section] = merged;
     }
     return { copy, skip, packageJson: { action: 'merge', added, text: `${JSON.stringify(next, null, 2)}\n` } };
+}
+
+/**
+ * The directory token a scaffold will create. `.` when the command omits one.
+ * @param {string} command
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function scaffoldTarget(command) {
+    const raw = String(command ?? '').trim().split(/\s+/);
+    let i = 0;
+    const skipFlags = () => { while (raw[i] === '--yes' || raw[i] === '--no-install' || raw[i]?.startsWith('-')) i += 1; };
+    if (raw[0] === 'npx') { i = 1; skipFlags(); i += 1; }
+    else if (raw[0] === 'npm' && raw[1] === 'init') { i = 2; skipFlags(); }
+    else if (raw[0] === 'npm' && (raw[1] === 'create' || raw[1] === 'exec')) { i = 2; skipFlags(); i += 1; }
+    const token = raw[i];
+    if (!token || token === '--' || token.startsWith('-')) return '.';
+    return token;
+}
+
+/**
+ * Point the scaffold at a folder inside `tempDir`.
+ * @param {string} command
+ * @param {string} tempDir
+ * @returns {{ command: string, cwd: string, from: string, destination: string }}
+ * @exports
+ * @ai.hint pure
+ */
+export function retargetScaffold(command, tempDir) {
+    const target = scaffoldTarget(command);
+    const destination = target === '.' ? '.' : target.replace(/\\/g, '/');
+    const from = destination === '.' ? 'scaffold' : destination.split('/').pop();
+    let replaced = false;
+    const next = String(command).trim().split(/\s+/).map((token) => {
+        if (!replaced && token === target) { replaced = true; return from; }
+        return token;
+    });
+    return { command: next.join(' '), cwd: tempDir, from, destination };
+}
+
+/**
+ * List files under `dir` as posix paths. Skip node_modules and .git.
+ * @param {string} dir
+ * @param {string} base
+ * @returns {Promise<string[]>}
+ * @ai.hint io
+ */
+async function walkFiles(dir, base) {
+    const found = [];
+    let entries = [];
+    try { entries = await readdir(dir, { withFileTypes: true }); }
+    catch { return found; }
+    for (const entry of entries) {
+        if (entry.name === 'node_modules' || entry.name === '.git') continue;
+        const abs = path.join(dir, entry.name);
+        const rel = path.posix.join(base, entry.name);
+        if (entry.isDirectory()) found.push(...await walkFiles(abs, rel));
+        else if (entry.isFile()) found.push(rel);
+    }
+    return found;
+}
+
+/**
+ * Run a scaffold in a temp directory and copy the planned files into `root`.
+ * A failure, timeout, or cancel copies nothing. The temp directory is always removed.
+ * @param {{ command: string, root: string, task?: string, protect?: string[], run: Function }} request
+ * @returns {Promise<object>}
+ * @exports
+ * @ai.hint io
+ */
+export async function guardScaffold({ command, root, task = '', protect = [], run }) {
+    scaffoldCommandError(command);
+    const temp = await mkdtemp(path.join(os.tmpdir(), 'ai-scaffold-'));
+    try {
+        const plan = retargetScaffold(command, temp);
+        if (plan.destination !== '.') await resolveInside(root, plan.destination, { forWrite: true });
+        const result = await run({ command: plan.command, cwd: temp });
+        const empty = { ...result, copied: [], skipped: [], added: [] };
+        if (result.exitCode !== 0 || result.timedOut || result.cancelled) return empty;
+        const produced = path.join(temp, plan.from);
+        const fromDir = await stat(produced).then((info) => (info.isDirectory() ? produced : temp)).catch(() => temp);
+        const incoming = await walkFiles(fromDir, '');
+        const destRoot = plan.destination === '.' ? root : path.join(root, plan.destination);
+        const existing = await walkFiles(destRoot, '');
+        const existingPackageText = await readFile(path.join(destRoot, 'package.json'), 'utf8').catch(() => '');
+        const incomingPackageText = await readFile(path.join(fromDir, 'package.json'), 'utf8').catch(() => '');
+        const decided = planScaffoldMerge({ incoming, existing, task, existingPackageText, incomingPackageText, protect });
+        for (const rel of decided.copy) {
+            const dest = path.join(destRoot, rel);
+            await mkdir(path.dirname(dest), { recursive: true });
+            await copyFile(path.join(fromDir, rel), dest);
+        }
+        if (decided.packageJson.action === 'copy') {
+            await mkdir(destRoot, { recursive: true });
+            await copyFile(path.join(fromDir, 'package.json'), path.join(destRoot, 'package.json'));
+        } else if (decided.packageJson.action === 'merge') {
+            await writeFile(path.join(destRoot, 'package.json'), decided.packageJson.text);
+        }
+        return { ...result, copied: decided.copy, skipped: decided.skip, added: decided.packageJson.added };
+    } finally {
+        await rm(temp, { recursive: true, force: true });
+    }
 }

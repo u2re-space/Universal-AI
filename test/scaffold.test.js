@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, renderGenerationTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge } from '../src/generate/scaffold.js';
+import os from 'node:os';
+import path from 'node:path';
+import { mkdtemp, mkdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
+import { filesForKind, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, renderGenerationTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, guardScaffold } from '../src/generate/scaffold.js';
 
 const platform = { id: 'chrome-157-beta', ecma: { edition: 2026 } };
 
@@ -143,4 +146,58 @@ test('merge keeps existing files, named paths, and package.json scripts', () => 
     });
     assert.equal(broken.packageJson.action, 'invalid');
     assert.equal(broken.packageJson.text, undefined);
+});
+
+test('guard copies only missing files and skips a failed scaffold', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-scaffold-dest-'));
+    try {
+        await writeFile(path.join(root, 'index.html'), 'OLD');
+        await writeFile(path.join(root, 'package.json'), `${JSON.stringify({ scripts: { test: 'node --test test/old.test.js' } })}\n`);
+        let spawned = 0;
+        const ok = await guardScaffold({
+            command: 'npx create-vite@latest .',
+            root,
+            task: 'Keep index.html.',
+            run: async ({ cwd, command }) => {
+                spawned += 1;
+                assert.match(command, /scaffold/);
+                assert.equal(command.includes(root), false);
+                await mkdir(path.join(cwd, 'scaffold', 'node_modules'), { recursive: true });
+                await mkdir(path.join(cwd, 'scaffold', 'src'), { recursive: true });
+                await writeFile(path.join(cwd, 'scaffold', 'index.html'), 'NEW');
+                await writeFile(path.join(cwd, 'scaffold', 'src', 'main.js'), 'export {}\n');
+                await writeFile(path.join(cwd, 'scaffold', 'node_modules', 'x.js'), '');
+                await writeFile(path.join(cwd, 'scaffold', 'package.json'), JSON.stringify({ scripts: { test: 'changed', generate: 'node scripts/generate.js' }, devDependencies: { sass: '*' } }));
+                return { exitCode: 0, timedOut: false, cancelled: false, stdout: '', stderr: '' };
+            },
+        });
+        assert.equal(spawned, 1);
+        assert.equal(await readFile(path.join(root, 'index.html'), 'utf8'), 'OLD');
+        assert.equal(await readFile(path.join(root, 'src', 'main.js'), 'utf8'), 'export {}\n');
+        assert.equal(await stat(path.join(root, 'node_modules')).then(() => true).catch(() => false), false);
+        const merged = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+        assert.equal(merged.scripts.test, 'node --test test/old.test.js');
+        assert.equal(merged.scripts.generate, 'node scripts/generate.js');
+        assert.equal(merged.devDependencies.sass, '*');
+        assert.ok(ok.copied.includes('src/main.js'));
+        assert.ok(ok.added.includes('scripts.generate'));
+        const before = await readFile(path.join(root, 'index.html'), 'utf8');
+        await guardScaffold({
+            command: 'npx create-vite@latest .', root, task: '',
+            run: async ({ cwd }) => {
+                await mkdir(path.join(cwd, 'scaffold'), { recursive: true });
+                await writeFile(path.join(cwd, 'scaffold', 'fresh.js'), 'nope');
+                return { exitCode: 1, timedOut: false, cancelled: false, stdout: '', stderr: '' };
+            },
+        });
+        assert.equal(await readFile(path.join(root, 'index.html'), 'utf8'), before);
+        assert.equal(await stat(path.join(root, 'fresh.js')).then(() => true).catch(() => false), false);
+        let called = false;
+        await assert.rejects(() => guardScaffold({
+            command: 'npx create-vite@latest ../outside', root, task: '', run: () => { called = true; },
+        }), /Путь вне рабочего каталога/);
+        assert.equal(called, false);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
 });

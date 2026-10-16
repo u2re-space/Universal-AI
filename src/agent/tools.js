@@ -2,12 +2,12 @@
  * @file src/agent/tools.js
  * @module agent/tools
  * @purpose Build the local toolset: approval, handlers, and the re-exports from tool-specs.
- * @depends node:path, node:crypto, node:fs/promises, openai/errors, core/attachments, util/text, agent/paths, agent/fs-tools, agent/map, agent/shell, agent/desktop, agent/tool-specs, channels/tool-handlers
+ * @depends node:path, node:crypto, node:fs/promises, openai/errors, core/attachments, util/text, agent/paths, agent/fs-tools, agent/map, agent/shell, agent/desktop, agent/tool-specs, channels/tool-handlers, generate/scaffold
  * @usedBy commands/ask, commands/chat, commands/run, agent/team, index.js
  * @exports TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory, createToolset, relativeToRoot
  * @ai.tags tools, approval
  * @ai.hint hot
- * @changed 2026-10-15 Channel tools for decisions, moderation, replies, and Telegram.
+ * @changed 2026-10-16 Scaffold commands merge into the project without replacing files.
  */
 
 import path from 'node:path';
@@ -21,6 +21,7 @@ import { resolveInside } from './paths.js';
 import { listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory } from './fs-tools.js';
 import { loadProjectMap, searchMapped, updateProjectMapPath } from './map.js';
 import { SHELLS, runCommand, runProgram, scriptLaunch, sshPlan } from './shell.js';
+import { guardScaffold, isScaffoldCommand } from '../generate/scaffold.js';
 import { structureCode } from '../structure/structure.js';
 import { DESKTOP_TOOL_NAMES, createDesktopHandlers } from './desktop.js';
 import { createImageHandlers } from './image-tools.js';
@@ -147,6 +148,7 @@ export function createToolset({
     backupDir = null, signal, emit = () => {}, memory = null, projectKey = null, projectName = null,
     describeImage = null, summarizeFile = null, editPaths = () => null,
     describeScreen = null, performDesktop = null, delegate = null, extras = [], client = null, ledger = null,
+    scaffoldTask = '',
 }) {
     const limits = config.limits;
     const allowed = new Set(names);
@@ -314,6 +316,16 @@ export function createToolset({
             const cwd = args.cwd ? (await resolveInside(root, args.cwd)).abs : root;
             const timeoutMs = commandTimeout(args, limits);
             const shell = chosenShell(args.shell, config.shell ?? null);
+            if (isScaffoldCommand(args.command)) {
+                const result = await guardScaffold({
+                    command: args.command, root: cwd, task: scaffoldTask,
+                    run: (options) => runCommand({ ...options, timeoutMs, maxOutputBytes: limits.maxCommandOutputBytes, signal, shell }),
+                });
+                stats.commands.push({ command: args.command, exitCode: result.exitCode, durationMs: result.durationMs });
+                const report = commandReport(result, timeoutMs, limits);
+                const extra = [`Copied: ${result.copied.join(', ') || '(none)'}`, `Skipped: ${result.skipped.join(', ') || '(none)'}`, `package.json added: ${result.added.join(', ') || '(none)'}`];
+                return { output: `${report.output}\n${extra.join('\n')}`, summary: report.summary, ok: report.ok };
+            }
             const result = await runCommand({ command: args.command, cwd, timeoutMs, maxOutputBytes: limits.maxCommandOutputBytes, signal, shell });
             stats.commands.push({ command: args.command, exitCode: result.exitCode, durationMs: result.durationMs });
             return commandReport(result, timeoutMs, limits);
