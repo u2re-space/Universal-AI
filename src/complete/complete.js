@@ -11,7 +11,8 @@
  */
 
 import { readFile, stat } from 'node:fs/promises';
-import { isReasoningModel, supportsVerbosity, REASONING_EFFORTS } from '../core/config.js';
+import { supportsVerbosity, REASONING_EFFORTS } from '../core/config.js';
+import { resolveCompletionModel, COMPLETION_MODEL_CHOICES } from './models.js';
 import { resolveInside } from '../agent/paths.js';
 import { buildCompletionContext, readCompletionWindow } from './context.js';
 import { CompletionError } from './errors.js';
@@ -92,10 +93,19 @@ async function prepareCompletionRequest(request, { cwd, config }) {
     const maxLineBytes = pickInt(request.maxLineBytes, limits.maxLineBytes, 1, 8 * 1024 * 1024, 'maxLineBytes');
     const maxContextBytes = pickInt(request.maxContextBytes, limits.maxContextBytes, 64, 1024 * 1024, 'maxContextBytes');
     const neighborLines = pickInt(request.neighborLines, limits.neighborLines, 0, 80, 'neighborLines');
-    const effort = pickString(request.effort, limits.effort) || "none";
-    if (!REASONING_EFFORTS.includes(effort)) throw new CompletionError(`effort: ${REASONING_EFFORTS.join(' | ')}`);
-    const model = pickString(request.model, limits.model);
-    const maxOutputTokens = pickInt(request.maxOutputTokens, limits.maxOutputTokens, 16, 4096, 'maxOutputTokens');
+    const namedModel = typeof request.model === 'string' ? request.model.trim() : '';
+    const row = resolveCompletionModel(namedModel || limits.model);
+    if (!row) throw new CompletionError(`completion.model: ${COMPLETION_MODEL_CHOICES.join(' | ')}`, { status: 400, code: 'BAD_MODEL' });
+    const namedEffort = typeof request.effort === 'string' ? request.effort.trim() : '';
+    if (namedEffort && !REASONING_EFFORTS.includes(namedEffort)) throw new CompletionError(`effort: ${REASONING_EFFORTS.join(' | ')}`);
+    let effort = null;
+    if (row.reasoning !== null) {
+        effort = namedEffort || row.reasoning;
+        if (row.clampNone && effort === 'none') effort = 'low';
+    }
+    const maxOutputTokens = request.maxOutputTokens == null
+        ? row.maxOutputTokens
+        : pickInt(request.maxOutputTokens, row.maxOutputTokens, 16, 4096, 'maxOutputTokens');
 
     let content = typeof request.content === 'string' ? request.content : null;
     const hasSplit = typeof request.prefix === 'string' || typeof request.suffix === 'string';
@@ -149,7 +159,7 @@ async function prepareCompletionRequest(request, { cwd, config }) {
         maxLineBytes,
         maxContextBytes,
         neighborLines,
-        model,
+        model: row.wire,
         effort,
         maxOutputTokens,
     };
@@ -172,7 +182,7 @@ export function buildCompletionBody({ model, effort, prompt, maxOutputTokens, co
         max_output_tokens: maxOutputTokens,
         truncation: 'auto',
     };
-    if (isReasoningModel(model)) body.reasoning = { effort };
+    if (effort) body.reasoning = { effort };
     else if (config.temperature != null) body.temperature = config.temperature;
     if (supportsVerbosity(model)) body.text = { verbosity: 'low' };
     if (config.serviceTier) body.service_tier = config.serviceTier;

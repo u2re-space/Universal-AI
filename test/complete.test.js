@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { startMockServer } from './helpers/mock-server.js';
-import { defaults } from '../src/core/config.js';
+import { defaults, loadConfig } from '../src/core/config.js';
 import { createClient } from '../src/openai/client.js';
 import { MAX_LINE_BYTES, buildCompletionContext, readCompletionWindow } from '../src/complete/context.js';
 import { completeCode, stripCompletion } from '../src/complete/complete.js';
@@ -190,13 +190,13 @@ test('masked client frames decode and unmasked frames are rejected', () => {
 
 test('completeCode calls the fast model at low effort and returns the insertion', async () => {
     script = (body) => {
-        //assert.equal(body.model, 'gpt-6-luna');
-        assert.equal(body.model, 'deepseek/deepseek-v4.1-flash');
+        assert.equal(body.model, 'gpt-6-luna');
         assert.equal(body.reasoning.effort, 'none');
         assert.equal(body.stream, false);
         assert.equal(body.store, false);
         assert.equal(body.tools, undefined);
-        assert.equal(body.text?.verbosity ?? 'low', 'low');
+        assert.equal(body.include, undefined);
+        assert.equal(body.text.verbosity, 'low');
         assert.equal(body.max_output_tokens, 160);
         assert.match(body.input, /const a = \|/);
         assert.equal(body.input.includes('SECRET_BASE64'), false);
@@ -210,10 +210,108 @@ test('completeCode calls the fast model at low effort and returns the insertion'
             request: { content: `const a = |\n${'SECRET_BASE64'}${'D'.repeat(40)}`, maxLineBytes: 16, neighborLines: 0 },
         });
         assert.equal(result.text, '1;');
-        //assert.equal(result.model, 'gpt-6-luna');
-        assert.equal(result.model, 'deepseek/deepseek-v4.1-flash');
+        assert.equal(result.model, 'gpt-6-luna');
         assert.equal(result.cursorLineOmitted, false);
     } finally { http.close(); }
+});
+
+test('an alias is sent as the wire model and an explicit output cap is kept', async () => {
+    script = (body) => {
+        assert.equal(body.model, 'gpt-6-luna');
+        assert.equal(body.max_output_tokens, 200);
+        return { text: 'n' };
+    };
+    const http = client();
+    try {
+        const result = await completeCode({
+            client: http,
+            config: config(),
+            request: { content: 'const n = |', model: 'openai/gpt-6-luna', maxOutputTokens: 200 },
+        });
+        assert.equal(result.model, 'gpt-6-luna');
+        assert.equal(result.text, 'n');
+    } finally { http.close(); }
+});
+
+test('qwen omits reasoning even when the request names an effort', async () => {
+    script = (body) => {
+        assert.equal(body.model, 'qwen/qwen3.8-flash');
+        assert.equal(body.reasoning, undefined);
+        assert.equal(body.text, undefined);
+        assert.equal(body.max_output_tokens, 160);
+        return { text: '1' };
+    };
+    const http = client();
+    try {
+        const next = config();
+        next.completion = { ...next.completion, effort: 'high' };
+        await completeCode({
+            client: http, config: next,
+            request: { content: 'const n = |', model: 'qwen3.8-flash', effort: 'high' },
+        });
+    } finally { http.close(); }
+});
+
+test('grok uses low effort and 512 tokens even when config asks for none and 80', async () => {
+    script = (body) => {
+        assert.equal(body.model, 'x-ai/grok-4.7');
+        assert.equal(body.reasoning.effort, 'low');
+        assert.equal(body.max_output_tokens, 512);
+        assert.equal(body.include, undefined);
+        return { text: '1' };
+    };
+    const http = client();
+    try {
+        const next = config();
+        next.completion = { ...next.completion, effort: 'none', maxOutputTokens: 80 };
+        await completeCode({
+            client: http, config: next,
+            request: { content: 'const n = |', model: 'x-ai/grok-4.7', effort: 'none' },
+        });
+    } finally { http.close(); }
+});
+
+test('deepseek completion sends effort none and 160 tokens', async () => {
+    script = (body) => {
+        assert.equal(body.model, 'deepseek/deepseek-v4.1-flash');
+        assert.equal(body.reasoning.effort, 'none');
+        assert.equal(body.max_output_tokens, 160);
+        assert.equal(body.text, undefined);
+        return { text: '1' };
+    };
+    const http = client();
+    try {
+        await completeCode({
+            client: http, config: config(),
+            request: { content: 'const n = |', model: 'deepseek/deepseek-v4.1-flash' },
+        });
+    } finally { http.close(); }
+});
+
+test('an unknown completion model does not call the provider', async () => {
+    let calls = 0;
+    script = () => { calls += 1; return { text: 'x' }; };
+    const http = client();
+    try {
+        await assert.rejects(
+            () => completeCode({ client: http, config: config(), request: { content: 'const n = |', model: 'nope' } }),
+            (error) => error instanceof CompletionError && error.code === 'BAD_MODEL' && /gpt-6-luna/.test(error.message),
+        );
+        assert.equal(calls, 0);
+    } finally { http.close(); }
+});
+
+test('the default completion model is gpt-6-luna and an unknown config model is rejected', async () => {
+    assert.equal(defaults.completion.model, 'gpt-6-luna');
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-complete-config-'));
+    try {
+        await assert.rejects(
+            () => loadConfig({ env: { AI_AGENT_HOME: home }, ensureHome: false, overrides: { completion: { model: 'nope' } } }),
+            /completion\.model: gpt-6-luna \| anthropic\/claude-haiku-5-5 \|/,
+        );
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
 });
 
 test('reading a secret path is rejected', async () => {
@@ -244,8 +342,7 @@ test('HTTP completion requires the token and returns the insertion', async () =>
     assert.equal(accepted.status, 200);
     assert.equal(body.id, 'req-1');
     assert.equal(body.text, 'next');
-    //assert.equal(body.model, 'gpt-6-luna');
-    assert.equal(body.model, 'deepseek/deepseek-v4.1-flash');
+    assert.equal(body.model, 'gpt-6-luna');
 });
 
 test('a second completion within one second does not call the model', async () => {
@@ -310,8 +407,7 @@ function runCli(args, { input = null, env = {} } = {}) {
 
 test('ai complete --json prints the insertion from stdin', async () => {
     script = (body) => {
-        //assert.equal(body.model, 'gpt-6-luna');
-        assert.equal(body.model, 'deepseek/deepseek-v4.1-flash');
+        assert.equal(body.model, 'gpt-6-luna');
         assert.equal(body.reasoning.effort, 'none');
         assert.match(body.input, /alpha \|/);
         return { text: 'beta' };
@@ -320,8 +416,7 @@ test('ai complete --json prints the insertion from stdin', async () => {
     assert.equal(code, 0);
     const result = stdout.trim().split('\n').map((line) => JSON.parse(line)).find((line) => line.type === 'completion');
     assert.equal(result.text, 'beta');
-    //assert.equal(result.model, 'gpt-6-luna');
-    assert.equal(result.model, 'deepseek/deepseek-v4.1-flash');
+    assert.equal(result.model, 'gpt-6-luna');
 });
 
 test('ai complete --listen serves health on 127.0.0.1 and then stops', async () => {

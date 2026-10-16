@@ -170,15 +170,16 @@ export const defaults = Object.freeze({
     /**
      * Inline completion for editors (`ai complete`, HTTP and WebSocket).
      * A fast model at effort none so a ghost text can arrive before the next key.
-     * Set completion.effort to low when the insertion should be more careful.
+     * The model must be a completion catalog choice. Each choice sets its own
+     * effort and output cap. completion.effort does not replace a choice that
+     * already has an effort.
      * Sixteen lines on each side of the cursor are sent, so a change a dozen
      * lines away is still visible. The rest of the file is not added on the
      * next request. A line over
      * maxLineBytes (0.5 MiB, typical of base64) is left out.
      */
     completion: {
-        //model: 'gpt-6-luna',
-        model: 'deepseek/deepseek-v4.1-flash',
+        model: 'gpt-6-luna',
         effort: 'none',
         maxOutputTokens: 160,
         maxLineBytes: 512 * 1024,

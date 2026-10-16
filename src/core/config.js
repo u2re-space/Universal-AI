@@ -24,6 +24,7 @@ import {
     ROLE_NAMES,
     defaults,
 } from './config-defaults.js';
+import { COMPLETION_MODEL_CHOICES, resolveCompletionModel } from '../complete/models.js';
 
 const KiB = 1024;
 
@@ -230,7 +231,9 @@ function validateConfig(c) {
     for (const key of Object.keys(c.completion)) {
         if (!(key in defaults.completion)) fail(`неизвестный параметр completion.${key}`);
     }
-    if (typeof c.completion.model !== 'string' || !c.completion.model.trim()) fail('completion.model должен быть строкой');
+    if (typeof c.completion.model !== 'string' || !resolveCompletionModel(c.completion.model)) {
+        fail(`completion.model: ${COMPLETION_MODEL_CHOICES.join(' | ')}`);
+    }
     if (!REASONING_EFFORTS.includes(c.completion.effort)) fail(`completion.effort: ${REASONING_EFFORTS.join(' | ')}`);
     if (!Number.isSafeInteger(c.completion.maxOutputTokens) || c.completion.maxOutputTokens < 16) fail('completion.maxOutputTokens ≥ 16');
     if (!Number.isSafeInteger(c.completion.maxLineBytes) || c.completion.maxLineBytes < 1024) fail('completion.maxLineBytes ≥ 1024');
