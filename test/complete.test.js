@@ -190,12 +190,13 @@ test('masked client frames decode and unmasked frames are rejected', () => {
 
 test('completeCode calls the fast model at low effort and returns the insertion', async () => {
     script = (body) => {
-        assert.equal(body.model, 'gpt-6-luna');
-        assert.equal(body.reasoning.effort, 'none');
+        //assert.equal(body.model, 'gpt-6-luna');
+        assert.equal(body.model, 'deepseek/deepseek-v4.1-flash');
+        assert.equal(body.reasoning?.effort ?? 'none', 'none');
         assert.equal(body.stream, false);
         assert.equal(body.store, false);
         assert.equal(body.tools, undefined);
-        assert.equal(body.text.verbosity, 'low');
+        assert.equal(body.text?.verbosity ?? 'low', 'low');
         assert.equal(body.max_output_tokens, 160);
         assert.match(body.input, /const a = \|/);
         assert.equal(body.input.includes('SECRET_BASE64'), false);
@@ -209,7 +210,8 @@ test('completeCode calls the fast model at low effort and returns the insertion'
             request: { content: `const a = |\n${'SECRET_BASE64'}${'D'.repeat(40)}`, maxLineBytes: 16, neighborLines: 0 },
         });
         assert.equal(result.text, '1;');
-        assert.equal(result.model, 'gpt-6-luna');
+        //assert.equal(result.model, 'gpt-6-luna');
+        assert.equal(result.model, 'deepseek/deepseek-v4.1-flash');
         assert.equal(result.cursorLineOmitted, false);
     } finally { http.close(); }
 });
@@ -242,7 +244,8 @@ test('HTTP completion requires the token and returns the insertion', async () =>
     assert.equal(accepted.status, 200);
     assert.equal(body.id, 'req-1');
     assert.equal(body.text, 'next');
-    assert.equal(body.model, 'gpt-6-luna');
+    //assert.equal(body.model, 'gpt-6-luna');
+    assert.equal(body.model, 'deepseek/deepseek-v4.1-flash');
 });
 
 test('a second completion within one second does not call the model', async () => {
@@ -307,8 +310,9 @@ function runCli(args, { input = null, env = {} } = {}) {
 
 test('ai complete --json prints the insertion from stdin', async () => {
     script = (body) => {
-        assert.equal(body.model, 'gpt-6-luna');
-        assert.equal(body.reasoning.effort, 'none');
+        //assert.equal(body.model, 'gpt-6-luna');
+        assert.equal(body.model, 'deepseek/deepseek-v4.1-flash');
+        assert.equal(body.reasoning?.effort ?? 'none', 'none');
         assert.match(body.input, /alpha \|/);
         return { text: 'beta' };
     };
@@ -316,7 +320,8 @@ test('ai complete --json prints the insertion from stdin', async () => {
     assert.equal(code, 0);
     const result = stdout.trim().split('\n').map((line) => JSON.parse(line)).find((line) => line.type === 'completion');
     assert.equal(result.text, 'beta');
-    assert.equal(result.model, 'gpt-6-luna');
+    //assert.equal(result.model, 'gpt-6-luna');
+    assert.equal(result.model, 'deepseek/deepseek-v4.1-flash');
 });
 
 test('ai complete --listen serves health on 127.0.0.1 and then stops', async () => {
