@@ -4,7 +4,7 @@
  * @purpose Build a fixed completion window around the cursor. The rest of the file is not added on later requests.
  * @depends node:fs, complete/errors
  * @usedBy complete/complete, test/complete.test.js
- * @exports MAX_LINE_BYTES, buildCompletionContext, readCompletionWindow
+ * @exports MAX_LINE_BYTES, formatCompletionProblems, formatCompletionTree, buildCompletionContext, readCompletionWindow
  * @ai.tags complete, context
  * @ai.hint pure
  * @changed 2026-10-15 Tab completion sends only the lines around the cursor.
@@ -250,13 +250,84 @@ function windowOnly(focusStart, focusEnd, lineCount) {
  * @returns {string}
  * @ai.hint pure
  */
+const PROBLEM_SEVERITY = new Set(['error', 'warning', 'info', 'hint']);
+
+/**
+ * One diagnostics list for the focused file. Lines are 0-based, matching the editor.
+ * @param {unknown} items
+ * @param {{ max?: number }} [options]
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function formatCompletionProblems(items, { max = 24 } = {}) {
+    const rows = [];
+    for (const item of Array.isArray(items) ? items : []) {
+        if (!item || typeof item !== 'object' || typeof item.message !== 'string' || !item.message.trim()) continue;
+        const line = Number.isSafeInteger(item.line) ? item.line + 1 : '?';
+        const character = Number.isSafeInteger(item.character) ? item.character + 1 : 1;
+        const severity = PROBLEM_SEVERITY.has(item.severity) ? item.severity : 'info';
+        const source = typeof item.source === 'string' && item.source.trim() ? item.source.trim() : 'check';
+        const message = item.message.trim().replace(/\s+/g, ' ').slice(0, 180);
+        rows.push(`L${line}:C${character} ${severity} ${source}: ${message}`);
+        if (rows.length >= max) break;
+    }
+    return rows.join('\n');
+}
+
+/**
+ * A workspace tree. `node_modules` and `.git` are left out. A directory with too many
+ * names keeps the first `maxPerDirectory` and counts the rest.
+ * @param {unknown} paths Relative file paths.
+ * @param {{ maxPerDirectory?: number, maxEntries?: number }} [options]
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function formatCompletionTree(paths, { maxPerDirectory = 40, maxEntries = 200 } = {}) {
+    const root = { dirs: new Map(), files: [] };
+    let kept = 0;
+    for (const raw of Array.isArray(paths) ? paths : []) {
+        if (typeof raw !== 'string' || kept >= maxEntries) continue;
+        const rel = raw.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
+        const parts = rel.split('/').filter(Boolean);
+        if (!parts.length || parts.some((part) => part === 'node_modules' || part === '.git')) continue;
+        let node = root;
+        for (let i = 0; i < parts.length - 1; i++) {
+            if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { dirs: new Map(), files: [] });
+            node = node.dirs.get(parts[i]);
+        }
+        node.files.push(parts[parts.length - 1]);
+        kept++;
+    }
+    /**
+     * @param {{ dirs: Map<string, { dirs: Map, files: string[] }>, files: string[] }} node
+     * @param {string} indent
+     * @returns {string[]}
+     * @ai.hint pure
+     */
+    const render = (node, indent) => {
+        const lines = [];
+        for (const name of [...node.dirs.keys()].sort()) {
+            lines.push(`${indent}${name}/`);
+            lines.push(...render(node.dirs.get(name), `${indent}  `));
+        }
+        const files = [...node.files].sort();
+        for (const file of files.slice(0, maxPerDirectory)) lines.push(`${indent}${file}`);
+        if (files.length > maxPerDirectory) lines.push(`${indent}… (${files.length - maxPerDirectory} more)`);
+        return lines;
+    };
+    return render(root, '').join('\n');
+}
+
 function renderPrompt(built) {
     const rows = [];
-    if (built.path) rows.push(`File: ${built.path}`);
+    rows.push(built.path ? `Focused file: ${built.path}` : 'Focused file:');
     if (built.language) rows.push(`Language: ${built.language}`);
     rows.push(`Cursor: line ${built.cursorLine + 1}, character ${built.cursorCharacter + 1}.`);
+    rows.push('The | marks the cursor in this file. Code before | and code after | are already in the buffer.');
     if (built.cursorLineOmitted) rows.push('The cursor line is omitted because it is larger than 0.5 MiB. Insert at the | between the nearest lines.');
-    if (built.truncated) rows.push('File context is shortened.');
+    if (built.truncated) rows.push('Only the lines around the cursor are shown.');
     if (built.omittedLines.length) {
         const shown = built.omittedLines.slice(0, 20).map((n) => n + 1).join(', ');
         const more = built.omittedLines.length > 20 ? ` (+${built.omittedLines.length - 20} more)` : '';
@@ -266,7 +337,13 @@ function renderPrompt(built) {
         const clip = built.replaced.length > 200 ? `${built.replaced.slice(0, 200)}…` : built.replaced;
         rows.push(`Replace this selection: ${clip}`);
     }
-    rows.push('', 'Editor buffer. Complete the code at | only.', 'Focus:', built.focus);
+    rows.push('', built.focus);
+    const problems = formatCompletionProblems(built.problems);
+    if (problems) rows.push('', 'Problems (syntax and lint):', problems);
+    const validation = formatCompletionProblems(built.validation);
+    if (validation && validation !== problems) rows.push('', 'Validation:', validation);
+    const tree = formatCompletionTree(built.files);
+    if (tree) rows.push('', 'Workspace files:', tree);
     return rows.join('\n');
 }
 
@@ -288,6 +365,11 @@ export function buildCompletionContext(input = {}) {
     const cursorLine = Math.min(cursor.line, Math.max(0, lines.length - 1));
     const { focus, focusStart, focusEnd } = renderFocus(lines, { ...cursor, line: cursorLine }, neighborLines, startLine);
     const { excerpt, truncated } = windowOnly(focusStart, focusEnd, lines.length);
+    const cursorEntry = lines[cursorLine];
+    const rest = cursorEntry && !cursorEntry.omitted ? cursorEntry.text.slice(Math.min(cursor.character, cursorEntry.text.length)) : '';
+    const nextEntry = lines[cursorLine + 1];
+    const following = nextEntry && !nextEntry.omitted ? nextEntry.text : '';
+    const afterCursor = following ? `${rest}\n${following}` : rest;
     const omittedLines = lines
         .filter((line) => line.omitted && line.number >= focusStart && line.number <= focusEnd)
         .map((line) => line.number + startLine);
@@ -303,6 +385,10 @@ export function buildCompletionContext(input = {}) {
         cursorCharacter: cursor.character,
         replaced,
         startLine,
+        afterCursor,
+        problems: input.problems,
+        validation: input.validation,
+        files: input.files,
     };
     built.prompt = renderPrompt(built);
     return built;

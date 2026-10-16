@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { startMockServer } from './helpers/mock-server.js';
 import { defaults, loadConfig } from '../src/core/config.js';
 import { createClient } from '../src/openai/client.js';
-import { MAX_LINE_BYTES, buildCompletionContext, readCompletionWindow } from '../src/complete/context.js';
-import { completeCode, stripCompletion } from '../src/complete/complete.js';
+import { MAX_LINE_BYTES, buildCompletionContext, formatCompletionTree, readCompletionWindow } from '../src/complete/context.js';
+import { completeCode, stripCompletion, stripDoubledClosers } from '../src/complete/complete.js';
 import { startCompletionServer } from '../src/complete/server.js';
 import { readClientFrames } from '../src/complete/ws.js';
 import { CompletionError } from '../src/complete/errors.js';
@@ -59,7 +59,7 @@ test('cursor coordinates insert | and leave a real pipe in the source', () => {
     });
     assert.equal(built.focus, '|a | b');
     assert.equal(built.cursorLineOmitted, false);
-    assert.match(built.prompt, /File: src\/app\.js/);
+    assert.match(built.prompt, /Focused file: src\/app\.js/);
     assert.match(built.prompt, /Language: javascript/);
 });
 
@@ -105,7 +105,7 @@ test('a long opaque line near the cursor is not sent whole', () => {
     assert.equal(built.prompt.includes(blob), false);
     assert.match(built.focus, /long line/);
     assert.match(built.focus, /const cursor = \|/);
-    assert.match(built.prompt, /Editor buffer/);
+    assert.match(built.prompt, /Focused file/);
 });
 
 test('a longer file does not add lines outside the cursor window', () => {
@@ -170,6 +170,55 @@ test('a large file is windowed and an oversized line is not kept', async () => {
     assert.match(built.focus, /above/);
     assert.match(built.focus, /below/);
     assert.equal(built.prompt.includes('PAYLOAD'), false);
+});
+
+test('the focused file around the cursor is the code to complete', () => {
+    const built = buildCompletionContext({
+        path: 'src/app.js', language: 'javascript',
+        content: 'function total(items) {\n  return items.;\n}\n',
+        cursor: { line: 1, character: 15 },
+    });
+    assert.match(built.prompt, /Focused file: src\/app\.js/);
+    assert.match(built.focus, /return items\.\|/);
+    assert.match(built.prompt, /function total\(items\)/);
+    assert.match(built.prompt, /already in the buffer/);
+    assert.match(built.prompt, /^function total/m);
+});
+
+test('problems, validation, and the workspace tree join the focused file', () => {
+    const files = ['src/app.js', 'src/util.js', 'node_modules/left-pad/index.js', '.git/config'];
+    for (let i = 0; i < 45; i++) files.push(`src/extra/f${String(i).padStart(2, '0')}.js`);
+    const built = buildCompletionContext({
+        content: 'const n = |',
+        problems: [{ line: 0, character: 6, severity: 'error', source: 'eslint', message: 'Unexpected token' }],
+        validation: [{ line: 2, character: 0, severity: 'error', source: 'typescript', message: "'}' expected" }],
+        files,
+    });
+    assert.match(built.prompt, /Problems \(syntax and lint\):/);
+    assert.match(built.prompt, /L1:C7 error eslint: Unexpected token/);
+    assert.match(built.prompt, /Validation:/);
+    assert.match(built.prompt, /typescript: '\}' expected/);
+    assert.match(built.prompt, /src\/\n {2}extra\//);
+    assert.match(built.prompt, / {2}app\.js/);
+    assert.equal(built.prompt.includes('node_modules'), false);
+    assert.equal(built.prompt.includes('.git/'), false);
+    assert.match(built.prompt, /… \(\d+ more\)/);
+});
+
+test('a crowded directory keeps a short listing', () => {
+    const files = Array.from({ length: 50 }, (_, i) => `src/f${String(i).padStart(2, '0')}.js`);
+    const tree = formatCompletionTree(files, { maxPerDirectory: 5 });
+    assert.match(tree, /^src\//);
+    assert.match(tree, /f00\.js/);
+    assert.match(tree, /… \(45 more\)/);
+    assert.equal(tree.includes('f49.js'), false);
+});
+
+test('stripDoubledClosers drops a repeated closer the file already has', () => {
+    assert.equal(stripDoubledClosers('}\n}', '\n}'), '');
+    assert.equal(stripDoubledClosers('items.length;\n}', '\n}'), 'items.length;');
+    assert.equal(stripDoubledClosers('items.length', '\n}'), 'items.length');
+    assert.equal(stripDoubledClosers(')\n)', '\n)'), '');
 });
 
 test('stripCompletion removes one wrapping fence', () => {
@@ -268,6 +317,19 @@ test('grok uses low effort and 512 tokens even when config asks for none and 80'
             client: http, config: next,
             request: { content: 'const n = |', model: 'x-ai/grok-4.7', effort: 'none' },
         });
+    } finally { http.close(); }
+});
+
+test('a completion does not insert a closing brace the focused file already has', async () => {
+    script = () => ({ text: '}\n}' });
+    const http = client();
+    try {
+        const result = await completeCode({
+            client: http,
+            config: config(),
+            request: { content: 'function f() {\n  \n}\n', cursor: { line: 1, character: 2 } },
+        });
+        assert.equal(result.text, '');
     } finally { http.close(); }
 });
 
