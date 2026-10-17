@@ -115,7 +115,7 @@ export const defaults = Object.freeze({
         visionDelegate: 'auto',         // auto (when roles.vision has its own model) | always | never
         chain: true,                    // first answer, then encoder or planner
         route: null,                    // null | encoder | planner; null lets the answer and the heuristic choose
-        resume: true,                   // continue the newest unfinished .tmp plan for the same task
+        resume: true,                   // continue the newest unfinished step and its saved turn
     },
     /** Long-term memory (SQLite, node:sqlite) and project notes. */
     memory: {

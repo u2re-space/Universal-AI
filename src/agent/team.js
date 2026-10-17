@@ -12,7 +12,7 @@
 
 import path from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
-import { createSession } from '../core/session.js';
+import { createSession, loadSession } from '../core/session.js';
 import { createSharedContext } from '../core/context.js';
 import { renderMemories } from '../core/memory.js';
 import { isAbortError, CancelledError } from '../openai/errors.js';
@@ -21,19 +21,6 @@ import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { SPECIALISTS } from '../roles/index.js';
 import { coderChoice, isCodingStep } from '../roles/coder.js';
 import { writerChoice, isWritingStep } from '../roles/writer.js';
-
-/**
- * Coder for source files, writer for documents, worker for everything else.
- * @param {string[]} files
- * @param {string} goal
- * @returns {'coder'|'writer'|'worker'}
- * @ai.hint pure
- */
-function authorFor(files, goal) {
-    if (isCodingStep(files, goal)) return 'coder';
-    if (isWritingStep(files, goal)) return 'writer';
-    return 'worker';
-}
 import { createToolset, enabledToolNames, READ_ONLY_TOOLS } from './tools.js';
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
 import { listFiles } from './fs-tools.js';
@@ -49,8 +36,21 @@ import { formatWorkspace, mergeTaskDraft, scanWorkspace } from './workspace-scan
 import { SHELL_TOOL_NAMES } from './tool-specs.js';
 import { openMcpSources } from '../mcp/session.js';
 import { ANSWER_INSTRUCTIONS, chooseRoute, loadHandoff, openHandoff, readDirectory, saveHandoff, seedDirectory, seedTextFile, spillAnswer } from './handoff.js';
-import { applyPlanUpdate, briefPlan, briefProgress, createProgress, expandPlan, findResumable, newWorkId, parsePlanUpdate, recordStep, saveWork, syncProgress } from './work-plan.js';
+import { applyFromStep, applyPlanUpdate, briefPlan, briefProgress, continuationText, createProgress, expandPlan, findResumable, loadWork, newWorkId, parsePlanUpdate, pathsIn, recordStep, revisionClause, saveWork, syncProgress } from './work-plan.js';
 import { CommandBatchError, executeFileCommands, FILE_COMMANDS_SCHEMA } from './file-commands.js';
+
+/**
+ * Coder for source files, writer for documents, worker for everything else.
+ * @param {string[]} files
+ * @param {string} goal
+ * @returns {'coder'|'writer'|'worker'}
+ * @ai.hint pure
+ */
+function authorFor(files, goal) {
+    if (isCodingStep(files, goal)) return 'coder';
+    if (isWritingStep(files, goal)) return 'writer';
+    return 'worker';
+}
 import { fileInstructions } from '../roles/encoder.js';
 import { requestDecision } from '../channels/decide.js';
 import { questionsFor } from '../channels/questions.js';
@@ -81,7 +81,7 @@ export function toolNamesForRole(allNames, role) {
 export async function runTeam({
     client, config, ledger, task, parts = [], root, approvalLevel = 'read', interactive = false, approve, askUser = null,
     memory = null, projectKey = null, projectName = null, backupDir = null, extraInstructions = null, emit = () => {}, signal,
-    seedFiles = [], generation = false,
+    seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null,
 }) {
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
     const roles = createRoleRunner({ client, config, ledger, emit, signal });
@@ -228,7 +228,10 @@ export async function runTeam({
 
         let plan = null;
         let progress = null;
-        const resumedWork = config.agent.resume !== false ? await findResumable(root, task) : null;
+        const resumedWork = resumeId
+            ? await loadWork(root, resumeId).catch(() => null)
+            : (config.agent.resume !== false ? await findResumable(root, task) : null);
+        if (resumeId && !resumedWork) throw new Error(`План .tmp/${resumeId} не прочитан.`);
         /** Put the short plan and the latest reports into the shared context. Bodies stay in `.tmp`. */
         const publish = () => {
             if (!plan || !progress) return;
@@ -257,24 +260,52 @@ export async function runTeam({
         let workerSession = createSession({ store: false, model: roles.resolve('worker').model });
         let sessionModel = workerSession ? roles.resolve('worker').model : null;
         let contextSent = false;
-        /** Send one worker, coder, or writer turn. A new model starts a fresh session. */
-        const runWorker = async (title, body, maxTurns = config.agent.workerMaxTurnsPerStep, author = 'worker') => {
+        let pendingSession = null;
+        const sessionFile = () => work?.id ? path.join(root, '.tmp', work.id, 'worker-session.json') : null;
+        /**
+         * Model that will run this step. A restored session is used only when it matches.
+         * @param {string[]} files
+         * @param {string} goal
+         * @returns {{ author: string, model: string }}
+         */
+        const authorModel = (files, goal) => {
+            const author = authorFor(files, goal);
+            const configured = config.roles?.[author] ?? {};
+            const choice = author === 'coder' ? coderChoice(plan?.complexity, configured)
+                : author === 'writer' ? writerChoice(plan?.complexity, configured) : null;
+            return { author, model: choice?.model ?? roles.resolve(author).model };
+        };
+        /** Send one worker, coder, or writer turn. A restored session continues the interrupted turn. */
+        const runWorker = async (title, body, maxTurns = config.agent.workerMaxTurnsPerStep, author = 'worker', checkpoint = null) => {
             const configured = config.roles?.[author] ?? {};
             const choice = author === 'coder' ? coderChoice(plan?.complexity, configured)
                 : author === 'writer' ? writerChoice(plan?.complexity, configured) : null;
             const model = choice?.model ?? roles.resolve(author).model;
-            if (workerSession.size > 160 || sessionModel !== model) {
+            const restored = Boolean(checkpoint?.resume && pendingSession && pendingSession.model === model);
+            if (restored) {
+                workerSession = pendingSession;
+                pendingSession = null;
+                sessionModel = model;
+                contextSent = true;
+            } else if (workerSession.size > 160 || sessionModel !== model) {
                 workerSession = createSession({ store: false, model });
                 sessionModel = model;
                 contextSent = false;
             }
             const header = contextSent ? `# Context updates\n${ctx.get('progress') ? clipMiddle(ctx.get('progress'), 12 * 1024) : '(none)'}` : ctx.render({ maxBytes, exclude: ['tree'] });
             contextSent = true;
-            return roles.run(author, {
+            const outcome = await roles.run(author, {
                 text: `${header}\n\n# ${title}\n${body}`, instructions: ROLE_INSTRUCTIONS[author], toolset: workerTools, builtin,
                 maxTurns, session: workerSession, imageTarget: config.image.outputDir,
                 model: choice?.model ?? null, effort: choice?.effort ?? null,
             });
+            if (checkpoint?.stepId && work) {
+                progress.checkpoint = { stepId: checkpoint.stepId, phase: checkpoint.phase, model };
+                work.progress = progress;
+                const file = sessionFile();
+                if (file) await workerSession.save(file).catch((error) => notify({ type: 'warning', message: `Сессия шага не сохранена: ${errorMessage(error)}` }));
+            }
+            return outcome;
         };
         /**
          * Remember the live plan. `expose` is false for an encode compatibility plan so `result.plan` stays null.
@@ -285,6 +316,7 @@ export async function runTeam({
         const bind = (nextPlan, nextProgress, { expose = true } = {}) => {
             plan = nextPlan;
             progress = nextProgress;
+            if (generation) progress.generation = true;
             work = { id: progress.id, plan, progress };
             if (expose) result.plan = plan;
             result.workId = work.id;
@@ -311,7 +343,14 @@ export async function runTeam({
             }
             const findings = await readFile(path.join(root, '.tmp', work.id, 'findings.md'), 'utf8').catch(() => '');
             if (findings.trim()) ctx.set('findings', 'Collected context (by the collector)', findings, { priority: 6 });
-            notify({ type: 'plan.resume', id: work.id, cursor: progress.cursor, steps: plan.steps.length });
+            pendingSession = await loadSession(path.join(root, '.tmp', work.id, 'worker-session.json')).catch(() => null);
+            if (Number.isInteger(fromStep)) progress = applyFromStep(progress, fromStep);
+            work.progress = progress;
+            const open = progress.steps?.[progress.cursor];
+            notify({
+                type: 'plan.resume', id: work.id, cursor: progress.cursor, steps: plan.steps.length,
+                phase: open?.phase ?? null, stage: progress.stage,
+            });
             showPlan();
         }
 
@@ -464,7 +503,10 @@ export async function runTeam({
             plan.filesOfInterest.length || plan.searchQueries.length || plan.questionsForCollector.length
             || marks.some((item) => item.role === 'read' || item.role === 'edit')
         );
-        if (!(resumedWork && progress.cursor > 0) && wantsContext && readNames.length) {
+        const pastCollect = Boolean(resumedWork) && (
+            progress.cursor > 0 || Boolean(ctx.get('findings')) || ['work', 'review', 'fix', 'done'].includes(progress.stage)
+        );
+        if (!pastCollect && wantsContext && readNames.length) {
             notify({ type: 'stage.start', stage: 'collect', role: 'collector', model: roles.resolve('collector').model });
             const focus = marks.filter((item) => item.role === 'read' || item.role === 'edit').map((item) => `${item.role} ${item.path} — ${item.reason}`);
             const brief = `# Collector brief\nTask map (read/edit):\n${bullets(focus)}\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`;
@@ -485,6 +527,9 @@ export async function runTeam({
         notify({ type: 'stage.start', stage: 'work', role: 'worker', model: roles.resolve('worker').model });
         progress.stage = 'work';
         let workIncomplete = false;
+        let revisionUsed = false;
+        const revisionAt = String(revision ?? '').trim() ? progress.cursor : -1;
+        const revisionOnly = revisionAt >= 0 && progress.cursor >= plan.steps.length;
         /**
          * Run one plan step. A file step is two turns: the public surface, then the bodies.
          * @param {number} index
@@ -494,33 +539,57 @@ export async function runTeam({
             const step = plan.steps[index];
             const number = index + 1;
             const allowance = stepAllowance({
-                complexity: plan.complexity, kind: step.kind, files: step.files, generation, ceiling: config.agent.workerMaxTurnsPerStep,
+                complexity: plan.complexity, kind: step.kind,
+                files: step.files?.length ? step.files : pathsIn(`${step.goal}\n${step.details}`),
+                goal: step.goal, details: step.details, generation, ceiling: config.agent.workerMaxTurnsPerStep,
             });
             const file = step.files?.[0];
             const title = step.kind === 'compat'
                 ? `Compatibility pass (step ${number} of ${plan.steps.length})`
                 : `Your step ${number} of ${plan.steps.length}`;
-            const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}`;
+            const prior = progress.steps[index];
+            const interrupted = Boolean(prior && prior.status !== 'pending' && prior.status !== 'completed');
+            const chosen = authorModel(step.files, step.goal);
+            const resumeSession = interrupted && progress.checkpoint?.stepId === step.id && pendingSession?.model === chosen.model;
+            const extra = index === revisionAt ? revisionClause(revision) : '';
+            if (extra) revisionUsed = true;
+            const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}${extra}`;
             const passes = [];
-            if (allowance.passes === 1) passes.push({ body: base, maxTurns: allowance.maxTurns, phase: 'body' });
+            if (interrupted) {
+                const phase = prior.phase === 'surface' ? 'surface' : 'body';
+                passes.push({
+                    body: continuationText(step, prior, { resumeSession, revision: index === revisionAt ? revision : '' }),
+                    maxTurns: phase === 'surface' ? allowance.surfaceTurns : (allowance.maxTurns ?? allowance.bodyTurns),
+                    phase, resume: resumeSession,
+                });
+                if (phase === 'surface') {
+                    passes.push({
+                        body: `Fill in ${file} so this step is complete. Keep the public surface already written. Do not edit other files.\n${base}`,
+                        maxTurns: allowance.bodyTurns, phase: 'body', resume: false,
+                    });
+                }
+            } else if (allowance.passes === 1) passes.push({ body: base, maxTurns: allowance.maxTurns, phase: 'body', resume: false });
             else {
-                if (progress.steps[index]?.phase !== 'body') {
+                if (prior?.phase !== 'body') {
                     passes.push({
                         body: `Write only the public surface of ${file}: exports, signatures, and headings. Leave bodies as short stubs. Do not edit other files.\n${base}`,
-                        maxTurns: allowance.surfaceTurns, phase: 'surface',
+                        maxTurns: allowance.surfaceTurns, phase: 'surface', resume: false,
                     });
                 }
                 passes.push({
                     body: `Fill in ${file} so this step is complete. Keep the public surface already written. Do not edit other files.\n${base}`,
-                    maxTurns: allowance.bodyTurns, phase: 'body',
+                    maxTurns: allowance.bodyTurns, phase: 'body', resume: false,
                 });
             }
             let outcome = null;
+            let lastPhase = prior?.phase ?? 'body';
             const reports = [];
             const files = [];
             for (const pass of passes) {
+                lastPhase = pass.phase;
+                progress.steps[index].phase = pass.phase;
                 workerTools.setBackupSlot?.(`${step.id ?? `s${number}`}-${pass.phase}`);
-                outcome = await runWorker(title, pass.body, pass.maxTurns, authorFor(step.files, step.goal));
+                outcome = await runWorker(title, pass.body, pass.maxTurns, chosen.author, { stepId: step.id, phase: pass.phase, resume: pass.resume });
                 result.images.push(...outcome.images);
                 reports.push(outcome.text.trim());
                 files.push(...takeFiles());
@@ -528,17 +597,18 @@ export async function runTeam({
                 if (pass.phase === 'surface') {
                     progress.steps[index].phase = 'body';
                     progress.steps[index].report = reports.filter(Boolean).join('\n\n');
-                    progress.steps[index].files = [...new Set(files)];
+                    progress.steps[index].files = [...new Set([...(progress.steps[index].files ?? []), ...files])];
                     work.progress = progress;
                     await persist('running');
                 }
             }
             return {
-                outcome, files: [...new Set(files)],
+                outcome, phase: lastPhase, files: [...new Set(files)],
                 report: reports.filter(Boolean).join('\n\n') || '(отчёт отсутствует)',
             };
         };
         for (let index = progress.cursor; index < plan.steps.length; index++) {
+            if (progress.steps[index]?.status === 'completed') continue;
             const step = plan.steps[index];
             const number = index + 1;
             notify({ type: 'step.start', index: number, total: plan.steps.length, goal: step.goal });
@@ -559,7 +629,7 @@ export async function runTeam({
                 notify({ type: 'warning', message: `Шаг ${number} пропал из плана после обновления.` });
                 break;
             }
-            progress = recordStep(progress, { index: recordAt, status: ran.outcome.status, report: ran.report, files: ran.files });
+            progress = recordStep(progress, { index: recordAt, status: ran.outcome.status, report: ran.report, files: ran.files, phase: ran.phase });
             work.plan = plan;
             work.progress = progress;
             publish();
@@ -569,16 +639,46 @@ export async function runTeam({
             notify({ type: 'step.done', index: recordAt + 1, total: plan.steps.length, status: ran.outcome.status, summary: ran.report });
             if (HARD_STOP.has(ran.outcome.status)) return stop(ran.outcome, `шаг ${number}`);
             if (ran.outcome.status !== 'completed') {
-                notify({ type: 'warning', message: `Шаг ${number} не завершён (${ran.outcome.status}${ran.outcome.error ? `: ${errorMessage(ran.outcome.error)}` : ''}); дальнейшие шаги пропущены.` });
                 workIncomplete = true;
+                if (generation && ran.outcome.status === 'max_turns') {
+                    notify({ type: 'warning', message: `Шаг ${number} упёрся в лимит ходов; следующий шаг всё равно выполняется.` });
+                    continue;
+                }
+                notify({ type: 'warning', message: `Шаг ${number} не завершён (${ran.outcome.status}${ran.outcome.error ? `: ${errorMessage(ran.outcome.error)}` : ''}); дальнейшие шаги пропущены.` });
                 break;
             }
         }
-        notify({ type: 'stage.done', stage: 'work', status: workIncomplete ? 'incomplete' : 'completed' });
+            notify({ type: 'stage.done', stage: 'work', status: workIncomplete ? 'incomplete' : 'completed' });
+            if (String(revision ?? '').trim() && !revisionUsed) {
+                const chosen = authorModel(pathsIn(revision), revision);
+                notify({ type: 'step.start', index: plan.steps.length + 1, total: plan.steps.length, goal: 'Доработка' });
+                const outcome = await runWorker(
+                    'Operator revision',
+                    `The plan steps are already complete. Apply this revision to the existing project. Do not repeat finished steps.${revisionClause(revision)}`,
+                    config.agent.workerMaxTurnsPerStep,
+                    chosen.author,
+                    { stepId: 'revision', phase: 'body', resume: false },
+                );
+                result.images.push(...outcome.images);
+                result.steps.push({ index: 'revision', goal: 'Доработка', status: outcome.status, report: outcome.text.trim() });
+                progress.notes ??= [];
+                progress.notes.push({ kind: 'revision', status: outcome.status, report: outcome.text.trim(), note: String(revision).trim() });
+                work.progress = progress;
+                await persist(outcome.status === 'completed' ? 'running' : outcome.status);
+                notify({ type: 'step.done', index: 'revision', total: plan.steps.length, status: outcome.status, summary: outcome.text.trim() });
+                if (HARD_STOP.has(outcome.status)) return stop(outcome, 'доработка');
+                if (outcome.status !== 'completed') workIncomplete = true;
+                revisionUsed = true;
+            }
 
         // 4. Review and fix rounds.
-        const shouldReview = plan.needsReview && plan.complexity !== 'trivial' && config.agent.maxReviewRounds > 0 && !workIncomplete;
+        const shouldReview = plan.needsReview && plan.complexity !== 'trivial' && config.agent.maxReviewRounds > 0 && !workIncomplete && !revisionOnly;
         let review = null;
+        if (shouldReview) {
+            progress.stage = 'review';
+            work.progress = progress;
+            await persist('running');
+        }
         for (let round = 1; shouldReview; round++) {
             notify({ type: 'stage.start', stage: 'review', role: 'reviewer', model: roles.resolve('reviewer').model, round });
             ctx.set('diff', 'Changes made by the worker (diff)', await describeChangeSet({ root, changes: workerTools.stats().changes, maxBytes: 48 * 1024 }), { priority: 5 });
@@ -649,7 +749,7 @@ export async function runTeam({
         }
         if (work) {
             work.progress.status = result.status;
-            work.progress.stage = 'done';
+            if (!workIncomplete && (result.status === 'completed' || result.status === 'revise')) work.progress.stage = 'done';
             await persist();
         }
         return finish();

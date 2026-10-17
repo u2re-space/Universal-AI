@@ -4,10 +4,10 @@
  * @purpose Split a plan into file steps, and store the plan and its progress under `.tmp`.
  * @depends node:path, node:crypto, node:fs/promises, util/text
  * @usedBy agent/team, index.js
- * @exports pathsIn, expandPlan, parsePlanUpdate, applyPlanUpdate, createProgress, recordStep, syncProgress, briefPlan, briefProgress, newWorkId, saveWork, loadWork, findResumable
+ * @exports pathsIn, expandPlan, parsePlanUpdate, applyPlanUpdate, createProgress, recordStep, syncProgress, briefPlan, briefProgress, continuationText, revisionClause, applyFromStep, resolveResumeStep, newWorkId, saveWork, loadWork, findResumable, findLatestResumable
  * @ai.tags team, plan, tmp
  * @ai.hint io
- * @changed 2026-10-16 Plan and progress files, resume, and a compatibility step.
+ * @changed 2026-10-17 Resume continues an interrupted step, phase, and saved turn.
  */
 
 import path from 'node:path';
@@ -17,7 +17,7 @@ import { clipMiddle } from '../util/text.js';
 
 const PATH_RE = /(?:^|[\s`'"(])((?:[\w.+-]+\/)*[\w.+-]+\.[\w.+-]+)/g;
 const EXT_RE = /^(js|mjs|cjs|ts|tsx|jsx|json|md|css|html|glsl|py|txt|vue|svelte|scss|yml|yaml|toml|rs|go|java|kt|php|rb|sh|ps1|xml|svg)$/;
-const RESUMABLE = new Set(['running', 'incomplete', 'failed', 'budget', 'cancelled']);
+const RESUMABLE = new Set(['running', 'incomplete', 'failed', 'budget', 'cancelled', 'max_turns']);
 const ID_RE = /^[0-9a-f]{8}$/;
 
 /**
@@ -78,7 +78,7 @@ export function pathsIn(text) {
     const found = [];
     const seen = new Set();
     for (const match of String(text ?? '').matchAll(PATH_RE)) {
-        const token = match[1];
+        const token = match[1].replace(/[.,;:)]+$/g, '');
         if (!isProjectPath(token) || seen.has(token)) continue;
         seen.add(token);
         found.push(token);
@@ -299,13 +299,13 @@ export function syncProgress(progress, plan) {
  * @exports
  * @ai.hint pure
  */
-export function recordStep(progress, { index, status, report, files = [] }) {
+export function recordStep(progress, { index, status, report, files = [], phase = null }) {
     const steps = progress.steps.map((step, i) => {
         if (i !== index) return step;
         const merged = [...new Set([...(step.files ?? []), ...files])];
         return {
             ...step, status, report, files: merged,
-            phase: status === 'completed' ? 'done' : (step.phase ?? 'pending'),
+            phase: status === 'completed' ? 'done' : (phase ?? step.phase ?? 'pending'),
         };
     });
     const known = new Set((progress.files ?? []).map((file) => file.path));
@@ -315,14 +315,92 @@ export function recordStep(progress, { index, status, report, files = [] }) {
         known.add(file);
         added.push({ path: file, stepId: steps[index].id });
     }
+    const open = steps.findIndex((step) => step.status !== 'completed');
     return {
         ...progress,
         steps,
         files: [...(progress.files ?? []), ...added],
-        cursor: status === 'completed' ? index + 1 : index,
+        cursor: open < 0 ? steps.length : open,
         status: status === 'completed' ? 'running' : status,
         stage: 'work',
     };
+}
+
+/**
+ * Prompt for a step that already started. A saved session only needs the short form.
+ * @param {object} step
+ * @param {object} [progressStep]
+ * @param {{ resumeSession?: boolean }} [options]
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function continuationText(step, progressStep = {}, { resumeSession = false, revision = '' } = {}) {
+    const rules = 'Finish only what is still missing. Do not repeat a finished tool call, do not regenerate an image that already exists, and do not rewrite a file that already satisfies the step.';
+    const goal = `Goal: ${step?.goal ?? ''}\nDetails: ${step?.details ?? ''}\nVerify: ${step?.verify ?? ''}`;
+    const extra = revisionClause(revision);
+    if (resumeSession) return `Continue this step from the interrupted turn. The conversation above is the work already done.\n${rules}\n${goal}${extra}`;
+    const files = (progressStep?.files ?? []).join(', ') || '(none)';
+    const report = clipMiddle(progressStep?.report ?? '', 4000);
+    return [
+        'Continue this step from the interrupted turn. Finish the current phase.',
+        rules,
+        goal,
+        `Phase: ${progressStep?.phase && progressStep.phase !== 'pending' ? progressStep.phase : 'body'}`,
+        `Files already written: ${files}`,
+        report ? `Report so far:\n${report}` : '',
+        extra,
+    ].filter(Boolean).join('\n');
+}
+
+/**
+ * English note appended when the operator asked to add, fix, or adjust something.
+ * @param {string} [revision]
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function revisionClause(revision) {
+    const text = String(revision ?? '').trim();
+    if (!text) return '';
+    return `\nOperator revision:\n${text}\nAdd, fix, or adjust what this asks. Do not redo work that already satisfies the step.`;
+}
+
+/**
+ * Start at `index`. Completed steps from there are opened again. An interrupted step stays interrupted.
+ * @param {object} progress
+ * @param {number} index
+ * @returns {object}
+ * @exports
+ * @ai.hint pure
+ */
+export function applyFromStep(progress, index) {
+    const steps = (progress.steps ?? []).map((step, i) => {
+        if (i < index || step.status !== 'completed') return step;
+        return { ...step, status: 'pending', phase: 'pending' };
+    });
+    return { ...progress, steps, cursor: index, stage: 'work' };
+}
+
+/**
+ * Zero-based step index for `2` or `s02`. `-1` when the token is not in the plan.
+ * @param {object} plan
+ * @param {string|number} token
+ * @returns {number}
+ * @exports
+ * @ai.hint pure
+ */
+export function resolveResumeStep(plan, token) {
+    const steps = Array.isArray(plan?.steps) ? plan.steps : [];
+    const text = String(token ?? '').trim();
+    const ident = /^s(\d+)$/i.exec(text);
+    if (ident) {
+        const id = `s${ident[1].padStart(2, '0')}`.toLowerCase();
+        return steps.findIndex((step) => String(step.id).toLowerCase() === id);
+    }
+    const number = Number(text);
+    if (Number.isInteger(number) && number >= 1 && number <= steps.length) return number - 1;
+    return -1;
 }
 
 /**
@@ -409,12 +487,35 @@ export async function loadWork(root, id) {
  * @ai.hint io
  */
 export async function findResumable(root, task) {
+    const wanted = normalizeTask(task);
+    const works = await readWorks(root);
+    return newest(works.filter((work) => normalizeTask(work.progress.task) === wanted && isOpenWork(work)));
+}
+
+/**
+ * Newest unfinished plan in this directory. With `includeDone`, a finished plan is used when nothing is open.
+ * @param {string} root
+ * @param {{ includeDone?: boolean }} [options]
+ * @returns {Promise<{ id: string, plan: object, progress: object } | null>}
+ * @exports
+ * @ai.hint io
+ */
+export async function findLatestResumable(root, { includeDone = false } = {}) {
+    const works = await readWorks(root);
+    return newest(works.filter((work) => isOpenWork(work))) ?? (includeDone ? newest(works) : null);
+}
+
+/**
+ * @param {string} root
+ * @returns {Promise<{ id: string, plan: object, progress: object }[]>}
+ * @ai.hint io
+ */
+async function readWorks(root) {
     const dir = path.join(root, '.tmp');
     let entries = [];
     try { entries = await readdir(dir); }
-    catch { return null; }
-    const wanted = normalizeTask(task);
-    let best = null;
+    catch { return []; }
+    const works = [];
     for (const id of entries) {
         if (!ID_RE.test(id)) continue;
         let progress;
@@ -424,10 +525,32 @@ export async function findResumable(root, task) {
             plan = JSON.parse(await readFile(path.join(dir, id, 'plan.json'), 'utf8'));
         } catch { continue; }
         if (!progress || !plan || !Array.isArray(plan.steps)) continue;
-        if (normalizeTask(progress.task) !== wanted) continue;
-        if (!RESUMABLE.has(progress.status)) continue;
-        if (!(progress.cursor < plan.steps.length)) continue;
-        if (!best || String(progress.updatedAt) > String(best.progress.updatedAt)) best = { id, plan, progress };
+        works.push({ id, plan, progress });
+    }
+    return works;
+}
+
+/**
+ * @param {{ plan: object, progress: object }} work
+ * @returns {boolean}
+ * @ai.hint pure
+ */
+function isOpenWork(work) {
+    const { plan, progress } = work;
+    if (!RESUMABLE.has(progress.status)) return false;
+    const reviewOpen = progress.stage === 'review' || progress.stage === 'fix';
+    return progress.cursor < plan.steps.length || reviewOpen;
+}
+
+/**
+ * @param {{ id: string, plan: object, progress: object }[]} works
+ * @returns {{ id: string, plan: object, progress: object } | null}
+ * @ai.hint pure
+ */
+function newest(works) {
+    let best = null;
+    for (const work of works) {
+        if (!best || String(work.progress.updatedAt) > String(best.progress.updatedAt)) best = work;
     }
     return best;
 }

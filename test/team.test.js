@@ -492,6 +492,107 @@ test('an unfinished plan resumes from the next step without a new planner call',
     }
 });
 
+test('an interrupted turn resumes in the saved session and finishes that step', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-resume-turn-'));
+    let phase = 'first';
+    const seen = [];
+    let resumed = null;
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'answer') return { text: 'нужен план\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({ summary: 'один шаг', complexity: 'trivial', steps: [
+                { goal: 'дописать src/app.tsx', details: 'календарь', verify: 'файл есть' },
+            ], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        }
+        if (phase === 'second') {
+            resumed = body.input;
+            return { text: 'доделано' };
+        }
+        return { calls: [{ name: 'list_files', arguments: { path: '.', depth: 1, include_hidden: false } }] };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.agent.workerMaxTurnsPerStep = 1;
+    const task = 'продолжи незаконченный ход';
+    try {
+        const first = await runTeam({ client: client(), config, ledger: createLedger(), task, root: dir, approvalLevel: 'read', emit() {} });
+        assert.equal(first.status, 'incomplete', first.error?.message);
+        assert.equal(first.steps[0].status, 'max_turns');
+        const saved = JSON.parse(await readFile(path.join(dir, '.tmp', first.workId, 'progress.json'), 'utf8'));
+        assert.equal(saved.steps[0].phase, 'body');
+        assert.equal(saved.stage, 'work');
+        phase = 'second';
+        seen.length = 0;
+        const second = await runTeam({ client: client(), config, ledger: createLedger(), task, root: dir, approvalLevel: 'read', emit() {} });
+        assert.equal(second.status, 'completed', second.error?.message);
+        assert.equal(seen.includes('planner'), false);
+        assert.equal(seen.includes('answer'), false);
+        assert.equal(second.steps[0].status, 'completed');
+        const text = JSON.stringify(resumed);
+        assert.match(text, /interrupted turn/);
+        assert.match(text, /list_files/);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('a revision continues the unfinished step and a finished plan accepts a revision without a new plan', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-resume-note-'));
+    let mode = 'build';
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'answer') return { text: 'нужен план\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({ summary: 'два', complexity: 'trivial', steps: [
+                { goal: 'первый', details: '', verify: 'да' },
+                { goal: 'второй', details: '', verify: 'да' },
+            ], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        }
+        const last = [...body.input].reverse().find((item) => item.type === 'message' && item.role === 'user');
+        const text = last?.content?.[0]?.text ?? '';
+        if (mode === 'revise') {
+            assert.match(text, /Operator revision/);
+            assert.match(text, /подпись/);
+            return { text: 'подпись добавлена' };
+        }
+        if (mode === 'interrupt' && /Your step 2/.test(text)) return { status: 'incomplete', text: 'обрыв второго', reason: 'max_output_tokens' };
+        return { text: 'готово' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    const task = 'резюме с доработкой';
+    try {
+        mode = 'interrupt';
+        const first = await runTeam({ client: client(), config, ledger: createLedger(), task, root: dir, approvalLevel: 'read', emit() {} });
+        assert.equal(first.status, 'incomplete', first.error?.message);
+        mode = 'revise';
+        seen.length = 0;
+        const second = await runTeam({
+            client: client(), config, ledger: createLedger(), task, root: dir, approvalLevel: 'read', emit() {},
+            revision: 'добавь подпись', resumeId: first.workId,
+        });
+        assert.equal(second.status, 'completed', second.error?.message);
+        assert.equal(seen.includes('planner'), false);
+        assert.match(second.steps.map((step) => step.report).join('\n'), /подпись добавлена/);
+
+        mode = 'build';
+        seen.length = 0;
+        const third = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'отдельная задача', root: dir, approvalLevel: 'read', emit() {},
+            revision: 'добавь подпись к готовому', resumeId: second.workId,
+        });
+        assert.equal(third.status, 'completed', third.error?.message);
+        assert.equal(seen.includes('planner'), false);
+        assert.equal(third.steps.some((step) => step.goal === 'Доработка'), true);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
 test('a worker plan-update inserts the next step and that step runs', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-plan-update-'));
     script = (body) => {
@@ -555,4 +656,35 @@ test('several encoded files get a compatibility pass and a progress file', async
     } finally {
         await rm(dir, { recursive: true, force: true });
     }
+});
+
+test('a generation step that hits the turn cap still runs the artwork step', async () => {
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'календарь', complexity: 'normal', needsReview: false, imageNotes: null,
+                steps: [
+                    { goal: 'Implement the calendar interface.', details: 'Primary file: src/app.tsx.', verify: 'сборка' },
+                    { goal: 'Recreate the reference styling and generate all required artwork.', details: 'Primary file: src/app.scss. Fix the layout.', verify: 'картинки' },
+                ],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], risks: [],
+            }) };
+        }
+        return { calls: [{ name: 'list_files', arguments: { path: '.', depth: 1, include_hidden: false } }] };
+    };
+    const config = baseConfig();
+    config.agent.chain = false;
+    config.agent.resume = false;
+    config.agent.workerMaxTurnsPerStep = 2;
+    config.memory = { ...defaults.memory, enabled: false };
+    const events = [];
+    const result = await runTeam({
+        client: client(), config, ledger: createLedger(), task: 'сгенерировать календарь', root,
+        approvalLevel: 'read', generation: true, memory: null, emit: (event) => events.push(event),
+    });
+    assert.equal(result.status, 'incomplete', result.error?.message);
+    assert.deepEqual(result.steps.map((step) => step.status), ['max_turns', 'max_turns']);
+    assert.match(result.steps[1].goal, /artwork/);
+    assert.equal(events.some((event) => event.type === 'warning' && /следующий шаг/.test(event.message)), true);
 });

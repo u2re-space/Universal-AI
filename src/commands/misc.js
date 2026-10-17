@@ -16,18 +16,33 @@ import { normalizeUsage } from '../openai/stream.js';
 import { defaults, redactConfig } from '../core/config.js';
 import { formatDuration, formatNumber } from '../util/text.js';
 import { UsageError, createClientFor, createLedgerFor, usageRow } from './shared.js';
+import { parseResumeRequest } from './resume-args.js';
+import { resumeLocal } from './run.js';
 
 /**
- * `ai resume <response_id>` — re-attach to a background response and print its output.
- * @param {object} ctx Command context from cli.main. positionals[0] is resp_….
- * @returns {Promise<number>} 0 when the response completed, otherwise 1.
+ * `ai resume` continues the newest unfinished step, applies a revision, or reattaches to resp_….
+ * @param {object} ctx Command context from cli.main.
+ * @returns {Promise<number>} 0 when the resumed work completed, otherwise 1.
  * @exports
  * @ai.hint io
  */
 export async function resume(ctx) {
-    const { config, renderer, positionals, signal, emit } = ctx;
-    const id = positionals[0];
-    if (!id || !/^resp_[A-Za-z0-9]+$/.test(id)) throw new UsageError('Укажите идентификатор ответа вида resp_… (ai resume resp_123).');
+    let request;
+    try { request = parseResumeRequest(ctx.positionals); }
+    catch (error) { throw new UsageError(error.message); }
+    if (request.kind === 'response') return resumeResponse(ctx, request.id);
+    return resumeLocal(ctx, { revision: request.revision, stepToken: request.step });
+}
+
+/**
+ * `ai resume <response_id>` — re-attach to a background response and print its output.
+ * @param {object} ctx Command context from cli.main.
+ * @param {string} id Response id, resp_….
+ * @returns {Promise<number>} 0 when the response completed, otherwise 1.
+ * @ai.hint io
+ */
+async function resumeResponse(ctx, id) {
+    const { config, renderer, signal, emit } = ctx;
     const client = createClientFor(config);
     const ledger = createLedgerFor(config);
     try {

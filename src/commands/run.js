@@ -4,7 +4,7 @@
  * @purpose Run an autonomous task as a role team or as a single tool loop.
  * @depends agent/map, agent/tools, agent/roles, agent/team, agent/workspace-scan, core/config, util/text, commands/instructions, commands/flow, commands/shared, mcp/session, node:path
  * @usedBy cli
- * @exports run
+ * @exports run, resumeLocal
  * @ai.tags cli, agent, team
  * @ai.hint io
  * @changed 2026-10-16 Prepared scaffold files are written before the model plans.
@@ -23,6 +23,7 @@ import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstruct
     describeRoles, usageRow, usageBreakdownRows, describeChanges, createClientFor, createLedgerFor, writeOutput, exitCodeFor, STATUS_LABELS } from './shared.js';
 import { openMcpSources } from '../mcp/session.js';
 import { prepareTeamInvocation } from './team-args.js';
+import { findLatestResumable, resolveResumeStep } from '../agent/work-plan.js';
 import { imageTransport } from '../openai/images.js';
 import { formatWorkspace, scanWorkspace } from '../agent/workspace-scan.js';
 import { buildGenerationBrief, writeGenerationManifest } from '../generate/brief.js';
@@ -150,7 +151,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
  * @returns {Promise<number>}
  * @ai.hint io
  */
-async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [], generation = false }) {
+async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null }) {
     const { config, renderer, values, signal, emit } = ctx;
     const client = createClientFor(config);
     const ledger = createLedgerFor(config);
@@ -161,7 +162,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         client, config, ledger, task, parts, root: ctx.cwd, approvalLevel: level, interactive,
         approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
         memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
-        backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles, generation,
+        backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles, generation, revision, fromStep, resumeId,
     });
     renderer.idle();
     renderer.ensureNewline();
@@ -204,4 +205,55 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
     await ctx.reporter?.finish(summary, code);
     client.close();
     return code;
+}
+
+/**
+ * `ai resume` without a response id. Continues the newest unfinished step, or applies a revision.
+ * @param {object} ctx Command context from cli.main.
+ * @param {{ revision?: string, stepToken?: string|null }} [request]
+ * @returns {Promise<number>}
+ * @exports
+ * @ai.hint io
+ */
+export async function resumeLocal(ctx, { revision = '', stepToken = null } = {}) {
+    const note = String(revision ?? '').trim();
+    const found = await findLatestResumable(ctx.cwd, { includeDone: Boolean(note) || stepToken != null });
+    if (!found) throw new UsageError('В этом каталоге нет сохранённой работы в .tmp. Сначала запустите ai run или ai gen.');
+    const steps = found.plan.steps ?? [];
+    const open = found.progress.cursor < steps.length || found.progress.stage === 'review' || found.progress.stage === 'fix';
+    if (!open && !note && stepToken == null) {
+        throw new UsageError('Незавершённых шагов нет. Напишите, что добавить или исправить: ai resume "…"');
+    }
+    const fromStep = stepToken == null ? null : resolveResumeStep(found.plan, stepToken);
+    if (fromStep != null && fromStep < 0) throw new UsageError(`В плане .tmp/${found.id} нет шага ${stepToken}. Шаги: 1–${steps.length}.`);
+    const task = found.progress.task || found.plan.task || '';
+    if (!task.trim()) throw new UsageError(`У работы .tmp/${found.id} нет текста задачи.`);
+    const generation = found.progress.generation === true || /Already written\. Do not plan/.test(task);
+
+    const { config, renderer, values } = ctx;
+    const interactive = renderer.interactive;
+    const level = approvalLevel(config, interactive);
+    const store = openMemoryFor(config, ctx.cwd, renderer);
+    const toolsChosen = values.tools !== undefined || Boolean(values['no-tools']) || Boolean(values.images);
+    if (generation && /generate_image|image_generation|edit_image/.test(task) && !toolsChosen) config.tools.images = true;
+    const imageApi = imageTransport(config) === 'images';
+    const names = enabledToolNames(config.tools, { interactive, memory: Boolean(store), summarize: true, imageApi });
+    if (!names.length && !config.tools.web && !config.tools.images) {
+        throw new UsageError('Все инструменты отключены; для resume нужен хотя бы один (fs, shell, fetch, web, images).');
+    }
+    ctx.backupDir = backupDirFor(config);
+    const extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
+    const where = fromStep == null ? `шаг ${Math.min(found.progress.cursor + 1, steps.length)}` : `шаг ${fromStep + 1}`;
+    renderer.line('info', note
+        ? `Доработка .tmp/${found.id}, ${where}: ${note}`
+        : `Продолжение .tmp/${found.id} с места остановки (${where}).`, { dim: true });
+    try {
+        const ensured = await ensureProjectMap(ctx.cwd);
+        if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
+        return await runTeamFlow(ctx, {
+            task, parts: [], level, interactive, store, names, extra, generation, revision: note, fromStep, resumeId: found.id,
+        });
+    } finally {
+        store?.memory.close();
+    }
 }

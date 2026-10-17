@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import {
-    applyPlanUpdate, briefPlan, createProgress, expandPlan, findResumable, loadWork, parsePlanUpdate, pathsIn, recordStep, saveWork,
+    applyFromStep, applyPlanUpdate, briefPlan, continuationText, createProgress, expandPlan, findLatestResumable, findResumable, loadWork, parsePlanUpdate, pathsIn, recordStep, resolveResumeStep, saveWork,
 } from '../src/agent/work-plan.js';
 
 const base = {
@@ -14,6 +14,7 @@ const base = {
 
 test('pathsIn keeps project files and skips versions', () => {
     assert.deepEqual(pathsIn('Собери src/app.js и test/app.test.js, версия 1.2'), ['src/app.js', 'test/app.test.js']);
+    assert.deepEqual(pathsIn('Primary file: src/app.tsx. Next src/app.scss.'), ['src/app.tsx', 'src/app.scss']);
 });
 
 test('a step that names two files becomes one step per file plus a compatibility step', () => {
@@ -97,6 +98,41 @@ test('recordStep keeps the cursor on a failed step and advances after success', 
     progress = recordStep(progress, { index: 0, status: 'completed', report: 'готово', files: ['src/a.js'] });
     assert.equal(progress.cursor, 1);
     assert.deepEqual(progress.files, [{ path: 'src/a.js', stepId: plan.steps[0].id }]);
+    progress = recordStep(progress, { index: 0, status: 'max_turns', report: 'обрыв', files: ['src/a.js'], phase: 'body' });
+    progress = recordStep(progress, { index: 1, status: 'completed', report: 'дальше', files: [] });
+    assert.equal(progress.cursor, 0);
+    assert.equal(progress.steps[0].phase, 'body');
+});
+
+test('continuation text keeps the unfinished phase and forbids rewriting finished work', () => {
+    const text = continuationText(
+        { goal: 'стили и картинки', details: 'src/app.scss', verify: 'сравнить' },
+        { phase: 'body', files: ['src/app.scss'], report: 'сетка уже есть' },
+    );
+    assert.match(text, /interrupted turn/);
+    assert.match(text, /do not regenerate an image/);
+    assert.match(text, /src\/app\.scss/);
+    assert.match(text, /сетка уже есть/);
+    assert.match(continuationText({ goal: 'дописать' }, {}, { resumeSession: true }), /conversation above/);
+});
+
+test('a resume step token and a start index stay on the unfinished step', () => {
+    const plan = expandPlan({ ...base, complexity: 'trivial', steps: [{ goal: 'один', details: '', verify: '' }, { goal: 'два', details: '', verify: '' }] });
+    assert.equal(resolveResumeStep(plan, '2'), 1);
+    assert.equal(resolveResumeStep(plan, 's01'), 0);
+    assert.equal(resolveResumeStep(plan, 's2'), 1);
+    assert.equal(resolveResumeStep(plan, '9'), -1);
+    let progress = createProgress({ id: 'abcd1234', task: 'задача', plan });
+    progress = recordStep(progress, { index: 0, status: 'completed', report: 'готово', files: [] });
+    progress = recordStep(progress, { index: 1, status: 'max_turns', report: 'обрыв', files: ['src/app.tsx'], phase: 'body' });
+    const fromStart = applyFromStep(progress, 0);
+    assert.equal(fromStart.cursor, 0);
+    assert.equal(fromStart.steps[0].status, 'pending');
+    assert.equal(fromStart.steps[1].status, 'max_turns');
+    const fromOpen = applyFromStep(progress, 1);
+    assert.equal(fromOpen.cursor, 1);
+    assert.equal(fromOpen.steps[0].status, 'completed');
+    assert.equal(fromOpen.steps[1].status, 'max_turns');
 });
 
 test('briefPlan points at the files and does not include step details', () => {
@@ -137,6 +173,9 @@ test('findResumable returns the newest unfinished plan for the same task', async
         const loaded = await loadWork(root, found.id);
         assert.equal(loaded.progress.cursor, 0);
         assert.equal(await findResumable(root, 'другая'), null);
+        const latest = await findLatestResumable(root);
+        assert.equal(latest.id, 'bbbb2222');
+        assert.equal(await findLatestResumable(root, { includeDone: true }).then((work) => work.id), 'bbbb2222');
     } finally {
         await rm(root, { recursive: true, force: true });
     }

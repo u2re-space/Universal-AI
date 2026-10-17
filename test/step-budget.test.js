@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GENERATION_MAX_STEPS, planLimit, stepAllowance } from '../src/agent/step-budget.js';
+import { pathsIn } from '../src/agent/work-plan.js';
 
 test('generation keeps a short plan and one pass on the interface', () => {
     assert.equal(GENERATION_MAX_STEPS, 4);
@@ -12,6 +13,9 @@ test('generation keeps a short plan and one pass on the interface', () => {
     assert.equal(page.maxTurns, 20);
     const config = stepAllowance({ generation: true, files: ['vite.config.js'] });
     assert.equal(config.maxTurns, 10);
+    assert.equal(stepAllowance({ generation: true, files: pathsIn('Primary file: src/app.tsx.') }).maxTurns, 20);
+    assert.equal(stepAllowance({ generation: true }).maxTurns, 20);
+    assert.equal(stepAllowance({ generation: true, goal: 'Recreate the reference styling and generate all required artwork.', details: 'layout' }).maxTurns, 25);
 });
 
 test('a normal source file gets a short surface pass and a longer body pass', () => {
