@@ -24,9 +24,16 @@ beforeEach(() => server.reset());
 after(async () => { await server.close(); await rm(home, { recursive: true, force: true }); await rm(work, { recursive: true, force: true }); });
 
 function runCli(args, { input = null, env = {} } = {}) {
+    const childEnv = { ...process.env };
+    delete childEnv.SPRUTDOCK_API_KEY;
+    delete childEnv.AI_FALLBACK_API_KEY;
+    delete childEnv.AI_FALLBACK_BASE_URL;
+    Object.assign(childEnv, {
+        OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: server.baseURL, AI_AGENT_HOME: home, AI_MODEL: 'mock-model', NO_COLOR: '1', ...env,
+    });
     return new Promise((resolve) => {
         const child = spawn(process.execPath, [bin, ...args], {
-            cwd: work, env: { ...process.env, OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: server.baseURL, AI_AGENT_HOME: home, AI_MODEL: 'mock-model', NO_COLOR: '1', ...env },
+            cwd: work, env: childEnv,
             stdio: [input === null ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true,
         });
         let stdout = '', stderr = '';
