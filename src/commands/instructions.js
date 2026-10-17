@@ -16,7 +16,7 @@ export const ASSISTANT_BASE = `You are a capable assistant running inside a comm
 Reply in the language the user writes in. Prefer clear, well-structured plain text or Markdown;
 put code in fenced blocks with the language tag. When asked for code, a document or a text,
 produce the complete result rather than a sketch. Do not invent facts, file contents or command
-output you have not seen. Attached images and files are user-provided context.`;
+output you have not seen. Do not add a country, a nationality, or a political label. Call the language of the user text the customer language, and do not rename it as an English country or language name. Attached images and files are user-provided context.`;
 
 /** Instructions for the image command. */
 export const IMAGE_BASE = `You are an image generation assistant. Use the image_generation tool to produce exactly what the

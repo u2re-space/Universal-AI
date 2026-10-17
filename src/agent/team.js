@@ -37,6 +37,7 @@ import { SHELL_TOOL_NAMES } from './tool-specs.js';
 import { openMcpSources } from '../mcp/session.js';
 import { ANSWER_INSTRUCTIONS, chooseRoute, loadHandoff, openHandoff, readDirectory, saveHandoff, seedDirectory, seedTextFile, spillAnswer } from './handoff.js';
 import { applyFromStep, applyPlanUpdate, briefPlan, briefProgress, continuationText, createProgress, expandPlan, findResumable, loadWork, newWorkId, parsePlanUpdate, pathsIn, recordStep, revisionClause, saveWork, syncProgress } from './work-plan.js';
+import { neutralPlan, neutralProgress, neutralSession } from './neutral.js';
 import { CommandBatchError, executeFileCommands, FILE_COMMANDS_SCHEMA } from './file-commands.js';
 
 /**
@@ -303,7 +304,10 @@ export async function runTeam({
                 progress.checkpoint = { stepId: checkpoint.stepId, phase: checkpoint.phase, model };
                 work.progress = progress;
                 const file = sessionFile();
-                if (file) await workerSession.save(file).catch((error) => notify({ type: 'warning', message: `Сессия шага не сохранена: ${errorMessage(error)}` }));
+                if (file) {
+                    neutralSession(workerSession);
+                    await workerSession.save(file).catch((error) => notify({ type: 'warning', message: `Сессия шага не сохранена: ${errorMessage(error)}` }));
+                }
             }
             return outcome;
         };
@@ -314,8 +318,8 @@ export async function runTeam({
          * @param {{ expose?: boolean }} [options]
          */
         const bind = (nextPlan, nextProgress, { expose = true } = {}) => {
-            plan = nextPlan;
-            progress = nextProgress;
+            plan = neutralPlan(nextPlan);
+            progress = neutralProgress(nextProgress);
             if (generation) progress.generation = true;
             work = { id: progress.id, plan, progress };
             if (expose) result.plan = plan;
@@ -344,6 +348,7 @@ export async function runTeam({
             const findings = await readFile(path.join(root, '.tmp', work.id, 'findings.md'), 'utf8').catch(() => '');
             if (findings.trim()) ctx.set('findings', 'Collected context (by the collector)', findings, { priority: 6 });
             pendingSession = await loadSession(path.join(root, '.tmp', work.id, 'worker-session.json')).catch(() => null);
+            if (pendingSession) neutralSession(pendingSession);
             if (Number.isInteger(fromStep)) progress = applyFromStep(progress, fromStep);
             work.progress = progress;
             const open = progress.steps?.[progress.cursor];

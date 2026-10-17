@@ -27,6 +27,7 @@ export const INLINE_BYTES = 2048;
  * @ai.hint pure
  */
 export const ANSWER_INSTRUCTIONS = `You write the first answer to the task. Reply in the user's language.
+Do not add a country, a nationality, or a political label. Call the language of the user text the customer language, and do not rename it as an English country or language name.
 Put every file body in a fenced code block with a language tag. Name the file in the heading or the paragraph just before the block when you know it.
 When the shared context has a Workspace scan, follow its import aliases and use the resolved file paths.
 If a web_search tool is available, use it for facts that may have changed, then answer. Source links are shown separately.
