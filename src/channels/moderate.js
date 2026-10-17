@@ -55,13 +55,21 @@ export async function moderateText({ client, input, config, preset, model, conte
     }
     const decisionModel = namedDecision ? model : (config.decisions?.model || 'openai/gpt-6-luna-decisions');
     const state = { text, preset: pack, ...(context ? { context } : {}) };
-    const raw = await requestDecision(client, { model: decisionModel, state, questions: questionsFor(pack), signal });
-    const verdict = {
-        ...verdictFromAnswers(raw.answers, thresholds),
-        source: 'decisions', model: raw.model, id: raw.id, preset: pack, answers: raw.answers, usage: raw.usage,
-    };
-    record(ledger, 'decision', verdict.model, raw.usage, raw.id);
-    return verdict;
+    try {
+        const raw = await requestDecision(client, { model: decisionModel, state, questions: questionsFor(pack), signal });
+        const verdict = {
+            ...verdictFromAnswers(raw.answers, thresholds),
+            source: 'decisions', model: raw.model, id: raw.id, preset: pack, answers: raw.answers, usage: raw.usage,
+        };
+        record(ledger, 'decision', verdict.model, raw.usage, raw.id);
+        return verdict;
+    } catch (error) {
+        if (error?.code !== 'DECISIONS_UNAVAILABLE') throw error;
+        return {
+            action: 'allow', scores: {}, top: null, choice: null, confidence: null, flagged: false,
+            source: 'skipped', model: null, id: null, preset: pack,
+        };
+    }
 }
 
 /**

@@ -11,7 +11,7 @@
  */
 import path from 'node:path';
 import { readFile, mkdir, writeFile, stat } from 'node:fs/promises';
-import { createClient } from '../openai/client.js';
+import { createFallbackClient } from '../openai/fallback.js';
 import { createLedger } from '../core/usage.js';
 import { createSession, loadSession, sessionFile } from '../core/session.js';
 import { loadImageAttachment, loadFileAttachment } from '../core/attachments.js';
@@ -106,10 +106,7 @@ export function composeInstructions(base, config, extra) {
  * @ai.hint io
  */
 export function createClientFor(config) {
-    return createClient({
-        apiKey: config.apiKey ?? process.env.OPENAI_API_KEY, baseURL: config.baseURL, organization: config.organization,
-        project: config.project, retries: config.retries, idleTimeoutMs: config.limits.idleTimeoutMs, connectTimeoutMs: config.limits.connectTimeoutMs,
-    });
+    return createFallbackClient(config);
 }
 
 /**

@@ -163,6 +163,20 @@ function validateConfig(c) {
     if (c.approve !== null && !APPROVAL_LEVELS.includes(c.approve)) fail(`approve: ${APPROVAL_LEVELS.join(' | ')}`);
     if (c.shell !== null && !['powershell', 'pwsh', 'bash', 'sh', 'zsh', 'cmd'].includes(c.shell)) fail('shell: powershell | pwsh | bash | sh | zsh | cmd');
     if (!Number.isSafeInteger(c.retries) || c.retries < 0 || c.retries > 10) fail('retries: 0..10');
+    if (!isRecord(c.fallback)) fail('fallback должен быть объектом');
+    if (typeof c.fallback.enabled !== 'boolean') fail('fallback.enabled: true | false');
+    if (!isRecord(c.fallback.models)) fail('fallback.models должен быть объектом');
+    for (const [key, value] of Object.entries(c.fallback.models)) {
+        if (typeof key !== 'string' || !key.trim() || typeof value !== 'string' || !value.trim()) fail(`fallback.models.${key} должен быть непустой строкой`);
+    }
+    if (!Array.isArray(c.fallback.providers)) fail('fallback.providers должен быть массивом');
+    for (const item of c.fallback.providers) {
+        if (!isRecord(item)) fail('fallback.providers[] должен быть объектом');
+        for (const key of Object.keys(item)) if (!['baseURL', 'apiKey', 'env'].includes(key)) fail(`неизвестный параметр fallback.providers[].${key}`);
+        try { new URL(item.baseURL); } catch { fail('fallback.providers[].baseURL должен быть URL'); }
+        if (item.apiKey != null && (typeof item.apiKey !== 'string' || !item.apiKey.trim() || /[\r\n]/.test(item.apiKey))) fail('fallback.providers[].apiKey: строка или null');
+        if (item.env != null && (typeof item.env !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(item.env))) fail('fallback.providers[].env: имя переменной или null');
+    }
     for (const [key, value] of Object.entries(c.limits)) {
         if (!(key in defaults.limits)) fail(`неизвестный лимит limits.${key}`);
         if (key === 'budgetUsd') { if (value !== null && !(Number.isFinite(value) && value > 0)) fail('limits.budgetUsd > 0'); continue; }
@@ -304,6 +318,9 @@ export function supportsVerbosity(model) {
 export function redactConfig(config) {
     const copy = structuredClone(config);
     if (copy.apiKey) copy.apiKey = `${copy.apiKey.slice(0, 7)}…${copy.apiKey.slice(-4)}`;
+    if (Array.isArray(copy.fallback?.providers)) {
+        for (const item of copy.fallback.providers) if (item?.apiKey) item.apiKey = '…';
+    }
     if (copy.telegram?.token) copy.telegram.token = '…';
     if (copy.channels?.token) copy.channels.token = '…';
     if (Array.isArray(copy.mcp?.servers)) {

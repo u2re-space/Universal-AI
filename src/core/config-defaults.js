@@ -8,6 +8,7 @@
  * @ai.hint pure
  * @changed 2026-10-15 Decisions, moderation, Telegram, and the channel server.
  */
+import { MODEL_FALLBACKS } from '../openai/model-map.js';
 const KiB = 1024;
 const MiB = KiB * KiB;
 
@@ -39,6 +40,17 @@ export const defaults = Object.freeze({
     promptCacheKey: null,
     stream: true,
     retries: 4,                    // repeats after the first try for a timeout or a dropped network; persistent HTTP statuses are not repeated
+    /**
+     * When a model or the whole gateway is missing, try another channel and then another host.
+     * A provider entry is used only when its apiKey or its env variable is set.
+     */
+    fallback: {
+        enabled: true,
+        models: { ...MODEL_FALLBACKS },
+        providers: [
+            { baseURL: 'https://sprutdock.ru/v1', apiKey: null, env: 'SPRUTDOCK_API_KEY' },
+        ],
+    },
     approve: null,                    // ask | read | write | all; null → ask (TTY) or read (no TTY)
     shell: null,                      // run_command shell: null (cmd.exe / sh) | powershell | pwsh | bash | sh | zsh | cmd
     tools: { fs: true, shell: true, fetch: true, web: false, images: false, askUser: true, desktop: false, mcp: true, channels: false },
