@@ -7,7 +7,7 @@
  * @exports createHub
  * @ai.tags websocket, runs
  * @ai.hint pure
- * @changed 2026-10-15 Owner-only approvals and a publisher that is not echoed.
+ * @changed 2026-10-17 Claim registry for client-run tool holders.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -20,7 +20,7 @@ const START_FIELDS = new Set([
     'type', 'command', 'prompt', 'cwd', 'approve', 'effort', 'summary', 'instructions', 'images', 'files', 'detail',
     'out', 'session', 'store', 'web', 'imagesTool', 'tools', 'noTools', 'maxTurns', 'budgetUsd', 'budgetTokens',
     'maxOutputTokens', 'temperature', 'verbosity', 'shell', 'stream', 'size', 'quality', 'format', 'imageBackground',
-    'partials', 'imageModel', 'count', 'schema', 'role', 'single', 'team', 'memory',
+    'partials', 'imageModel', 'count', 'schema', 'role', 'single', 'team', 'memory', 'processing',
 ]);
 const REJECTED = new Set(['background', 'detach', 'job']);
 
@@ -335,7 +335,103 @@ export function createHub({ token, onStart = async () => {}, createId = () => ra
         if (frame.type === 'cancel') return cancel(socket, frame.runId);
         if (frame.type === 'input') return input(socket, frame);
         if (frame.type === 'approve' || frame.type === 'answer') return control(socket, frame);
+        if (frame.type === 'processing.claim') return claim(socket, frame);
         send(socket, errorFrame('unknown_type', `Неизвестный тип кадра: ${frame.type}.`));
+    }
+
+    const PROCESSABLE = ['delete_file', 'list_files', 'read_file', 'replace_text', 'run_command', 'run_script', 'search_files', 'write_file'];
+    const PROCESSABLE_SET = new Set(PROCESSABLE);
+
+    /**
+     * @param {unknown} list
+     * @param {string} label
+     * @returns {string} Empty when the list is a set of processable names.
+     * @ai.hint pure
+     */
+    function validateToolList(list, label) {
+        if (!Array.isArray(list)) return `${label} должен быть массивом.`;
+        const seen = new Set();
+        for (const name of list) {
+            if (seen.has(name)) return `Имя инструмента повторяется: ${name}.`;
+            seen.add(name);
+        }
+        for (const name of list) {
+            if (typeof name !== 'string' || !PROCESSABLE_SET.has(name)) return `Инструмент недоступен для захвата: ${name}.`;
+        }
+        return '';
+    }
+
+    /**
+     * @param {object} run
+     * @returns {string[]}
+     * @ai.hint pure
+     */
+    function sortedHeld(run) {
+        return [...run.holders.keys()].sort();
+    }
+
+    /**
+     * @param {object} run
+     * @returns {void}
+     * @ai.hint pure
+     */
+    function publishHeld(run) {
+        if (run.status !== 'running') return;
+        publish(run.id, { type: 'processing.held', tools: sortedHeld(run) });
+    }
+
+    /**
+     * Replace this socket's names on the run with `tools`.
+     * @param {object} run
+     * @param {object} socket
+     * @param {string[]} tools
+     * @returns {void}
+     * @ai.hint pure
+     */
+    function applyClaim(run, socket, tools) {
+        const next = new Set(tools);
+        /** @type {Map<string, string[]>} */
+        const released = new Map();
+        for (const [name, holderId] of [...run.holders.entries()]) {
+            const mine = holderId === socket.id;
+            if (mine && !next.has(name)) run.holders.delete(name);
+            if (!mine && next.has(name)) {
+                run.holders.delete(name);
+                const names = released.get(holderId) ?? [];
+                names.push(name);
+                released.set(holderId, names);
+            }
+        }
+        for (const name of tools) run.holders.set(name, socket.id);
+        for (const [holderId, names] of released) {
+            sockets.get(holderId)?.send({ type: 'processing.released', runId: run.id, tools: names.sort() });
+        }
+        socket.send({ type: 'processing.claimed', runId: run.id, tools: [...tools] });
+        publishHeld(run);
+    }
+
+    /**
+     * @param {object} socket
+     * @param {object} frame
+     * @returns {void}
+     * @ai.hint pure
+     */
+    function claim(socket, frame) {
+        const run = typeof frame.runId === 'string' ? runs.get(frame.runId) : null;
+        if (!run || run.status !== 'running') {
+            send(socket, errorFrame('unknown_run', 'Запуск не найден или уже завершён.'));
+            return;
+        }
+        if (run.source !== 'client') {
+            send(socket, errorFrame('bad_request', 'Захват доступен только для клиентского запуска.'));
+            return;
+        }
+        const problem = validateToolList(frame.tools, 'tools');
+        if (problem) {
+            send(socket, errorFrame('bad_request', problem));
+            return;
+        }
+        applyClaim(run, socket, frame.tools);
     }
 
     /**
@@ -347,7 +443,7 @@ export function createHub({ token, onStart = async () => {}, createId = () => ra
     function openRun(socket, fields) {
         const run = {
             id: createId(), ownerId: socket.id, status: 'running', startedAt: now(), controller: new AbortController(),
-            queue: [], waiters: [], ...fields,
+            queue: [], waiters: [], holders: new Map(), ...fields,
         };
         runs.set(run.id, run);
         return run;
@@ -386,6 +482,15 @@ export function createHub({ token, onStart = async () => {}, createId = () => ra
             send(socket, errorFrame('invalid_start', 'approve: ask, read, write или all.'));
             return;
         }
+        const listed = frame.processing;
+        const claimNow = listed !== undefined && !(Array.isArray(listed) && listed.length === 0);
+        if (claimNow) {
+            const problem = validateToolList(listed, 'processing');
+            if (problem) {
+                send(socket, errorFrame('invalid_start', problem));
+                return;
+            }
+        }
         const prompt = typeof frame.prompt === 'string' ? frame.prompt : '';
         const run = openRun(socket, {
             source: 'client', command: frame.command, title: `${frame.command} ${prompt}`.trim().slice(0, 200),
@@ -393,6 +498,7 @@ export function createHub({ token, onStart = async () => {}, createId = () => ra
         });
         socket.subs.add(run.id);
         broadcast({ type: 'run.started', run: publicRun(run) });
+        if (claimNow) applyClaim(run, socket, listed);
         if (frame.command === 'chat' && prompt.trim()) run.queue.push(prompt);
         void Promise.resolve(onStart(run, frame)).catch((error) => {
             publish(run.id, { type: 'warning', message: error.message });

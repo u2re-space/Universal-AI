@@ -74,3 +74,96 @@ test('a start frame rejects a detached job and keeps an allowed extra field', as
     assert.equal(transport.frames.at(-1).code, 'invalid_start');
     assert.match(transport.frames.at(-1).message, /detach/);
 });
+
+function ids() {
+    let n = 0;
+    return () => `id${++n}`;
+}
+
+test('processing: start.processing claims before onStart and a bad list opens no run', async () => {
+    let claimedBeforeStart = false;
+    let starts = 0;
+    let transport;
+    const hub = createHub({
+        token: 'secret', createId: ids(),
+        onStart() {
+            starts += 1;
+            claimedBeforeStart = transport.frames.some((frame) => frame.type === 'processing.claimed');
+            return new Promise(() => {});
+        },
+    });
+    transport = pair();
+    const socket = hub.connect(transport);
+    await hub.receive(socket, { type: 'hello', role: 'client', token: 'secret' });
+    await hub.receive(socket, { type: 'start', command: 'ask', prompt: 'hi', cwd: process.cwd(), processing: ['nope', 'nope'] });
+    assert.equal(transport.frames.at(-1).code, 'invalid_start');
+    assert.match(transport.frames.at(-1).message, /Имя инструмента повторяется: nope/);
+    await hub.receive(socket, { type: 'start', command: 'ask', prompt: 'hi', cwd: process.cwd(), processing: 'read_file' });
+    assert.match(transport.frames.at(-1).message, /processing должен быть массивом/);
+    await hub.receive(socket, { type: 'start', command: 'ask', prompt: 'hi', cwd: process.cwd(), processing: ['read_file', 'missing'] });
+    assert.match(transport.frames.at(-1).message, /Инструмент недоступен для захвата: missing/);
+    assert.equal(starts, 0);
+    await hub.receive(socket, { type: 'start', command: 'ask', prompt: 'empty', cwd: process.cwd(), processing: [] });
+    assert.equal(starts, 1);
+    assert.equal(claimedBeforeStart, false);
+    assert.equal(transport.frames.some((frame) => frame.type === 'processing.claimed'), false);
+    await hub.receive(socket, { type: 'start', command: 'ask', prompt: 'hi', cwd: process.cwd(), processing: ['write_file', 'read_file'] });
+    assert.equal(claimedBeforeStart, true);
+    assert.equal(starts, 2);
+    assert.deepEqual(transport.frames.find((frame) => frame.type === 'processing.claimed').tools, ['write_file', 'read_file']);
+    const held = transport.frames.find((frame) => frame.type === 'run.event' && frame.event.type === 'processing.held');
+    assert.deepEqual(held.event.tools, ['read_file', 'write_file']);
+});
+
+test('processing: claims replace a socket set, steal a name, and stay inside one run', async () => {
+    const hub = createHub({ token: 'secret', createId: ids(), onStart() { return new Promise(() => {}); } });
+    const ownerT = pair();
+    const otherT = pair();
+    const watchT = pair();
+    const owner = hub.connect(ownerT);
+    const other = hub.connect(otherT);
+    const watch = hub.connect(watchT);
+    await hub.receive(owner, { type: 'hello', role: 'client', token: 'secret' });
+    await hub.receive(other, { type: 'hello', role: 'client', token: 'secret' });
+    await hub.receive(watch, { type: 'hello', role: 'client', token: 'secret' });
+    await hub.receive(owner, { type: 'start', command: 'ask', prompt: 'one', cwd: process.cwd(), processing: ['read_file', 'write_file'] });
+    await hub.receive(owner, { type: 'start', command: 'ask', prompt: 'two', cwd: process.cwd() });
+    const runs = ownerT.frames.filter((frame) => frame.type === 'run.started').map((frame) => frame.run.id);
+    await hub.receive(watch, { type: 'subscribe', runId: runs[1] });
+    await hub.receive(other, { type: 'processing.claim', runId: runs[0], tools: ['read_file'] });
+    assert.deepEqual(otherT.frames.find((frame) => frame.type === 'processing.claimed').tools, ['read_file']);
+    assert.deepEqual(ownerT.frames.find((frame) => frame.type === 'processing.released').tools, ['read_file']);
+    await hub.receive(owner, { type: 'processing.claim', runId: runs[0], tools: [] });
+    assert.deepEqual(ownerT.frames.filter((frame) => frame.type === 'processing.claimed').at(-1).tools, []);
+    const held = ownerT.frames.filter((frame) => frame.event?.type === 'processing.held').at(-1);
+    assert.deepEqual(held.event.tools, ['read_file']);
+    assert.equal(watchT.frames.some((frame) => frame.event?.type === 'processing.held'), false);
+    const claimedCount = otherT.frames.filter((frame) => frame.type === 'processing.claimed').length;
+    await hub.receive(other, { type: 'processing.claim', runId: runs[0], tools: ['read_file'] });
+    assert.equal(otherT.frames.filter((frame) => frame.type === 'processing.claimed').length, claimedCount + 1);
+    await hub.receive(other, { type: 'processing.claim', runId: runs[0], tools: ['read_file', 'read_file'] });
+    assert.match(otherT.frames.at(-1).message, /Имя инструмента повторяется: read_file/);
+    assert.deepEqual(ownerT.frames.filter((frame) => frame.event?.type === 'processing.held').at(-1).event.tools, ['read_file']);
+    await hub.receive(other, { type: 'processing.claim', runId: 'missing', tools: ['read_file'] });
+    assert.equal(otherT.frames.at(-1).code, 'unknown_run');
+});
+
+test('processing: a publisher may claim a client run but not its own terminal run', async () => {
+    const hub = createHub({ token: 'secret', createId: ids(), onStart() { return new Promise(() => {}); } });
+    const ownerT = pair();
+    const pubT = pair();
+    const owner = hub.connect(ownerT);
+    const pub = hub.connect(pubT);
+    await hub.receive(owner, { type: 'hello', role: 'client', token: 'secret' });
+    await hub.receive(pub, { type: 'hello', role: 'publisher', token: 'secret', command: 'run', title: 't', cwd: process.cwd() });
+    await hub.receive(owner, { type: 'start', command: 'ask', prompt: 'hi', cwd: process.cwd() });
+    const clientRun = ownerT.frames.find((frame) => frame.type === 'run.started' && frame.run.source === 'client').run.id;
+    const terminalRun = pubT.frames.find((frame) => frame.type === 'run.started' && frame.run.source === 'terminal').run.id;
+    await hub.receive(owner, { type: 'processing.claim', runId: terminalRun, tools: ['read_file'] });
+    assert.equal(ownerT.frames.at(-1).code, 'bad_request');
+    assert.equal(ownerT.frames.at(-1).message, 'Захват доступен только для клиентского запуска.');
+    await hub.receive(pub, { type: 'processing.claim', runId: clientRun, tools: ['read_file'] });
+    assert.deepEqual(pubT.frames.find((frame) => frame.type === 'processing.claimed').tools, ['read_file']);
+    assert.equal(pubT.frames.some((frame) => frame.type === 'run.event' && frame.event?.type === 'processing.held'), false);
+    assert.deepEqual(ownerT.frames.find((frame) => frame.event?.type === 'processing.held').event.tools, ['read_file']);
+});
