@@ -167,3 +167,96 @@ test('processing: a publisher may claim a client run but not its own terminal ru
     assert.equal(pubT.frames.some((frame) => frame.type === 'run.event' && frame.event?.type === 'processing.held'), false);
     assert.deepEqual(ownerT.frames.find((frame) => frame.event?.type === 'processing.held').event.tools, ['read_file']);
 });
+
+async function clientRun(hub) {
+    const ownerT = pair();
+    const owner = hub.connect(ownerT);
+    await hub.receive(owner, { type: 'hello', role: 'client', token: 'secret' });
+    await hub.receive(owner, { type: 'start', command: 'ask', prompt: 'hi', cwd: process.cwd(), processing: ['read_file', 'write_file'] });
+    const runId = ownerT.frames.find((frame) => frame.type === 'run.started').run.id;
+    return { owner, ownerT, runId };
+}
+
+test('processing: tool.result returns output and a bad frame keeps waiting', async () => {
+    const hub = createHub({ token: 'secret', createId: ids(), onStart() { return new Promise(() => {}); } });
+    const { owner, ownerT, runId } = await clientRun(hub);
+    assert.equal(await hub.requestTool(runId, 'delete_file', { path: 'a.js' }), null);
+    const pending = hub.requestTool(runId, 'read_file', { path: 'a.js' });
+    const request = ownerT.frames.find((frame) => frame.type === 'tool.request');
+    assert.equal(request.name, 'read_file');
+    assert.deepEqual(request.args, { path: 'a.js' });
+    const watchT = pair();
+    const watch = hub.connect(watchT);
+    await hub.receive(watch, { type: 'hello', role: 'client', token: 'secret' });
+    await hub.receive(watch, { type: 'tool.result', requestId: request.requestId, output: 'stolen', summary: 's' });
+    assert.equal(watchT.frames.at(-1).message, 'Этот requestId адресован другому сокету.');
+    await hub.receive(owner, { type: 'approve', requestId: request.requestId, decision: 'yes' });
+    assert.equal(ownerT.frames.at(-1).message, 'Неизвестный requestId.');
+    await hub.receive(owner, { type: 'tool.result', requestId: request.requestId, error: 1 });
+    assert.equal(ownerT.frames.at(-1).message, 'error должен быть строкой.');
+    await hub.receive(owner, { type: 'tool.result', requestId: request.requestId, output: 1, summary: 's' });
+    assert.equal(ownerT.frames.at(-1).message, 'output и summary должны быть строками.');
+    await hub.receive(owner, { type: 'tool.result', requestId: request.requestId, error: '   ', output: 'text', summary: 'sum' });
+    assert.deepEqual(await pending, { output: 'text', summary: 'sum', changes: [] });
+    const failed = hub.requestTool(runId, 'read_file', { path: 'b.js' });
+    const failRequest = ownerT.frames.filter((frame) => frame.type === 'tool.request').at(-1);
+    await hub.receive(owner, { type: 'tool.result', requestId: failRequest.requestId, error: 'Файл не найден', output: 'ignored' });
+    await assert.rejects(failed, { message: 'Файл не найден' });
+    await hub.receive(owner, { type: 'tool.result', requestId: 'nope', output: 'x', summary: 'y' });
+    assert.equal(ownerT.frames.at(-1).message, 'Неизвестный requestId.');
+});
+
+test('processing: an in-flight request stays on the old holder', async () => {
+    const hub = createHub({ token: 'secret', createId: ids(), onStart() { return new Promise(() => {}); } });
+    const { owner, ownerT, runId } = await clientRun(hub);
+    const first = hub.requestTool(runId, 'read_file', { path: 'a.js' });
+    const second = hub.requestTool(runId, 'read_file', { path: 'b.js' });
+    const requests = ownerT.frames.filter((frame) => frame.type === 'tool.request');
+    assert.equal(requests.length, 2);
+    const otherT = pair();
+    const other = hub.connect(otherT);
+    await hub.receive(other, { type: 'hello', role: 'client', token: 'secret' });
+    await hub.receive(other, { type: 'processing.claim', runId, tools: ['read_file'] });
+    await hub.receive(owner, { type: 'tool.result', requestId: requests[0].requestId, output: 'old', summary: 'o' });
+    await hub.receive(owner, { type: 'tool.result', requestId: requests[1].requestId, output: 'old-2', summary: 'o2' });
+    assert.equal((await first).output, 'old');
+    assert.equal((await second).output, 'old-2');
+    const third = hub.requestTool(runId, 'read_file', { path: 'c.js' });
+    const moved = otherT.frames.find((frame) => frame.type === 'tool.request');
+    assert.equal(moved.args.path, 'c.js');
+    await hub.receive(other, { type: 'tool.result', requestId: moved.requestId, output: 'new', summary: 'n', changes: [{ op: 'edit', path: 'c.js' }] });
+    assert.deepEqual(await third, { output: 'new', summary: 'n', changes: [{ op: 'edit', path: 'c.js' }] });
+    const huge = Array.from({ length: 101 }, () => ({ op: 'edit', path: 'c.js' }));
+    const fourth = hub.requestTool(runId, 'read_file', { path: 'd.js' });
+    const hugeRequest = otherT.frames.filter((frame) => frame.type === 'tool.request').at(-1);
+    await hub.receive(other, { type: 'tool.result', requestId: hugeRequest.requestId, output: 'x', summary: 'y', changes: huge });
+    assert.match(otherT.frames.at(-1).message, /op create, overwrite, edit или delete/);
+    await hub.receive(other, { type: 'tool.result', requestId: hugeRequest.requestId, output: 'x', summary: 'y' });
+    assert.equal((await fourth).output, 'x');
+});
+
+test('processing: holder disconnect fails its calls, and owner disconnect cancels the run', async () => {
+    const hub = createHub({ token: 'secret', createId: ids(), onStart() { return new Promise(() => {}); } });
+    const ownerT = pair();
+    const otherT = pair();
+    const owner = hub.connect(ownerT);
+    const other = hub.connect(otherT);
+    await hub.receive(owner, { type: 'hello', role: 'client', token: 'secret' });
+    await hub.receive(other, { type: 'hello', role: 'client', token: 'secret' });
+    await hub.receive(owner, { type: 'start', command: 'ask', prompt: 'owned', cwd: process.cwd(), processing: ['read_file'] });
+    await hub.receive(other, { type: 'start', command: 'ask', prompt: 'other', cwd: process.cwd() });
+    const ownedId = ownerT.frames.find((frame) => frame.type === 'run.started' && frame.run.title.startsWith('ask owned')).run.id;
+    const otherId = otherT.frames.find((frame) => frame.type === 'run.started' && frame.run.title.startsWith('ask other')).run.id;
+    await hub.receive(owner, { type: 'processing.claim', runId: otherId, tools: ['write_file'] });
+    const ownedCall = hub.requestTool(ownedId, 'read_file', { path: 'a.js' });
+    const otherCall = hub.requestTool(otherId, 'write_file', { path: 'b.js' });
+    hub.disconnect(owner);
+    await assert.rejects(ownedCall, { name: 'AbortError', message: 'Отменено.' });
+    await assert.rejects(otherCall, { message: 'Держатель инструмента отключился.' });
+    assert.equal(otherT.frames.some((frame) => frame.type === 'run.ended' && frame.runId === otherId), false);
+    assert.equal(await hub.requestTool(otherId, 'write_file', { path: 'b.js' }), null);
+    await assert.rejects(hub.requestTool('gone', 'read_file', {}), { message: 'Запуск не найден.' });
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(hub.requestTool('gone', 'read_file', {}, controller.signal), { name: 'AbortError' });
+});

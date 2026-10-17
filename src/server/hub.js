@@ -123,7 +123,8 @@ export function createHub({ token, onStart = async () => {}, createId = () => ra
         for (const waiter of waiters) waiter.reject(abortError());
         for (const [requestId, item] of pending) {
             if (item.runId !== runId) continue;
-            item.resolve(item.kind === 'question' ? null : 'abort');
+            if (item.kind === 'tool') item.resolve(abortError());
+            else item.resolve(item.kind === 'question' ? null : 'abort');
             pending.delete(requestId);
         }
         runs.delete(runId);
@@ -157,9 +158,25 @@ export function createHub({ token, onStart = async () => {}, createId = () => ra
     function disconnect(socket) {
         sockets.delete(socket.id);
         for (const run of [...runs.values()]) {
-            if (run.ownerId !== socket.id || run.status !== 'running') continue;
-            run.controller?.abort();
-            finish(run.id, 'cancelled', 130);
+            if (run.status !== 'running') continue;
+            if (run.ownerId === socket.id) {
+                run.controller?.abort();
+                finish(run.id, 'cancelled', 130);
+                continue;
+            }
+            if (run.source !== 'client') continue;
+            let lost = false;
+            for (const [name, holderId] of [...run.holders.entries()]) {
+                if (holderId !== socket.id) continue;
+                run.holders.delete(name);
+                lost = true;
+            }
+            for (const item of [...pending.values()]) {
+                if (item.kind === 'tool' && item.runId === run.id && item.holderId === socket.id) {
+                    item.resolve(new Error('Держатель инструмента отключился.'));
+                }
+            }
+            if (lost) publishHeld(run);
         }
     }
 
@@ -336,6 +353,7 @@ export function createHub({ token, onStart = async () => {}, createId = () => ra
         if (frame.type === 'input') return input(socket, frame);
         if (frame.type === 'approve' || frame.type === 'answer') return control(socket, frame);
         if (frame.type === 'processing.claim') return claim(socket, frame);
+        if (frame.type === 'tool.result') return toolResult(socket, frame);
         send(socket, errorFrame('unknown_type', `Неизвестный тип кадра: ${frame.type}.`));
     }
 
@@ -432,6 +450,103 @@ export function createHub({ token, onStart = async () => {}, createId = () => ra
             return;
         }
         applyClaim(run, socket, frame.tools);
+    }
+
+    const CHANGE_OPS = new Set(['create', 'overwrite', 'edit', 'delete']);
+
+    /**
+     * @param {unknown} changes
+     * @returns {{ changes?: { op: string, path: string }[], error?: string }}
+     * @ai.hint pure
+     */
+    function parseChanges(changes) {
+        if (changes === undefined) return { changes: [] };
+        if (!Array.isArray(changes) || changes.length > 100) return { error: 'changes: op create, overwrite, edit или delete и path-строка.' };
+        const parsed = [];
+        for (const item of changes) {
+            if (!isRecord(item) || !CHANGE_OPS.has(item.op) || typeof item.path !== 'string') {
+                return { error: 'changes: op create, overwrite, edit или delete и path-строка.' };
+            }
+            parsed.push({ op: item.op, path: item.path });
+        }
+        return { changes: parsed };
+    }
+
+    /**
+     * @param {string} runId
+     * @param {string} name
+     * @param {object} args
+     * @param {AbortSignal} [signal]
+     * @returns {Promise<null | { output: string, summary: string, changes: { op: string, path: string }[] }>}
+     * @ai.hint pure
+     */
+    function requestTool(runId, name, args, signal) {
+        if (signal?.aborted) return Promise.reject(abortError());
+        const run = runs.get(runId);
+        if (!run || run.status !== 'running') return Promise.reject(new Error('Запуск не найден.'));
+        const holderId = run.holders.get(name);
+        if (!holderId) return Promise.resolve(null);
+        const holder = sockets.get(holderId);
+        if (!holder) return Promise.reject(new Error('Держатель инструмента отключился.'));
+        const requestId = createId();
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            /**
+             * @param {Error | null} error
+             * @param {object} [value]
+             * @returns {void}
+             * @ai.hint pure
+             */
+            const done = (error, value) => {
+                if (settled) return;
+                settled = true;
+                pending.delete(requestId);
+                signal?.removeEventListener('abort', onAbort);
+                if (error) reject(error);
+                else resolve(value);
+            };
+            /** @returns {void} */
+            const onAbort = () => done(abortError());
+            pending.set(requestId, { runId, holderId, kind: 'tool', resolve: done });
+            if (signal) signal.addEventListener('abort', onAbort, { once: true });
+            holder.send({ type: 'tool.request', runId, requestId, name, args });
+        });
+    }
+
+    /**
+     * @param {object} socket
+     * @param {object} frame
+     * @returns {void}
+     * @ai.hint pure
+     */
+    function toolResult(socket, frame) {
+        const item = typeof frame.requestId === 'string' ? pending.get(frame.requestId) : null;
+        if (!item || item.kind !== 'tool') {
+            send(socket, errorFrame('bad_request', 'Неизвестный requestId.'));
+            return;
+        }
+        if (item.holderId !== socket.id) {
+            send(socket, errorFrame('bad_request', 'Этот requestId адресован другому сокету.'));
+            return;
+        }
+        if (frame.error !== undefined && typeof frame.error !== 'string') {
+            send(socket, errorFrame('bad_request', 'error должен быть строкой.'));
+            return;
+        }
+        if (typeof frame.error === 'string' && frame.error.trim()) {
+            item.resolve(new Error(frame.error));
+            return;
+        }
+        if (typeof frame.output !== 'string' || typeof frame.summary !== 'string') {
+            send(socket, errorFrame('bad_request', 'output и summary должны быть строками.'));
+            return;
+        }
+        const parsed = parseChanges(frame.changes);
+        if (parsed.error) {
+            send(socket, errorFrame('bad_request', parsed.error));
+            return;
+        }
+        item.resolve(null, { output: frame.output, summary: frame.summary, changes: parsed.changes });
     }
 
     /**
@@ -618,7 +733,7 @@ export function createHub({ token, onStart = async () => {}, createId = () => ra
      */
     function control(socket, frame) {
         const item = typeof frame.requestId === 'string' ? pending.get(frame.requestId) : null;
-        if (!item) {
+        if (!item || item.kind === 'tool') {
             send(socket, errorFrame('bad_request', 'Неизвестный requestId.'));
             return;
         }
@@ -637,5 +752,5 @@ export function createHub({ token, onStart = async () => {}, createId = () => ra
         item.resolve(typeof frame.text === 'string' ? frame.text : '');
     }
 
-    return { connect, receive, disconnect, publish, requestApproval, requestQuestion, waitInput, finish, shutdown };
+    return { connect, receive, disconnect, publish, requestApproval, requestQuestion, requestTool, waitInput, finish, shutdown };
 }
