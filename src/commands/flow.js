@@ -15,7 +15,7 @@ import { buildUserMessage } from '../core/attachments.js';
 import { runTurn, builtinTools } from '../agent/loop.js';
 import { formatBytes } from '../util/text.js';
 import { UsageError, createClientFor, createLedgerFor, openSession, writeOutput, resultObject, exitCodeFor, STATUS_LABELS,
-    usageRow, describeChanges } from './shared.js';
+    usageRow, backupSummaryRows } from './shared.js';
 
 /**
  * Load a JSON schema file for structured output (--schema).
@@ -87,7 +87,7 @@ export async function runOnce(ctx, {
         rows: [
             ['статус', STATUS_LABELS[result.status] ?? result.status],
             ...(toolset ? [['ходов', `${result.turns}`], ['вызовов инструментов', stats.calls ? `${stats.calls} (${Object.entries(stats.byTool).map(([n, c]) => `${n} ×${c}`).join(', ')})${stats.denied ? `, отклонено ${stats.denied}` : ''}` : '0']] : []),
-            ...(stats?.changes?.length ? [['изменения', describeChanges(stats)], ['резервные копии', ctx.backupDir]] : []),
+            ...backupSummaryRows(stats?.changes, ctx.backupDir),
             ...(stats?.commands?.length ? [['команды', stats.commands.map((c) => `${c.command} → ${c.exitCode ?? '?'}`).join('; ')]] : []),
             ...(result.images.length ? [['изображения', result.images.join(', ')]] : []),
             ['токены', usageRow(ledger)],

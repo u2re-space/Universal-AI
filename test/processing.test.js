@@ -7,6 +7,7 @@ import { createToolset } from '../src/agent/tools.js';
 import { buildProjectMap, loadProjectMap } from '../src/agent/map.js';
 import { defaults } from '../src/core/config.js';
 import { CancelledError } from '../src/openai/errors.js';
+import { backupSummaryRows } from '../src/commands/shared.js';
 
 async function rootFor(name) {
     return mkdtemp(path.join(os.tmpdir(), `ai-proc-${name}-`));
@@ -177,4 +178,12 @@ test('processing: denial, cancellation, shell stats, and make_dir stay local', a
     } finally {
         await rm(root, { recursive: true, force: true });
     }
+});
+
+test('processing: the backup row appears only when a change has a backup path', () => {
+    const remote = backupSummaryRows([{ op: 'edit', path: 'a.js' }], '/tmp/backup');
+    assert.deepEqual(remote, [['изменения', '~ a.js']]);
+    const local = backupSummaryRows([{ op: 'edit', path: 'a.js', backupPath: '/tmp/backup/a.js' }], '/tmp/backup');
+    assert.deepEqual(local, [['изменения', '~ a.js'], ['резервные копии', '/tmp/backup']]);
+    assert.deepEqual(backupSummaryRows([], '/tmp/backup'), []);
 });

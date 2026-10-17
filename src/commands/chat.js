@@ -84,6 +84,7 @@ export async function chat(ctx) {
             root: ctx.cwd, config, client, ledger, names, approvalLevel: approvalLevel(config, true),
             approve: (request) => renderer.approve(request, { signal: ctx.turnSignal() }), askUser: null,
             backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
+            processTool: ctx.processTool,
         });
         return `локальные инструменты: ${names.join(', ')} · доступ ${toolset.approvalLevel} · каталог ${ctx.cwd}${store ? ' · память' : ''}`;
     }

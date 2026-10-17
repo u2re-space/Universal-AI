@@ -145,6 +145,7 @@ function commandRunner({ hub, baseConfig = null }) {
             argv: [], values, positionals: frame.command === 'chat' || !frame.prompt ? [] : [frame.prompt],
             config, renderer: wrapped, cwd, controller: run.controller, signal: run.controller.signal,
             emit: wrapped.handle, reporter: null, backupDir: null, stdin: Readable.from([]),
+            processTool: (name, args, signal) => hub.requestTool(run.id, name, args, signal),
             setTurnController() {},
             turnSignal: () => run.controller.signal,
         };

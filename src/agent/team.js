@@ -82,7 +82,7 @@ export function toolNamesForRole(allNames, role) {
 export async function runTeam({
     client, config, ledger, task, parts = [], root, approvalLevel = 'read', interactive = false, approve, askUser = null,
     memory = null, projectKey = null, projectName = null, backupDir = null, extraInstructions = null, emit = () => {}, signal,
-    seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null,
+    seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, processTool = null,
 }) {
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
     const roles = createRoleRunner({ client, config, ledger, emit, signal });
@@ -92,7 +92,7 @@ export async function runTeam({
     const result = { status: 'failed', text: '', plan: null, review: null, steps: [], images: [], changes: [], stats: null,
         recalled: [], memoriesSaved: [], reviewRounds: 0, error: null };
 
-    const toolBase = { root, config, client, ledger, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile, scaffoldTask: task };
+    const toolBase = { root, config, client, ledger, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile, scaffoldTask: task, processTool };
     const mcp = await openMcpSources(config, { signal, notify });
     const mcpRead = mcp.extras.filter((extra) => extra.category === 'read');
     const imageApi = imageTransport(config) === 'images';

@@ -4,7 +4,7 @@
  * @purpose Shared CLI helpers for stdin, attachments, sessions, memory, usage text, and exit codes.
  * @depends node:path, node:fs/promises, openai/client, core/usage, core/session, core/attachments, core/config, core/memory, util/text, commands/flags
  * @usedBy cli, commands/ask, commands/chat, commands/flow, commands/run, commands/image, commands/jobs, commands/memory, commands/map, commands/misc
- * @exports UsageError, overridesFrom, readStdin, resolveTextArg, loadAttachments, composeInstructions, createClientFor, createLedgerFor, openSession, approvalLevel, backupDirFor, writeOutput, STATUS_LABELS, exitCodeFor, resolveRole, openMemoryFor, describeRoles, usageBreakdownRows, usageRow, describeChanges, resultObject
+ * @exports UsageError, overridesFrom, readStdin, resolveTextArg, loadAttachments, composeInstructions, createClientFor, createLedgerFor, openSession, approvalLevel, backupDirFor, writeOutput, STATUS_LABELS, exitCodeFor, resolveRole, openMemoryFor, describeRoles, usageBreakdownRows, usageRow, describeChanges, backupSummaryRows, resultObject
  * @ai.tags cli, session, usage
  * @ai.hint io
  * @changed 2026-10-15 JSDoc card, 4-space indent.
@@ -279,6 +279,21 @@ export function describeChanges(stats) {
     const seen = new Map();
     for (const change of stats.changes) seen.set(change.path, marks[change.op] ?? '~');
     return [...seen.entries()].map(([file, mark]) => `${mark} ${file}`).join('  ');
+}
+
+/**
+ * Summary rows for file changes. The backup directory is listed only when a change kept a local copy.
+ * @param {Array<{ op?: string, path: string, backupPath?: string | null }> | null | undefined} changes
+ * @param {string | null | undefined} backupDir
+ * @returns {Array<[string, string]>}
+ * @exports
+ * @ai.hint pure
+ */
+export function backupSummaryRows(changes, backupDir) {
+    if (!changes?.length) return [];
+    const rows = [['изменения', describeChanges({ changes })]];
+    if (changes.some((change) => change.backupPath)) rows.push(['резервные копии', backupDir]);
+    return rows;
 }
 
 /**

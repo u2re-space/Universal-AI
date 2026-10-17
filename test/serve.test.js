@@ -214,6 +214,63 @@ test('ai serve CLI accepts --port and a publisher event', async () => {
     }
 });
 
+test('processing: the owner answers write_file and the work directory stays unchanged', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-serve-proc-'));
+    const work = await mkdtemp(path.join(os.tmpdir(), 'ai-serve-proc-work-'));
+    const server = await startMockServer({
+        script: (body) => (body.input?.some((item) => item.type === 'function_call_output')
+            ? { text: 'готово' }
+            : { calls: [{ name: 'write_file', arguments: { path: 'note.txt', content: 'ok\u0007\n', overwrite: true } }] }),
+    });
+    const saved = {
+        OPENAI_API_KEY: process.env.OPENAI_API_KEY, OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+        AI_MODEL: process.env.AI_MODEL, AI_AGENT_HOME: process.env.AI_AGENT_HOME,
+    };
+    process.env.OPENAI_API_KEY = 'sk-test';
+    process.env.OPENAI_BASE_URL = server.baseURL;
+    process.env.AI_MODEL = 'mock-model';
+    process.env.AI_AGENT_HOME = home;
+    const handle = await startServe({ home, port: 0 });
+    try {
+        const frames = [];
+        const owner = new WebSocket(handle.url);
+        framesOf(owner, frames);
+        await once(owner, 'open');
+        owner.send(JSON.stringify({ type: 'hello', role: 'client', token: handle.token }));
+        await delay(30);
+        owner.send(JSON.stringify({
+            type: 'start', command: 'ask', prompt: 'создай note.txt', cwd: work, approve: 'ask', tools: 'fs', web: false,
+            processing: ['write_file'],
+        }));
+        const approval = await waitFor(frames, (frame) => frame.type === 'approval.request');
+        owner.send(JSON.stringify({ type: 'approve', requestId: approval.requestId, decision: 'yes' }));
+        const request = await waitFor(frames, (frame) => frame.type === 'tool.request');
+        assert.equal(request.name, 'write_file');
+        assert.equal(request.args.content, 'ok\n');
+        owner.send(JSON.stringify({
+            type: 'tool.result', requestId: request.requestId, output: 'Создан note.txt', summary: '+ note.txt',
+            changes: [{ op: 'create', path: 'note.txt' }],
+        }));
+        await waitFor(frames, (frame) => frame.type === 'run.ended' && frame.status === 'completed');
+        await assert.rejects(stat(path.join(work, 'note.txt')));
+        const result = frames.find((frame) => frame.type === 'run.event' && frame.event.type === 'result');
+        assert.deepEqual(result.event.tools.changes, [{ op: 'create', path: 'note.txt' }]);
+        const summary = frames.find((frame) => frame.type === 'run.event' && frame.event.type === 'summary');
+        assert.equal(summary.event.rows.some((row) => row[0] === 'изменения'), true);
+        assert.equal(summary.event.rows.some((row) => row[0] === 'резервные копии'), false);
+        owner.close();
+    } finally {
+        await handle.close();
+        for (const [key, value] of Object.entries(saved)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+        await server.close();
+        await rm(home, { recursive: true, force: true });
+        await rm(work, { recursive: true, force: true });
+    }
+});
+
 function onceEvent(emitter, name) {
     return new Promise((resolve) => emitter.once(name, resolve));
 }

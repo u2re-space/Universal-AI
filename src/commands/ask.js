@@ -53,6 +53,7 @@ export async function ask(ctx) {
                 root: ctx.cwd, config, names, approvalLevel: approvalLevel(config, renderer.interactive),
                 approve: (request) => renderer.approve(request, { signal }), askUser: renderer.interactive ? (q) => renderer.ask(q, { signal }) : null,
                 backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
+                processTool: ctx.processTool,
             });
         }
     }

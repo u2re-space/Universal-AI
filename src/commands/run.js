@@ -20,7 +20,7 @@ import { formatBytes, truncate } from '../util/text.js';
 import { agentBase } from './instructions.js';
 import { runOnce } from './flow.js';
 import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstructions, approvalLevel, backupDirFor, openMemoryFor,
-    describeRoles, usageRow, usageBreakdownRows, describeChanges, createClientFor, createLedgerFor, writeOutput, exitCodeFor, STATUS_LABELS } from './shared.js';
+    describeRoles, usageRow, usageBreakdownRows, backupSummaryRows, createClientFor, createLedgerFor, writeOutput, exitCodeFor, STATUS_LABELS } from './shared.js';
 import { openMcpSources } from '../mcp/session.js';
 import { prepareTeamInvocation } from './team-args.js';
 import { findLatestResumable, resolveResumeStep } from '../agent/work-plan.js';
@@ -117,7 +117,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
             approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
             backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
             describeImage: roles.shouldDelegateVision('default') ? roles.describeImage : null, summarizeFile: roles.summarizeFile,
-            scaffoldTask: task,
+            scaffoldTask: task, processTool: ctx.processTool,
         });
         const mcpNote = mcp.describe() ? `\n\nMCP sources:\n${mcp.describe()}` : '';
         const instructions = composeInstructions(agentBase({ root: ctx.cwd, approvalLevel: level, toolNames: toolset.names(), interactive, shell: config.shell ?? null }), config, extra) + mcpNote;
@@ -163,6 +163,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
         memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
         backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles, generation, revision, fromStep, resumeId,
+        processTool: ctx.processTool,
     });
     renderer.idle();
     renderer.ensureNewline();
@@ -186,7 +187,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
             ['шагов', result.steps.length ? `${result.steps.length} (${result.steps.map((s) => `${s.index}: ${s.status}`).join(', ')})` : '0'],
             ...(result.review ? [['ревью', `${result.review.verdict === 'accept' ? 'принято' : 'правки'} после ${result.reviewRounds} раунд(а/ов) · ${truncate(result.review.summary, 200)}`]] : []),
             ['вызовов инструментов', toolCalls ? `${toolCalls} (worker ${worker.calls}, collector ${result.stats.collector.calls}, reviewer ${result.stats.reviewer.calls})${worker.denied ? `, отклонено ${worker.denied}` : ''}` : '0'],
-            ...(result.changes.length ? [['изменения', describeChanges({ changes: result.changes })], ['резервные копии', ctx.backupDir]] : []),
+            ...backupSummaryRows(result.changes, ctx.backupDir),
             ...(worker?.commands?.length ? [['команды', worker.commands.map((c) => `${c.command} → ${c.exitCode ?? '?'}`).join('; ')]] : []),
             ...(result.images.length ? [['изображения', result.images.join(', ')]] : []),
             ...(store ? [['память', `найдено ${result.recalled.length}, сохранено ${result.memoriesSaved.length}`]] : []),
