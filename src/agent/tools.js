@@ -7,7 +7,7 @@
  * @exports TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory, createToolset, relativeToRoot
  * @ai.tags tools, approval
  * @ai.hint hot
- * @changed 2026-10-16 Scaffold commands merge into the project without replacing files.
+ * @changed 2026-10-17 Optional processTool replaces a processable handler.
  */
 
 import path from 'node:path';
@@ -130,6 +130,10 @@ function commandReport(result, timeoutMs, limits) {
     return { output: body.join('\n'), summary: status, ok: result.exitCode === 0 };
 }
 
+const PROCESSABLE = new Set(['delete_file', 'list_files', 'read_file', 'replace_text', 'run_command', 'run_script', 'search_files', 'write_file']);
+const WRITE_CHANGES = new Set(['write_file', 'replace_text', 'delete_file']);
+const CHANGE_OPS = new Set(['create', 'overwrite', 'edit', 'delete']);
+
 /**
  * Create the executable toolset for one agent run.
  *
@@ -143,13 +147,14 @@ function commandReport(result, timeoutMs, limits) {
  * performDesktop(action) → { message, screenshotAbs, screenshotRel } — injected runner; skips AutoHotkey (optional).
  * delegate(role, task) → { output, summary, data? } — specialist call for delegate_role (optional).
  * extras — additional tools `{ name, description, parameters, category, handler }`, used for MCP.
+ * processTool(name, args, signal) → null | { output, summary, changes? } — remote handler for a processable tool. null runs the local handler.
  */
 export function createToolset({
     root = process.cwd(), config, names, approvalLevel = 'read', approve = async () => 'no', askUser = null,
     backupDir = null, signal, emit = () => {}, memory = null, projectKey = null, projectName = null,
     describeImage = null, summarizeFile = null, editPaths = () => null,
     describeScreen = null, performDesktop = null, delegate = null, extras = [], client = null, ledger = null,
-    scaffoldTask = '',
+    scaffoldTask = '', processTool = null,
 }) {
     const limits = config.limits;
     const allowed = new Set(names);
@@ -165,6 +170,27 @@ export function createToolset({
     const stats = { calls: 0, byTool: {}, changes: [], commands: [], denied: 0, errors: 0, memories: [] };
     let backupSlot = 'write';
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
+
+    /** Record host changes for a write tool and refresh the map. */
+    async function applyRemoteChanges(changes) {
+        const list = Array.isArray(changes) ? changes : [];
+        if (list.length > 100) notify({ type: 'warning', message: 'changes содержит больше 100 записей.' });
+        for (const change of list.slice(0, 100)) {
+            if (!change || typeof change.path !== 'string' || !CHANGE_OPS.has(change.op)) {
+                notify({ type: 'warning', message: 'Некорректная запись changes.' });
+                continue;
+            }
+            try {
+                const { rel } = await resolveInside(root, change.path, { forWrite: true, allowRoot: false });
+                if (rel === '.backup' || rel.startsWith('.backup/')) throw new Error(`Запись в .backup запрещена: ${rel}`);
+                stats.changes.push({ op: change.op, path: rel });
+                try { await updateProjectMapPath(root, rel); }
+                catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
+            } catch (error) {
+                notify({ type: 'warning', message: error.message });
+            }
+        }
+    }
 
     /** Apply the approval level, and throw when the operator aborts. */
     async function decide(name, category, args, preview) {
@@ -520,6 +546,26 @@ export function createToolset({
             return fail(`операция ${name} отклонена пользователем или политикой доступа (${approvalLevel}). Не повторяйте её; предложите альтернативу или завершите с описанием.`);
         }
         signal?.throwIfAborted();
+        if (PROCESSABLE.has(name) && processTool) {
+            let remote = null;
+            try {
+                remote = await processTool(name, args, signal);
+            } catch (error) {
+                if (signal?.aborted || error instanceof CancelledError || error?.name === 'AbortError') {
+                    throw error instanceof CancelledError ? error : new CancelledError('Отменено.');
+                }
+                stats.errors++;
+                return fail(errorMessage(error));
+            }
+            if (remote) {
+                if (typeof remote.output !== 'string' || typeof remote.summary !== 'string') {
+                    stats.errors++;
+                    return fail('output и summary должны быть строками.');
+                }
+                if (WRITE_CHANGES.has(name)) await applyRemoteChanges(remote.changes);
+                return { ok: true, output: remote.output, summary: remote.summary, durationMs: Date.now() - started, category };
+            }
+        }
         try {
             const result = await handlers[name](args);
             return { ok: true, ...result, durationMs: Date.now() - started, category };
