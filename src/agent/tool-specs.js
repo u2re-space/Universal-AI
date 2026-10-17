@@ -354,13 +354,13 @@ export function toolDefinitions(names) {
 }
 
 /** Which tools are enabled for a config.tools selection. */
-export function enabledToolNames(tools, { interactive = false, memory = false, summarize = false, imageApi = false } = {}) {
+export function enabledToolNames(tools, { interactive = false, memory = false, summarize = false, imageApi = false, unsafeScreenshot = false } = {}) {
     const names = [];
     if (tools.fs) names.push('list_files', 'read_file', 'search_files', 'write_file', 'replace_text', 'delete_file', 'make_dir', 'view_image', 'structure_file', 'list_backups', 'restore_backup');
     if (tools.fs && summarize) names.push('summarize_file');
     if (tools.shell) names.push(...SHELL_TOOL_NAMES);
     if (tools.fetch) names.push('fetch_url');
-    if (tools.desktop) names.push(...DESKTOP_TOOL_NAMES);
+    if (tools.desktop) names.push(...DESKTOP_TOOL_NAMES.filter((name) => name !== 'screenshot' || unsafeScreenshot));
     if (memory) names.push('recall', 'remember');
     if (tools.askUser && interactive) names.push('ask_user');
     if (tools.images && imageApi) names.push('generate_image', 'edit_image');

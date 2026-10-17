@@ -77,7 +77,7 @@ export async function chat(ctx) {
         const selection = list === 'on' || list === true ? { fs: true, shell: true, fetch: true, askUser: true }
             : Object.fromEntries(['fs', 'shell', 'fetch', 'askUser', 'channels'].map((name) => [name, list.split(',').map((s) => s.trim()).includes(name)]));
         store ??= openMemoryFor(config, ctx.cwd, renderer);
-        const names = enabledToolNames({ ...config.tools, ...selection, askUser: false }, { interactive: false, memory: Boolean(store) });
+        const names = enabledToolNames({ ...config.tools, ...selection, askUser: false }, { interactive: false, memory: Boolean(store), unsafeScreenshot: config.desktop?.unsafeScreenshot === true });
         if (!names.length) { toolset = null; return 'локальные инструменты выключены'; }
         ctx.backupDir ??= backupDirFor(config);
         toolset = createToolset({

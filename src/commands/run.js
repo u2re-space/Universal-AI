@@ -59,7 +59,7 @@ export async function run(ctx) {
     if (prepared.wantsProfile && mockups.length && !toolsChosen) config.tools.images = true;
     if (prepared.wantsProfile && mockups.length && config.tools.images && !values.route) config.agent.route = 'planner';
     const imageApi = imageTransport(config) === 'images';
-    const names = enabledToolNames(config.tools, { interactive, memory: Boolean(store), summarize: true, imageApi });
+    const names = enabledToolNames(config.tools, { interactive, memory: Boolean(store), summarize: true, imageApi, unsafeScreenshot: config.desktop?.unsafeScreenshot === true });
     if (!names.length && !config.tools.web && !config.tools.images) {
         throw new UsageError('Все инструменты отключены; для run нужен хотя бы один (fs, shell, fetch, web, images).');
     }
@@ -237,7 +237,7 @@ export async function resumeLocal(ctx, { revision = '', stepToken = null } = {})
     const toolsChosen = values.tools !== undefined || Boolean(values['no-tools']) || Boolean(values.images);
     if (generation && /generate_image|image_generation|edit_image/.test(task) && !toolsChosen) config.tools.images = true;
     const imageApi = imageTransport(config) === 'images';
-    const names = enabledToolNames(config.tools, { interactive, memory: Boolean(store), summarize: true, imageApi });
+    const names = enabledToolNames(config.tools, { interactive, memory: Boolean(store), summarize: true, imageApi, unsafeScreenshot: config.desktop?.unsafeScreenshot === true });
     if (!names.length && !config.tools.web && !config.tools.images) {
         throw new UsageError('Все инструменты отключены; для resume нужен хотя бы один (fs, shell, fetch, web, images).');
     }

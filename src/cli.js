@@ -45,7 +45,7 @@ const OPTIONS = {
     reasoning: { type: 'boolean', default: true }, instructions: { type: 'string', short: 'i' },
     image: { type: 'string', multiple: true }, file: { type: 'string', short: 'f', multiple: true }, detail: { type: 'string' },
     out: { type: 'string', short: 'o' }, session: { type: 'string', short: 's' }, store: { type: 'boolean', default: false },
-    web: { type: 'boolean', default: false }, images: { type: 'boolean', default: false }, desktop: { type: 'boolean', default: false }, tools: { type: 'string' },
+    web: { type: 'boolean', default: false }, images: { type: 'boolean', default: false }, desktop: { type: 'boolean', default: false }, 'unsafe-screenshot': { type: 'boolean', default: false }, tools: { type: 'string' },
     'no-tools': { type: 'boolean', default: false }, approve: { type: 'string' }, yes: { type: 'boolean', short: 'y', default: false },
     cwd: { type: 'string', short: 'C' }, 'max-turns': { type: 'string' }, 'budget-usd': { type: 'string' }, 'budget-tokens': { type: 'string' },
     'max-output-tokens': { type: 'string' }, temperature: { type: 'string' }, verbosity: { type: 'string' }, shell: { type: 'string' },

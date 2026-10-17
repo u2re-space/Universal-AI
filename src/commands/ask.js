@@ -46,7 +46,7 @@ export async function ask(ctx) {
     let store = null;
     if (values.tools !== undefined && values.tools !== 'none') {
         store = openMemoryFor(config, ctx.cwd, renderer);
-        const names = enabledToolNames(config.tools, { interactive: renderer.interactive, memory: Boolean(store) });
+        const names = enabledToolNames(config.tools, { interactive: renderer.interactive, memory: Boolean(store), unsafeScreenshot: config.desktop?.unsafeScreenshot === true });
         if (names.length) {
             ctx.backupDir = backupDirFor(config);
             toolset = createToolset({

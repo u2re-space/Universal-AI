@@ -42,8 +42,8 @@ export const defaults = Object.freeze({
     approve: null,                    // ask | read | write | all; null → ask (TTY) or read (no TTY)
     shell: null,                      // run_command shell: null (cmd.exe / sh) | powershell | pwsh | bash | sh | zsh | cmd
     tools: { fs: true, shell: true, fetch: true, web: false, images: false, askUser: true, desktop: false, mcp: true, channels: false },
-    /** Windows screen, mouse, keyboard, and AutoHotkey v2. Tools stay off until tools.desktop is true. */
-    desktop: { ahkPath: null, shotAfterAction: true },
+    /** Windows screen, mouse, keyboard, and AutoHotkey v2. Tools stay off until tools.desktop is true. Screen capture stays off until unsafeScreenshot. */
+    desktop: { ahkPath: null, shotAfterAction: true, unsafeScreenshot: false },
     limits: {
         maxTurns: 60,
         maxToolCallsPerTurn: 32,

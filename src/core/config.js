@@ -181,6 +181,7 @@ function validateConfig(c) {
         fail('desktop.ahkPath: непустая строка или null');
     }
     if (typeof c.desktop.shotAfterAction !== 'boolean') fail('desktop.shotAfterAction: true | false');
+    if (typeof c.desktop.unsafeScreenshot !== 'boolean') fail('desktop.unsafeScreenshot: true | false');
     if (!['png', 'webp', 'jpeg'].includes(c.image.format)) fail('image.format: png | webp | jpeg');
     if (!['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(c.image.quality)) fail('image.quality: auto | low | medium | high | xhigh | max');
     if (!['auto', 'transparent', 'opaque'].includes(c.image.background)) fail('image.background: auto | transparent | opaque');

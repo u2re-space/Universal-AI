@@ -103,15 +103,25 @@ import { defaults } from '../src/core/config.js';
 test('desktop tools follow the exec approval gate', async () => {
     assert.equal(enabledToolNames({ ...defaults.tools, desktop: false }).includes('click'), false);
     const names = enabledToolNames({ ...defaults.tools, desktop: true });
-    for (const name of ['screenshot', 'click', 'type', 'run_ahk', 'run_batch', 'delegate_role']) assert.equal(names.includes(name), true);
+    assert.equal(names.includes('screenshot'), false);
+    for (const name of ['click', 'type', 'run_ahk', 'run_batch', 'delegate_role']) assert.equal(names.includes(name), true);
+    const unsafe = enabledToolNames({ ...defaults.tools, desktop: true }, { unsafeScreenshot: true });
+    assert.equal(unsafe.includes('screenshot'), true);
     const toolset = createToolset({
         root: os.tmpdir(), config: defaults, names: ['click'], approvalLevel: 'read', approve: async () => 'yes',
     });
     const denied = await toolset.execute({ name: 'click', arguments: JSON.stringify({ mode: 'coord', x: 1, y: 2, button: 'left', clicks: 1, title: '', control: '', image: '' }) });
     assert.match(denied.output, /отклонена/);
     let performed = 0;
-    const allowed = createToolset({
+    const blocked = createToolset({
         root: os.tmpdir(), config: defaults, names: ['screenshot'], approvalLevel: 'all', approve: async () => 'no',
+        performDesktop: async () => { performed += 1; return { message: 'ok', screenshotAbs: null, screenshotRel: null }; },
+    });
+    const refused = await blocked.execute({ name: 'screenshot', arguments: '{}' });
+    assert.equal(performed, 0);
+    assert.match(refused.output, /unsafe-screenshot/);
+    const allowed = createToolset({
+        root: os.tmpdir(), config: { ...defaults, desktop: { ...defaults.desktop, unsafeScreenshot: true } }, names: ['screenshot'], approvalLevel: 'all', approve: async () => 'no',
         performDesktop: async () => { performed += 1; return { message: 'ok', screenshotAbs: null, screenshotRel: null }; },
     });
     const shot = await allowed.execute({ name: 'screenshot', arguments: '{}' });
@@ -182,7 +192,7 @@ test('run_batch approves each action when the level is ask', async () => {
     const performed = [];
     const toolset = createToolset({
         root: os.tmpdir(),
-        config: defaults,
+        config: { ...defaults, desktop: { ...defaults.desktop, unsafeScreenshot: true } },
         names: ['run_batch'],
         approvalLevel: 'ask',
         approve: async ({ name, preview }) => {
@@ -208,4 +218,22 @@ test('run_batch approves each action when the level is ask', async () => {
     });
     assert.deepEqual(performed, ['screenshot']);
     assert.match(result.output, /действие 2 отклонено/);
+});
+
+test('a desktop batch cannot capture the screen unless unsafeScreenshot is set', async () => {
+    let performed = 0;
+    const toolset = createToolset({
+        root: os.tmpdir(),
+        config: defaults,
+        names: ['run_batch'],
+        approvalLevel: 'all',
+        approve: async () => 'yes',
+        performDesktop: async () => { performed += 1; return { message: 'ok', screenshotAbs: null, screenshotRel: null }; },
+    });
+    const result = await toolset.execute({
+        name: 'run_batch',
+        arguments: JSON.stringify({ batch_json: JSON.stringify({ summary: 'shot', actions: [{ type: 'screenshot' }] }), batch_toon: '', path: '' }),
+    });
+    assert.equal(performed, 0);
+    assert.match(result.output, /unsafe-screenshot/);
 });

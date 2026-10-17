@@ -59,6 +59,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --web                  поиск web_search на /v1/responses (ProxyAPI). Запросы и страницы печатаются под ответом
                          --images   генерация картинок в ответах
   --desktop              включает экран Windows, мышь, клавиатуру и AutoHotkey v2
+  --unsafe-screenshot    разрешить снимок рабочего стола. Без флага screenshot и снимок после клика выключены
   --approve ask|read|write|all   политика подтверждений (по умолчанию: ask в терминале, read без него)
   --yes, -y              = --approve all (без вопросов; осторожно)
   --cwd, -C <каталог>    рабочий каталог для инструментов (по умолчанию текущий)

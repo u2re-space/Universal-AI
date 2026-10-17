@@ -108,6 +108,7 @@ export function overridesFrom(values) {
     if (values.web) o.tools.web = true;
     if (values.images) o.tools.images = true;
     if (values.desktop) o.tools.desktop = true;
+    if (values['unsafe-screenshot']) (o.desktop ??= {}).unsafeScreenshot = true;
     if (values.tools !== undefined) {
         const list = values.tools.split(',').map((s) => s.trim()).filter(Boolean);
         const all = { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false, channels: false };

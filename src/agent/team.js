@@ -96,7 +96,7 @@ export async function runTeam({
     const mcp = await openMcpSources(config, { signal, notify });
     const mcpRead = mcp.extras.filter((extra) => extra.category === 'read');
     const imageApi = imageTransport(config) === 'images';
-    const enabled = enabledToolNames(config.tools, { interactive, memory: Boolean(memory), summarize: true, imageApi });
+    const enabled = enabledToolNames(config.tools, { interactive, memory: Boolean(memory), summarize: true, imageApi, unsafeScreenshot: config.desktop?.unsafeScreenshot === true });
     const readNames = toolNamesForRole(enabled, 'collector');
     const reviewerNames = toolNamesForRole(enabled, 'reviewer');
     const allNames = toolNamesForRole(enabled, 'worker');

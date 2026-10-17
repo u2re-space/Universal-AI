@@ -52,15 +52,18 @@ function actionPreview(action) {
 export function createDesktopHandlers(ctx) {
     const { root, config, decide, describeScreen = null, performDesktop = null, delegate = null } = ctx;
 
-    /** Run `action` through `performDesktop`, or through AutoHotkey. */
+    /** Run `action` through `performDesktop`, or through AutoHotkey. Screen capture needs desktop.unsafeScreenshot. */
     async function perform(action) {
+        if (action?.type === 'screenshot' && config.desktop?.unsafeScreenshot !== true) {
+            throw new Error('Снимок рабочего стола выключен. Чтобы его разрешить, укажите --unsafe-screenshot.');
+        }
         if (performDesktop) return performDesktop(action);
         const executable = await findAhk({ ahkPath: config.desktop?.ahkPath ?? null });
         return performAction({
             root,
             executable,
             action,
-            shotAfterAction: config.desktop.shotAfterAction,
+            shotAfterAction: config.desktop?.unsafeScreenshot === true && config.desktop?.shotAfterAction === true,
             timeoutMs: config.limits.commandTimeoutMs,
         });
     }
