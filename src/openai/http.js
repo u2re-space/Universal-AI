@@ -4,7 +4,7 @@
  * @purpose HTTPS transport with an explicit idle timeout, plus a capped body reader.
  * @depends node:http, node:https, openai/errors
  * @usedBy openai/client
- * @exports createHttp, readBody
+ * @exports createHttp, readBody, transientNetwork
  * @ai.tags http
  * @ai.hint io
  * @changed 2026-10-15 JSDoc card, 4-space indent.
@@ -12,6 +12,23 @@
 import http from 'node:http';
 import https from 'node:https';
 import { ApiError } from './errors.js';
+
+const TRANSIENT_NETWORK = new Set([
+    'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE',
+    'ENETUNREACH', 'EHOSTUNREACH', 'ENETDOWN', 'ENETRESET', 'ECONNABORTED', 'EHOSTDOWN',
+]);
+
+/**
+ * True when the socket error is a timeout or a route change, not a permanent refusal.
+ * @param {{ code?: string, message?: string }} error
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function transientNetwork(error) {
+    if (TRANSIENT_NETWORK.has(error?.code)) return true;
+    return /network changed|ENETRESET|EAI_AGAIN|ETIMEDOUT|ECONNRESET/i.test(String(error?.message ?? ''));
+}
 
 /**
  * Minimal HTTP transport on node:http(s).
@@ -95,16 +112,14 @@ export function createHttp({
             }
             signal?.addEventListener('abort', onAbort, { once: true });
             req.setTimeout(idleTimeout, () => fail(new ApiError(
-                `Нет данных от сервера дольше ${Math.round(idleTimeout / 1000)} с.`, { code: 'TIMEOUT' })));
+                `Нет данных от сервера дольше ${Math.round(idleTimeout / 1000)} с.`, { code: 'TIMEOUT', retryable: true })));
             req.once('socket', (socket) => {
                 if (socket.connecting) socket.once('connect', () => clearTimeout(connectTimer));
                 else clearTimeout(connectTimer);
             });
             req.once('error', (error) => {
                 if (failure) return; // Our own timeout / abort was already reported.
-                const retryable = ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE']
-                    .includes(error.code);
-                fail(new ApiError(`Сетевая ошибка: ${error.message}`, { code: 'NETWORK_ERROR', retryable, cause: error }));
+                fail(new ApiError(`Сетевая ошибка: ${error.message}`, { code: 'NETWORK_ERROR', retryable: transientNetwork(error), cause: error }));
             });
             req.once('response', (res) => {
                 clearTimeout(connectTimer);
@@ -120,10 +135,10 @@ export function createHttp({
                     try {
                         for await (const chunk of res) yield chunk;
                         if (!res.complete) throw failure ?? new ApiError('Соединение закрыто до конца ответа.',
-                            { code: 'NETWORK_ERROR', retryable: false });
+                            { code: 'NETWORK_ERROR', retryable: true });
                     } catch (error) {
                         throw failure ?? (error instanceof ApiError ? error
-                            : new ApiError(`Ошибка чтения ответа: ${error.message}`, { code: 'NETWORK_ERROR', cause: error }));
+                            : new ApiError(`Ошибка чтения ответа: ${error.message}`, { code: 'NETWORK_ERROR', retryable: transientNetwork(error), cause: error }));
                     } finally {
                         signal?.removeEventListener('abort', onAbort);
                     }

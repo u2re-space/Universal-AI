@@ -38,7 +38,7 @@ export const defaults = Object.freeze({
     serviceTier: null,                // auto | default | flex | priority | fast
     promptCacheKey: null,
     stream: true,
-    retries: 2,
+    retries: 4,                    // repeats after the first try for a timeout or a dropped network; persistent HTTP statuses are not repeated
     approve: null,                    // ask | read | write | all; null → ask (TTY) or read (no TTY)
     shell: null,                      // run_command shell: null (cmd.exe / sh) | powershell | pwsh | bash | sh | zsh | cmd
     tools: { fs: true, shell: true, fetch: true, web: false, images: false, askUser: true, desktop: false, mcp: true, channels: false },

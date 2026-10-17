@@ -1,6 +1,7 @@
 import { test, after, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { createClient } from '../src/openai/client.js';
+import { createClient, retryDelayMs } from '../src/openai/client.js';
+import { transientNetwork } from '../src/openai/http.js';
 import { startMockServer } from './helpers/mock-server.js';
 
 let server;
@@ -37,7 +38,32 @@ test('retries retryable HTTP errors then succeeds', async () => {
     const events = [];
     const response = await client().responses.create({ model: 'mock-model', input: 'hi', stream: true }, { onEvent: (e) => events.push(e) });
     assert.equal(response.output_text, 'after retry');
-    assert.ok(events.some((e) => e.type === 'request.retry' && e.status === 429));
+    const retry = events.find((e) => e.type === 'request.retry' && e.status === 429);
+    assert.ok(retry);
+    assert.ok(retry.delayMs >= 3000);
+    assert.match(retry.reason, /429/);
+});
+
+test('a dropped network can be retried and a persistent status cannot', async () => {
+    assert.equal(transientNetwork({ code: 'ENETRESET' }), true);
+    assert.equal(transientNetwork({ message: 'read ECONNRESET: network changed' }), true);
+    assert.equal(transientNetwork({ code: 'EACCES' }), false);
+    for (const status of [400, 401, 403, 404]) {
+        server.reset();
+        scenarios = [{ httpStatus: status, httpBody: { error: { message: 'постоянная ошибка', code: 'denied' } } }];
+        const events = [];
+        await assert.rejects(client().responses.create({ model: 'mock-model', input: 'hi', stream: false }, { onEvent: (event) => events.push(event) }), (error) => error.status === status);
+        assert.equal(server.requests.length, 1);
+        assert.equal(events.some((event) => event.type === 'request.retry'), false);
+        assert.ok(events.some((event) => event.type === 'warning' && String(event.message).includes(String(status))));
+    }
+});
+
+test('a 429 waits at least 3 seconds and honors a longer Retry-After', () => {
+    assert.ok(retryDelayMs(0, null, 429) >= 3000);
+    assert.ok(retryDelayMs(0, 1, 429) >= 3000);
+    assert.equal(retryDelayMs(0, 8, 429), 8000);
+    assert.ok(retryDelayMs(0, null, 500) < 3000);
 });
 
 test('non-retryable HTTP error surfaces as ApiError with details', async () => {

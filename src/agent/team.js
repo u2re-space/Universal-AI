@@ -58,7 +58,7 @@ import { questionsFor } from '../channels/questions.js';
 import { routeFlag } from '../channels/verdict.js';
 
 import { bullets, renderFindings } from './team-text.js';
-const HARD_STOP = new Set(['cancelled', 'budget']);
+const HARD_STOP = new Set(['cancelled', 'budget', 'failed']);
 
 
 

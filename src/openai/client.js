@@ -4,7 +4,7 @@
  * @purpose Responses API client on node:https: create, retrieve, cancel, compact, and count tokens.
  * @depends node:crypto, node:timers/promises, openai/errors, openai/http, openai/sse, openai/stream
  * @usedBy commands/shared
- * @exports ApiError, createClient
+ * @exports ApiError, createClient, retryDelayMs
  * @ai.tags openai, http
  * @ai.hint io
  * @changed 2026-10-15 Decisions and moderations endpoints.
@@ -20,9 +20,10 @@ import { encodeMultipart, generationBody, imagePayloads } from './images.js';
 export { ApiError };
 
 const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+const PERSISTENT_STATUS = new Set([400, 401, 402, 403, 404, 405, 406, 410, 411, 413, 415, 422, 451]);
 const defaults = Object.freeze({
     baseURL: 'https://api.openai.com/v1/',
-    retries: 2,
+    retries: 4,                    // extra tries after the first, for timeout and network loss only
     maxErrorBytes: 64 * 1024,
     maxResponseBytes: 256 * 1024 * 1024,
     maxEventBytes: 32 * 1024 * 1024,
@@ -45,15 +46,21 @@ function normalizeBaseURL(value) {
 
 /**
  * Delay before a retry. A positive Retry-After wins, capped at 60 seconds; otherwise backoff with jitter.
+ * HTTP 429 waits at least 3 seconds so a repeat does not look like a burst.
  * @param {number} attempt
  * @param {string|number|null} retryAfter
+ * @param {number|null} [status]
  * @returns {number}
+ * @exports
  * @ai.hint pure
  */
-function retryDelayMs(attempt, retryAfter) {
+export function retryDelayMs(attempt, retryAfter, status = null) {
     const header = Number(retryAfter);
-    if (Number.isFinite(header) && header > 0) return Math.min(header * 1000, 60_000);
-    return Math.min(500 * 2 ** attempt + Math.random() * 250, 20_000);
+    const fromHeader = Number.isFinite(header) && header > 0 ? Math.min(header * 1000, 60_000) : 0;
+    const backoff = Math.min(500 * 2 ** attempt + Math.random() * 250, 20_000);
+    const delay = Math.max(fromHeader, backoff);
+    if (status === 429) return Math.max(delay, 3000);
+    return fromHeader > 0 ? fromHeader : backoff;
 }
 
 /**
@@ -111,7 +118,7 @@ export function createClient({
         return new ApiError(`OpenAI API: ${message}`, {
             code: 'HTTP_ERROR', status: res.status, apiCode: details.code ?? null, apiType: details.type ?? null,
             param: details.param ?? null, requestId: res.headers['x-request-id'] ?? null, clientRequestId,
-            retryAfter: res.headers['retry-after'] ?? null, retryable: RETRYABLE_STATUS.has(res.status),
+            retryAfter: res.headers['retry-after'] ?? null, retryable: RETRYABLE_STATUS.has(res.status) && !PERSISTENT_STATUS.has(res.status),
         });
     }
 
@@ -128,6 +135,31 @@ export function createClient({
         const emit = (event) => { try { onEvent?.(event); globalOnEvent?.(event); } catch { /* observer */ } };
         const payload = rawBody !== undefined ? rawBody : (body === undefined ? undefined : JSON.stringify(body));
         let attempt = 0;
+        /**
+         * Retry a timeout or a dropped connection. A persistent status ends the call at once.
+         * @param {Error} error
+         * @returns {Promise<boolean>}
+         */
+        const retryOrStop = async (error) => {
+            if (PERSISTENT_STATUS.has(error?.status)) {
+                emit({ type: 'warning', message: `HTTP ${error.status}: повтор не выполняется, выполнение остановлено.` });
+                return false;
+            }
+            if (error instanceof ApiError && error.retryable && attempt < retries && !signal?.aborted) {
+                const delay = retryDelayMs(attempt, error.retryAfter, error.status);
+                const reason = error.status === 429
+                    ? `HTTP 429: слишком много запросов. Пауза ${Math.max(2, Math.round(delay / 1000))} с перед повтором.`
+                    : error.message;
+                emit({ type: 'request.retry', attempt: attempt + 1, delayMs: delay, reason, status: error.status ?? null });
+                await sleep(delay, undefined, { signal }).catch(() => {});
+                attempt++;
+                return true;
+            }
+            if (error instanceof ApiError && error.retryable && retries > 0) {
+                emit({ type: 'warning', message: `Запрос не удался после ${attempt + 1} попыток. Дальнейшие обращения остановлены.` });
+            }
+            return false;
+        };
         for (;;) {
             signal?.throwIfAborted();
             const clientRequestId = randomUUID();
@@ -140,13 +172,7 @@ export function createClient({
                 if (contentType) headers['Content-Type'] = contentType;
                 res = await transport.request({ url, method, body: payload, signal, idleTimeout, headers });
             } catch (error) {
-                if (error instanceof ApiError && error.retryable && attempt < retries && !signal?.aborted) {
-                    const delay = retryDelayMs(attempt, null);
-                    emit({ type: 'request.retry', attempt: attempt + 1, delayMs: delay, reason: error.message });
-                    await sleep(delay, undefined, { signal }).catch(() => {});
-                    attempt++;
-                    continue;
-                }
+                if (await retryOrStop(error)) continue;
                 throw error;
             }
             const requestId = res.headers['x-request-id'] ?? null;
@@ -154,13 +180,7 @@ export function createClient({
             if (res.status < 200 || res.status >= 300) {
                 const error = await apiErrorFrom(res, clientRequestId);
                 res.destroy();
-                if (error.retryable && attempt < retries && !signal?.aborted) {
-                    const delay = retryDelayMs(attempt, error.retryAfter);
-                    emit({ type: 'request.retry', attempt: attempt + 1, delayMs: delay, reason: error.message, status: error.status });
-                    await sleep(delay, undefined, { signal }).catch(() => {});
-                    attempt++;
-                    continue;
-                }
+                if (await retryOrStop(error)) continue;
                 throw error;
             }
             const mime = String(res.headers['content-type'] ?? '').split(';', 1)[0].trim().toLowerCase();
@@ -214,6 +234,7 @@ export function createClient({
                         error.details ??= { partialText: reducer.partialText(), lastSequence: reducer.lastSequence };
                     }
                 }
+                if (await retryOrStop(error)) continue;
                 throw error;
             }
         }

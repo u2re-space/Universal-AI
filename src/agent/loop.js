@@ -17,6 +17,7 @@ import { isReasoningModel, supportsVerbosity } from '../core/config.js';
 import { createImageSink } from '../core/images.js';
 import { attachBackground, awaitBackground, TERMINAL_STATUSES } from '../core/background.js';
 import { byteSize, clipMiddle, estimateTokens, errorMessage, formatBytes } from '../util/text.js';
+import { guardCommandInput } from './command-risk.js';
 
 /** Built-in tool definitions derived from the configuration. */
 export function builtinTools(config, { web = false, images = false } = {}) {
@@ -182,6 +183,8 @@ export async function runTurn({
             result.turns++;
             session.bumpTurn();
             let { input, previous_response_id: previousResponseId } = session.requestInput();
+            const guarded = guardCommandInput(input);
+            if (guarded.changed) notify({ type: 'warning', message: `Запрос со скриптом или командой переформулирован перед отправкой: ${guarded.reasons.join('; ')}.` });
             let body = buildRequestBody({ config, model, instructions, input, previousResponseId, tools, toolChoice, textFormat, background });
             let requestBytes = byteSize(body);
             if (requestBytes > config.limits.maxRequestBytes && !session.store) {
