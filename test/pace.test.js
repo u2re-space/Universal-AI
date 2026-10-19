@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { acceptanceParagraph, applyPins, ceilingIndex, clampModel, mergeSteps, resolvePace } from '../src/agent/pace.js';
+import { acceptanceParagraph, applyPins, ceilingIndex, clampModel, guaranteesParagraph, mergeSteps, resolvePace } from '../src/agent/pace.js';
 
 const models = ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'];
 const base = { speed: 10, quality: 40, mode: 'auto', models };
@@ -164,4 +164,51 @@ test('pins replace pace and clamp only an unpinned ladder model', () => {
 test('generation fidelity is attached only when a stated value is passed', () => {
     assert.equal(resolvePace({ ...base, label: 'normal' }).fidelity, null);
     assert.deepEqual(resolvePace({ ...base, label: 'normal', fidelity: 87 }).fidelity, { stated: 87, effective: 66 });
+});
+
+test('a shared budget of 200 splits stable, strained, and broken pace', () => {
+    const steady = resolvePace({ ...base, speed: 10, quality: 40, label: 'normal' });
+    assert.equal(steady.guarantees, 'steady');
+    assert.equal(steady.ceilingModel, 'gpt-6.1-sol');
+    assert.equal(steady.roles.planner.effort, 'high');
+    assert.equal(steady.stepCap, 12);
+    assert.equal(guaranteesParagraph('steady'), '');
+
+    const qualityMax = resolvePace({ ...base, speed: 0, quality: 200, label: 'normal' });
+    assert.equal(qualityMax.guarantees, 'strained');
+    assert.equal(qualityMax.policy, 'b');
+    assert.equal(qualityMax.ceilingModel, 'gpt-6-astra');
+    assert.equal(qualityMax.roles.planner.model, 'gpt-6-astra');
+    assert.equal(qualityMax.roles.planner.effort, 'xhigh');
+    assert.equal(qualityMax.stepCap, 16);
+    assert.equal(qualityMax.reviewMode, 'plan');
+    assert.equal(qualityMax.reviewRounds, 2);
+    assert.deepEqual(resolvePace({ ...base, speed: 0, quality: 200, label: 'normal', fidelity: 87 }).fidelity, { stated: 87, effective: 100 });
+    const qualityAuthor = resolvePace({
+        ...base, speed: 0, quality: 200, label: 'normal',
+        steps: [{ complexity: 'complex', author: 'coder', files: ['a.js'], goal: 'write', details: '', verify: '' }],
+    }).steps[0];
+    assert.equal(qualityAuthor.model, 'gpt-6-astra');
+
+    const both = resolvePace({ ...base, speed: 100, quality: 100, label: 'normal' });
+    assert.equal(both.guarantees, 'strained');
+    assert.equal(both.merge, true);
+    assert.equal(both.ceilingModel, 'gpt-6-astra');
+    assert.equal(both.roles.planner.model, 'gpt-6-astra');
+    assert.equal(both.roles.planner.effort, 'medium');
+    assert.match(guaranteesParagraph('strained'), /Balance is not promised/);
+
+    const reckless = resolvePace({ ...base, speed: 180, quality: 20, label: 'normal' });
+    assert.equal(reckless.guarantees, 'broken');
+    assert.equal(reckless.ceilingModel, 'gpt-6-luna');
+    assert.equal(reckless.roles.planner.effort, 'minimal');
+    assert.equal(reckless.reviewMode, 'off');
+    assert.equal(reckless.reviewRounds, 0);
+    assert.equal(reckless.stepCap, 1);
+    assert.equal(resolvePace({ ...base, speed: 180, quality: 20, label: 'normal', stepCapOverride: 12 }).stepCap, 1);
+    assert.match(guaranteesParagraph('broken'), /Acceptance criteria are not binding/);
+
+    assert.throws(() => resolvePace({ ...base, speed: -1, quality: 40 }), /pace\.speed/);
+    assert.throws(() => resolvePace({ ...base, speed: 10, quality: 201 }), /pace\.quality/);
+    assert.throws(() => resolvePace({ ...base, speed: 100, quality: 101 }), /pace\.speed/);
 });

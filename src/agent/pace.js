@@ -4,13 +4,29 @@
  * @purpose Choose policy, model rung, effort, stages, and step merge from speed and quality.
  * @depends generate/fidelity
  * @usedBy agent/team
- * @exports ceilingIndex, mergeSteps, acceptanceParagraph, resolvePace, applyPins, clampModel
+ * @exports ceilingIndex, mergeSteps, acceptanceParagraph, guaranteesParagraph, assertPaceBudget, resolvePace, applyPins, clampModel
  * @ai.tags team, pace
  * @ai.hint pure
  * @changed 2026-10-19 Speed, quality, and pace decide a team run.
  */
 
 import { effectiveFidelity } from '../generate/fidelity.js';
+
+export const PACE_QUALITY_MESSAGE = 'pace.quality: целое 0..200, и speed + quality не больше 200';
+export const PACE_SPEED_MESSAGE = 'pace.speed: целое от 0, и speed + quality не больше 200';
+
+/**
+ * Reject a pair outside the shared budget. Quality is checked first.
+ * @param {number} speed
+ * @param {number} quality
+ * @returns {void}
+ * @exports
+ * @ai.hint pure
+ */
+export function assertPaceBudget(speed, quality) {
+    if (!Number.isInteger(quality) || quality < 0 || quality > 200) throw new Error(PACE_QUALITY_MESSAGE);
+    if (!Number.isInteger(speed) || speed < 0 || speed + quality > 200) throw new Error(PACE_SPEED_MESSAGE);
+}
 
 const ORDER = Object.freeze(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 const RANK = Object.freeze({ trivial: 0, normal: 1, complex: 2 });
@@ -72,15 +88,16 @@ function applyShift(base, shift, floor) {
 
 /**
  * @param {string} base
- * @param {number} speed
- * @param {number} quality
+ * @param {number} paceSpeed
+ * @param {number} modelQuality
  * @param {boolean} protect
+ * @param {number} [recklessExtra]
  * @returns {string}
  * @ai.hint pure
  */
-function effortFor(base, speed, quality, protect) {
-    const shift = effortShift(speed, quality);
-    const floor = protect && quality >= 67 && shift < 0 ? 'medium' : 'minimal';
+function effortFor(base, paceSpeed, modelQuality, protect, recklessExtra = 0) {
+    const shift = effortShift(paceSpeed, modelQuality) + recklessExtra;
+    const floor = recklessExtra < 0 ? 'minimal' : (protect && modelQuality >= 67 && shift < 0 ? 'medium' : 'minimal');
     return applyShift(base, shift, floor);
 }
 
@@ -161,6 +178,19 @@ export function acceptanceParagraph(tone) {
 }
 
 /**
+ * English sentence for a budget that is no longer stable. Steady pace adds nothing.
+ * @param {'steady' | 'strained' | 'broken'} guarantees
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function guaranteesParagraph(guarantees) {
+    if (guarantees === 'strained') return 'Speed and quality together exceed the stable budget. Balance is not promised.';
+    if (guarantees === 'broken') return 'This pace is past the safe speed. Acceptance criteria are not binding. A step may stop before its plan is finished. Finish the smallest usable slice and stop.';
+    return '';
+}
+
+/**
  * @param {unknown} value
  * @param {string} [fallback]
  * @returns {'trivial' | 'normal' | 'complex'}
@@ -172,19 +202,19 @@ function knownComplexity(value, fallback = 'normal') {
 
 /**
  * @param {object[]} steps
- * @param {{ speed: number, quality: number, models: string[], adjusted: number }} context
+ * @param {{ modelSpeed: number, paceSpeed: number, modelQuality: number, models: string[], adjusted: number, recklessExtra: number }} context
  * @returns {object[]}
  * @ai.hint pure
  */
-function decorate(steps, { speed, quality, models, adjusted }) {
+function decorate(steps, { modelSpeed, paceSpeed, modelQuality, models, adjusted, recklessExtra }) {
     return steps.map((step) => {
         const complexity = knownComplexity(step.complexity);
-        const rung = authorRung(complexity, speed, adjusted);
+        const rung = authorRung(complexity, modelSpeed, adjusted);
         const base = complexity === 'trivial' ? 'low' : complexity === 'complex' ? 'high' : 'medium';
         const author = step.author === 'coder' || step.author === 'writer' ? step.author : 'worker';
         return {
             author, complexity, rung, model: models[rung],
-            effort: effortFor(base, speed, quality, complexity === 'complex'),
+            effort: effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra),
             files: Array.isArray(step.files) ? [...step.files] : [],
             goal: String(step.goal ?? ''), details: String(step.details ?? ''), verify: String(step.verify ?? ''),
             kind: step.kind ?? 'work',
@@ -203,12 +233,18 @@ export function resolvePace({
     speed, quality, mode, models, label = null, steps = null, generation = false,
     fidelity = null, stepCapOverride = null, task = '', author = 'worker',
 } = {}) {
-    const policy = policyOf(mode, speed, label);
-    const raw = ceilingIndex(quality, models.length);
+    assertPaceBudget(speed, quality);
+    const modelQuality = Math.min(quality, 100);
+    const modelSpeed = Math.min(100, speed + Math.max(0, quality - 100));
+    const paceSpeed = Math.min(speed, 100);
+    const guarantees = speed + quality <= 100 ? 'steady' : speed <= 100 ? 'strained' : 'broken';
+    const recklessExtra = speed <= 100 ? 0 : speed <= 150 ? -1 : -2;
+    const policy = policyOf(mode, paceSpeed, label);
+    const raw = ceilingIndex(modelQuality, models.length);
     const adjusted = label === 'trivial' ? Math.max(0, raw - 1) : raw;
-    const fast = policy === 'a' && speed >= 67 && (label === 'normal' || label === 'complex');
-    const reviewRounds = quality <= 33 ? 0 : quality <= 66 ? 1 : 2;
-    const acceptance = quality <= 33 ? 'loose' : quality <= 66 ? 'normal' : 'strict';
+    const fast = policy === 'a' && paceSpeed >= 67 && (label === 'normal' || label === 'complex');
+    const reviewRounds = modelQuality <= 33 ? 0 : modelQuality <= 66 ? 1 : 2;
+    const acceptance = modelQuality <= 33 ? 'loose' : modelQuality <= 66 ? 'normal' : 'strict';
     let reviewMode = 'plan';
     if (policy === 'c' || (policy === 'a' && label === 'trivial')) reviewMode = 'off';
     else if (policy === 'a') reviewMode = 'force';
@@ -220,25 +256,30 @@ export function resolvePace({
                 : policy === 'c' ? 1
                     : label === 'trivial' ? (generation ? 2 : 4)
                         : (generation ? 4 : 12);
-    if (policy !== 'c' && Number.isInteger(stepCapOverride)) stepCap = Math.max(1, stepCapOverride);
+    if (guarantees !== 'broken' && policy !== 'c' && Number.isInteger(stepCapOverride)) stepCap = Math.max(1, stepCapOverride);
     const role = (rung, base, protect) => ({
-        rung, model: models[rung], effort: effortFor(base, speed, quality, protect),
+        rung, model: models[rung], effort: effortFor(base, paceSpeed, modelQuality, protect, recklessExtra),
     });
-    const planner = role(plannerRung(label, speed, adjusted), plannerRung(label, speed, adjusted) === 0 ? 'medium' : 'high', true);
-    const reviewerBase = quality >= 67 ? 'high' : 'medium';
+    const planner = role(plannerRung(label, modelSpeed, adjusted), plannerRung(label, modelSpeed, adjusted) === 0 ? 'medium' : 'high', true);
+    const reviewerBase = modelQuality >= 67 ? 'high' : 'medium';
     const directive = {
         ready: label === 'trivial' || label === 'normal' || label === 'complex',
         policy, ceilingIndex: adjusted, ceilingModel: models[adjusted],
-        merge: fast, stepCap, reviewRounds, reviewMode, collect, acceptance,
+        merge: fast, stepCap, reviewRounds, reviewMode, collect, acceptance, guarantees,
         fidelity: Number.isInteger(fidelity) ? { stated: fidelity, effective: effectiveFidelity(fidelity, quality) } : null,
         roles: {
             classifier: role(0, 'low', false),
             planner, collector: role(0, 'low', false),
-            reviewer: role(quality >= 67 ? adjusted : Math.min(adjusted, 1), reviewerBase, true),
+            reviewer: role(modelQuality >= 67 ? adjusted : Math.min(adjusted, 1), reviewerBase, true),
             summarizer: role(0, 'low', false),
         },
         steps: null,
     };
+    if (guarantees === 'broken') {
+        directive.reviewMode = 'off';
+        directive.reviewRounds = 0;
+        directive.stepCap = 1;
+    }
     if (!directive.ready) return directive;
     if (policy === 'c' && !Array.isArray(steps)) {
         const complexity = knownComplexity(label);
@@ -247,13 +288,13 @@ export function resolvePace({
         directive.steps = [{
             author: author === 'coder' || author === 'writer' ? author : 'worker',
             complexity, rung, model: models[rung],
-            effort: effortFor(base, speed, quality, complexity === 'complex'),
+            effort: effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra),
             files: [], goal: String(task), details: '', verify: '', kind: 'work',
         }];
         return directive;
     }
     if (Array.isArray(steps)) {
-        const decorated = decorate(steps, { speed, quality, models, adjusted });
+        const decorated = decorate(steps, { modelSpeed, paceSpeed, modelQuality, models, adjusted, recklessExtra });
         directive.steps = fast ? mergeSteps(decorated) : decorated;
     }
     return directive;
