@@ -59,7 +59,7 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.deepEqual(overrides.agent, { mode: 'single' });
     assert.deepEqual(overrides.memory, { enabled: false });
     assert.throws(() => overridesFrom({ role: ['nobody=x'] }), /неизвестная роль/);
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 15);
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 16);
 });
 
 test('memory store: remember / recall (FTS) / list / forget / tasks / file summaries', () => {

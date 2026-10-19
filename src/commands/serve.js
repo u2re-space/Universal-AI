@@ -116,7 +116,7 @@ function commandRunner({ hub, baseConfig = null }) {
         let config;
         try {
             values = valuesFromFrame(frame);
-            const overrides = overridesFrom(values);
+            const overrides = overridesFrom(values, { command: 'serve' });
             config = baseConfig
                 ? deepMerge(structuredClone(baseConfig), overrides)
                 : await loadConfig({ overrides, env: process.env, ensureHome: false });

@@ -61,6 +61,7 @@ const OPTIONS = {
     listen: { type: 'boolean', default: false }, port: { type: 'string' }, line: { type: 'string' }, character: { type: 'string' },
     language: { type: 'string' }, token: { type: 'string' }, serve: { type: 'boolean', default: false },
     fidelity: { type: 'string' }, creativity: { type: 'string' }, platform: { type: 'string' },
+    speed: { type: 'string' }, pace: { type: 'string' }, 'max-steps': { type: 'string' },
     template: { type: 'string', multiple: true }, example: { type: 'string', multiple: true },
     'mcp-command': { type: 'string' }, 'mcp-arg': { type: 'string', multiple: true },
 };
@@ -149,7 +150,7 @@ export async function main(argvInput = process.argv.slice(2)) {
         const cwd = path.resolve(values.cwd ?? '.');
         if (!(await stat(cwd).then((s) => s.isDirectory()).catch(() => false))) throw new UsageError(`Каталог не найден: ${cwd}`);
         const config = await loadConfig({
-            configPath: values.config, overrides: overridesFrom(values), env: await resolveRuntimeEnv({ cwd }),
+            configPath: values.config, overrides: overridesFrom(values, { command: commandName }), env: await resolveRuntimeEnv({ cwd }),
         });
         if (NEEDS_API_KEY.has(commandName) && !config.apiKey) {
             throw new UsageError('Не задан OPENAI_API_KEY. Укажите его в .env, в окружении или в ~/.ai-agent/config.json.');

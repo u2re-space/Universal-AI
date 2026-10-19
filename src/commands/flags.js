@@ -45,11 +45,14 @@ function number(value, name, { integer = false, min = 0 } = {}) {
 /**
  * Translate CLI flags into configuration overrides.
  * @param {object} values Flags from node:util parseArgs.
- * @returns {object} Partial config: model, limits, reasoning, image, tools, roles, agent, memory.
+ * @param {{ command?: string | null }} [context] Command name. image rejects an integer quality. serve ignores it.
+ * @returns {object} Partial config: model, limits, reasoning, image, tools, roles, agent, memory, pace.
  * @exports
  * @ai.hint pure
  */
-export function overridesFrom(values) {
+const IMAGE_QUALITY = ['low', 'medium', 'high', 'xhigh', 'max', 'auto'];
+
+export function overridesFrom(values, { command = null } = {}) {
     const o = { limits: {}, reasoning: {}, image: {}, tools: {} };
     if (values.model) o.model = values.model;
     if (values['image-model']) o.imageModel = values['image-model'];
@@ -77,7 +80,17 @@ export function overridesFrom(values) {
     if (values['budget-tokens'] !== undefined) o.limits.budgetTokens = number(values['budget-tokens'], 'budget-tokens', { integer: true, min: 1 });
     if (values.timeout !== undefined) o.limits.idleTimeoutMs = number(values.timeout, 'timeout', { integer: true, min: 1 }) * 1000;
     if (values.size) o.image.size = values.size;
-    if (values.quality) o.image.quality = values.quality;
+    if (values.quality !== undefined) {
+        if (IMAGE_QUALITY.includes(values.quality)) o.image.quality = values.quality;
+        else if (command !== 'serve') {
+            let quality;
+            try { quality = number(values.quality, 'quality', { integer: true, min: 0 }); }
+            catch { throw new UsageError('--quality: 0..100 или low|medium|high|xhigh|max|auto'); }
+            if (quality > 100) throw new UsageError('--quality: 0..100 или low|medium|high|xhigh|max|auto');
+            if (command === 'image') throw new UsageError('Для image --quality: low | medium | high | xhigh | max | auto');
+            (o.pace ??= {}).quality = quality;
+        }
+    }
     if (values.format) o.image.format = values.format;
     if (values['image-background']) o.image.background = values['image-background'];
     if (values.partials !== undefined) o.image.partialImages = number(values.partials, 'partials', { integer: true, min: 0 });
@@ -104,6 +117,16 @@ export function overridesFrom(values) {
         if (!['encoder', 'planner', 'decisions'].includes(values.route)) throw new UsageError('--route: encoder | planner | decisions');
         (o.agent ??= {}).route = values.route;
     }
+    if (values.speed !== undefined) {
+        const speed = number(values.speed, 'speed', { integer: true, min: 0 });
+        if (speed > 100) throw new UsageError('--speed: 0..100');
+        (o.pace ??= {}).speed = speed;
+    }
+    if (values.pace !== undefined) {
+        if (!['auto', 'a', 'b', 'c'].includes(values.pace)) throw new UsageError('--pace: auto | a | b | c');
+        (o.pace ??= {}).mode = values.pace;
+    }
+    if (values['max-steps'] !== undefined) (o.agent ??= {}).maxSteps = number(values['max-steps'], 'max-steps', { integer: true, min: 1 });
     if (values.memory === false) o.memory = { enabled: false };
     if (values.web) o.tools.web = true;
     if (values.images) o.tools.images = true;

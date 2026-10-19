@@ -158,6 +158,19 @@ test('pace defaults to speed 10 and quality 40 and a file can pin a role', async
     }
 });
 
+test('speed, quality, and pace flags parse and image quality stays a word', () => {
+    assert.equal(overridesFrom({ speed: '10' }, { command: 'run' }).pace.speed, 10);
+    assert.equal(overridesFrom({ quality: '40' }, { command: 'run' }).pace.quality, 40);
+    assert.equal(overridesFrom({ quality: 'high' }, { command: 'run' }).image.quality, 'high');
+    assert.equal(overridesFrom({ pace: 'c' }, { command: 'gen' }).pace.mode, 'c');
+    assert.equal(overridesFrom({ 'max-steps': '8' }, { command: 'run' }).agent.maxSteps, 8);
+    assert.throws(() => overridesFrom({ speed: '101' }, { command: 'run' }), /--speed/);
+    assert.throws(() => overridesFrom({ quality: '40' }, { command: 'image' }), /Для image --quality/);
+    assert.throws(() => overridesFrom({ quality: 'nope' }, { command: 'run' }), /0\.\.100 или low/);
+    assert.throws(() => overridesFrom({ pace: 'z' }, { command: 'run' }), /--pace/);
+    assert.equal(overridesFrom({ quality: '40' }, { command: 'serve' }).pace, undefined);
+});
+
 test('loadConfig rejects a bad server id and a bad fidelity', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-gen-home-'));
     const file = path.join(home, 'bad.json');
