@@ -30,6 +30,7 @@ import { buildGenerationBrief, writeGenerationManifest } from '../generate/brief
 import { preparedScaffoldFiles, writePreparedScaffold } from '../generate/scaffold.js';
 import { resolvePlatform } from '../generate/platform.js';
 import { stdinFence } from '../core/attachments.js';
+import { startEncodeHost } from '../encode/host.js';
 
 const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло результат', incomplete: 'шаги выполнены не полностью' };
 
@@ -91,12 +92,26 @@ export async function run(ctx) {
     }
     if (level === 'read' && !interactive) renderer.line('warn', 'Неинтерактивный режим без --approve write|all: агент сможет только читать файлы.');
 
+    let encodeHost = null;
+    if (config.agent.encode === 'mcp') {
+        try {
+            encodeHost = await startEncodeHost({
+                root: ctx.cwd, config, decide: (request) => renderer.approve(request, { signal: ctx.signal }),
+                signal: ctx.signal, approvalLevel: level, emit: ctx.emit,
+            });
+        } catch (error) {
+            throw new UsageError(error.message);
+        }
+        ctx.encodeHost = encodeHost;
+        ctx.processTool = encodeHost.processTool;
+    }
     try {
         const ensured = await ensureProjectMap(ctx.cwd);
         if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
         if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra, seedFiles: prepared.seedFiles, generation: prepared.wantsProfile });
         return await runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra });
     } finally {
+        await encodeHost?.close();
         store?.memory.close();
     }
 }
@@ -167,7 +182,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
         memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
         backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles, generation, revision, fromStep, resumeId,
-        processTool: ctx.processTool,
+        processTool: ctx.processTool, encodeHost: ctx.encodeHost ?? null,
     });
     renderer.idle();
     renderer.ensureNewline();

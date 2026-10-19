@@ -13,6 +13,7 @@ import { runTeam } from '../src/agent/team.js';
 import { diffHunk, describeChangeSet } from '../src/agent/diff.js';
 import { overridesFrom } from '../src/commands/shared.js';
 import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
+import { encodeArtifacts } from '../src/encode/encode.ts';
 
 let server;
 let script = () => ({ text: 'ok' });
@@ -758,4 +759,44 @@ test('a strained budget tells the planner that balance is not promised', async (
     });
     assert.equal(result.status, 'completed', result.error?.message);
     assert.match(planner, /Balance is not promised/);
+});
+
+test('encode host writes the hinted file and does not call the encoder model', async () => {
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'encoder') throw new Error('encoder model');
+        if (role === 'answer') return { text: 'encode-host.js\n\n```js\nexport const a = 1;\n```\nroute: encode' };
+        throw new Error(`unexpected ${role}`);
+    };
+    const events = [];
+    const result = await runTeam({
+        client: client(), config: { ...baseConfig(), memory: { ...defaults.memory, enabled: false } },
+        ledger: createLedger(), task: 'запиши модуль', root, approvalLevel: 'all', emit: (event) => events.push(event),
+        encodeHost: {
+            encode: (input) => encodeArtifacts({
+                ...input,
+                writeFile: async (file, content) => writeFile(path.join(root, file), content),
+            }),
+        },
+    });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(await readFile(path.join(root, 'encode-host.js'), 'utf8'), 'export const a = 1;');
+    assert.ok(events.some((event) => event.type === 'stage.start' && event.stage === 'encode' && event.role === 'encoder'));
+    assert.match(result.text, /encode-host\.js/);
+});
+
+test('encode host failure does not call the encoder model', async () => {
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'encoder') throw new Error('encoder model');
+        if (role === 'answer') return { text: 'encode-host.js\n\n```js\nexport const a = 1;\n```\nroute: encode' };
+        throw new Error(`unexpected ${role}`);
+    };
+    const result = await runTeam({
+        client: client(), config: { ...baseConfig(), memory: { ...defaults.memory, enabled: false } },
+        ledger: createLedger(), task: 'запиши модуль', root, approvalLevel: 'all',
+        encodeHost: { encode: async () => { throw new Error('encode failed'); } },
+    });
+    assert.equal(result.status, 'failed');
+    assert.match(result.error.message, /encode failed/);
 });

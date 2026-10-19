@@ -83,7 +83,7 @@ export function toolNamesForRole(allNames, role) {
 export async function runTeam({
     client, config, ledger, task, parts = [], root, approvalLevel = 'read', interactive = false, approve, askUser = null,
     memory = null, projectKey = null, projectName = null, backupDir = null, extraInstructions = null, emit = () => {}, signal,
-    seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, processTool = null,
+    seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, processTool = null, encodeHost = null,
 }) {
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
     const roles = createRoleRunner({ client, config, ledger, emit, signal });
@@ -241,9 +241,36 @@ export async function runTeam({
                 return { ok: false, done: finish() };
             }
         }
-        /** Ask the encoder for file commands and run them. */
+        /** Ask the encoder model, or execute the MCP encode host when it is connected. */
         async function encodeHandoff() {
             notify({ type: 'stage.start', stage: 'encode', role: 'encoder', model: roles.resolve('encoder').model });
+            if (encodeHost) {
+                const workspaceText = ctx.get('workspace') ?? '';
+                const artifacts = [];
+                for (const item of handoff.artifacts) {
+                    let body = item.body;
+                    if (typeof body !== 'string') {
+                        try { body = await readFile(path.join(root, item.rel), 'utf8'); }
+                        catch { body = ''; }
+                    }
+                    artifacts.push({ id: item.id, body, hintLanguage: item.hintLanguage ?? null, hintPath: item.hintPath ?? null });
+                }
+                try {
+                    const encoded = await encodeHost.encode({
+                        root, text: handoff.text, artifacts, workspace: workspaceText, directoryTree,
+                    });
+                    notify({ type: 'stage.done', stage: 'encode', status: 'completed' });
+                    return { ok: true, written: encoded.written };
+                } catch (error) {
+                    if (error instanceof CancelledError || error?.name === 'AbortError') throw error;
+                    notify({ type: 'stage.done', stage: 'encode', status: 'failed' });
+                    result.status = 'failed';
+                    result.error = error;
+                    result.text = handoff.text;
+                    await persist('failed');
+                    return { ok: false, done: finish() };
+                }
+            }
             const index = handoff.artifacts.map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''} ${item.hintPath ?? ''}`.trim()).join('\n') || '(none)';
             const workspaceText = ctx.get('workspace');
             const encoded = await roles.run('encoder', {

@@ -16,6 +16,7 @@ import { createToolset, enabledToolNames } from '../agent/tools.js';
 import { REASONING_EFFORTS, APPROVAL_LEVELS } from '../core/config.js';
 import { formatNumber } from '../util/text.js';
 import { ASSISTANT_BASE } from './instructions.js';
+import { startEncodeHost } from '../encode/host.js';
 import { UsageError, createClientFor, createLedgerFor, openSession, loadAttachments, composeInstructions, resolveTextArg,
     approvalLevel, backupDirFor, writeOutput, usageRow, STATUS_LABELS, openMemoryFor, resolveRole } from './shared.js';
 
@@ -62,6 +63,18 @@ export async function chat(ctx) {
     let toolset = null;
     let store = null;
     const tools = { web: Boolean(config.tools.web), images: Boolean(config.tools.images) };
+    let encodeHost = null;
+    if (config.agent.encode === 'mcp') {
+        try {
+            encodeHost = await startEncodeHost({
+                root: ctx.cwd, config, decide: (request) => renderer.approve(request, { signal: ctx.turnSignal() }),
+                signal, approvalLevel: approvalLevel(config, true), emit,
+            });
+        } catch (error) {
+            throw new UsageError(error.message);
+        }
+        ctx.processTool = encodeHost.processTool;
+    }
     const rl = renderer.readline();
     const tty = renderer.mode === 'tty';
     const paint = (format, text) => (tty ? styleText(format, text, { stream: process.stderr }) : text);
@@ -222,6 +235,7 @@ export async function chat(ctx) {
             const target = await writeOutput(values.out, session.transcript(), { cwd: ctx.cwd });
             renderer.line('ok', `Расшифровка сохранена: ${target}`);
         }
+        await encodeHost?.close();
         store?.memory.close();
         client.close();
     }

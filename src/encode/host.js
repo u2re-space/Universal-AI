@@ -107,6 +107,7 @@ export async function startEncodeHost({
     let closed = false;
     return {
         mcpURL, processingURL, encode,
+        processTool: (name, args, callSignal) => registry.requestTool(name, args, callSignal ?? signal),
         async close() {
             if (closed) return;
             closed = true;
