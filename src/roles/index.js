@@ -2,7 +2,7 @@
  * @file src/roles/index.js
  * @module roles/index
  * @purpose Collect role prompts, settings, and desktop specialist limits.
- * @depends roles/default, roles/planner, roles/collector, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/scanner, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester
+ * @depends roles/default, roles/planner, roles/collector, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/scanner, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier
  * @usedBy commands/instructions, agent/team
  * @exports ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS
  * @ai.tags roles, prompts, desktop
@@ -25,6 +25,7 @@ import * as clicker from './clicker.js';
 import * as typer from './typer.js';
 import * as encoder from './encoder.js';
 import * as tester from './tester.js';
+import * as classifier from './classifier.js';
 
 /**
  * Instructions and settings for every named role.
@@ -48,6 +49,7 @@ export const ROLE_MODULES = {
     typer: { instructions: typer.instructions, settings: typer.settings },
     encoder: { instructions: encoder.instructions, settings: encoder.settings },
     tester: { instructions: tester.instructions, settings: tester.settings },
+    classifier: { instructions: classifier.instructions, settings: classifier.settings },
 };
 
 /**

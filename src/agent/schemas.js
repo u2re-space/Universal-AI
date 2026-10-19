@@ -3,7 +3,7 @@
  * @module agent/schemas
  * @purpose Strict JSON schemas for structured role outputs (Responses API text.format = json_schema).
  * @usedBy agent/team, agent/roles
- * @exports PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA
+ * @exports PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA
  * @ai.tags schema, roles
  * @ai.hint pure
  * @changed 2026-10-15 JSDoc card, 4-space indent.
@@ -22,14 +22,19 @@ const nullableInteger = { type: ['integer', 'null'] };
  */
 const object = (properties) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
 
+export const CLASSIFIER_SCHEMA = object({
+    label: { type: 'string', enum: ['trivial', 'normal', 'complex'], description: 'How large the task is.' },
+});
+
 export const PLAN_SCHEMA = object({
     summary: { ...string, description: 'One paragraph: what will be done and why.' },
     complexity: { type: 'string', enum: ['trivial', 'normal', 'complex'] },
     steps: {
         type: 'array',
-        items: object({
-            goal: { ...string, description: 'Imperative, verifiable goal of the step.' },
-            details: { ...string, description: 'Concrete guidance: files, functions, commands, edge cases.' },
+            items: object({
+                goal: { ...string, description: 'Imperative, verifiable goal of the step.' },
+                complexity: { type: 'string', enum: ['trivial', 'normal', 'complex'], description: 'How hard this step is.' },
+                details: { ...string, description: 'Concrete guidance: files, functions, commands, edge cases.' },
             verify: { ...string, description: 'How the worker should verify this step (command, check, re-read).' },
         }),
     },

@@ -335,6 +335,12 @@ export async function runTeam({
             }
             if (!Array.isArray(source.fileActions)) source.fileActions = [];
             if (!Array.isArray(source.taskMap)) source.taskMap = [];
+            const planComplexity = source.complexity === 'trivial' || source.complexity === 'complex' || source.complexity === 'normal' ? source.complexity : 'normal';
+            if (Array.isArray(source.steps)) {
+                for (const step of source.steps) {
+                    if (step.complexity !== 'trivial' && step.complexity !== 'normal' && step.complexity !== 'complex') step.complexity = planComplexity;
+                }
+            }
             return source;
         };
 
@@ -467,7 +473,7 @@ export async function runTeam({
         if (planned.status !== 'completed') return stop(planned, 'план');
         const drafted = lists(planned.data);
         drafted.steps = drafted.steps.slice(0, stepLimit);
-        if (!drafted.steps.length) drafted.steps = [{ goal: task, details: 'Complete the task as described.', verify: 'Re-read the result.' }];
+        if (!drafted.steps.length) drafted.steps = [{ goal: task, details: 'Complete the task as described.', verify: 'Re-read the result.', complexity: drafted.complexity === 'trivial' || drafted.complexity === 'complex' || drafted.complexity === 'normal' ? drafted.complexity : 'normal' }];
         const expanded = lists(expandPlan(drafted, { maxSteps: stepLimit, splitFiles: !generation }));
         const id = handoff?.id ?? newWorkId();
         bind(expanded, createProgress({ id, task, plan: expanded }));
