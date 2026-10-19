@@ -114,9 +114,10 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 
 MCP:
   ai mcp add <id> --mcp-command <команда> [--mcp-arg <аргумент> ...]
+  ai mcp add <id> --mcp-url <https://…> [--mcp-description <текст>] [--mcp-approval never|always]
   ai mcp remove <id>     ai mcp probe <id>
-  Серверы — stdio, кадры Content-Length. add/remove правят ~/.ai-agent/config.json и не запускают процесс.
-  Вызовы инструментов MCP подтверждаются как сеть (категория network).
+  Локальный сервер — stdio. Сторонний https-адрес уходит в API как type mcp, процесс не запускается.
+  add/remove правят ~/.ai-agent/config.json. Вызовы локальных инструментов MCP подтверждаются как сеть.
 
 Чаты и решения:
   ai decide и POST /v1/decisions — модель openai/gpt-6-luna-decisions (или decisions.model). Если маршрута нет, шаг решений пропускается.

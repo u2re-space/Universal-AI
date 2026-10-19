@@ -18,11 +18,13 @@ import { createImageSink } from '../core/images.js';
 import { attachBackground, awaitBackground, TERMINAL_STATUSES } from '../core/background.js';
 import { byteSize, clipMiddle, estimateTokens, errorMessage, formatBytes } from '../util/text.js';
 import { guardCommandInput } from './command-risk.js';
+import { remoteMcpTools } from '../mcp/servers.js';
 
 /** Built-in tool definitions derived from the configuration. */
 export function builtinTools(config, { web = false, images = false } = {}) {
     const tools = [];
     if (web) tools.push(webSearchTool(config.webSearch?.contextSize));
+    if (config.tools?.mcp !== false) tools.push(...remoteMcpTools(config.mcp?.servers));
     if (images) {
         const image = { type: 'image_generation', output_format: config.image.format, partial_images: config.image.partialImages };
         if (config.imageModel) image.model = config.imageModel;

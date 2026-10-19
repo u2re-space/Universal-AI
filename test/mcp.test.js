@@ -7,7 +7,9 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { encodeMessage, createFrameParser } from '../src/mcp/frame.js';
 import { connectMcp } from '../src/mcp/client.js';
-import { mcpToolName, normalizeMcpServer } from '../src/mcp/servers.js';
+import { mcpToolName, normalizeMcpServer, remoteMcpTools } from '../src/mcp/servers.js';
+import { builtinTools } from '../src/agent/loop.js';
+import { createSession } from '../src/core/session.js';
 import { openMcpSources } from '../src/mcp/session.js';
 import { createToolset } from '../src/agent/tools.js';
 import { defaults } from '../src/core/config-defaults.js';
@@ -37,7 +39,34 @@ test('server ids and tool names stay within the function-name rules', () => {
     assert.ok(long.length <= 64);
     assert.match(long, /^mcp_design_/);
     assert.throws(() => normalizeMcpServer({ id: 'Bad', command: 'node' }), /id/);
-    assert.throws(() => normalizeMcpServer({ id: 'ok', command: 'node', transport: 'http' }), /stdio/);
+    assert.throws(() => normalizeMcpServer({ id: 'ok', transport: 'http' }), /server_url/);
+    assert.throws(() => normalizeMcpServer({ id: 'ok', server_url: 'http://example.com/mcp' }), /https/);
+});
+
+test('a remote MCP server becomes a Responses API mcp tool and is not spawned', () => {
+    const server = normalizeMcpServer({
+        id: 'openai_docs',
+        server_url: 'https://developers.openai.com/mcp',
+        server_description: 'OpenAI docs',
+        allowed_tools: ['search_openai_docs'],
+    });
+    assert.equal(server.transport, 'http');
+    assert.equal(server.require_approval, 'never');
+    const tool = remoteMcpTools([server, normalizeMcpServer({ id: 'local', command: 'node' })])[0];
+    assert.deepEqual(tool, {
+        type: 'mcp',
+        server_label: 'openai_docs',
+        server_url: 'https://developers.openai.com/mcp',
+        server_description: 'OpenAI docs',
+        require_approval: 'never',
+        allowed_tools: ['search_openai_docs'],
+    });
+    const cfg = { ...defaults, mcp: { servers: [server] } };
+    assert.equal(builtinTools(cfg).some((item) => item.type === 'mcp' && item.server_label === 'openai_docs'), true);
+    assert.equal(builtinTools({ ...cfg, tools: { ...defaults.tools, mcp: false } }).some((item) => item.type === 'mcp'), false);
+    const session = createSession({ store: false });
+    session.recordResponse({ id: 'resp_1', output: [{ type: 'mcp_call', id: 'mcp_1', name: 'search_openai_docs', server_label: 'openai_docs' }] });
+    assert.equal(session.requestInput().input.some((item) => item.type === 'mcp_call'), true);
 });
 
 test('MCP children do not inherit secret environment variables', async () => {

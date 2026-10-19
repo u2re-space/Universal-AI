@@ -77,27 +77,36 @@ export async function mcpCommand(ctx) {
     if (sub === 'list') {
         const servers = config.mcp.servers;
         if (!servers.length) {
-            renderer.write('MCP-серверы не заданы.\nДобавить: ai mcp add <id> --mcp-command <команда> [--mcp-arg <аргумент> ...]\n');
+            renderer.write('MCP-серверы не заданы.\nЛокальный: ai mcp add <id> --mcp-command <команда>\nСторонний: ai mcp add <id> --mcp-url https://…\n');
             return 0;
         }
         for (const server of servers) {
             const state = server.enabled ? 'включён' : 'выключен';
-            renderer.write(`${server.id}\t${state}\t${server.command} ${server.args.join(' ')}\n`);
+            const where = server.transport === 'http' ? server.server_url : `${server.command} ${(server.args ?? []).join(' ')}`;
+            renderer.write(`${server.id}\t${state}\t${where}\n`);
         }
         return 0;
     }
     if (sub === 'add') {
         const id = positionals[1];
-        if (!id) throw new UsageError('Укажите id: ai mcp add <id> --mcp-command <команда>');
-        if (!values['mcp-command']) throw new UsageError('Укажите --mcp-command.');
-        const entry = normalizeMcpServer({ id, command: values['mcp-command'], args: values['mcp-arg'] ?? [] });
-        const stored = { id: entry.id, transport: entry.transport, command: entry.command, args: entry.args };
+        if (!id) throw new UsageError('Укажите id: ai mcp add <id> --mcp-command <команда> или --mcp-url <https://…>');
+        if (!values['mcp-command'] && !values['mcp-url']) throw new UsageError('Укажите --mcp-command или --mcp-url.');
+        const entry = values['mcp-url']
+            ? normalizeMcpServer({
+                id, server_url: values['mcp-url'], server_description: values['mcp-description'] ?? '',
+                require_approval: values['mcp-approval'] ?? 'never',
+            })
+            : normalizeMcpServer({ id, command: values['mcp-command'], args: values['mcp-arg'] ?? [] });
+        const stored = entry.transport === 'http'
+            ? { id: entry.id, server_url: entry.server_url, server_description: entry.server_description, require_approval: entry.require_approval }
+            : { id: entry.id, transport: entry.transport, command: entry.command, args: entry.args };
         const { file, raw } = await loadHomeFile(config.home);
         const servers = homeServers(raw);
         if (servers.some((server) => server.id === id)) throw new UsageError(`MCP-сервер уже есть: ${id}`);
         raw.mcp = { ...(raw.mcp ?? {}), servers: [...servers, stored] };
         await saveHomeFile(file, raw);
-        renderer.write(`Добавлен MCP-сервер ${id} (stdio: ${entry.command} ${entry.args.join(' ')})\n`);
+        const detail = entry.transport === 'http' ? entry.server_url : `stdio: ${entry.command} ${entry.args.join(' ')}`;
+        renderer.write(`Добавлен MCP-сервер ${id} (${detail})\n`);
         return 0;
     }
     if (sub === 'remove') {
@@ -116,6 +125,7 @@ export async function mcpCommand(ctx) {
         if (!id) throw new UsageError('Укажите id: ai mcp probe <id>');
         const server = config.mcp.servers.find((item) => item.id === id);
         if (!server) throw new UsageError(`MCP-сервер не найден: ${id}`);
+        if (server.transport === 'http') throw new UsageError('Сторонний сервер вызывает Responses API. probe смотрит только локальный stdio.');
         const session = await openMcpSources({
             tools: { mcp: true },
             mcp: { servers: [server] },

@@ -245,10 +245,11 @@ ai run --template quest.md --file notes.md "допиши шейдер"
 
 ## MCP-источники
 
-Пользовательские серверы MCP отдают инструменты и ресурсы. Транспорт — stdio, кадры `Content-Length`. Протокол клиента — `2025-06-18`.
+Локальный сервер MCP запускается здесь по stdio. Сторонний сервер с адресом `https://` в запрос не порождается: в `tools` уходит `{ "type": "mcp", "server_label", "server_url" }`, и его вызывает сам Responses API.
 
 ```bash
 ai mcp add design --mcp-command node --mcp-arg servers/design.js
+ai mcp add openai_docs --mcp-url https://developers.openai.com/mcp --mcp-description "OpenAI docs"
 ai mcp list
 ai mcp probe design
 ai mcp remove design
@@ -259,12 +260,13 @@ ai mcp remove design
 ```json
 "mcp": {
   "servers": [
-    { "id": "design", "command": "node", "args": ["servers/design.js"], "env": { "TOKEN": "…" }, "enabled": true }
+    { "id": "design", "command": "node", "args": ["servers/design.js"], "env": { "TOKEN": "…" }, "enabled": true },
+    { "id": "openai_docs", "server_url": "https://developers.openai.com/mcp", "server_description": "OpenAI docs", "require_approval": "never" }
   ]
 }
 ```
 
-`tools.mcp` по умолчанию `true`. Пустой список серверов ничего не добавляет. `--no-tools` и `--tools` без `mcp` отключают источники.
+`tools.mcp` по умолчанию `true`. Пустой список серверов ничего не добавляет. `--no-tools` и `--tools` без `mcp` отключают и локальные источники, и сторонние адреса. `require_approval` по умолчанию `never`: API вызывает сервер сам. Значение `always` записывается, но ход не отвечает на `mcp_approval_request`.
 
 ## Чаты, решения и Telegram
 

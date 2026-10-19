@@ -371,6 +371,10 @@ export function redactConfig(config) {
             if (server.env && typeof server.env === 'object') {
                 server.env = Object.fromEntries(Object.keys(server.env).map((key) => [key, '…']));
             }
+            if (server.authorization) server.authorization = '…';
+            if (server.headers && typeof server.headers === 'object') {
+                server.headers = Object.fromEntries(Object.keys(server.headers).map((key) => [key, '…']));
+            }
         }
     }
     return copy;

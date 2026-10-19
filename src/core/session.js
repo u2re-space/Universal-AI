@@ -22,8 +22,8 @@ const SESSION_VERSION = 1;
  *
  * store=false (default): the full history is replayed in every request. Output items from
  *   the model are stored as returned (reasoning items only when they carry encrypted_content,
- *   which we request via include=["reasoning.encrypted_content"]). Built-in tool call items
- *   are summarized into assistant messages because they cannot be replayed statelessly.
+ *   which we request via include=["reasoning.encrypted_content"]). Remote MCP items are kept.
+ *   Other built-in tool calls are summarized because they cannot be replayed statelessly.
  * store=true: OpenAI keeps state; every request sends only new items + previous_response_id.
  */
 export function createSession({ store = false, model = null, name = null, instructions = null } = {}) {
@@ -86,7 +86,9 @@ export function createSession({ store = false, model = null, name = null, instru
             case 'code_interpreter_call':
             case 'mcp_call':
             case 'mcp_list_tools':
-                return store ? item : null;
+            case 'mcp_approval_request':
+            case 'mcp_approval_response':
+                return item;
             default:
                 return null;
         }

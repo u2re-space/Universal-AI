@@ -158,7 +158,7 @@ export const defaults = Object.freeze({
         mode: 'auto',
         models: ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'],
     },
-    /** User MCP servers. stdio only. An empty list leaves tools.mcp as a no-op. */
+    /** User MCP servers. stdio is spawned here. http is sent to the API as type mcp. */
     mcp: {
         servers: [],
     },

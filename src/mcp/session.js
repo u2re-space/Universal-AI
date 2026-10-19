@@ -122,7 +122,7 @@ function resourceExtras(clients) {
 export async function openMcpSources(config, { signal, notify = () => {} } = {}) {
     const empty = { extras: [], errors: [], close: async () => {}, describe: () => '' };
     if (!config?.tools?.mcp) return empty;
-    const servers = (config.mcp?.servers ?? []).filter((server) => server.enabled !== false);
+    const servers = (config.mcp?.servers ?? []).filter((server) => server.enabled !== false && server.transport !== 'http');
     if (!servers.length) return empty;
     const maxBytes = config.limits?.maxCommandOutputBytes ?? 64 * 1024;
     const clients = [];
