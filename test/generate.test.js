@@ -135,6 +135,29 @@ test('config defaults and flag bounds', async () => {
     assert.equal(overridesFrom({ 'no-tools': true }).tools.mcp, false);
 });
 
+test('pace defaults to speed 10 and quality 40 and a file can pin a role', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-pace-home-'));
+    const extra = path.join(home, 'extra.json');
+    await writeFile(path.join(home, 'config.json'), JSON.stringify({ roles: { summarizer: { model: 'gpt-6-luna-nano' } }, agent: { maxSteps: 12 } }));
+    await writeFile(extra, JSON.stringify({ pace: { models: ['gpt-6-luna', 'gpt-6-luna'] } }));
+    try {
+        const config = await loadConfig({ env: { AI_AGENT_HOME: home, AI_MODEL: 'mock-model', OPENAI_API_KEY: 'sk-test' }, ensureHome: false });
+        assert.equal(config.pace.speed, 10);
+        assert.equal(config.pace.quality, 40);
+        assert.equal(config.pace.mode, 'auto');
+        assert.deepEqual(config.pace.models, ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra']);
+        assert.equal(config.rolePins.summarizer.model, true);
+        assert.equal(config.rolePins.summarizer.effort, false);
+        assert.equal(config.stepCapPinned, true);
+        await assert.rejects(
+            () => loadConfig({ configPath: extra, env: { AI_AGENT_HOME: home, AI_MODEL: 'mock-model', OPENAI_API_KEY: 'sk-test' }, ensureHome: false }),
+            /pace\.models/,
+        );
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
 test('loadConfig rejects a bad server id and a bad fidelity', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-gen-home-'));
     const file = path.join(home, 'bad.json');

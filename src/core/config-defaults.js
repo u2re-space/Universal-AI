@@ -114,6 +114,7 @@ export const defaults = Object.freeze({
         typer: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         encoder: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         tester: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+        classifier: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
     },
     /** Multi-role orchestration used by `ai run`. */
     agent: {
@@ -145,6 +146,16 @@ export const defaults = Object.freeze({
         fidelity: 87,
         creativity: 20,
         platform: 'chrome-157-beta',
+    },
+    /**
+     * Team pace. models run from cheap to expensive.
+     * speed and quality are 0..100. mode auto follows those numbers.
+     */
+    pace: {
+        speed: 10,
+        quality: 40,
+        mode: 'auto',
+        models: ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'],
     },
     /** User MCP servers. stdio only. An empty list leaves tools.mcp as a no-op. */
     mcp: {

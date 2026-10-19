@@ -125,6 +125,31 @@ function fromEnv(env) {
 }
 
 /**
+ * Pins come from files and CLI overrides. Built-in defaults are not a source.
+ * @param {object[]} sources
+ * @returns {{ rolePins: object, stepCapPinned: boolean }}
+ * @ai.hint pure
+ */
+function pinsFrom(sources) {
+    const rolePins = {};
+    let stepCapPinned = false;
+    for (const source of sources) {
+        if (!source || typeof source !== 'object') continue;
+        if (source.roles && typeof source.roles === 'object') {
+            for (const [name, role] of Object.entries(source.roles)) {
+                if (!role || typeof role !== 'object') continue;
+                const pin = rolePins[name] ?? { model: false, effort: false };
+                if (typeof role.model === 'string' && role.model.trim()) pin.model = true;
+                if (Object.hasOwn(role, 'effort')) pin.effort = true;
+                rolePins[name] = pin;
+            }
+        }
+        if (source.agent && Object.hasOwn(source.agent, 'maxSteps')) stepCapPinned = true;
+    }
+    return { rolePins, stepCapPinned };
+}
+
+/**
  * Resolve the effective configuration.
  * Precedence: defaults < ~/.ai-agent/config.json < --config file < environment < overrides (CLI).
  * The CLI passes environment after reading .env and repairing a split Windows credential pair.
@@ -139,6 +164,9 @@ export async function loadConfig({ configPath = null, overrides = {}, env = proc
     config.memory.dbFile ||= path.join(home, 'memory.db');
     config.configFiles = [path.join(home, 'config.json'), ...(configPath ? [path.resolve(configPath)] : [])];
     validateConfig(config);
+    const pins = pinsFrom([homeConfig, fileConfig, overrides]);
+    config.rolePins = pins.rolePins;
+    config.stepCapPinned = pins.stepCapPinned;
     if (ensureHome) await mkdir(home, { recursive: true });
     return config;
 }
@@ -266,6 +294,19 @@ function validateConfig(c) {
     if (!Number.isInteger(c.generate.fidelity) || c.generate.fidelity < 0 || c.generate.fidelity > 100) fail('generate.fidelity: целое 0..100');
     if (!Number.isInteger(c.generate.creativity) || c.generate.creativity < 0 || c.generate.creativity > 100) fail('generate.creativity: целое 0..100');
     if (!Object.hasOwn(PLATFORMS, c.generate.platform)) fail(`generate.platform: ${Object.keys(PLATFORMS).join(' | ')}`);
+    if (!isRecord(c.pace)) fail('pace должен быть объектом');
+    for (const key of Object.keys(c.pace)) {
+        if (!['speed', 'quality', 'mode', 'models'].includes(key)) fail(`неизвестный параметр pace.${key}`);
+    }
+    if (!Number.isInteger(c.pace.speed) || c.pace.speed < 0 || c.pace.speed > 100) fail('pace.speed: целое 0..100');
+    if (!Number.isInteger(c.pace.quality) || c.pace.quality < 0 || c.pace.quality > 100) fail('pace.quality: целое 0..100');
+    if (!['auto', 'a', 'b', 'c'].includes(c.pace.mode)) fail('pace.mode: auto | a | b | c');
+    if (!Array.isArray(c.pace.models)) fail('pace.models: от 1 до 8 непустых уникальных строк');
+    const paceModels = c.pace.models.map((item) => typeof item === 'string' ? item.trim() : '');
+    if (paceModels.length < 1 || paceModels.length > 8 || paceModels.some((item) => !item) || new Set(paceModels).size !== paceModels.length) {
+        fail('pace.models: от 1 до 8 непустых уникальных строк');
+    }
+    c.pace.models = paceModels;
     if (!isRecord(c.mcp)) fail('mcp должен быть объектом');
     for (const key of Object.keys(c.mcp)) {
         if (!(key in defaults.mcp)) fail(`неизвестный параметр mcp.${key}`);
