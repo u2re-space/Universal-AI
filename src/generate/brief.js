@@ -11,7 +11,7 @@
  */
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { fidelityContract, fidelityInstructions } from './fidelity.js';
+import { fidelityContract, fidelityInstructions, effectiveFidelity } from './fidelity.js';
 import { platformInstructions } from './platform.js';
 import { filesForKind, filesForStack, stackText, recommendStack, renderGenerationTask, kindRules } from './scaffold.js';
 
@@ -45,9 +45,10 @@ function referenceLines(label, items) {
  * @exports
  * @ai.hint pure
  */
-export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', fidelity, creativity, platform, references = {} }) {
+export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', fidelity, creativity, platform, quality = 40, references = {} }) {
     if (kind != null && !GENERATION_KINDS.includes(kind)) throw new Error(`Вид генерации: ${GENERATION_KINDS.join('|')}`);
     const contract = fidelityContract({ fidelity, creativity });
+    const effective = effectiveFidelity(contract.fidelity, quality);
     const refs = {
         images: [...(references.images ?? [])],
         files: [...(references.files ?? [])],
@@ -63,14 +64,15 @@ export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', f
     const recommendations = recommendStack({ kind, prompt, references: refs });
     const outputs = kind ? [...filesForStack({ kind, libraries: recommendations.libraries })] : [];
     const manifest = {
-        kind, prompt, fidelity: contract.fidelity, creativity: contract.creativity, measured: null,
+        kind, prompt, fidelity: contract.fidelity, effectiveFidelity: effective, creativity: contract.creativity, measured: null,
         method: 'unmeasured', reason: contract.reason, platform: platform.id, experimentalFlags: false,
         references: refs, outputs, stack: { kind, text: stackText(kind, platform, recommendations.libraries) }, recommendations,
     };
     const task = [
         renderGenerationTask({ kind, prompt, platform, recommendations, name }),
         '',
-        `Fidelity target: ${contract.fidelity}%. Measured match: unmeasured. Do not invent a percentage.`,
+        `Fidelity target: ${effective}%. Measured match: unmeasured. Do not invent a percentage.`,
+        `Requested fidelity ${contract.fidelity}% at quality ${quality} works as ${effective}%.`,
         `Creativity for elements that are not in the references: ${contract.creativity}%.`,
         '',
         listed.length ? 'References:' : 'References: none attached.',
@@ -90,7 +92,7 @@ export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', f
         '',
         kindRules(kind, recommendations),
         '',
-        fidelityInstructions(contract),
+        fidelityInstructions({ ...contract, fidelity: effective }),
         ...(refs.images.length ? ['', 'The worker must create each artwork region with generate_image or edit_image before the page is finished. The saved image paths belong in the HTML and CSS.'] : []),
     ].join('\n');
     return { task, instructions, manifest };

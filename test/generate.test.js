@@ -73,6 +73,7 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
         references: { images: [landing], files: [], templates: ['templates/base'], examples: ['https://css-tricks.com/'] },
     });
     assert.equal(brief.manifest.fidelity, 87);
+    assert.equal(brief.manifest.effectiveFidelity, 66);
     assert.equal(brief.manifest.creativity, 20);
     assert.equal(brief.manifest.measured, null);
     assert.equal(brief.manifest.method, 'unmeasured');
@@ -83,6 +84,8 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
         '.rules/stack.md', '.rules/files.md', '.skills/scaffold/SKILL.md',
     ]);
     assert.match(brief.task, /87%/);
+    assert.match(brief.task, /Requested fidelity 87% at quality 40 works as 66%/);
+    assert.match(brief.instructions, /66%/);
     assert.match(brief.task, /landing\.png/);
     assert.match(brief.task, /templates\/base/);
     assert.match(brief.task, /https:\/\/css-tricks\.com\//);

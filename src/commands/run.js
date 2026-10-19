@@ -68,6 +68,7 @@ export async function run(ctx) {
     if (prepared.wantsProfile) {
         const brief = buildGenerationBrief({
             kind: prepared.kind, prompt: task, fidelity: config.generate.fidelity, creativity: config.generate.creativity,
+            quality: config.pace.quality,
             platform: resolvePlatform(config.generate.platform),
             references: { images: values.image ?? [], files: values.file ?? [], examples: values.example ?? [] },
             name: path.basename(ctx.cwd),
@@ -81,7 +82,10 @@ export async function run(ctx) {
             const saved = await writePreparedScaffold(ctx.cwd, boilerplate);
             if (saved.written.length) renderer.line('info', `Каркас уже записан: ${saved.written.join(', ')}`, { dim: true });
         }
-        renderer.line('info', `Контракт генерации: .ai/generation.json · точность ${brief.manifest.fidelity}% · креативность ${brief.manifest.creativity}%`, { dim: true });
+        const fidelityLine = brief.manifest.fidelity === brief.manifest.effectiveFidelity
+            ? `точность ${brief.manifest.fidelity}%`
+            : `точность ${brief.manifest.fidelity}% · рабочая ${brief.manifest.effectiveFidelity}%`;
+        renderer.line('info', `Контракт генерации: .ai/generation.json · ${fidelityLine} · креативность ${brief.manifest.creativity}%`, { dim: true });
         task = brief.task;
         extra = [brief.instructions, extra].filter(Boolean).join('\n\n');
     }
