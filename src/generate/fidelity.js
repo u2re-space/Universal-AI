@@ -3,7 +3,7 @@
  * @module generate/fidelity
  * @purpose Fidelity and creativity targets. The match itself is not measured.
  * @usedBy generate/brief, commands/gen
- * @exports DEFAULT_FIDELITY, DEFAULT_CREATIVITY, clampPercent, fidelityContract, fidelityInstructions
+ * @exports DEFAULT_FIDELITY, DEFAULT_CREATIVITY, clampPercent, effectiveFidelity, fidelityContract, fidelityInstructions
  * @ai.tags generate
  * @ai.hint pure
  * @changed 2026-10-15 Default fidelity 87, creativity 20, measured null.
@@ -25,6 +25,19 @@ export const DEFAULT_CREATIVITY = 20;
 export function clampPercent(value, name) {
     if (!Number.isInteger(value) || value < 0 || value > 100) throw new Error(`${name}: целое 0..100`);
     return value;
+}
+
+/**
+ * Working fidelity. Quality 0 keeps 60% of the stated target. Quality 100 keeps all of it.
+ * @param {number} stated
+ * @param {number} quality
+ * @returns {number}
+ * @exports
+ * @ai.hint pure
+ */
+export function effectiveFidelity(stated, quality) {
+    const scaled = Math.round(stated * (600 + quality * 4) / 1000);
+    return Math.min(100, Math.max(0, scaled));
 }
 
 /**

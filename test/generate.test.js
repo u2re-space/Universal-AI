@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolvePlatform, platformInstructions, PLATFORM_SOURCES, ENABLED_IN_157 } from '../src/generate/platform.js';
-import { fidelityContract, DEFAULT_FIDELITY, DEFAULT_CREATIVITY } from '../src/generate/fidelity.js';
+import { fidelityContract, effectiveFidelity, DEFAULT_FIDELITY, DEFAULT_CREATIVITY } from '../src/generate/fidelity.js';
 import { buildGenerationBrief, GENERATION_KINDS } from '../src/generate/brief.js';
 import { loadConfig, redactConfig } from '../src/core/config.js';
 import { overridesFrom } from '../src/commands/flags.js';
@@ -51,6 +51,14 @@ test('fidelity defaults to 87 and is not measured', () => {
     assert.match(contract.reason, /не реализована/);
     assert.throws(() => fidelityContract({ fidelity: 101, creativity: 20 }), /fidelity/);
     assert.throws(() => fidelityContract({ fidelity: 87, creativity: 1.5 }), /creativity/);
+});
+
+test('effective fidelity scales with quality and stays unmeasured', () => {
+    assert.equal(effectiveFidelity(100, 0), 60);
+    assert.equal(effectiveFidelity(100, 40), 76);
+    assert.equal(effectiveFidelity(87, 40), 66);
+    assert.equal(effectiveFidelity(100, 100), 100);
+    assert.equal(effectiveFidelity(0, 40), 0);
 });
 
 test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
