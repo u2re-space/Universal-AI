@@ -737,3 +737,25 @@ test('a bad classifier label becomes normal and the run continues', async () => 
     assert.equal(result.status, 'completed', result.error?.message);
     assert.ok(events.some((event) => event.type === 'warning' && event.message === 'Метка задачи не распознана, взята normal.'));
 });
+
+test('a strained budget tells the planner that balance is not promised', async () => {
+    let planner = '';
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'classifier') return { text: JSON.stringify({ label: 'normal' }) };
+        if (role === 'planner') {
+            planner = body.instructions;
+            return { text: JSON.stringify({ summary: 's', complexity: 'normal', steps: [{ goal: 'сделать', details: '', verify: '', complexity: 'normal' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: ['видно'], needsReview: false, imageNotes: null, risks: [], fileActions: [], taskMap: [] }) };
+        }
+        if (role === 'reviewer') return { text: JSON.stringify({ verdict: 'accept', summary: 'ok', issues: [], unverified: [] }) };
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'ok', memories: [] }) };
+        return { text: 'готово' };
+    };
+    const result = await runTeam({
+        client: client(),
+        config: { ...baseConfig(), pace: { ...defaults.pace, speed: 60, quality: 60 }, agent: { ...baseConfig().agent, chain: false }, memory: { ...defaults.memory, enabled: false } },
+        ledger: createLedger(), task: 'Сделай шаг', root, approvalLevel: 'all', emit: () => {},
+    });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.match(planner, /Balance is not promised/);
+});

@@ -30,7 +30,7 @@ import { builtinTools } from './loop.js';
 import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
 import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA } from './schemas.js';
-import { acceptanceParagraph, applyPins, clampModel, resolvePace } from './pace.js';
+import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace } from './pace.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
 import { formatWorkspace, mergeTaskDraft, scanWorkspace } from './workspace-scan.js';
@@ -536,7 +536,7 @@ export async function runTeam({
         notify({ type: 'stage.start', stage: 'plan', role: 'planner', model: paced.roles.planner.model });
         const planned = await roles.run('planner', {
             text: `${ctx.render({ maxBytes })}\n\n# Directory tree\n${directoryTree}\n\n${draft}\n\n# Task\n${task}`, parts: handoff ? [] : parts,
-            instructions: `${ROLE_INSTRUCTIONS.planner.replace('{maxSteps}', String(stepLimit))}\n\n${acceptanceParagraph(paced.acceptance)}`,
+            instructions: `${ROLE_INSTRUCTIONS.planner.replace('{maxSteps}', String(stepLimit))}\n\n${[acceptanceParagraph(paced.acceptance), guaranteesParagraph(paced.guarantees)].filter(Boolean).join('\n\n')}`,
             schema: PLAN_SCHEMA, schemaName: 'plan',
             model: paced.roles.planner.model, effort: paced.roles.planner.effort,
             builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
@@ -636,7 +636,7 @@ export async function runTeam({
             const resumeSession = interrupted && progress.checkpoint?.stepId === step.id && pendingSession?.model === chosen.model;
             const extra = index === revisionAt ? revisionClause(revision) : '';
             if (extra) revisionUsed = true;
-            const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}${extra}`;
+            const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}${extra}${paced?.guarantees === 'broken' ? `\n\n${guaranteesParagraph('broken')}` : ''}`;
             const passes = [];
             if (interrupted) {
                 const phase = prior.phase === 'surface' ? 'surface' : 'body';
@@ -772,7 +772,7 @@ export async function runTeam({
             const commands = workerTools.stats().commands.map((c) => `- ${c.command} → exit ${c.exitCode ?? '?'}`).join('\n') || '- (none)';
             const reviewed = await roles.run('reviewer', {
                 text: `${ctx.render({ maxBytes })}\n\n# Review request (round ${round})\nAcceptance criteria:\n${bullets(plan.acceptanceCriteria)}\nCommands run by the worker:\n${commands}`,
-                instructions: `${ROLE_INSTRUCTIONS.reviewer}\n\n${acceptanceParagraph(paced.acceptance)}`, toolset: reviewerTools, schema: REVIEW_SCHEMA, schemaName: 'review', maxTurns: config.agent.reviewerMaxTurns,
+                instructions: `${ROLE_INSTRUCTIONS.reviewer}\n\n${[acceptanceParagraph(paced.acceptance), guaranteesParagraph(paced.guarantees)].filter(Boolean).join('\n\n')}`, toolset: reviewerTools, schema: REVIEW_SCHEMA, schemaName: 'review', maxTurns: config.agent.reviewerMaxTurns,
                 model: paced.roles.reviewer.model, effort: paced.roles.reviewer.effort,
             });
             if (HARD_STOP.has(reviewed.status)) return stop(reviewed, 'ревью');
