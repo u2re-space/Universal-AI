@@ -18,6 +18,11 @@ test('generation keeps a short plan and one pass on the interface', () => {
     assert.equal(stepAllowance({ generation: true, goal: 'Recreate the reference styling and generate all required artwork.', details: 'layout' }).maxTurns, 25);
 });
 
+test('a pace cap is not pulled back to four steps on a generation run', () => {
+    assert.equal(planLimit({ maxSteps: 8, generation: true, pace: true }), 8);
+    assert.equal(planLimit({ maxSteps: 12, generation: true }), 4);
+});
+
 test('a normal source file gets a short surface pass and a longer body pass', () => {
     const source = stepAllowance({ files: ['src/main.js'] });
     assert.equal(source.passes, 2);

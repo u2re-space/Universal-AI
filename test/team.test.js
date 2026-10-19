@@ -26,6 +26,7 @@ after(async () => { await server.close(); await rm(root, { recursive: true, forc
 
 const baseConfig = () => structuredClone({
     ...defaults, model: 'gpt-6.1-sol', home: root, baseURL: server.baseURL,
+    pace: { ...defaults.pace, quality: 20 },
     roles: { ...defaults.roles, worker: { ...defaults.roles.worker, model: 'gpt-6-luna' }, collector: { ...defaults.roles.collector, model: 'gpt-6-luna' },
         vision: { ...defaults.roles.vision, model: 'gpt-6-luna-vision' }, summarizer: { ...defaults.roles.summarizer, model: 'gpt-6-luna-nano' } },
     memory: { ...defaults.memory, dbFile: ':memory:' },
@@ -40,6 +41,7 @@ function roleOf(body) {
     if (format === 'context_report') return 'collector';
     if (format === 'review') return 'reviewer';
     if (format === 'memory_update') return 'summarizer';
+    if (format === 'task_label') return 'classifier';
     if (typeof body.instructions === 'string' && body.instructions.includes('route: encode')) return 'answer';
     if (body.input.some((i) => i.type === 'message' && i.content?.some?.((c) => c.type === 'input_image'))) return 'vision';
     if (body.model === 'gpt-6-luna-nano') return 'summarizer-file';
@@ -119,12 +121,14 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
         switch (role) {
             case 'answer':
                 return { text: 'Черновик без кода.\nroute: plan' };
+            case 'classifier':
+                return { text: JSON.stringify({ label: 'normal' }) };
             case 'planner':
                 assert.match(body.input[0].content[0].text, /Проект: демо/, 'project notes are in the shared context');
                 assert.match(body.input[0].content[0].text, /Long-term memory/, 'recalled memories are in the shared context');
                 return { text: JSON.stringify({ summary: 'Добавить функцию sum', complexity: 'normal', steps: [
-                    { goal: 'Создать src/sum.js', details: 'export const sum', verify: 'прочитать файл' },
-                    { goal: 'Создать тест', details: 'test/sum.test.js', verify: 'node --test' } ],
+                    { goal: 'Создать src/sum.js', details: 'export const sum', verify: 'прочитать файл', complexity: 'normal' },
+                    { goal: 'Создать тест', details: 'test/sum.test.js', verify: 'node --test', complexity: 'normal' } ],
                 filesOfInterest: ['package.json'], searchQueries: ['sum'], questionsForCollector: ['Какой test runner?'], acceptanceCriteria: ['sum(1,2)=3'],
                 needsReview: true, imageNotes: null, risks: [] }) };
             case 'collector': {
@@ -164,10 +168,11 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
         }
     };
     const config = baseConfig();
+    config.pace = { ...defaults.pace, quality: 80 };
     const memory = openMemory({ file: ':memory:' });
     const key = projectKey(root);
     memory.remember({ scope: 'project', project: key, kind: 'fact', content: 'Тесты в проекте пишутся на node:test; функции экспортируются как ESM', tags: ['esm'] });
-    const ledger = createLedger({ prices: { 'gpt-6.1-sol': { input: 10, output: 30 }, 'gpt-6-luna': { input: 1, output: 2 }, 'gpt-6-luna-nano': { input: 0.1, output: 0.4 } } });
+    const ledger = createLedger({ prices: { 'gpt-6.1-sol': { input: 10, output: 30 }, 'gpt-6-luna': { input: 1, output: 2 }, 'gpt-6-luna-nano': { input: 0.1, output: 0.4 }, 'gpt-6-astra': { input: 20, output: 60 } } });
     const events = [];
     const result = await runTeam({ client: client(), config, ledger, task: 'Добавь функцию sum с тестом', root, approvalLevel: 'all', memory, projectKey: key,
         projectName: 'demo', emit: (e) => events.push(e) });
@@ -482,6 +487,7 @@ test('an unfinished plan resumes from the next step without a new planner call',
         const second = await runTeam({ client: client(), config, ledger: createLedger(), task, root: dir, approvalLevel: 'read', emit() {} });
         assert.equal(second.status, 'completed', second.error?.message);
         assert.equal(seen.includes('planner'), false);
+        assert.equal(seen.includes('classifier'), false);
         assert.equal(seen.includes('answer'), false);
         assert.equal(second.steps.map((step) => step.goal).join('\n').includes('второй'), true);
         const progress = JSON.parse(await readFile(path.join(dir, '.tmp', second.workId, 'progress.json'), 'utf8'));
@@ -687,4 +693,47 @@ test('a generation step that hits the turn cap still runs the artwork step', asy
     assert.deepEqual(result.steps.map((step) => step.status), ['max_turns', 'max_turns']);
     assert.match(result.steps[1].goal, /artwork/);
     assert.equal(events.some((event) => event.type === 'warning' && /следующий шаг/.test(event.message)), true);
+});
+
+test('trivial pace skips the reviewer', async () => {
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Коротко.\nroute: plan' };
+        if (role === 'classifier') return { text: JSON.stringify({ label: 'trivial' }) };
+        if (role === 'planner') return { text: JSON.stringify({ summary: 'мелочь', complexity: 'trivial', steps: [{ goal: 'сделать', details: '', verify: '', complexity: 'trivial' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: true, imageNotes: null, risks: [], fileActions: [], taskMap: [] }) };
+        if (role === 'reviewer') throw new Error('reviewer ran');
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'ok', memories: [] }) };
+        return { text: 'готово' };
+    };
+    const result = await runTeam({ client: client(), config: { ...baseConfig(), pace: { ...defaults.pace, speed: 10, quality: 40 } }, ledger: createLedger(), task: 'Поправь опечатку', root, approvalLevel: 'all', emit: () => {} });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(result.review, null);
+});
+
+test('pace c does not call the planner', async () => {
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Коротко.\nroute: plan' };
+        if (role === 'classifier') return { text: JSON.stringify({ label: 'trivial' }) };
+        if (role === 'planner') throw new Error('planner ran');
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'ok', memories: [] }) };
+        return { text: 'готово' };
+    };
+    const result = await runTeam({ client: client(), config: { ...baseConfig(), pace: { ...defaults.pace, mode: 'c' }, agent: { ...baseConfig().agent, chain: false } }, ledger: createLedger(), task: 'Поправь опечатку', root, approvalLevel: 'all', emit: () => {} });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(result.plan.steps.length, 1);
+});
+
+test('a bad classifier label becomes normal and the run continues', async () => {
+    const events = [];
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'classifier') return { text: 'не json' };
+        if (role === 'planner') return { text: JSON.stringify({ summary: 's', complexity: 'normal', steps: [{ goal: 'сделать', details: '', verify: '', complexity: 'normal' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [], fileActions: [], taskMap: [] }) };
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'ok', memories: [] }) };
+        return { text: 'готово' };
+    };
+    const result = await runTeam({ client: client(), config: { ...baseConfig(), agent: { ...baseConfig().agent, chain: false } }, ledger: createLedger(), task: 'Сделай шаг', root, approvalLevel: 'all', emit: (event) => events.push(event) });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.ok(events.some((event) => event.type === 'warning' && event.message === 'Метка задачи не распознана, взята normal.'));
 });

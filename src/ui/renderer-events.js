@@ -175,6 +175,9 @@ export function handleRendererEvent(event, api) {
             state.roles.pop();
             if (verbose) line('info', `${event.role}: ${event.status}${event.toolCalls ? ` · инструментов ${event.toolCalls}` : ''}`, { dim: true });
             break;
+        case 'pace':
+            line('info', `Темп: speed ${event.speed} · quality ${event.quality} · политика ${String(event.policy).toUpperCase()} · потолок ${event.model}`, { dim: true });
+            break;
         case 'stage.start':
             line('action', `этап «${STAGES[event.stage] ?? event.stage}»${event.round ? ` (раунд ${event.round})` : ''} — ${event.role}${event.model ? ` · ${event.model}` : ''}`);
             setStatus(`${STAGES[event.stage] ?? event.stage}…`);

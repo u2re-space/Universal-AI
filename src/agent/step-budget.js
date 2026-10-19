@@ -23,8 +23,9 @@ const VISUAL = /artwork|generate_image|edit_image|image_generation|illustration|
  * @exports
  * @ai.hint pure
  */
-export function planLimit({ maxSteps = 12, generation = false } = {}) {
+export function planLimit({ maxSteps = 12, generation = false, pace = false } = {}) {
     const cap = Math.max(1, maxSteps);
+    if (pace) return cap;
     return generation ? Math.min(cap, GENERATION_MAX_STEPS) : cap;
 }
 

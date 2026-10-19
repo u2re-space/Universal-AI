@@ -29,7 +29,8 @@ import { createRoleRunner } from './roles.js';
 import { builtinTools } from './loop.js';
 import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
-import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA } from './schemas.js';
+import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA } from './schemas.js';
+import { acceptanceParagraph, applyPins, clampModel, resolvePace } from './pace.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
 import { formatWorkspace, mergeTaskDraft, scanWorkspace } from './workspace-scan.js';
@@ -88,7 +89,39 @@ export async function runTeam({
     const roles = createRoleRunner({ client, config, ledger, emit, signal });
     const ctx = createSharedContext({ task, root });
     const maxBytes = config.agent.maxContextBytes;
-    const stepLimit = planLimit({ maxSteps: config.agent.maxSteps, generation });
+    let stepLimit = planLimit({ maxSteps: config.agent.maxSteps, generation });
+    let encodeRoute = false;
+    let paced = null;
+    let pacedLabel = 'normal';
+    const paceSettings = config.pace ?? { speed: 10, quality: 40, mode: 'auto', models: ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'] };
+    const pins = config.rolePins ?? Object.fromEntries(Object.entries(config.roles ?? {}).flatMap(([name, role]) => (
+        typeof role?.model === 'string' && role.model.trim() ? [[name, { model: true, effort: false }]] : []
+    )));
+    const paceInput = (extra) => ({
+        speed: paceSettings.speed, quality: paceSettings.quality, mode: paceSettings.mode, models: paceSettings.models,
+        generation, fidelity: generation ? config.generate?.fidelity : null,
+        stepCapOverride: config.stepCapPinned ? config.agent.maxSteps : null,
+        ...extra,
+    });
+    const adopt = (extra) => {
+        paced = applyPins(resolvePace(paceInput(extra)), config.roles ?? {}, pins);
+        if (extra.label) pacedLabel = extra.label;
+        if (paced.ready) stepLimit = planLimit({ maxSteps: paced.stepCap, generation, pace: true });
+        return paced;
+    };
+    const legacyChoice = (author, complexity) => {
+        const configured = config.roles?.[author] ?? {};
+        const choice = author === 'coder' ? coderChoice(complexity, configured) : author === 'writer' ? writerChoice(complexity, configured) : null;
+        return { model: choice?.model ?? null, effort: choice?.effort ?? null };
+    };
+    const paceChoice = (author, complexity) => {
+        const known = complexity === 'trivial' || complexity === 'complex' || complexity === 'normal' ? complexity : 'normal';
+        const one = applyPins(resolvePace(paceInput({
+            label: pacedLabel,
+            steps: [{ complexity: known, author, files: [], goal: '', details: '', verify: '' }],
+        })), config.roles ?? {}, pins);
+        return one.steps?.[0] ?? { model: null, effort: null };
+    };
     const result = { status: 'failed', text: '', plan: null, review: null, steps: [], images: [], changes: [], stats: null,
         recalled: [], memoriesSaved: [], reviewRounds: 0, error: null };
 
@@ -116,6 +149,7 @@ export async function runTeam({
         const result = await roles.run(role, {
             text: task, instructions: ROLE_INSTRUCTIONS[role], toolset, maxTurns: spec.turns, silent: true,
             ...(spec.schema === 'batch' ? { schema: BATCH_SCHEMA, schemaName: 'batch' } : {}),
+            ...(encodeRoute || !paced?.ready ? {} : { model: clampModel(roles.resolve(role).model, paceSettings.models, paced.ceilingIndex, Boolean(pins[role]?.model)) }),
         });
         return { output: result.text, summary: role + ' ' + result.status, data: result.data ?? null };
     }
@@ -269,19 +303,17 @@ export async function runTeam({
          * @param {string} goal
          * @returns {{ author: string, model: string }}
          */
-        const authorModel = (files, goal) => {
+        const authorModel = (files, goal, complexity = plan?.complexity) => {
             const author = authorFor(files, goal);
-            const configured = config.roles?.[author] ?? {};
-            const choice = author === 'coder' ? coderChoice(plan?.complexity, configured)
-                : author === 'writer' ? writerChoice(plan?.complexity, configured) : null;
-            return { author, model: choice?.model ?? roles.resolve(author).model };
+            const choice = encodeRoute || !paced?.ready ? legacyChoice(author, complexity) : paceChoice(author, complexity);
+            return { author, model: choice.model ?? roles.resolve(author).model, effort: choice.effort ?? null };
         };
         /** Send one worker, coder, or writer turn. A restored session continues the interrupted turn. */
         const runWorker = async (title, body, maxTurns = config.agent.workerMaxTurnsPerStep, author = 'worker', checkpoint = null) => {
-            const configured = config.roles?.[author] ?? {};
-            const choice = author === 'coder' ? coderChoice(plan?.complexity, configured)
-                : author === 'writer' ? writerChoice(plan?.complexity, configured) : null;
-            const model = choice?.model ?? roles.resolve(author).model;
+            const complexity = checkpoint?.complexity ?? plan?.complexity;
+            const choice = encodeRoute || !paced?.ready ? legacyChoice(author, complexity) : paceChoice(author, complexity);
+            const model = choice.model ?? roles.resolve(author).model;
+            const effort = choice.effort ?? null;
             const restored = Boolean(checkpoint?.resume && pendingSession && pendingSession.model === model);
             if (restored) {
                 workerSession = pendingSession;
@@ -298,7 +330,7 @@ export async function runTeam({
             const outcome = await roles.run(author, {
                 text: `${header}\n\n# ${title}\n${body}`, instructions: ROLE_INSTRUCTIONS[author], toolset: workerTools, builtin,
                 maxTurns, session: workerSession, imageTarget: config.image.outputDir,
-                model: choice?.model ?? null, effort: choice?.effort ?? null,
+                model, effort,
             });
             if (checkpoint?.stepId && work) {
                 progress.checkpoint = { stepId: checkpoint.stepId, phase: checkpoint.phase, model };
@@ -363,6 +395,15 @@ export async function runTeam({
                 phase: open?.phase ?? null, stage: progress.stage,
             });
             showPlan();
+            const known = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
+            adopt({
+                label: known,
+                steps: (plan.steps ?? []).map((step) => ({
+                    complexity: step.complexity, author: authorFor(step.files, step.goal),
+                    files: step.files, goal: step.goal, details: step.details, verify: step.verify, kind: step.kind,
+                })),
+            });
+            notify({ type: 'pace', speed: paceSettings.speed, quality: paceSettings.quality, policy: paced.policy, model: paced.ceilingModel });
         }
 
         if (!resumedWork && config.agent.chain !== false) {
@@ -407,6 +448,7 @@ export async function runTeam({
             ctx.set('artifacts', 'Artifacts', handoff.artifacts.map((item) => `${item.id} ${item.rel}`).join('\n') || '(none)', { priority: 8 });
             notify({ type: 'stage.done', stage: 'answer', status: 'completed', route });
             if (route === 'encode') {
+                encodeRoute = true;
                 const encoded = await encodeHandoff();
                 if (!encoded.ok) return encoded.done;
                 if (encoded.written.length >= 2) {
@@ -462,12 +504,41 @@ export async function runTeam({
             }
         }
 
+        if (!resumedWork && !encodeRoute) {
+            adopt({ label: null });
+            const classified = await roles.run('classifier', {
+                text: task, instructions: ROLE_INSTRUCTIONS.classifier, schema: CLASSIFIER_SCHEMA, schemaName: 'task_label',
+                maxTurns: 1, model: paced.roles.classifier.model, effort: paced.roles.classifier.effort,
+            });
+            if (classified.status === 'cancelled' || classified.status === 'budget') return stop(classified, 'классификация');
+            let label = 'normal';
+            if (classified.status === 'completed' && ['trivial', 'normal', 'complex'].includes(classified.data?.label)) label = classified.data.label;
+            else notify({ type: 'warning', message: 'Метка задачи не распознана, взята normal.' });
+            adopt({ label, task, author: authorFor(pathsIn(task), task) });
+            notify({ type: 'pace', speed: paceSettings.speed, quality: paceSettings.quality, policy: paced.policy, model: paced.ceilingModel });
+            if (paced.policy === 'c') {
+                const step = paced.steps[0];
+                const drafted = lists({
+                    summary: task, complexity: label,
+                    steps: [{ goal: step.goal || task, details: step.details || 'Complete the task as described.', verify: step.verify || 'Re-read the result.', complexity: step.complexity }],
+                    filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                    needsReview: false, imageNotes: null, risks: [], fileActions: [], taskMap: [],
+                });
+                const expanded = lists(expandPlan(drafted, { maxSteps: 1, splitFiles: false }));
+                bind(expanded, createProgress({ id: handoff?.id ?? newWorkId(), task, plan: expanded }));
+                await persist('running');
+                showPlan();
+            }
+        }
+
         // 1. Planner. A resumed plan is already bound.
         if (!plan) {
-        notify({ type: 'stage.start', stage: 'plan', role: 'planner', model: roles.resolve('planner').model });
+        notify({ type: 'stage.start', stage: 'plan', role: 'planner', model: paced.roles.planner.model });
         const planned = await roles.run('planner', {
             text: `${ctx.render({ maxBytes })}\n\n# Directory tree\n${directoryTree}\n\n${draft}\n\n# Task\n${task}`, parts: handoff ? [] : parts,
-            instructions: ROLE_INSTRUCTIONS.planner.replace('{maxSteps}', String(stepLimit)), schema: PLAN_SCHEMA, schemaName: 'plan',
+            instructions: `${ROLE_INSTRUCTIONS.planner.replace('{maxSteps}', String(stepLimit))}\n\n${acceptanceParagraph(paced.acceptance)}`,
+            schema: PLAN_SCHEMA, schemaName: 'plan',
+            model: paced.roles.planner.model, effort: paced.roles.planner.effort,
             builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
         });
         if (planned.status !== 'completed') return stop(planned, 'план');
@@ -517,13 +588,14 @@ export async function runTeam({
         const pastCollect = Boolean(resumedWork) && (
             progress.cursor > 0 || Boolean(ctx.get('findings')) || ['work', 'review', 'fix', 'done'].includes(progress.stage)
         );
-        if (!pastCollect && wantsContext && readNames.length) {
-            notify({ type: 'stage.start', stage: 'collect', role: 'collector', model: roles.resolve('collector').model });
+        if (!pastCollect && paced?.collect !== 'off' && wantsContext && readNames.length) {
+            notify({ type: 'stage.start', stage: 'collect', role: 'collector', model: paced.roles.collector.model });
             const focus = marks.filter((item) => item.role === 'read' || item.role === 'edit').map((item) => `${item.role} ${item.path} — ${item.reason}`);
             const brief = `# Collector brief\nTask map (read/edit):\n${bullets(focus)}\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`;
             const collected = await roles.run('collector', {
                 text: `${ctx.render({ maxBytes })}\n\n${brief}`, instructions: ROLE_INSTRUCTIONS.collector, toolset: collectorTools,
                 schema: COLLECTOR_SCHEMA, schemaName: 'context_report', maxTurns: config.agent.collectorMaxTurns,
+                model: paced.roles.collector.model, effort: paced.roles.collector.effort,
             });
             if (HARD_STOP.has(collected.status)) return stop(collected, 'сбор контекста');
             if (collected.status === 'completed' && collected.data) {
@@ -560,7 +632,7 @@ export async function runTeam({
                 : `Your step ${number} of ${plan.steps.length}`;
             const prior = progress.steps[index];
             const interrupted = Boolean(prior && prior.status !== 'pending' && prior.status !== 'completed');
-            const chosen = authorModel(step.files, step.goal);
+            const chosen = authorModel(step.files, step.goal, step.complexity);
             const resumeSession = interrupted && progress.checkpoint?.stepId === step.id && pendingSession?.model === chosen.model;
             const extra = index === revisionAt ? revisionClause(revision) : '';
             if (extra) revisionUsed = true;
@@ -600,7 +672,7 @@ export async function runTeam({
                 lastPhase = pass.phase;
                 progress.steps[index].phase = pass.phase;
                 workerTools.setBackupSlot?.(`${step.id ?? `s${number}`}-${pass.phase}`);
-                outcome = await runWorker(title, pass.body, pass.maxTurns, chosen.author, { stepId: step.id, phase: pass.phase, resume: pass.resume });
+                outcome = await runWorker(title, pass.body, pass.maxTurns, chosen.author, { stepId: step.id, phase: pass.phase, resume: pass.resume, complexity: step.complexity });
                 result.images.push(...outcome.images);
                 reports.push(outcome.text.trim());
                 files.push(...takeFiles());
@@ -683,7 +755,11 @@ export async function runTeam({
             }
 
         // 4. Review and fix rounds.
-        const shouldReview = plan.needsReview && plan.complexity !== 'trivial' && config.agent.maxReviewRounds > 0 && !workIncomplete && !revisionOnly;
+        const shouldReview = paced?.reviewMode === 'force'
+            ? paced.reviewRounds > 0 && !workIncomplete && !revisionOnly
+            : paced?.reviewMode === 'plan'
+                ? Boolean(plan.needsReview) && plan.complexity !== 'trivial' && paced.reviewRounds > 0 && !workIncomplete && !revisionOnly
+                : false;
         let review = null;
         if (shouldReview) {
             progress.stage = 'review';
@@ -691,12 +767,13 @@ export async function runTeam({
             await persist('running');
         }
         for (let round = 1; shouldReview; round++) {
-            notify({ type: 'stage.start', stage: 'review', role: 'reviewer', model: roles.resolve('reviewer').model, round });
+            notify({ type: 'stage.start', stage: 'review', role: 'reviewer', model: paced.roles.reviewer.model, round });
             ctx.set('diff', 'Changes made by the worker (diff)', await describeChangeSet({ root, changes: workerTools.stats().changes, maxBytes: 48 * 1024 }), { priority: 5 });
             const commands = workerTools.stats().commands.map((c) => `- ${c.command} → exit ${c.exitCode ?? '?'}`).join('\n') || '- (none)';
             const reviewed = await roles.run('reviewer', {
                 text: `${ctx.render({ maxBytes })}\n\n# Review request (round ${round})\nAcceptance criteria:\n${bullets(plan.acceptanceCriteria)}\nCommands run by the worker:\n${commands}`,
-                instructions: ROLE_INSTRUCTIONS.reviewer, toolset: reviewerTools, schema: REVIEW_SCHEMA, schemaName: 'review', maxTurns: config.agent.reviewerMaxTurns,
+                instructions: `${ROLE_INSTRUCTIONS.reviewer}\n\n${acceptanceParagraph(paced.acceptance)}`, toolset: reviewerTools, schema: REVIEW_SCHEMA, schemaName: 'review', maxTurns: config.agent.reviewerMaxTurns,
+                model: paced.roles.reviewer.model, effort: paced.roles.reviewer.effort,
             });
             if (HARD_STOP.has(reviewed.status)) return stop(reviewed, 'ревью');
             if (reviewed.status !== 'completed' || !reviewed.data) {
@@ -708,10 +785,10 @@ export async function runTeam({
             result.reviewRounds = round;
             notify({ type: 'review.done', round, verdict: review.verdict, summary: review.summary, issues: review.issues, unverified: review.unverified });
             notify({ type: 'stage.done', stage: 'review', status: review.verdict });
-            if (review.verdict === 'accept' || round > config.agent.maxReviewRounds) break;
+            if (review.verdict === 'accept' || round >= paced.reviewRounds) break;
             notify({ type: 'stage.start', stage: 'fix', role: 'worker', model: roles.resolve('worker').model, round });
             const issues = review.issues.map((i) => `- [${i.severity}] ${i.path ? `${i.path}: ` : ''}${i.message} → ${i.requestedChange}`).join('\n') || '- (see summary)';
-            const fixed = await runWorker(`Review round ${round}: changes requested`, `${review.summary}\n${issues}\n\nAddress every issue, verify, and report what you changed.`, config.agent.workerMaxTurnsPerStep, plan.steps.some((step) => authorFor(step.files, step.goal) === 'coder') ? 'coder' : plan.steps.some((step) => authorFor(step.files, step.goal) === 'writer') ? 'writer' : 'worker');
+            const fixed = await runWorker(`Review round ${round}: changes requested`, `${review.summary}\n${issues}\n\nAddress every issue, verify, and report what you changed.`, config.agent.workerMaxTurnsPerStep, plan.steps.some((step) => authorFor(step.files, step.goal) === 'coder') ? 'coder' : plan.steps.some((step) => authorFor(step.files, step.goal) === 'writer') ? 'writer' : 'worker', { complexity: [...plan.steps].sort((a, b) => (({ trivial: 0, normal: 1, complex: 2 })[b.complexity] ?? 1) - (({ trivial: 0, normal: 1, complex: 2 })[a.complexity] ?? 1))[0]?.complexity ?? plan.complexity });
             result.images.push(...fixed.images);
             result.steps.push({ index: `fix-${round}`, goal: 'Устранение замечаний ревью', status: fixed.status, report: fixed.text.trim() });
             progress.notes ??= [];
@@ -738,11 +815,12 @@ export async function runTeam({
         // 6. Memory extraction (cheap summarizer role).
         if (memory) {
             if (config.memory.autoSave) {
-                notify({ type: 'stage.start', stage: 'memory', role: 'summarizer', model: roles.resolve('summarizer').model });
+                notify({ type: 'stage.start', stage: 'memory', role: 'summarizer', model: paced?.roles.summarizer.model ?? roles.resolve('summarizer').model });
                 const extracted = await roles.run('summarizer', {
                     text: `# Task\n${task}\n\n# Plan summary\n${plan.summary}\n\n# Worker reports\n${clipMiddle(ctx.get('progress'), 24 * 1024)}\n\n# Review\n${review ? `${review.verdict}: ${review.summary}` : 'not performed'}` +
                         `\n\n# Existing memories (do not repeat)\n${renderMemories(result.recalled) || '(none)'}`,
                     instructions: ROLE_INSTRUCTIONS.summarizerMemory, schema: MEMORY_SCHEMA, schemaName: 'memory_update',
+                    model: paced?.roles.summarizer.model ?? null, effort: paced?.roles.summarizer.effort ?? null,
                 });
                 if (extracted.status === 'completed' && extracted.data) {
                     for (const item of extracted.data.memories.slice(0, 6)) {
