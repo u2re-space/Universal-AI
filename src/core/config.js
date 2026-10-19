@@ -25,6 +25,7 @@ import {
     defaults,
 } from './config-defaults.js';
 import { COMPLETION_MODEL_CHOICES, resolveCompletionModel } from '../complete/models.js';
+import { assertPaceBudget } from '../agent/pace.js';
 
 const KiB = 1024;
 
@@ -298,8 +299,8 @@ function validateConfig(c) {
     for (const key of Object.keys(c.pace)) {
         if (!['speed', 'quality', 'mode', 'models'].includes(key)) fail(`неизвестный параметр pace.${key}`);
     }
-    if (!Number.isInteger(c.pace.speed) || c.pace.speed < 0 || c.pace.speed > 100) fail('pace.speed: целое 0..100');
-    if (!Number.isInteger(c.pace.quality) || c.pace.quality < 0 || c.pace.quality > 100) fail('pace.quality: целое 0..100');
+    try { assertPaceBudget(c.pace.speed, c.pace.quality); }
+    catch (error) { fail(error.message); }
     if (!['auto', 'a', 'b', 'c'].includes(c.pace.mode)) fail('pace.mode: auto | a | b | c');
     if (!Array.isArray(c.pace.models)) fail('pace.models: от 1 до 8 непустых уникальных строк');
     const paceModels = c.pace.models.map((item) => typeof item === 'string' ? item.trim() : '');

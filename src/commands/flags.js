@@ -11,6 +11,7 @@
  */
 import { APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES } from '../core/config.js';
 import { PLATFORMS } from '../generate/platform.js';
+import { assertPaceBudget, PACE_QUALITY_MESSAGE, PACE_SPEED_MESSAGE } from '../agent/pace.js';
 
 /**
  * Error for invalid arguments or configuration. Command handlers map it to exit code 2.
@@ -85,8 +86,8 @@ export function overridesFrom(values, { command = null } = {}) {
         else if (command !== 'serve') {
             let quality;
             try { quality = number(values.quality, 'quality', { integer: true, min: 0 }); }
-            catch { throw new UsageError('--quality: 0..100 или low|medium|high|xhigh|max|auto'); }
-            if (quality > 100) throw new UsageError('--quality: 0..100 или low|medium|high|xhigh|max|auto');
+            catch { throw new UsageError('--quality: 0..200 или low|medium|high|xhigh|max|auto'); }
+            if (quality > 200) throw new UsageError(PACE_QUALITY_MESSAGE);
             if (command === 'image') throw new UsageError('Для image --quality: low | medium | high | xhigh | max | auto');
             (o.pace ??= {}).quality = quality;
         }
@@ -118,8 +119,10 @@ export function overridesFrom(values, { command = null } = {}) {
         (o.agent ??= {}).route = values.route;
     }
     if (values.speed !== undefined) {
-        const speed = number(values.speed, 'speed', { integer: true, min: 0 });
-        if (speed > 100) throw new UsageError('--speed: 0..100');
+        let speed;
+        try { speed = number(values.speed, 'speed', { integer: true, min: 0 }); }
+        catch { throw new UsageError(PACE_SPEED_MESSAGE); }
+        if (speed > 200) throw new UsageError(PACE_SPEED_MESSAGE);
         (o.pace ??= {}).speed = speed;
     }
     if (values.pace !== undefined) {
@@ -127,6 +130,10 @@ export function overridesFrom(values, { command = null } = {}) {
         (o.pace ??= {}).mode = values.pace;
     }
     if (values['max-steps'] !== undefined) (o.agent ??= {}).maxSteps = number(values['max-steps'], 'max-steps', { integer: true, min: 1 });
+    if (Number.isInteger(o.pace?.speed) && Number.isInteger(o.pace?.quality)) {
+        try { assertPaceBudget(o.pace.speed, o.pace.quality); }
+        catch (error) { throw new UsageError(error.message); }
+    }
     if (values.memory === false) o.memory = { enabled: false };
     if (values.web) o.tools.web = true;
     if (values.images) o.tools.images = true;

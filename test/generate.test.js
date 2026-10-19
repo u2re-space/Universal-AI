@@ -167,11 +167,35 @@ test('speed, quality, and pace flags parse and image quality stays a word', () =
     assert.equal(overridesFrom({ quality: 'high' }, { command: 'run' }).image.quality, 'high');
     assert.equal(overridesFrom({ pace: 'c' }, { command: 'gen' }).pace.mode, 'c');
     assert.equal(overridesFrom({ 'max-steps': '8' }, { command: 'run' }).agent.maxSteps, 8);
-    assert.throws(() => overridesFrom({ speed: '101' }, { command: 'run' }), /--speed/);
+    assert.equal(overridesFrom({ speed: '150', quality: '50' }, { command: 'run' }).pace.speed, 150);
+    assert.equal(overridesFrom({ speed: '150', quality: '50' }, { command: 'run' }).pace.quality, 50);
+    assert.throws(() => overridesFrom({ speed: '-1' }, { command: 'run' }), /pace\.speed/);
+    assert.throws(() => overridesFrom({ quality: '201' }, { command: 'run' }), /pace\.quality/);
+    assert.throws(() => overridesFrom({ speed: '100', quality: '101' }, { command: 'run' }), /pace\.speed/);
     assert.throws(() => overridesFrom({ quality: '40' }, { command: 'image' }), /Для image --quality/);
-    assert.throws(() => overridesFrom({ quality: 'nope' }, { command: 'run' }), /0\.\.100 или low/);
+    assert.throws(() => overridesFrom({ quality: 'nope' }, { command: 'run' }), /0\.\.200 или low/);
     assert.throws(() => overridesFrom({ pace: 'z' }, { command: 'run' }), /--pace/);
     assert.equal(overridesFrom({ quality: '40' }, { command: 'serve' }).pace, undefined);
+});
+
+test('config rejects a pace pair outside the shared budget', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-pace-budget-'));
+    const file = path.join(home, 'bad.json');
+    const load = () => loadConfig({
+        configPath: file,
+        env: { AI_AGENT_HOME: home, AI_MODEL: 'mock-model', OPENAI_API_KEY: 'sk-test' },
+        ensureHome: false,
+    });
+    try {
+        await writeFile(file, JSON.stringify({ pace: { quality: 201 } }));
+        await assert.rejects(() => load(), /pace\.quality: целое 0\.\.200/);
+        await writeFile(file, JSON.stringify({ pace: { speed: -1 } }));
+        await assert.rejects(() => load(), /pace\.speed/);
+        await writeFile(file, JSON.stringify({ pace: { speed: 100, quality: 101 } }));
+        await assert.rejects(() => load(), /pace\.speed/);
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
 });
 
 test('loadConfig rejects a bad server id and a bad fidelity', async () => {
