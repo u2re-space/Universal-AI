@@ -128,6 +128,7 @@ export const defaults = Object.freeze({
         visionDelegate: 'auto',         // auto (when roles.vision has its own model) | always | never
         chain: true,                    // first answer, then encoder or planner
         route: null,                    // null | encoder | planner; null lets the answer and the heuristic choose
+        encode: 'encoder',              // encoder (file-command model) | mcp (this process hosts the encode server)
         resume: true,                   // continue the newest unfinished step and its saved turn
     },
     /** Long-term memory (SQLite, node:sqlite) and project notes. */

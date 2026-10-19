@@ -256,6 +256,7 @@ function validateConfig(c) {
     if (typeof c.agent.chain !== 'boolean') fail('agent.chain: true | false');
     if (typeof c.agent.resume !== 'boolean') fail('agent.resume: true | false');
     if (c.agent.route !== null && !['encoder', 'planner', 'decisions'].includes(c.agent.route)) fail('agent.route: encoder | planner | decisions');
+    if (!['encoder', 'mcp'].includes(c.agent.encode)) fail('agent.encode: encoder | mcp');
     for (const key of ['enabled', 'autoSave']) if (typeof c.memory[key] !== 'boolean') fail(`memory.${key}: true | false`);
     if (!Number.isSafeInteger(c.memory.maxRecall) || c.memory.maxRecall < 0 || c.memory.maxRecall > 50) fail('memory.maxRecall: 0..50');
     if (c.memory.notesFile !== null && (typeof c.memory.notesFile !== 'string' || !c.memory.notesFile.trim())) fail('memory.notesFile: имя файла или null');

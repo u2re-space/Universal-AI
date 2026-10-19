@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, writeFile, rm, symlink, mkdir } from 'node:fs/promises';
 import { createSession, loadSession } from '../src/core/session.js';
+import { loadConfig } from '../src/core/config.js';
 import { createLedger, priceFor, costOf } from '../src/core/usage.js';
 import { loadImageAttachment, loadFileAttachment, buildUserMessage, detectImageMime, stdinFence } from '../src/core/attachments.js';
 import { resolveInside } from '../src/agent/paths.js';
@@ -137,4 +138,23 @@ test('shell: captures output, exit codes and timeouts', async () => {
 
 test('sanitizeTerminal strips control sequences but keeps newlines', () => {
     assert.equal(sanitizeTerminal('a\x1b[31mred\x1b[0m\nb\u202etext\x07'), 'ared\nbtext');
+});
+
+test('agent.encode accepts encoder or mcp and rejects anything else', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-encode-cfg-'));
+    const env = { AI_AGENT_HOME: home };
+    try {
+        const config = await loadConfig({ env, ensureHome: false });
+        assert.equal(config.agent.encode, 'encoder');
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ agent: { encode: 'mcp' } }));
+        const mcp = await loadConfig({ env, ensureHome: false });
+        assert.equal(mcp.agent.encode, 'mcp');
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ agent: { encode: 'nope' } }));
+        await assert.rejects(
+            loadConfig({ env, ensureHome: false }),
+            /agent\.encode: encoder \| mcp/,
+        );
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
 });
