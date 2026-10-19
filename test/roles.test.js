@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS } from '../src/roles/index.js';
 import { defaults } from '../src/core/config.js';
 
-const NAMES = ['default', 'planner', 'collector', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'scanner', 'solver', 'clicker', 'typer', 'encoder', 'tester'];
+const NAMES = ['default', 'planner', 'collector', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'scanner', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier'];
 
 test('role modules match config role names', () => {
     assert.deepEqual(Object.keys(ROLE_MODULES).sort(), NAMES.slice().sort());

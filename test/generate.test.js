@@ -197,6 +197,7 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
         script: (body) => {
             if (body.tools?.some((tool) => tool.type === 'image_generation')) sawImageTool = true;
             const role = body.text?.format?.name ?? 'worker';
+            if (role === 'task_label') return { text: JSON.stringify({ label: 'trivial' }) };
             if (role === 'plan') {
                 planner = JSON.stringify(body.input);
                 return { text: JSON.stringify({ summary: 'лендинг', complexity: 'trivial', steps: [{ goal: 'страница', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: 'tilda', risks: [] }) };
@@ -235,6 +236,7 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
         const manifest = JSON.parse(await readFile(path.join(work, '.ai', 'generation.json'), 'utf8'));
         assert.equal(manifest.kind, 'landing');
         assert.equal(manifest.fidelity, 87);
+        assert.equal(manifest.effectiveFidelity, 66);
         assert.equal(manifest.creativity, 20);
         assert.equal(manifest.measured, null);
         assert.equal(manifest.method, 'unmeasured');
@@ -270,5 +272,25 @@ test('ai gen without a kind or a reference exits 2', async () => {
     } finally {
         await rm(home, { recursive: true, force: true });
         await rm(work, { recursive: true, force: true });
+    }
+});
+
+test('config init writes pace and does not pin the default step cap', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-init-home-'));
+    try {
+        const child = spawn(process.execPath, [bin, 'config', 'init'], {
+            env: { ...process.env, OPENAI_API_KEY: 'sk-test', AI_AGENT_HOME: home, AI_MODEL: 'mock-model', NO_COLOR: '1' },
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
+        });
+        let stderr = '';
+        child.stderr.on('data', (chunk) => { stderr += chunk; });
+        const code = await new Promise((resolve) => child.once('close', resolve));
+        assert.equal(code, 0, stderr);
+        const saved = JSON.parse(await readFile(path.join(home, 'config.json'), 'utf8'));
+        assert.deepEqual(saved.pace.models, ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra']);
+        assert.equal(saved.agent?.maxSteps, undefined);
+    } finally {
+        await rm(home, { recursive: true, force: true });
     }
 });

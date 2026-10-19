@@ -190,6 +190,7 @@ test('run (team mode): roles use their own models; memory command sees what was 
     script = (body) => {
         const role = roleOf(body);
         models[role] = body.model;
+        if (role === 'task_label') return { text: JSON.stringify({ label: 'trivial' }) };
         if (role === 'plan') return { text: JSON.stringify({ summary: 'Создать файл заметки', complexity: 'trivial', steps: [{ goal: 'Создать note.txt', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
         if (role === 'memory_update') return { text: JSON.stringify({ taskSummary: 'Создан note.txt', memories: [{ scope: 'project', kind: 'convention', content: 'Заметки хранятся в note.txt в корне', tags: ['notes'] }] }) };
         const outputs = body.input.filter((i) => i.type === 'function_call_output');

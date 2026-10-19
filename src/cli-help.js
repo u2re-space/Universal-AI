@@ -69,7 +69,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 
 Команда (run и gen):
   --role <роль=модель[:effort]>  модель для роли: planner, collector, worker, coder, writer, reviewer, vision, summarizer,
-                         scanner, solver, clicker, typer, encoder, tester, default, all
+                         scanner, solver, clicker, typer, encoder, tester, classifier, default, all
                          (например: --role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
   --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
   --no-resume            не продолжать незавершённый шаг, фазу и ход из .tmp (по умолчанию тот же текст задачи продолжается с места остановки)
@@ -77,6 +77,10 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   В каталоге Node.js или фронтенда сканер (до ответа, encoder и planner) кладёт в контекст package.json, tsconfig.json или jsconfig.json, import map и найденные по ним файлы. Корневой index.html целиком — если он до 8 КиБ или задача про страницу.
   --template <файл>      текст задачи из файла. {{message}} заменяется целью. Можно несколько
   --fidelity <0..100>    цель соответствия референсам (по умолчанию 87). Процент не измеряется
+  --speed <0..100>       скорость работы (по умолчанию 10). Выше — меньше шагов и ролей
+  --quality <0..100>     качество работы (по умолчанию 40). Ниже — дешевле модель и мягче приёмка
+  --pace auto|a|b|c      кто выключает стадии (по умолчанию auto)
+  --max-steps <n>        потолок шагов плана. Закрепляет число и заменяет расчёт pace
   --creativity <0..100>  сколько можно добавить сверх референсов (по умолчанию 20)
   --platform <id>        профиль платформы (по умолчанию chrome-157-beta)
   --example <путь|url>   пример или шаблон оформления, можно несколько
@@ -93,6 +97,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 
 Изображения (image / --images):
   --size WxH|auto  --quality low|medium|high|xhigh|max|auto  --format png|webp|jpeg
+  Целое --quality задаёт качество работы, слово low|medium|high|xhigh|max|auto — качество картинки.
   --image-background transparent|opaque|auto  --partials 0..3  --image-model <id>  --count, -n <n>
   Для api.proxyapi.ru картинки идут через /images/generations и /images/edits (модель openai/gpt-image-1-mini, если не задана --image-model).
 
