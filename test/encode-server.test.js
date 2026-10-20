@@ -40,7 +40,7 @@ test('the encode server lists tools, reads through Node, and sends writes to a h
     const logs = stderrSink();
     await writeFile(path.join(root, 'note.txt'), 'hello file\n');
     const host = await startEncodeHost({
-        root, config: defaults, stderr: logs.stream, approvalLevel: 'all',
+        root, config: defaults, stderr: logs.stream, approvalLevel: 'all', port: 0,
     });
     try {
         assert.match(logs.read(), new RegExp(`MCP: ${host.mcpURL}`));

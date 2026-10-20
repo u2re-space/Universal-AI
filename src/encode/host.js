@@ -18,13 +18,13 @@ const TOOLS = ['list_files', 'read_file', 'search_files', 'write_file', 'replace
 
 /**
  * Open the MCP server and the claim registry. Loads TypeScript only from here.
- * @param {{ root: string, config: object, decide?: Function, signal?: AbortSignal, stderr?: object, approvalLevel?: string, emit?: Function }} options
+ * @param {{ root: string, config: object, decide?: Function, signal?: AbortSignal, stderr?: object, approvalLevel?: string, emit?: Function, port?: number }} options
  * @returns {Promise<{ mcpURL: string, processingURL: string, encode: Function, close: () => Promise<void> }>}
  * @exports
  * @ai.hint io
  */
 export async function startEncodeHost({
-    root, config, decide = async () => 'yes', signal, stderr = process.stderr, approvalLevel = 'all', emit = () => {},
+    root, config, decide = async () => 'yes', signal, stderr = process.stderr, approvalLevel = 'all', emit = () => {}, port = 3000,
 }) {
     const registry = createProcessRegistry();
     const { encodeArtifacts } = await import('./encode.ts');
@@ -79,6 +79,7 @@ export async function startEncodeHost({
     let listener;
     try {
         listener = await listenProtocol({
+            port,
             onRequest(req, res) {
                 const pathname = String(req.url ?? '').split('?')[0];
                 if (pathname !== '/mcp') return false;
@@ -99,7 +100,8 @@ export async function startEncodeHost({
             },
         });
     } catch (error) {
-        throw new Error(`Не удалось открыть MCP-сервер: ${error.message}`);
+        const message = error?.code === 'EADDRINUSE' ? `порт ${port} занят` : error.message;
+        throw new Error(`Не удалось открыть MCP-сервер: ${message}`);
     }
     const mcpURL = `http://127.0.0.1:${listener.port}/mcp`;
     const processingURL = listener.url;
