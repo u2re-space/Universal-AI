@@ -169,7 +169,7 @@ function attachSocket(socket, { onConnection, pingIntervalMs, idleMs, maxFrameBy
  * @exports
  * @ai.hint io
  */
-export function listenProtocol({ port = 0, host = '127.0.0.1', onConnection, onRequest = null, onUpgrade = null, pingIntervalMs = 30_000, idleMs = 90_000, maxFrameBytes = MAX_FRAME_BYTES } = {}) {
+export function listenProtocol({ port = 3000, host = '127.0.0.1', onConnection, onRequest = null, onUpgrade = null, pingIntervalMs = 30_000, idleMs = 90_000, maxFrameBytes = MAX_FRAME_BYTES } = {}) {
     if (host !== '127.0.0.1') return Promise.reject(new Error('WebSocket-сервер слушает только 127.0.0.1.'));
     const sockets = new Set();
     const server = http.createServer(async (req, res) => {
