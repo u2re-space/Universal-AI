@@ -18,6 +18,7 @@ import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { encodeToon } from '../util/toon.js';
 import { runTurn } from './loop.js';
 import { SCREEN_SCHEMA } from './schemas.js';
+import { imageLongSide, visionChoice } from '../roles/vision.js';
 
 /**
  * Runs requests on behalf of a named role with that role's model / reasoning settings.
@@ -76,19 +77,25 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
     }
 
     /** Describe an image through the vision role; returns plain text. */
-    async function describeImage({ part, question = null, rel = 'image' }) {
+    async function describeImage({ part, question = null, rel = 'image', buffer = null }) {
+        const choice = visionChoice(imageLongSide(buffer), config.roles?.vision ?? {});
         const prompt = question ? `Image: ${rel}\nQuestion: ${question}` : `Image: ${rel}\nDescribe it in detail.`;
-        const result = await run('vision', { text: prompt, parts: [part], instructions: ROLE_INSTRUCTIONS.vision, silent: true });
+        const result = await run('vision', {
+            text: prompt, parts: [part], instructions: ROLE_INSTRUCTIONS.vision, silent: true,
+            model: choice.model, effort: choice.effort,
+        });
         if (result.status !== 'completed' || !result.text.trim()) throw new Error(result.error?.message ?? `Роль vision не вернула описание (${result.status}).`);
         return result.text.trim();
     }
 
     /** Describe a screenshot through the vision role; returns structured data and its TOON form. */
-    async function describeScreen({ part, rel = 'screenshot' }) {
+    async function describeScreen({ part, rel = 'screenshot', buffer = null }) {
+        const choice = visionChoice(imageLongSide(buffer), config.roles?.vision ?? {}, { screen: true });
         const prompt = `Screenshot: ${rel}\nDescribe the screen.`;
         const result = await run('vision', {
             text: prompt, parts: [part], instructions: ROLE_INSTRUCTIONS.visionScreen,
             schema: SCREEN_SCHEMA, schemaName: 'screen', silent: true,
+            model: choice.model, effort: choice.effort,
         });
         if (result.status !== 'completed' || !result.data) throw new Error(result.error?.message ?? `Роль vision не вернула описание (${result.status}).`);
         return { data: result.data, toon: encodeToon(result.data) };

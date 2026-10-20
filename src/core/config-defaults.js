@@ -23,7 +23,7 @@ export const IMAGE_DETAILS = ['auto', 'low', 'high', 'original'];
  * AI_MODEL, AI_AGENT_HOME) and finally CLI flags.
  */
 export const defaults = Object.freeze({
-    model: 'gpt-6.1-sol',
+    model: 'gpt-6-luna',
     imageModel: null,                 // null → let the image_generation tool use its default model
     baseURL: "https://api.proxyapi.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
     apiKey: null,                     // prefer the OPENAI_API_KEY environment variable
@@ -89,10 +89,9 @@ export const defaults = Object.freeze({
      *   coder      — writes code; model and effort follow plan complexity unless config pins them
      *   writer     — writes documents, reports, and Markdown; stays on the cheaper model, effort follows complexity
      *   reviewer   — verifies the result (read-only tools, may run tests)
-     *   vision     — describes images for other roles (view_image delegation)
+     *   vision     — describes images; model and effort follow the long side, unless config pins them
      *   summarizer — compaction, file summaries, memory extraction (cheapest model)
-     *   scanner    — decides what to capture; may return coordinates
-     *   solver     — solves the step, including math and captchas
+     *   solver     — solves a step from the screen or an image; model and effort follow step complexity
      *   clicker    — clicks one UI target
      *   typer      — types into a named UI field
      *   encoder    — returns a batch for later execution
@@ -106,10 +105,9 @@ export const defaults = Object.freeze({
         coder: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         writer: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         reviewer: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        vision: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+        vision: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         summarizer: { model: null, effort: 'low', summary: 'none', verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
-        scanner: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        solver: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+        solver: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         clicker: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         typer: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         encoder: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },

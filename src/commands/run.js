@@ -144,7 +144,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
         try {
             const card = await scanWorkspace(ctx.cwd, { task });
             if (card) {
-                emit({ type: 'stage.start', stage: 'scan', role: 'scanner' });
+                emit({ type: 'stage.start', stage: 'scan', role: 'workspace' });
                 prompt = `${formatWorkspace(card)}\n\n# Task\n${task}`;
                 emit({ type: 'stage.done', stage: 'scan', status: 'completed', files: card.files.map((item) => item.path) });
             }

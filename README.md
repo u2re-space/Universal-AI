@@ -197,10 +197,9 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 | `collector` | собрать контекст из файлов для остальных: ответить на вопросы планировщика, выписать нужные фрагменты и соглашения | только чтение: `list_files`, `search_files`, `read_file`, `summarize_file`, `recall` | младшая модель, effort `low` |
 | `worker` | выполнять шаги плана по одному: генерировать вызовы инструментов (JSON для локального исполнителя), проверять, отчитываться | все (по политике `--approve`) | младшая/средняя модель |
 | `reviewer` | независимо проверить результат по diff и критериям приёмки; `accept` или `revise` с конкретными замечаниями → worker исправляет (до `agent.maxReviewRounds` раундов) | чтение + `run_command` | старшая модель |
-| `vision` | описывать изображения для других ролей (`view_image` делегирует ей, когда у неё своя модель — `agent.visionDelegate`) | — | — |
+| `vision` | описывать изображения для других ролей (`view_image` делегирует ей, когда у неё своя модель — `agent.visionDelegate`) | — | длинная сторона до 512 px: `gpt-6-luna` / `low`; до 1280 px: `gpt-6-luna` / `medium`; крупнее и любой скриншот экрана: `gpt-6.1-sol` / `high` |
 | `summarizer` | сводки больших файлов (`summarize_file`, кешируются по хешу), извлечение фактов в память после задачи | — | самая дешёвая модель, без рассуждений |
-| `scanner` | решить, что снимать; может вернуть координаты | `screenshot` | общая `model`, effort `low` |
-| `solver` | решить шаг, включая арифметику и капчи; мышью не пользуется | `screenshot` | общая `model`, effort `high` |
+| `solver` | решить шаг по экрану или файлу (формула, фрагмент текста, капча) и указать, где элементы | `screenshot`, `view_image` | trivial: `gpt-6-luna` / `low`; normal: `gpt-6-luna` / `medium`; complex: `gpt-6.1-sol` / `high` |
 | `clicker` | кликнуть | `click`, `screenshot` | общая `model`, effort `low` |
 | `typer` | ввести текст в поле | `type`, `screenshot` | общая `model`, effort `low` |
 | `encoder` | вернуть пакет действий | `screenshot` | общая `model`, effort `medium` |
@@ -218,7 +217,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 ### Рабочий стол
 
 `--desktop` включает `screenshot`, `click`, `type`, `run_ahk`, `run_batch` и `delegate_role` для worker и reviewer.
-`delegate_role` передаёт один шаг роли `scanner`, `solver`, `clicker`, `typer`, `encoder` или `tester`.
+`delegate_role` передаёт один шаг роли `solver`, `clicker`, `typer`, `encoder` или `tester`.
 Нужен AutoHotkey v2: установленный `AutoHotkey64.exe`, либо `desktop.ahkPath` указывает на него.
 `--approve ask` подтверждает каждое действие рабочего стола. `--approve read` и `--approve write` рабочий стол не разрешают. `--approve all` разрешает.
 Снимки попадают в `.ai/desktop/`; роль `vision` описывает их как TOON.

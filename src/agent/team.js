@@ -20,6 +20,7 @@ import { clipMiddle, errorMessage } from '../util/text.js';
 import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { SPECIALISTS } from '../roles/index.js';
 import { coderChoice, isCodingStep } from '../roles/coder.js';
+import { solverChoice } from '../roles/solver.js';
 import { writerChoice, isWritingStep } from '../roles/writer.js';
 import { createToolset, enabledToolNames, READ_ONLY_TOOLS } from './tools.js';
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
@@ -139,6 +140,7 @@ export async function runTeam({
         return roles.shouldDelegateVision(role) ? roles.describeImage : null;
     };
     const taskMarks = { edit: null };
+    const stepState = { complexity: 'normal' };
     let marks = [];
     /** Run one specialist on `task` and return its text, status, and JSON. */
     async function delegate(role, task) {
@@ -146,10 +148,17 @@ export async function runTeam({
         const spec = SPECIALISTS[role];
         const names = spec.tools.filter((name) => allNames.includes(name));
         const toolset = createToolset({ ...toolBase, names, approvalLevel, describeScreen: roles.describeScreen });
+        const known = stepState.complexity === 'trivial' || stepState.complexity === 'complex' ? stepState.complexity : 'normal';
+        const solver = role === 'solver' ? solverChoice(known, config.roles?.solver ?? {}) : null;
+        let model = solver?.model ?? null;
+        if (!encodeRoute && paced?.ready) {
+            model = clampModel(model ?? roles.resolve(role).model, paceSettings.models, paced.ceilingIndex, Boolean(pins[role]?.model));
+        }
         const result = await roles.run(role, {
             text: task, instructions: ROLE_INSTRUCTIONS[role], toolset, maxTurns: spec.turns, silent: true,
             ...(spec.schema === 'batch' ? { schema: BATCH_SCHEMA, schemaName: 'batch' } : {}),
-            ...(encodeRoute || !paced?.ready ? {} : { model: clampModel(roles.resolve(role).model, paceSettings.models, paced.ceilingIndex, Boolean(pins[role]?.model)) }),
+            ...(model ? { model } : {}),
+            ...(solver ? { effort: solver.effort } : {}),
         });
         return { output: result.text, summary: role + ' ' + result.status, data: result.data ?? null };
     }
@@ -216,7 +225,7 @@ export async function runTeam({
         try { workspace = await scanWorkspace(root, { task }); }
         catch (error) { notify({ type: 'warning', message: `Сканер workspace: ${errorMessage(error)}` }); }
         if (workspace) {
-            notify({ type: 'stage.start', stage: 'scan', role: 'scanner' });
+            notify({ type: 'stage.start', stage: 'scan', role: 'workspace' });
             ctx.set('workspace', 'Workspace scan', formatWorkspace(workspace), { priority: 8 });
             notify({ type: 'stage.done', stage: 'scan', status: 'completed', files: workspace.files.map((item) => item.path) });
         }
@@ -338,6 +347,7 @@ export async function runTeam({
         /** Send one worker, coder, or writer turn. A restored session continues the interrupted turn. */
         const runWorker = async (title, body, maxTurns = config.agent.workerMaxTurnsPerStep, author = 'worker', checkpoint = null) => {
             const complexity = checkpoint?.complexity ?? plan?.complexity;
+            stepState.complexity = complexity === 'trivial' || complexity === 'complex' || complexity === 'normal' ? complexity : 'normal';
             const choice = encodeRoute || !paced?.ready ? legacyChoice(author, complexity) : paceChoice(author, complexity);
             const model = choice.model ?? roles.resolve(author).model;
             const effort = choice.effort ?? null;

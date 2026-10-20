@@ -2,7 +2,7 @@
  * @file src/roles/index.js
  * @module roles/index
  * @purpose Collect role prompts, settings, and desktop specialist limits.
- * @depends roles/default, roles/planner, roles/collector, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/scanner, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier
+ * @depends roles/default, roles/planner, roles/collector, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier
  * @usedBy commands/instructions, agent/team
  * @exports ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS
  * @ai.tags roles, prompts, desktop
@@ -19,7 +19,6 @@ import * as writer from './writer.js';
 import * as reviewer from './reviewer.js';
 import * as vision from './vision.js';
 import * as summarizer from './summarizer.js';
-import * as scanner from './scanner.js';
 import * as solver from './solver.js';
 import * as clicker from './clicker.js';
 import * as typer from './typer.js';
@@ -43,7 +42,6 @@ export const ROLE_MODULES = {
     reviewer: { instructions: reviewer.instructions, settings: reviewer.settings },
     vision: { instructions: vision.instructions, settings: vision.settings },
     summarizer: { instructions: summarizer.fileInstructions, settings: summarizer.settings },
-    scanner: { instructions: scanner.instructions, settings: scanner.settings },
     solver: { instructions: solver.instructions, settings: solver.settings },
     clicker: { instructions: clicker.instructions, settings: clicker.settings },
     typer: { instructions: typer.instructions, settings: typer.settings },
@@ -72,8 +70,7 @@ export const ROLE_INSTRUCTIONS = {
  * @ai.hint pure
  */
 export const SPECIALISTS = {
-    scanner: { tools: ['screenshot'], turns: 4, schema: null },
-    solver: { tools: ['screenshot'], turns: 6, schema: null },
+    solver: { tools: ['screenshot', 'view_image'], turns: 6, schema: null },
     clicker: { tools: ['click', 'screenshot'], turns: 4, schema: null },
     typer: { tools: ['type', 'screenshot'], turns: 4, schema: null },
     encoder: { tools: ['screenshot'], turns: 3, schema: 'batch' },

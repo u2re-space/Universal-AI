@@ -80,7 +80,7 @@ export function createDesktopHandlers(ctx) {
         const mime = detectImageMime(buffer, abs);
         if (!mime) throw new Error('Не изображение (нужны PNG, JPEG, GIF или WebP).');
         const part = { type: 'input_image', image_url: `data:${mime};base64,${buffer.toString('base64')}`, detail: 'auto' };
-        const described = await describeScreen({ part, rel });
+        const described = await describeScreen({ part, rel, buffer });
         if (typeof described === 'string') return described;
         if (described && typeof described === 'object' && typeof described.toon === 'string') return described.toon;
         throw new Error('vision не вернул TOON.');

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS } from '../src/roles/index.js';
 import { defaults } from '../src/core/config.js';
 
-const NAMES = ['default', 'planner', 'collector', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'scanner', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier'];
+const NAMES = ['default', 'planner', 'collector', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier'];
 
 test('role modules match config role names', () => {
     assert.deepEqual(Object.keys(ROLE_MODULES).sort(), NAMES.slice().sort());
@@ -31,9 +31,8 @@ test('existing role instructions keep their job', () => {
 });
 
 test('specialists do not delegate or run batches', () => {
-    assert.deepEqual(Object.keys(SPECIALISTS).sort(), ['clicker', 'encoder', 'scanner', 'solver', 'tester', 'typer']);
-    assert.deepEqual(SPECIALISTS.scanner, { tools: ['screenshot'], turns: 4, schema: null });
-    assert.deepEqual(SPECIALISTS.solver, { tools: ['screenshot'], turns: 6, schema: null });
+    assert.deepEqual(Object.keys(SPECIALISTS).sort(), ['clicker', 'encoder', 'solver', 'tester', 'typer']);
+    assert.deepEqual(SPECIALISTS.solver, { tools: ['screenshot', 'view_image'], turns: 6, schema: null });
     assert.deepEqual(SPECIALISTS.clicker, { tools: ['click', 'screenshot'], turns: 4, schema: null });
     assert.deepEqual(SPECIALISTS.typer, { tools: ['type', 'screenshot'], turns: 4, schema: null });
     assert.deepEqual(SPECIALISTS.encoder, { tools: ['screenshot'], turns: 3, schema: 'batch' });

@@ -140,6 +140,18 @@ test('sanitizeTerminal strips control sequences but keeps newlines', () => {
     assert.equal(sanitizeTerminal('a\x1b[31mred\x1b[0m\nb\u202etext\x07'), 'ared\nbtext');
 });
 
+test('a retired scanner role in config is dropped', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-scanner-cfg-'));
+    try {
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ roles: { scanner: { effort: 'low' }, solver: { effort: 'high' } } }));
+        const config = await loadConfig({ env: { AI_AGENT_HOME: home, AI_MODEL: 'mock-model' }, ensureHome: false });
+        assert.equal(Object.hasOwn(config.roles, 'scanner'), false);
+        assert.equal(config.roles.solver.effort, 'high');
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
 test('agent.encode accepts encoder or mcp and rejects anything else', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-encode-cfg-'));
     const env = { AI_AGENT_HOME: home };

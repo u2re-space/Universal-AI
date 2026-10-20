@@ -236,6 +236,7 @@ function validateConfig(c) {
         fail('compaction: { auto: boolean, afterInputTokens ≥ 1000 }');
     }
     if (!isRecord(c.roles)) fail('roles должен быть объектом');
+    if (Object.hasOwn(c.roles, 'scanner')) delete c.roles.scanner;
     for (const [name, role] of Object.entries(c.roles)) {
         if (!ROLE_NAMES.includes(name)) fail(`roles.${name}: неизвестная роль (${ROLE_NAMES.join(', ')})`);
         if (!isRecord(role)) fail(`roles.${name} должен быть объектом`);

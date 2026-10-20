@@ -460,7 +460,7 @@ export function createToolset({
             if (!mime) throw new Error('Не изображение (нужны PNG, JPEG, GIF или WebP).');
             const part = { type: 'input_image', image_url: `data:${mime};base64,${buffer.toString('base64')}`, detail: args.detail ?? 'auto' };
             if (describeImage) {
-                const description = await describeImage({ part, question: args.question ?? null, rel });
+                const description = await describeImage({ part, question: args.question ?? null, rel, buffer });
                 return { output: `Описание изображения ${rel} (модель vision):\n${description}`, summary: `${rel} → vision (${formatBytes(buffer.length)})` };
             }
             return {

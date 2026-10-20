@@ -293,7 +293,7 @@ export const TOOL_SPECS = {
         category: 'read', group: 'desktop',
         description: 'Send one task to a specialist and return its answer. encoder returns a batch and does not run it; pass that batch to run_batch.',
         parameters: schema({
-            role: { type: 'string', enum: ['scanner', 'solver', 'clicker', 'typer', 'encoder', 'tester'], description: 'Specialist to call.' },
+            role: { type: 'string', enum: ['solver', 'clicker', 'typer', 'encoder', 'tester'], description: 'Specialist to call.' },
             task: str('One task for that specialist.'),
         }),
     },

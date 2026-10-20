@@ -69,7 +69,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 
 Команда (run и gen):
   --role <роль=модель[:effort]>  модель для роли: planner, collector, worker, coder, writer, reviewer, vision, summarizer,
-                         scanner, solver, clicker, typer, encoder, tester, classifier, default, all
+                         solver, clicker, typer, encoder, tester, classifier, default, all
                          (например: --role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
   --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
   --no-resume            не продолжать незавершённый шаг, фазу и ход из .tmp (по умолчанию тот же текст задачи продолжается с места остановки)
