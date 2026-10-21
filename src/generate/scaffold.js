@@ -4,10 +4,10 @@
  * @purpose Stack, package.json, recommendations, and the safe scaffold merge for generation.
  * @depends node:path, node:fs/promises, node:os, agent/paths
  * @usedBy generate/brief, agent/tools
- * @exports filesForKind, filesForStack, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, stackDocuments, kindRules, renderGenerationTask, preparedScaffoldFiles, writePreparedScaffold, pathsNamedInTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, scaffoldTarget, retargetScaffold, guardScaffold
+ * @exports filesForKind, filesForStack, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, viteConfig, stackDocuments, kindRules, renderGenerationTask, preparedScaffoldFiles, writePreparedScaffold, pathsNamedInTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, scaffoldTarget, retargetScaffold, guardScaffold
  * @ai.tags generate
  * @ai.hint pure
- * @changed 2026-10-16 Named Preact and TypeScript links select TSX and SCSS modules.
+ * @changed 2026-10-21 The Vite config is prepared with the Chrome 157 targets.
  */
 import path from 'node:path';
 import os from 'node:os';
@@ -340,6 +340,30 @@ export function scaffoldScript() {
 }
 
 /**
+ * Vite config for a generated web project. The platform profile owns the target strings.
+ * @param {{ vite?: { target?: string, cssTarget?: string } }} [platform]
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function viteConfig(platform = {}) {
+    const target = platform?.vite?.target ?? 'esnext';
+    const cssTarget = platform?.vite?.cssTarget ?? 'chrome157';
+    return [
+        "import { defineConfig } from 'vite';",
+        '',
+        '// Chrome 157 Beta is the only target. esnext keeps the ES2026 syntax intact.',
+        'export default defineConfig({',
+        '    build: {',
+        `        target: '${target}',`,
+        `        cssTarget: '${cssTarget}',`,
+        '    },',
+        '});',
+        '',
+    ].join('\n');
+}
+
+/**
  * English rule and skill bodies.
  * @param {string | null} kind
  * @param {{ id: string, ecma: { edition: number } }} platform
@@ -365,18 +389,24 @@ export function stackDocuments(kind, platform, libraries = []) {
  */
 export function kindRules(kind, recommendations) {
     const fastify = recommendations.libraries.some((item) => item.name === 'fastify' && item.include);
+    const web = kind === 'landing' || kind === 'site' || kind === 'app';
     const lines = [];
     if (kind === 'backend') {
         lines.push('Node.js 26 ESM. Bind 127.0.0.1. Port from PORT or 3000.');
         lines.push(fastify ? 'Use fastify and the companion packages marked include.' : 'Use node:http. Do not add Fastify unless the recommendation includes it.');
-    } else if (kind === 'landing' || kind === 'site' || kind === 'app') {
+    } else if (web) {
         lines.push('Vite, SCSS, and ESM. Node.js 26.');
         lines.push(kind === 'app' ? 'server.js serves dist/ after vite build.' : 'No Node server.');
+        lines.push('vite.config.js is already written with the Chrome 157 build targets. Do not plan a step to create or verify it.');
+        lines.push('Do not run npm run dev or npm run preview inside a step: they do not exit. Verify with npm run build and read the built files.');
     } else lines.push('Choose the files the request needs.');
     lines.push('Read .rules/ and .skills/ and follow them. Do not overwrite them.');
     lines.push('Add absent package.json keys only. Keep existing script bodies and versions.');
     lines.push('Do not pass --force or -f to a scaffold command. Do not chain a scaffold command with &&, ||, ;, |, or redirection.');
-    lines.push('package.json, scripts/generate.js, .rules/stack.md, .rules/files.md, and .skills/scaffold/SKILL.md are already written. Do not plan a step to create or rewrite them.');
+    const prepared = ['package.json', 'scripts/generate.js', ...(web ? ['vite.config.js'] : []), '.rules/stack.md', '.rules/files.md', '.skills/scaffold/SKILL.md'];
+    lines.push(`${prepared.join(', ')} are already written. Do not plan a step to create or rewrite them.`);
+    lines.push('Every step must create or change a named file. Do not spend a step only inspecting installed packages, tool versions, or toolchain internals.');
+    lines.push('npm test reports 0 tests until the project adds tests. Do not count it as verification.');
     lines.push('Use at most 4 steps. Group the page, styles, and modules into one step when they belong together.');
     if (recommendations.libraries.some((item) => item.name === 'preact' && item.include && recommendations.libraries.some((entry) => entry.name === 'typescript' && entry.include))) {
         lines.push('Write the interface as Preact TSX modules. Each component has a matching SCSS module. Do not implement the UI as h() calls in src/main.js.');
@@ -396,8 +426,10 @@ export function kindRules(kind, recommendations) {
 export function preparedScaffoldFiles({ kind, platform, recommendations, name = 'app' }) {
     const docs = stackDocuments(kind, platform, recommendations.libraries);
     const manifest = buildPackageManifest({ kind, name, libraries: recommendations.libraries });
+    const web = kind === 'landing' || kind === 'site' || kind === 'app';
     return {
         'package.json': `${JSON.stringify(manifest, null, 2)}\n`,
+        ...(web ? { 'vite.config.js': viteConfig(platform) } : {}),
         'scripts/generate.js': scaffoldScript(),
         ...docs,
     };
@@ -466,6 +498,8 @@ export function renderGenerationTask({ kind, prompt = '', platform, recommendati
         ...(libs.length ? libs : ['- (none)']),
         '',
         'The prepared files are complete. Plan the application, not a step per boilerplate file.',
+        'Every step must create or change a named file. Do not plan a step only to inspect installed packages, tool versions, or toolchain internals.',
+        'For a web kind, verify with npm run build. Do not run npm run dev or npm run preview: they do not exit.',
         'Run npx or npm run generate only for a named generator or template.',
         'Read .rules/ and .skills/ and follow them. Do not overwrite them.',
         'Do not overwrite an existing file. A scaffold command copies only missing paths and adds absent package.json keys.',

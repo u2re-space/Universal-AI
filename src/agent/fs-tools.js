@@ -7,7 +7,7 @@
  * @exports listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory
  * @ai.tags filesystem, tools
  * @ai.hint io
- * @changed 2026-10-16 Overwrite and delete keep a project snapshot in .backup.
+ * @changed 2026-10-21 A direct search can include noisy directories.
  */
 
 import path from 'node:path';
@@ -127,13 +127,14 @@ export async function readTextFile({ root, file, startLine = null, endLine = nul
 
 /**
  * Find `query` in text files and return `path:line: text` hits.
- * `search_files` uses this when the project map is missing.
- * @param {{ root: string, query: string, dir?: string, regex?: boolean, maxResults?: number, maxFileBytes?: number }} options
+ * `search_files` uses this when the project map is missing or does not cover the requested path.
+ * `includeNoisy` allows a direct search inside node_modules, dist, and similar directories.
+ * @param {{ root: string, query: string, dir?: string, regex?: boolean, maxResults?: number, maxFileBytes?: number, includeNoisy?: boolean }} options
  * @returns {Promise<{ text: string, count: number, scanned: number, truncated: boolean }>}
  * @exports
  * @ai.hint io
  */
-export async function searchFiles({ root, query, dir = '.', regex = false, maxResults = 60, maxFileBytes = 1024 * 1024 }) {
+export async function searchFiles({ root, query, dir = '.', regex = false, maxResults = 60, maxFileBytes = 1024 * 1024, includeNoisy = false }) {
     if (typeof query !== 'string' || !query) throw new Error('Пустой запрос поиска.');
     const { abs, rel } = await resolveInside(root, dir);
     let matcher;
@@ -151,7 +152,9 @@ export async function searchFiles({ root, query, dir = '.', regex = false, maxRe
             if (truncated) return;
             const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
             if (entry.isDirectory()) {
-                if (NOISY_DIRS.test(entry.name) || /^\.(ssh|gnupg|aws|azure)$/i.test(entry.name)) continue;
+                if (entry.name === '.git') continue;
+                if (includeNoisy ? entry.name === 'node_modules' : NOISY_DIRS.test(entry.name)) continue;
+                if (/^\.(ssh|gnupg|aws|azure)$/i.test(entry.name)) continue;
                 await walk(path.join(current, entry.name), relative);
             } else if (entry.isFile()) {
                 if (/^\.env|\.(pem|key|p12|pfx)$/i.test(entry.name)) continue;

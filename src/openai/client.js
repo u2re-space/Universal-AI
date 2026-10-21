@@ -7,7 +7,7 @@
  * @exports ApiError, createClient, retryDelayMs
  * @ai.tags openai, http
  * @ai.hint io
- * @changed 2026-10-15 Decisions and moderations endpoints.
+ * @changed 2026-10-21 Image edit sizes are normalized.
  */
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -15,7 +15,7 @@ import { ApiError } from './errors.js';
 import { createHttp, readBody } from './http.js';
 import { parseSSE } from './sse.js';
 import { createStreamReducer, outputText } from './stream.js';
-import { encodeMultipart, generationBody, imagePayloads } from './images.js';
+import { encodeMultipart, generationBody, imagePayloads, normalizeImageSize } from './images.js';
 
 export { ApiError };
 
@@ -278,8 +278,9 @@ export function createClient({
         },
         /** POST /images/edits as multipart form data. `files` are { filename, mime, bytes }. */
         async edit({ model, prompt, files, size, signal } = {}) {
+            const frame = normalizeImageSize(size);
             const form = encodeMultipart({
-                fields: { model, prompt, ...(size && size !== 'auto' ? { size } : {}) },
+                fields: { model, prompt, ...(frame ? { size: frame } : {}) },
                 files: files.map((file) => ({ ...file, field: 'image' })),
             });
             const result = await call('images/edits', { rawBody: form.body, contentType: form.contentType, signal });

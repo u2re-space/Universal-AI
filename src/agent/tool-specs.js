@@ -7,7 +7,7 @@
  * @exports TOOL_SPECS, READ_ONLY_TOOLS, SHELL_TOOL_NAMES, toolDefinitions, enabledToolNames, describeTool, toolCategory
  * @ai.tags tools, schema
  * @ai.hint pure
- * @changed 2026-10-15 Channel tools: decide, moderate, reply, Telegram.
+ * @changed 2026-10-21 Image sizes are documented and run_command excludes servers.
  */
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
 
@@ -144,7 +144,7 @@ export const TOOL_SPECS = {
     },
     run_command: {
         category: 'exec', group: 'shell',
-        description: 'Run one command in the working directory and return the exit code with captured stdout/stderr. Set shell to cmd, powershell, pwsh, bash, sh, or zsh; an empty shell uses the configured default (cmd.exe on Windows, /bin/sh elsewhere). Non-interactive only; output is truncated.',
+        description: 'Run one command in the working directory and return the exit code with captured stdout/stderr. Set shell to cmd, powershell, pwsh, bash, sh, or zsh; an empty shell uses the configured default (cmd.exe on Windows, /bin/sh elsewhere). Non-interactive only; output is truncated. The command must exit: do not use this for dev or preview servers, which run until stopped.',
         parameters: schema({
             command: str('The command line to execute.'),
             shell: { type: 'string', enum: ['', 'powershell', 'pwsh', 'cmd', 'bash', 'sh', 'zsh'], description: 'Interpreter for this command. Empty string = configured default.' },
@@ -275,7 +275,7 @@ export const TOOL_SPECS = {
         parameters: schema({
             prompt: str('What to draw. Describe the artwork only, not the page layout.'),
             path: str('Relative output path such as assets/portrait.png. Empty string lets the tool choose a name.'),
-            size: str('WIDTHxHEIGHT, or an empty string for the server default.'),
+            size: str('WIDTHxHEIGHT. Supported frames: 1024x1024, 1024x1536 (portrait), 1536x1024 (landscape). Other sizes snap to the nearest frame. Empty string uses the server default.'),
             quality: str('low, medium, high, or an empty string for the server default.'),
         }),
     },
@@ -286,7 +286,7 @@ export const TOOL_SPECS = {
             prompt: str('How to change the source image.'),
             image: str('Source image path relative to the working directory.'),
             path: str('Relative output path. Empty string lets the tool choose a name.'),
-            size: str('WIDTHxHEIGHT, or an empty string for the server default.'),
+            size: str('WIDTHxHEIGHT. Supported frames: 1024x1024, 1024x1536 (portrait), 1536x1024 (landscape). Other sizes snap to the nearest frame. Empty string uses the server default.'),
         }),
     },
     delegate_role: {

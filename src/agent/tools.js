@@ -7,7 +7,7 @@
  * @exports TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory, createToolset, relativeToRoot
  * @ai.tags tools, approval
  * @ai.hint hot
- * @changed 2026-10-17 Optional processTool replaces a processable handler.
+ * @changed 2026-10-21 A noisy path is searched directly, and a timeout explains dev servers.
  */
 
 import path from 'node:path';
@@ -17,7 +17,7 @@ import { CancelledError } from '../openai/errors.js';
 import { createClient } from '../openai/client.js';
 import { detectImageMime } from '../core/attachments.js';
 import { errorMessage, formatBytes, truncate, clipMiddle } from '../util/text.js';
-import { resolveInside } from './paths.js';
+import { resolveInside, NOISY_DIRS } from './paths.js';
 import { listProjectBackups, restoreProjectBackup } from './project-backup.js';
 import { listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory } from './fs-tools.js';
 import { loadProjectMap, searchMapped, updateProjectMapPath } from './map.js';
@@ -126,6 +126,7 @@ function commandReport(result, timeoutMs, limits) {
     const body = [`status: ${status}`, `duration_ms: ${result.durationMs}`];
     if (result.stdout) body.push(`--- stdout ---\n${clipMiddle(result.stdout, limits.maxCommandOutputBytes)}`);
     if (result.stderr) body.push(`--- stderr ---\n${clipMiddle(result.stderr, limits.maxCommandOutputBytes)}`);
+    if (result.timedOut) body.push('(команда не завершилась; dev- и preview-серверы не выходят сами — проверяйте npm run build и собранные файлы)');
     if (result.truncated) body.push('(вывод усечён)');
     return { output: body.join('\n'), summary: status, ok: result.exitCode === 0 };
 }
@@ -261,17 +262,20 @@ export function createToolset({
             const result = await readTextFile({ root, file: args.path, startLine: args.start_line, endLine: args.end_line, maxBytes: limits.maxFileReadBytes });
             return { output: result.text, summary: `${args.path}: строки ${result.from}-${result.to}/${result.totalLines}` };
         },
-        /** Search the project map, or walk the tree when the map is missing. */
+        /** Search the project map, or walk the tree when the map is missing or does not cover the path. */
         async search_files(args) {
             const scope = args.scope ?? 'all';
             if (!['path', 'symbol', 'content', 'all'].includes(scope)) throw new Error('scope: path, symbol, content или all.');
-            const projectMap = await loadProjectMap(root);
+            const requested = String(args.path || '.').split(path.sep).join('/');
+            const noisy = requested.split('/').some((part) => part && part !== '.' && NOISY_DIRS.test(part));
+            const projectMap = noisy ? null : await loadProjectMap(root);
             if (projectMap) {
                 const result = await searchMapped(projectMap, { query: args.query, dir: args.path || '.', scope, regex: Boolean(args.regex), maxResults: limits.maxSearchResults });
                 return { output: result.text, summary: `${result.count} совпадений` };
             }
-            const result = await searchFiles({ root, query: args.query, dir: args.path || '.', regex: Boolean(args.regex), maxResults: limits.maxSearchResults });
-            return { output: `Карта проекта недоступна; поиск по дереву.\n${result.text}`, summary: `${result.count} совпадений` };
+            const result = await searchFiles({ root, query: args.query, dir: args.path || '.', regex: Boolean(args.regex), maxResults: limits.maxSearchResults, includeNoisy: noisy });
+            const note = noisy ? 'Путь исключён из карты проекта; поиск по дереву.' : 'Карта проекта недоступна; поиск по дереву.';
+            return { output: `${note}\n${result.text}`, summary: `${result.count} совпадений` };
         },
         /** Write the file, record the change, and refresh that map path. */
         async write_file(args) {

@@ -147,6 +147,13 @@ test('generate script is standalone English and the wrapper quotes the customer'
     assert.match(task, /Plan the work before changing files/);
     assert.match(task, /When web_search is available/);
     assert.match(task, /scripts\/generate\.js/);
+    assert.match(task, /vite\.config\.js/);
+    const written = task.slice(task.indexOf('Already written'), task.indexOf('Create these application files'));
+    assert.match(written, /vite\.config\.js/);
+    const application = task.slice(task.indexOf('Create these application files'), task.indexOf('Recommendations:'));
+    assert.doesNotMatch(application, /vite\.config\.js/);
+    assert.match(task, /Every step must create or change a named file/);
+    assert.match(task, /npm run build/);
     assert.match(task, /Already written/);
     assert.match(task, /Do not plan a step/);
     assert.doesNotMatch(task, /The skeleton is already written/);
@@ -157,13 +164,18 @@ test('prepared scaffold files are written once and an existing file stays', asyn
     const recommendations = recommendStack({ kind: 'landing', prompt: 'page', references: {} });
     const files = preparedScaffoldFiles({ kind: 'landing', platform, recommendations, name: 'widget' });
     assert.equal(typeof files['scripts/generate.js'], 'string');
+    assert.match(files['vite.config.js'], /target: 'esnext'/);
+    assert.match(files['vite.config.js'], /cssTarget: 'chrome157'/);
     assert.match(files['package.json'], /"name": "widget"/);
+    const backend = preparedScaffoldFiles({ kind: 'backend', platform, recommendations, name: 'api' });
+    assert.equal('vite.config.js' in backend, false);
     const root = await mkdtemp(path.join(os.tmpdir(), 'ai-prepared-'));
     try {
         await mkdir(path.join(root, '.rules'), { recursive: true });
         await writeFile(path.join(root, '.rules', 'stack.md'), 'keep\n');
         const first = await writePreparedScaffold(root, files);
         assert.ok(first.written.includes('scripts/generate.js'));
+        assert.ok(first.written.includes('vite.config.js'));
         assert.ok(first.written.includes('package.json'));
         assert.ok(first.kept.includes('.rules/stack.md'));
         assert.equal(await readFile(path.join(root, '.rules', 'stack.md'), 'utf8'), 'keep\n');

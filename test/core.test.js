@@ -8,6 +8,7 @@ import { loadConfig } from '../src/core/config.js';
 import { createLedger, priceFor, costOf } from '../src/core/usage.js';
 import { loadImageAttachment, loadFileAttachment, buildUserMessage, detectImageMime, stdinFence } from '../src/core/attachments.js';
 import { resolveInside } from '../src/agent/paths.js';
+import { searchFiles } from '../src/agent/fs-tools.js';
 import { runCommand } from '../src/agent/shell.js';
 import { sanitizeTerminal } from '../src/ui/sanitize.js';
 import { normalizeUsage } from '../src/openai/stream.js';
@@ -125,6 +126,20 @@ test('paths: confinement, protected names, symlink escape', async () => {
         try { await symlink(outside, path.join(dir, 'sub', 'link'), 'junction'); } catch { linked = false; }
         if (linked) await assert.rejects(resolveInside(dir, 'sub/link/file.txt'), /символическую/);
     } finally { await rm(dir, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
+});
+
+test('searchFiles can look inside a noisy directory when asked directly', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-agent-search-'));
+    try {
+        const nested = path.join(dir, 'node_modules', 'vite', 'dist', 'node');
+        await mkdir(nested, { recursive: true });
+        await writeFile(path.join(nested, 'index.d.ts'), 'export interface BuildOptions { cssTarget?: string }\n');
+        const skipped = await searchFiles({ root: dir, query: 'cssTarget', dir: 'node_modules/vite' });
+        assert.equal(skipped.count, 0);
+        const found = await searchFiles({ root: dir, query: 'cssTarget', dir: 'node_modules/vite', includeNoisy: true });
+        assert.equal(found.count, 1);
+        assert.match(found.text, /node_modules\/vite\/dist\/node\/index\.d\.ts:1/);
+    } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test('shell: captures output, exit codes and timeouts', async () => {

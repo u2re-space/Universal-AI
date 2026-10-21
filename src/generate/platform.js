@@ -6,7 +6,7 @@
  * @exports ENABLED_IN_157, WITHHELD, PLATFORM_SOURCES, CHROME_157_BETA, PLATFORMS, resolvePlatform, platformInstructions
  * @ai.tags generate, css, javascript
  * @ai.hint pure
- * @changed 2026-10-15 Snapshot of Chrome 157 Beta default-enabled features.
+ * @changed 2026-10-21 Vite target strings live on the profile.
  */
 
 /** Features enabled by default in Chrome 157. Origin trials and flags are not in this list. */
@@ -60,6 +60,7 @@ export const CHROME_157_BETA = Object.freeze({
     ecma: Object.freeze({ edition: 2026, spec: 'https://262.ecma-international.org/' }),
     javascript: Object.freeze({ target: 'es2026', engine: 'v8', flags: false }),
     css: Object.freeze({ target: 'chrome-157-beta', flags: false }),
+    vite: Object.freeze({ target: 'esnext', cssTarget: 'chrome157' }),
     sources: PLATFORM_SOURCES,
     enabledIn157: ENABLED_IN_157,
     withheld: WITHHELD,
@@ -100,6 +101,7 @@ export function platformInstructions(profile) {
         `Snapshot: ${profile.snapshot}.`,
         `ECMAScript edition ${profile.ecma.edition} (${profile.ecma.spec}). Use that edition only for syntax and built-ins Chrome ${profile.version} runs with experimental flags off.`,
         `JavaScript target: ${profile.javascript.target}. CSS target: ${profile.css.target}.`,
+        `Vite build target: ${profile.vite.target}. Vite CSS target: ${profile.vite.cssTarget}.`,
         'Features already enabled by default in earlier Chrome versions stay allowed. That includes CSS nesting, cascade layers, :has(), container queries, subgrid, color-mix(), oklch, light-dark(), anchor positioning, same-document view transitions, popover, dialog, text-wrap: balance, and dvh/svh/lvh, plus ECMAScript built-ins those earlier versions ship without a flag.',
         `Features newly enabled by default in Chrome ${profile.version}:`,
         enabled,

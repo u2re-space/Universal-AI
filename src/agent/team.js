@@ -537,7 +537,10 @@ export async function runTeam({
             notify({ type: 'stage.start', stage: 'answer', role: 'default', model: roles.resolve('default').model });
             const answered = await roles.run('default', {
                 text: `${ctx.render({ maxBytes })}\n\n# Task\n${task}${handoff.text ? `\n\n# Attached files\n${handoff.text}` : ''}`,
-                parts, instructions: ANSWER_INSTRUCTIONS, instructionsOnly: true,
+                parts, instructions: generation
+                    ? `${ANSWER_INSTRUCTIONS}\nThis is a generation brief. The planner writes the plan and the worker writes the files. Describe the reference and the requested result; do not repeat the plan, the file tree, or file bodies.`
+                    : ANSWER_INSTRUCTIONS,
+                instructionsOnly: true,
                 builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
             });
             if (answered.status !== 'completed') return stop(answered, 'ответ');

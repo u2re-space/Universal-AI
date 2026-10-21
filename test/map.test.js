@@ -28,6 +28,19 @@ test('project map', async (t) => {
         assert.ok(built.files.get('widget.py').symbols.some((symbol) => symbol.name === 'Widget' && symbol.kind === 'class'));
     });
 
+    await t.test('search_files walks a noisy path even when a map exists', async () => {
+        await mkdir(path.join(root, 'node_modules', 'vite', 'dist', 'node'), { recursive: true });
+        await writeFile(path.join(root, 'node_modules', 'vite', 'dist', 'node', 'index.d.ts'), 'export interface BuildOptions { cssTarget?: string }\n');
+        const toolset = createToolset({
+            root, config: { limits: { maxFileWriteBytes: 1024 * 1024, maxFileReadBytes: 1024, maxSearchResults: 20, maxListEntries: 50, maxCommandOutputBytes: 1000, commandTimeoutMs: 1000, maxFetchBytes: 1000, maxImageBytes: 1000 }, tools: { fs: true }, shell: null, image: {} },
+            names: ['search_files'], approvalLevel: 'read',
+        });
+        const found = await toolset.execute({ name: 'search_files', arguments: JSON.stringify({ query: 'cssTarget', path: 'node_modules/vite' }) });
+        assert.match(found.output, /Путь исключён из карты проекта/);
+        assert.match(found.output, /cssTarget/);
+        assert.equal(found.summary, '1 совпадений');
+    });
+
     await t.test('a second load with the same modification time does not observe a rewritten map file', async () => {
         const first = await loadProjectMap(root);
         assert.equal(first.files.has('lib.js'), true);

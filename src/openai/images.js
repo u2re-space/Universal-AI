@@ -4,16 +4,43 @@
  * @purpose Image generation and edits through POST /images/generations and /images/edits.
  * @depends node:crypto
  * @usedBy openai/client, agent/loop, agent/tools, commands/image, commands/run
- * @exports PROXY_IMAGE_MODEL, imageTransport, imageModelFor, generationBody, encodeMultipart, imagePayloads, sniffImage
+ * @exports PROXY_IMAGE_MODEL, IMAGE_SIZES, imageTransport, imageModelFor, normalizeImageSize, generationBody, encodeMultipart, imagePayloads, sniffImage
  * @ai.tags images, proxyapi
  * @ai.hint pure
- * @changed 2026-10-15 ProxyAPI images endpoints. Docs: https://proxyapi.ru/docs/image-generation
+ * @changed 2026-10-21 Snap unsupported image sizes to the API set.
  */
 
 import { randomBytes } from 'node:crypto';
 
 /** Default ProxyAPI image model when imageModel is unset. See https://proxyapi.ru/models/browse/image */
 export const PROXY_IMAGE_MODEL = 'recraft/recraft-v4.1-flash';
+
+/** Sizes accepted by POST /images/generations and /images/edits. */
+export const IMAGE_SIZES = Object.freeze(['1024x1024', '1024x1536', '1536x1024']);
+
+/**
+ * Map a requested size to the nearest supported one. `auto` and an empty value omit the field.
+ * Common words portrait, landscape, and square are accepted.
+ * @param {string | null | undefined} size
+ * @returns {string | null}
+ * @exports
+ * @ai.hint pure
+ */
+export function normalizeImageSize(size) {
+    const value = String(size ?? '').trim().toLowerCase();
+    if (!value || value === 'auto') return null;
+    if (IMAGE_SIZES.includes(value)) return value;
+    if (value === 'portrait') return '1024x1536';
+    if (value === 'landscape') return '1536x1024';
+    if (value === 'square') return '1024x1024';
+    const match = /^(\d+)\s*x\s*(\d+)$/.exec(value);
+    if (!match) return value;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!width || !height) return value;
+    if (width === height) return '1024x1024';
+    return height > width ? '1024x1536' : '1536x1024';
+}
 
 /**
  * `images` uses /images/generations and /images/edits. `responses` uses the Responses image_generation tool.
@@ -47,6 +74,7 @@ export function imageModelFor(config) {
 
 /**
  * JSON body for POST /images/generations. `auto` size and quality are omitted; partial frames are never sent.
+ * An unsupported size is snapped to the nearest supported frame.
  * @param {{ model: string, prompt: string, size?: string | null, quality?: string | null, n?: number | null }} request
  * @returns {object}
  * @exports
@@ -54,7 +82,8 @@ export function imageModelFor(config) {
  */
 export function generationBody({ model, prompt, size = null, quality = null, n = null }) {
     const body = { model, prompt };
-    if (size && size !== 'auto') body.size = size;
+    const frame = normalizeImageSize(size);
+    if (frame) body.size = frame;
     if (quality && quality !== 'auto') body.quality = quality;
     if (Number.isInteger(n) && n > 1) body.n = n;
     return body;
