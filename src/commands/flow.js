@@ -15,7 +15,7 @@ import { buildUserMessage } from '../core/attachments.js';
 import { runTurn, builtinTools } from '../agent/loop.js';
 import { formatBytes } from '../util/text.js';
 import { UsageError, createClientFor, createLedgerFor, openSession, writeOutput, resultObject, exitCodeFor, STATUS_LABELS,
-    usageRow, backupSummaryRows } from './shared.js';
+    usageRow, backupSummaryRows, turnExtender } from './shared.js';
 
 /**
  * Load a JSON schema file for structured output (--schema).
@@ -62,6 +62,7 @@ export async function runOnce(ctx, {
         client, config, session, ledger, toolset, builtin: builtinList, toolChoice, instructions, textFormat,
         background: Boolean(values.background), imageTarget: imageTarget ?? config.image.outputDir,
         maxTurns: maxTurns ?? (toolset ? config.limits.maxTurns : 1), signal, emit,
+        onMaxTurns: turnExtender(renderer, config, signal),
     });
     renderer.idle();
 

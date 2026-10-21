@@ -11,9 +11,24 @@
  */
 
 import { effectiveFidelity } from '../generate/fidelity.js';
+import { FORBIDDEN_MODELS as REVIEWER_FORBIDDEN } from '../roles/reviewer.js';
 
 export const PACE_QUALITY_MESSAGE = 'pace.quality: целое 0..200, и speed + quality не больше 200';
 export const PACE_SPEED_MESSAGE = 'pace.speed: целое от 0, и speed + quality не больше 200';
+
+/**
+ * Highest rung at or below `wanted` whose model may serve the reviewer.
+ * gpt-6-astra is forbidden for review, so the ladder steps down instead.
+ * @param {string[]} models
+ * @param {number} wanted
+ * @returns {number}
+ * @ai.hint pure
+ */
+function reviewerRung(models, wanted) {
+    let index = Math.max(0, Math.min(models.length - 1, wanted));
+    while (index > 0 && REVIEWER_FORBIDDEN.includes(models[index])) index--;
+    return index;
+}
 
 /**
  * Reject a pair outside the shared budget. Quality is checked first.
@@ -270,7 +285,7 @@ export function resolvePace({
         roles: {
             classifier: role(0, 'low', false),
             planner, collector: role(0, 'low', false),
-            reviewer: role(modelQuality >= 67 ? adjusted : Math.min(adjusted, 1), reviewerBase, true),
+            reviewer: role(reviewerRung(models, modelQuality >= 67 ? adjusted : Math.min(adjusted, 1)), reviewerBase, true),
             summarizer: role(0, 'low', false),
             extractor: role(0, 'low', false),
         },

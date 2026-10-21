@@ -7,7 +7,7 @@
  * @exports TOOL_SPECS, READ_ONLY_TOOLS, SHELL_TOOL_NAMES, toolDefinitions, enabledToolNames, describeTool, toolCategory
  * @ai.tags tools, schema
  * @ai.hint pure
- * @changed 2026-10-21 Image sizes are documented and run_command excludes servers.
+ * @changed 2026-10-22 Image splitting, cropping, SVG generation, fonts, and icon sets.
  */
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
 
@@ -332,6 +332,61 @@ export const TOOL_SPECS = {
             args_json: str('JSON object for the method. Empty string means {}.'),
         }),
     },
+    split_image: {
+        category: 'write', group: 'images',
+        description: 'Split an image into a rows×cols grid with ImageMagick (magick or convert). Returns each tile path, its pixel size, and its x/y offset, so a tile can be cropped further or read with view_image. Requires ImageMagick.',
+        parameters: schema({
+            path: str('Image file path relative to the working directory.'),
+            rows: nullableInt('Number of rows. Null = 1.'),
+            cols: nullableInt('Number of columns. Null = 1.'),
+            output: str('Output directory. Empty string = .tmp/split-<timestamp>.'),
+            reason: str('One sentence: why this split is needed (shown to the user for approval).'),
+        }),
+    },
+    crop_image: {
+        category: 'write', group: 'images',
+        description: 'Crop a rectangular region (x, y, width, height) from an image with ImageMagick (magick or convert). Returns the cropped image path. Requires ImageMagick.',
+        parameters: schema({
+            path: str('Source image path relative to the working directory.'),
+            x: nullableInt('X coordinate of the crop region (0-based). Null = 0.'),
+            y: nullableInt('Y coordinate of the crop region (0-based). Null = 0.'),
+            width: nullableInt('Width of the crop region. Required and greater than zero.'),
+            height: nullableInt('Height of the crop region. Required and greater than zero.'),
+            output: str('Output path. Empty string = .tmp/crop-<timestamp>.png.'),
+            reason: str('One sentence: why this crop is needed (shown to the user for approval).'),
+        }),
+    },
+    generate_svg: {
+        category: 'write', group: 'images',
+        description: 'Write an SVG file. Pass complete SVG markup (preferred) or a short text label; the tool completes the document, validates the wrapper, and saves it.',
+        parameters: schema({
+            prompt: str('SVG markup such as <svg …>…</svg>, or a text label to render in a simple frame.'),
+            path: str('Output path such as assets/icon.svg. Empty string lets the tool choose a name.'),
+            width: nullableInt('SVG width in pixels. Default 512.'),
+            height: nullableInt('SVG height in pixels. Default 512.'),
+            reason: str('One sentence: why this SVG is needed (shown to the user for approval).'),
+        }),
+    },
+    download_font: {
+        category: 'write', group: 'assets',
+        description: 'Download a font file (TTF/OTF/WOFF/WOFF2) from Google Fonts by family name, or from a direct http(s) URL. Saves under fonts/.',
+        parameters: schema({
+            name: str('Font family (e.g. "Inter", "Roboto", "Fira Code"). Empty when url is given.'),
+            style: str('Style or weight: Regular (default), Bold, Italic, Light, or 100..900.'),
+            url: nullableStr('Direct http(s) download URL. Overrides name and style.'),
+            output: str('Relative output path. Empty string = fonts/<family>-<weight>[italic].<ext>.'),
+        }),
+    },
+    download_icons: {
+        category: 'write', group: 'assets',
+        description: 'Download one icon or a common subset of an icon set (phosphor, lucide) as SVG files from a public CDN. Use a CDN link in the page instead when the icons do not need to be local.',
+        parameters: schema({
+            name: str('Icon set name: "phosphor" or "lucide". Required.'),
+            icon: nullableStr('One icon name (e.g. "house", "user"). Null = download the common subset.'),
+            variant: { type: 'string', enum: ['thin', 'light', 'regular', 'bold', 'duotone', 'fill'], description: 'Phosphor variant. Use regular for the default.' },
+            output: str('Output directory. Empty string = assets/icons/<set>/.'),
+        }),
+    },
 };
 
 export const READ_ONLY_TOOLS = ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall', 'list_backups'];
@@ -354,7 +409,7 @@ export function toolDefinitions(names) {
 }
 
 /** Which tools are enabled for a config.tools selection. */
-export function enabledToolNames(tools, { interactive = false, memory = false, summarize = false, imageApi = false, unsafeScreenshot = false } = {}) {
+export function enabledToolNames(tools, { interactive = false, memory = false, summarize = false, imageApi = false, unsafeScreenshot = false, images = true } = {}) {
     const names = [];
     if (tools.fs) names.push('list_files', 'read_file', 'search_files', 'write_file', 'replace_text', 'delete_file', 'make_dir', 'view_image', 'structure_file', 'list_backups', 'restore_backup');
     if (tools.fs && summarize) names.push('summarize_file');
@@ -364,6 +419,8 @@ export function enabledToolNames(tools, { interactive = false, memory = false, s
     if (memory) names.push('recall', 'remember');
     if (tools.askUser && interactive) names.push('ask_user');
     if (tools.images && imageApi) names.push('generate_image', 'edit_image');
+    if (tools.images && images) names.push('split_image', 'crop_image', 'generate_svg');
+    if (tools.fetch) names.push('download_font', 'download_icons');
     if (tools.channels) names.push('decide', 'moderate_text', 'channel_reply', 'telegram_call');
     return names;
 }

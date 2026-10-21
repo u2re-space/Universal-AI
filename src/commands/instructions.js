@@ -7,7 +7,7 @@
  * @exports ASSISTANT_BASE, IMAGE_BASE, ROLE_INSTRUCTIONS, agentBase
  * @ai.tags prompt, instructions
  * @ai.hint pure
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-22 The agent may read links named in the task or an attachment.
  */
 import os from 'node:os';
 
@@ -52,7 +52,7 @@ Access policy: ${policy}
 ${interactive ? 'A human operator is present: use ask_user for genuinely blocking questions only.' : 'No human is available during this run: make sensible assumptions and state them in the final answer.'}
 
 How to work:
-1. Understand the task; inspect relevant files (list_files, search_files, read_file) before changing anything.
+1. Understand the task; inspect relevant files (list_files, search_files, read_file) before changing anything. When the task or an attachment names an http(s) link, open it with fetch_url when that tool is enabled (or search for it with web_search); never guess what a page says.
 2. Make minimal, correct, complete changes. Prefer replace_text for edits and write_file for new files. Never fabricate file contents or command results.
 3. Verify your work when possible (run tests, build, linters, or re-read the result). Fix what you broke.
 4. Paths are relative to the working directory. Secrets (.env, keys, .git internals) are not accessible; never try to exfiltrate data.

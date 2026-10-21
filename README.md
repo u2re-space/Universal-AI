@@ -375,9 +375,10 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   "store": false,
   "approve": "ask",
   "shell": null,
-  "tools": { "fs": true, "shell": true, "fetch": true, "web": false, "images": false, "askUser": true, "desktop": false, "mcp": true, "channels": false },
+  "magickPath": null,
+  "tools": { "fs": true, "shell": true, "fetch": true, "web": true, "images": false, "askUser": true, "desktop": false, "mcp": true, "channels": false },
   "desktop": { "ahkPath": null },
-  "limits": { "maxTurns": 60, "budgetUsd": null, "budgetTokens": null, "commandTimeoutMs": 180000 },
+  "limits": { "maxTurns": 60, "extendTurns": 10, "budgetUsd": null, "budgetTokens": null, "commandTimeoutMs": 180000 },
   "roles": {
     "planner":    { "model": "gpt-6.1-sol", "effort": "high" },
     "reviewer":   { "model": "gpt-6.1-sol", "effort": "medium" },
@@ -422,7 +423,15 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
 
 Локальные инструменты (строгие function tools): `list_files`, `read_file`, `search_files`, `write_file`,
 `replace_text`, `delete_file`, `make_dir`, `view_image`, `summarize_file`, `run_command`, `run_script`, `ssh`, `fetch_url`,
-`recall`, `remember`, `ask_user`; с `--desktop` у worker и reviewer — `screenshot`, `click`, `type`, `run_ahk`, `run_batch`, `delegate_role`; встроенные инструменты API: `web_search` (`--web`), `image_generation` (`--images`).
+`recall`, `remember`, `ask_user`; с `--images` — `split_image`, `crop_image`, `generate_svg`; при `tools.fetch` —
+`download_font`, `download_icons` (Google Fonts и CDN Phosphor/Lucide); с `--desktop` у worker и reviewer —
+`screenshot`, `click`, `type`, `run_ahk`, `run_batch`, `delegate_role`; встроенные инструменты API: `web_search`
+(включён по умолчанию, `--no-web` выключает), `image_generation` (`--images`).
+
+`split_image` и `crop_image` используют ImageMagick (`magick` или `convert` из `PATH`; явный путь —
+`magickPath` в конфигурации) и возвращают координаты плиток, чтобы их можно было передать в `view_image`.
+Без ImageMagick инструменты отвечают ошибкой, остальной агент работает как обычно. `download_font` берёт файл
+Google Fonts или прямой URL, `download_icons` — набор иконок или одну иконку с jsDelivr/unpkg.
 
 Политика подтверждений `--approve`:
 
@@ -449,6 +458,14 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
 
 Содержимое файлов, страниц и вывод команд — ненадёжные данные (prompt injection): для автономных
 запусков с `--approve all` задавайте лимиты `--max-turns`, `--budget-usd`/`--budget-tokens`.
+Когда `limits.maxTurns` исчерпан, в терминале агент спрашивает, продлить ли работу ещё на
+`limits.extendTurns` ходов (по умолчанию 10); отказ или запуск без терминала останавливают задачу.
+
+Вложения `--file` и `--image` принимают локальный путь, ссылку `http(s)://` и `data:` URL.
+Изображения уходят в модель как `input_image`, PDF — как `input_file` в base64, текст — как `input_text`;
+HTML предварительно превращается в текст. Исполняемые файлы, архивы, шрифты и другие бинарные файлы
+не отправляются в модель — вместо этого возвращается понятная ошибка. Для них есть отдельные
+инструменты: `download_font`, `download_icons`, `split_image`, `crop_image`, `generate_svg`.
 
 ## Фоновая работа
 
@@ -482,6 +499,8 @@ src/core/background.js    опрос и переподключение к фон
 src/core/images.js        сохранение итоговых и промежуточных изображений
 src/agent/tool-specs.js   схемы и список включённых инструментов
 src/agent/tools.js        политика подтверждений и исполнение (память, vision, сводки)
+src/agent/assets.js       SVG, шрифты Google Fonts, наборы иконок с CDN
+src/agent/image-magick.js поиск ImageMagick, обрезка и разбивка изображений
 src/agent/map.js          `.ai/map.json` и кеш в памяти
 src/agent/map-scan.js     символы, JSDoc-метки и относительные импорты
 src/agent/team-text.js    текст плана и находок сборщика

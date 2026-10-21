@@ -20,7 +20,8 @@ import { formatBytes, truncate } from '../util/text.js';
 import { agentBase } from './instructions.js';
 import { runOnce } from './flow.js';
 import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstructions, approvalLevel, backupDirFor, openMemoryFor,
-    describeRoles, usageRow, usageBreakdownRows, backupSummaryRows, createClientFor, createLedgerFor, writeOutput, exitCodeFor, STATUS_LABELS } from './shared.js';
+    describeRoles, usageRow, usageBreakdownRows, backupSummaryRows, createClientFor, createLedgerFor, writeOutput, exitCodeFor, STATUS_LABELS,
+    turnExtender } from './shared.js';
 import { openMcpSources } from '../mcp/session.js';
 import { prepareTeamInvocation } from './team-args.js';
 import { findLatestResumable, resolveResumeStep } from '../agent/work-plan.js';
@@ -195,6 +196,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
         backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles, generation, revision, fromStep, resumeId,
         processTool: ctx.processTool, encodeHost: ctx.encodeHost ?? null,
+        onMaxTurns: turnExtender(renderer, config, signal),
     });
     renderer.idle();
     renderer.ensureNewline();

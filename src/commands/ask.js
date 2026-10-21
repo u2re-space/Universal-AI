@@ -7,7 +7,7 @@
  * @exports ask
  * @ai.tags cli, prompt
  * @ai.hint io
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-22 Web search follows tools.web, which is on by default.
  */
 import { createToolset, enabledToolNames } from '../agent/tools.js';
 import { resolveRole } from '../core/config.js';
@@ -41,7 +41,8 @@ export async function ask(ctx) {
     const instructions = composeInstructions(ASSISTANT_BASE, config, extra);
     const textFormat = await loadTextFormat(values.schema, ctx.cwd);
 
-    // Local tools are opt-in for `ask` (--tools fs,shell,…); built-in web/images follow --web/--images.
+    // Local tools are opt-in for `ask` (--tools fs,shell,…); web search follows tools.web (on by default),
+    // image generation follows --images.
     let toolset = null;
     let store = null;
     if (values.tools !== undefined && values.tools !== 'none') {

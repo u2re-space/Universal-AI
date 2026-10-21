@@ -142,6 +142,7 @@ export function overridesFrom(values, { command = null } = {}) {
     }
     if (values.memory === false) o.memory = { enabled: false };
     if (values.web) o.tools.web = true;
+    if (values['no-web']) o.tools.web = false;
     if (values.images) o.tools.images = true;
     if (values.desktop) o.tools.desktop = true;
     if (values['unsafe-screenshot']) (o.desktop ??= {}).unsafeScreenshot = true;

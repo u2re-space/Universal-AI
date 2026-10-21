@@ -6,7 +6,7 @@
  * @exports HELP
  * @ai.tags cli
  * @ai.hint pure
- * @changed 2026-10-15 Help mentions the Node and frontend workspace scanner.
+ * @changed 2026-10-22 Help mentions turn extension, image tools, and asset downloads.
  */
 export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
 
@@ -56,14 +56,18 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 Инструменты и автономность:
   --tools fs,shell,fetch,mcp,channels  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
   search_files scope=path|symbol|content|all читает карту проекта.
-  --web                  поиск web_search на /v1/responses (ProxyAPI). Запросы и страницы печатаются под ответом
-                         --images   генерация картинок в ответах
+  --web                  поиск web_search на /v1/responses (ProxyAPI), включён по умолчанию; --no-web выключает
+                         запросы и страницы печатаются под ответом
+  --images               генерация картинок в ответах; вместе с tools.images — split_image, crop_image, generate_svg
   --desktop              включает экран Windows, мышь, клавиатуру и AutoHotkey v2
   --unsafe-screenshot    разрешить снимок рабочего стола. Без флага screenshot и снимок после клика выключены
   --approve ask|read|write|all   политика подтверждений (по умолчанию: ask в терминале, read без него)
   --yes, -y              = --approve all (без вопросов; осторожно)
   --cwd, -C <каталог>    рабочий каталог для инструментов (по умолчанию текущий)
   --max-turns <n>        лимит ходов агента          --shell powershell|pwsh|bash|sh|zsh|cmd
+                         когда лимит исчерпан, терминал предлагает продлить на limits.extendTurns (10) ходов
+  При tools.fetch доступны download_font (Google Fonts или URL) и download_icons (Phosphor, Lucide с CDN).
+  split_image и crop_image требуют ImageMagick (magick или convert); путь задаётся полем magickPath.
   При tools.shell агент может: run_command (оболочка на вызов), run_script (.ps1 .cmd .bat .sh .bash), ssh (команда или файл, scp put/get).
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 

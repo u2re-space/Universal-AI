@@ -7,7 +7,7 @@
  * @exports APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, defaults, resolveRole, defaultHome, loadConfig, isReasoningModel, supportsVerbosity, redactConfig
  * @ai.tags config
  * @ai.hint io
- * @changed 2026-10-15 Accept OPENAI_MODEL when AI_MODEL is unset.
+ * @changed 2026-10-22 Validate magickPath and keep gpt-6-astra out of the reviewer role.
  */
 import os from 'node:os';
 import path from 'node:path';
@@ -26,6 +26,7 @@ import {
 } from './config-defaults.js';
 import { COMPLETION_MODEL_CHOICES, resolveCompletionModel } from '../complete/models.js';
 import { assertPaceBudget } from '../agent/pace.js';
+import { FORBIDDEN_MODELS as REVIEWER_FORBIDDEN, safeReviewerModel } from '../roles/reviewer.js';
 
 const KiB = 1024;
 
@@ -47,7 +48,7 @@ export function resolveRole(config, name = 'default') {
     const base = config.roles?.default ?? {};
     const role = config.roles?.[name] ?? {};
     const pick = (key, fallback) => role[key] ?? (name !== 'default' ? base[key] : undefined) ?? fallback;
-    const model = pick('model', config.model);
+    const model = name === 'reviewer' ? safeReviewerModel(pick('model', config.model)) : pick('model', config.model);
     return {
         name, model,
         effort: pick('effort', config.reasoning.effort),
@@ -191,6 +192,7 @@ function validateConfig(c) {
     if (!['auto', 'disabled'].includes(c.truncation)) fail('truncation: auto | disabled');
     if (c.approve !== null && !APPROVAL_LEVELS.includes(c.approve)) fail(`approve: ${APPROVAL_LEVELS.join(' | ')}`);
     if (c.shell !== null && !['powershell', 'pwsh', 'bash', 'sh', 'zsh', 'cmd'].includes(c.shell)) fail('shell: powershell | pwsh | bash | sh | zsh | cmd');
+    if (c.magickPath !== null && (typeof c.magickPath !== 'string' || c.magickPath.trim() === '')) fail('magickPath: непустая строка или null');
     if (!Number.isSafeInteger(c.retries) || c.retries < 0 || c.retries > 10) fail('retries: 0..10');
     if (!isRecord(c.fallback)) fail('fallback должен быть объектом');
     if (typeof c.fallback.enabled !== 'boolean') fail('fallback.enabled: true | false');
@@ -210,6 +212,7 @@ function validateConfig(c) {
         if (!(key in defaults.limits)) fail(`неизвестный лимит limits.${key}`);
         if (key === 'budgetUsd') { if (value !== null && !(Number.isFinite(value) && value > 0)) fail('limits.budgetUsd > 0'); continue; }
         if (key === 'budgetTokens') { if (value !== null && !(Number.isSafeInteger(value) && value > 0)) fail('limits.budgetTokens > 0'); continue; }
+        if (key === 'extendTurns') { if (!Number.isSafeInteger(value) || value < 0) fail('limits.extendTurns: целое ≥ 0'); continue; }
         if (!Number.isSafeInteger(value) || value <= 0) fail(`limits.${key} должен быть положительным целым`);
     }
     if (c.limits.maxTurns > 1000) fail('limits.maxTurns ≤ 1000');
@@ -345,6 +348,11 @@ function validateConfig(c) {
     }
     if (!Array.isArray(c.mcp.servers)) fail('mcp.servers должен быть массивом');
     c.mcp.servers = c.mcp.servers.map((entry) => normalizeMcpServer(entry));
+    // Reviewer model restriction: gpt-6-astra is forbidden. An explicit pin is an error;
+    // an inherited default is replaced by the safe fallback in resolveRole.
+    if (c.roles?.reviewer?.model && REVIEWER_FORBIDDEN.includes(c.roles.reviewer.model)) {
+        fail(`roles.reviewer.model не может быть "${c.roles.reviewer.model}" (запрещён для ревьюера).`);
+    }
     if (!isRecord(c.decisions)) fail('decisions должен быть объектом');
     for (const key of Object.keys(c.decisions)) if (!(key in defaults.decisions)) fail(`неизвестный параметр decisions.${key}`);
     if (typeof c.decisions.model !== 'string' || !c.decisions.model.trim()) fail('decisions.model должен быть строкой');

@@ -106,6 +106,40 @@ test('max turns limit stops an endless tool loop and settles pending calls', asy
     assert.equal(calls, outs, 'every function_call has an output');
 });
 
+test('the operator can extend the turn budget once the cap is reached', async () => {
+    let requests = 0;
+    script = () => { requests++; return { calls: [{ name: 'list_files', arguments: { path: '.', depth: 1, include_hidden: false } }] }; };
+    const { session, ledger, toolset, events, emit, cfg } = setup();
+    const asked = [];
+    const result = await runTurn({
+        client: client(), config: cfg, session, ledger, toolset, emit, maxTurns: 2,
+        onMaxTurns: async ({ turns, maxTurns }) => { asked.push({ turns, maxTurns }); return maxTurns === 2 ? maxTurns + 10 : null; },
+    });
+    assert.equal(result.status, 'max_turns');
+    assert.equal(asked.length, 2, 'asked at the first cap and again at the extended cap');
+    assert.deepEqual(asked[0], { turns: 2, maxTurns: 2 });
+    assert.deepEqual(asked[1], { turns: 12, maxTurns: 12 });
+    assert.equal(result.turns, 12, 'continued to the extended cap');
+    assert.equal(requests, 12);
+    assert.ok(events.some((e) => e.type === 'warning' && /продлён: 2 → 12/.test(e.message)));
+    const calls = session.items.filter((i) => i.type === 'function_call').length;
+    const outs = session.items.filter((i) => i.type === 'function_call_output').length;
+    assert.equal(calls, outs, 'history stays valid after the extension');
+});
+
+test('declining the extension stops at the original cap', async () => {
+    script = () => ({ calls: [{ name: 'list_files', arguments: { path: '.', depth: 1, include_hidden: false } }] });
+    const { session, ledger, toolset, emit, cfg } = setup();
+    let asked = 0;
+    const result = await runTurn({
+        client: client(), config: cfg, session, ledger, toolset, emit, maxTurns: 2,
+        onMaxTurns: async () => { asked++; return null; },
+    });
+    assert.equal(result.status, 'max_turns');
+    assert.equal(asked, 1);
+    assert.equal(result.turns, 2);
+});
+
 test('the same failing tool call stops the loop before the turn cap', async () => {
     script = () => ({ calls: [{ name: 'read_file', arguments: { path: 'missing.txt', start_line: null, end_line: null } }] });
     const { session, ledger, toolset, events, emit, cfg } = setup();

@@ -7,7 +7,7 @@
  * @exports createRoleRunner
  * @ai.tags roles, models
  * @ai.hint hot
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-22 onMaxTurns reaches the turn loop.
  */
 
 import { createSession } from '../core/session.js';
@@ -35,7 +35,7 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
     async function run(name, {
         text, parts = [], instructions = '', toolset = null, builtin = [], schema = null, schemaName = 'result',
         maxTurns = 1, imageTarget = config.image.outputDir, session = null, silent = Boolean(schema), instructionsOnly = false,
-        model: modelOverride = null, effort: effortOverride = null,
+        model: modelOverride = null, effort: effortOverride = null, onMaxTurns = null,
     }) {
         const role = resolve(name);
         const model = modelOverride || role.model;
@@ -56,6 +56,7 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
             result = await runTurn({
                 client, config: roleConfig, session: conversation, ledger, toolset, builtin, instructions: fullInstructions, model,
                 textFormat: schema ? { type: 'json_schema', name: schemaName, strict: true, schema } : null, maxTurns, signal, emit: roleEmit, imageTarget,
+                onMaxTurns,
             });
         } finally {
             ledger.setRole(previousRole);

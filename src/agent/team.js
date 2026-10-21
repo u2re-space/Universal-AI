@@ -7,7 +7,7 @@
  * @exports toolNamesForRole, runTeam
  * @ai.tags team, roles
  * @ai.hint keep
- * @changed 2026-10-21 The optional coordinator reviews the plan after every stage and may revise it.
+ * @changed 2026-10-22 The turn budget can be extended and the reviewer model is sanitized.
  */
 
 import path from 'node:path';
@@ -60,6 +60,7 @@ import { fileInstructions } from '../roles/encoder.js';
 import { requestDecision } from '../channels/decide.js';
 import { questionsFor } from '../channels/questions.js';
 import { routeFlag } from '../channels/verdict.js';
+import { safeReviewerModel } from '../roles/reviewer.js';
 
 import { bullets, renderFindings } from './team-text.js';
 const HARD_STOP = new Set(['cancelled', 'budget', 'failed']);
@@ -87,6 +88,7 @@ export async function runTeam({
     client, config, ledger, task, parts = [], root, approvalLevel = 'read', interactive = false, approve, askUser = null,
     memory = null, projectKey = null, projectName = null, backupDir = null, extraInstructions = null, emit = () => {}, signal,
     seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, processTool = null, encodeHost = null,
+    onMaxTurns = null,
 }) {
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
     const roles = createRoleRunner({ client, config, ledger, emit, signal });
@@ -454,7 +456,7 @@ export async function runTeam({
             const outcome = await roles.run(author, {
                 text: `${header}\n\n# ${title}\n${body}`, instructions: ROLE_INSTRUCTIONS[author], toolset: workerTools, builtin,
                 maxTurns, session: workerSession, imageTarget: config.image.outputDir,
-                model, effort,
+                model, effort, onMaxTurns,
             });
             if (checkpoint?.stepId && work) {
                 progress.checkpoint = { stepId: checkpoint.stepId, phase: checkpoint.phase, model };
@@ -999,13 +1001,13 @@ export async function runTeam({
             }
         }
         for (let round = 1; shouldReview && !decisionsAccepted; round++) {
-            notify({ type: 'stage.start', stage: 'review', role: 'reviewer', model: paced.roles.reviewer.model, round });
+            notify({ type: 'stage.start', stage: 'review', role: 'reviewer', model: safeReviewerModel(paced.roles.reviewer.model), round });
             ctx.set('diff', 'Changes made by the worker (diff)', await describeChangeSet({ root, changes: workerTools.stats().changes, maxBytes: 48 * 1024 }), { priority: 5 });
             const commands = workerTools.stats().commands.map((c) => `- ${c.command} → exit ${c.exitCode ?? '?'}`).join('\n') || '- (none)';
             const reviewed = await roles.run('reviewer', {
                 text: `${ctx.render({ maxBytes })}\n\n# Review request (round ${round})\nAcceptance criteria:\n${bullets(plan.acceptanceCriteria)}\nCommands run by the worker:\n${commands}`,
                 instructions: `${ROLE_INSTRUCTIONS.reviewer}\n\n${[acceptanceParagraph(paced.acceptance), guaranteesParagraph(paced.guarantees)].filter(Boolean).join('\n\n')}`, toolset: reviewerTools, schema: REVIEW_SCHEMA, schemaName: 'review', maxTurns: config.agent.reviewerMaxTurns,
-                model: paced.roles.reviewer.model, effort: paced.roles.reviewer.effort,
+                model: safeReviewerModel(paced.roles.reviewer.model), effort: paced.roles.reviewer.effort, onMaxTurns,
             });
             if (HARD_STOP.has(reviewed.status)) return stop(reviewed, 'ревью');
             if (reviewed.status !== 'completed' || !reviewed.data) {

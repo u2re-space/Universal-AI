@@ -7,7 +7,7 @@
  * @exports builtinTools, buildRequestBody, compactSession, shrinkHistory, runTurn
  * @ai.tags loop, tools
  * @ai.hint hot
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-22 onMaxTurns lets the operator extend the turn budget.
  */
 
 import { ApiError, BudgetError, CancelledError, isAbortError } from '../openai/errors.js';
@@ -132,7 +132,7 @@ export async function compactSession({ client, session, model, instructions = nu
 export async function runTurn({
     client, config, session, ledger, toolset = null, builtin = [], toolChoice = null, instructions = null,
     model = config.model, textFormat = null, background = false, imageTarget = config.image.outputDir,
-    maxTurns = config.limits.maxTurns, signal, emit = () => {},
+    maxTurns = config.limits.maxTurns, signal, emit = () => {}, onMaxTurns = null,
 }) {
     const notify = (event) => { try { emit(event); } catch { /* observers never break the loop */ } };
     const images = createImageSink({ target: imageTarget, format: config.image.format });
@@ -320,9 +320,24 @@ export async function runTurn({
                 return result;
             }
             if (result.turns >= maxTurns) {
-                notify({ type: 'warning', message: `Достигнут лимит ходов (${maxTurns}); остановка.` });
-                result.status = 'max_turns';
-                return result;
+                // Ask the operator for an extension before giving up. The callback returns a new cap or null.
+                if (typeof onMaxTurns === 'function') {
+                    let extended = null;
+                    try { extended = await onMaxTurns({ turns: result.turns, maxTurns, toolCalls: result.toolCalls }); }
+                    catch (error) { notify({ type: 'warning', message: `Продление ходов недоступно: ${errorMessage(error)}` }); }
+                    if (Number.isSafeInteger(extended) && extended > maxTurns) {
+                        notify({ type: 'warning', message: `Лимит ходов продлён: ${maxTurns} → ${extended}.` });
+                        maxTurns = extended;
+                    } else {
+                        notify({ type: 'warning', message: `Достигнут лимит ходов (${maxTurns}); остановка.` });
+                        result.status = 'max_turns';
+                        return result;
+                    }
+                } else {
+                    notify({ type: 'warning', message: `Достигнут лимит ходов (${maxTurns}); остановка.` });
+                    result.status = 'max_turns';
+                    return result;
+                }
             }
             if (config.compaction.auto && !session.store && entry.usage && entry.usage.input > config.compaction.afterInputTokens) {
                 try {

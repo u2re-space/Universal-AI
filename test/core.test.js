@@ -6,13 +6,14 @@ import { mkdtemp, writeFile, rm, symlink, mkdir } from 'node:fs/promises';
 import { createSession, loadSession } from '../src/core/session.js';
 import { loadConfig } from '../src/core/config.js';
 import { createLedger, priceFor, costOf } from '../src/core/usage.js';
-import { loadImageAttachment, loadFileAttachment, buildUserMessage, detectImageMime, stdinFence } from '../src/core/attachments.js';
+import { loadImageAttachment, loadFileAttachment, buildUserMessage, detectImageMime, detectBinary, stdinFence } from '../src/core/attachments.js';
 import { resolveInside } from '../src/agent/paths.js';
 import { searchFiles, listFiles } from '../src/agent/fs-tools.js';
 import { createToolset } from '../src/agent/tools.js';
 import { runCommand } from '../src/agent/shell.js';
 import { sanitizeTerminal } from '../src/ui/sanitize.js';
 import { normalizeUsage } from '../src/openai/stream.js';
+import { resolveTextArg } from '../src/commands/shared.js';
 import { TINY_PNG } from './helpers/mock-server.js';
 
 test('session: replayable items for stateless history', () => {
@@ -97,6 +98,26 @@ test('attachments: images become data URLs, PDFs input_file, text input_text', a
         await assert.rejects(loadFileAttachment('blob.bin', { cwd: dir }), /Бинарный/);
         await assert.rejects(loadImageAttachment('missing.png', { cwd: dir }), /не найдено/);
         assert.equal(detectImageMime(Buffer.from([0xff, 0xd8, 0xff, 0xe0])), 'image/jpeg');
+        // data: URLs are accepted as files and images.
+        const dataImage = await loadFileAttachment(`data:image/png;base64,${TINY_PNG}`, { cwd: dir });
+        assert.equal(dataImage.part.type, 'input_image');
+        assert.match(dataImage.part.image_url, /^data:image\/png;base64,/);
+        const dataText = await loadFileAttachment('data:text/plain;charset=utf-8;base64,aGVsbG8=', { cwd: dir });
+        assert.equal(dataText.part.type, 'input_text');
+        assert.match(dataText.part.text, /hello/);
+        const dataPdf = await loadFileAttachment('data:application/pdf;base64,JVBERi0xLjQ=', { cwd: dir });
+        assert.equal(dataPdf.part.type, 'input_file');
+        assert.match(dataPdf.part.file_data, /^data:application\/pdf;base64,/);
+        const dataSvg = await loadFileAttachment('data:image/svg+xml;base64,PHN2Zy8+', { cwd: dir });
+        assert.equal(dataSvg.part.type, 'input_text');
+        assert.match(dataSvg.part.text, /<svg\/>/);
+        await assert.rejects(loadImageAttachment('data:image/svg+xml;base64,PHN2Zy8+', { cwd: dir }), /не является поддерживаемым изображением/);
+        await assert.rejects(loadFileAttachment('data:application/octet-stream;base64,TVqQAA==', { cwd: dir }), /Бинарный/);
+        // An executable header is rejected even under a harmless extension.
+        await writeFile(path.join(dir, 'fake.txt'), Buffer.from([0x4d, 0x5a, 0x90, 0x00]));
+        await assert.rejects(loadFileAttachment('fake.txt', { cwd: dir }), /исполняемый файл/);
+        assert.equal(detectBinary(Buffer.from([0x7f, 0x45, 0x4c, 0x46]), 'x'), 'исполняемый файл (ELF)');
+        assert.equal(detectBinary(Buffer.from('# text')), null);
         const message = buildUserMessage({ text: 'look', parts: [image.part] });
         assert.equal(message.role, 'user');
         assert.deepEqual(message.content.map((c) => c.type), ['input_text', 'input_image']);
@@ -106,6 +127,19 @@ test('attachments: images become data URLs, PDFs input_file, text input_text', a
 
 test('stdin fence is English', () => {
     assert.equal(stdinFence('hello'), '--- stdin ---\nhello\n--- end stdin ---');
+});
+
+test('resolveTextArg reads UTF-8 and refuses binary files', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-text-arg-'));
+    try {
+        await writeFile(path.join(dir, 'notes.md'), '\uFEFF# hello');
+        assert.equal(await resolveTextArg('@notes.md', { cwd: dir }), '# hello');
+        await writeFile(path.join(dir, 'app.exe'), Buffer.from([0x4d, 0x5a, 0x00, 0x00]));
+        await assert.rejects(resolveTextArg('@app.exe', { cwd: dir }), /бинарный файл/);
+        await assert.rejects(resolveTextArg('@missing.md', { cwd: dir }), /Не удалось прочитать/);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
 });
 
 test('paths: confinement, protected names, symlink escape', async () => {
@@ -214,6 +248,25 @@ test('agent.extract accepts off, auto, and always', async () => {
             loadConfig({ env, ensureHome: false }),
             /agent\.extract: off \| auto \| always/,
         );
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
+test('web search, turn extension, and magickPath defaults; reviewer model is validated', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-tools-cfg-'));
+    const env = { AI_AGENT_HOME: home };
+    try {
+        const config = await loadConfig({ env, ensureHome: false });
+        assert.equal(config.tools.web, true);
+        assert.equal(config.limits.extendTurns, 10);
+        assert.equal(config.magickPath, null);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ limits: { extendTurns: -1 } }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /limits\.extendTurns/);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ magickPath: '' }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /magickPath/);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ roles: { reviewer: { model: 'gpt-6-astra' } } }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /reviewer.*gpt-6-astra/);
     } finally {
         await rm(home, { recursive: true, force: true });
     }

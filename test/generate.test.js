@@ -136,6 +136,7 @@ test('config defaults and flag bounds', async () => {
     assert.equal(overridesFrom({ tools: 'fs,mcp' }).tools.mcp, true);
     assert.equal(overridesFrom({ tools: 'fs,mcp' }).tools.shell, false);
     assert.equal(overridesFrom({ 'no-tools': true }).tools.mcp, false);
+    assert.equal(overridesFrom({ 'no-web': true }).tools.web, false);
 });
 
 test('pace defaults to speed 10 and quality 40 and a file can pin a role', async () => {

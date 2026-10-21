@@ -7,14 +7,14 @@
  * @exports UsageError, overridesFrom, readStdin, resolveTextArg, loadAttachments, composeInstructions, createClientFor, createLedgerFor, openSession, approvalLevel, backupDirFor, writeOutput, STATUS_LABELS, exitCodeFor, resolveRole, openMemoryFor, describeRoles, usageBreakdownRows, usageRow, describeChanges, backupSummaryRows, resultObject
  * @ai.tags cli, session, usage
  * @ai.hint io
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-22 turnExtender asks the operator to extend a spent turn budget.
  */
 import path from 'node:path';
 import { readFile, mkdir, writeFile, stat } from 'node:fs/promises';
 import { createFallbackClient } from '../openai/fallback.js';
 import { createLedger } from '../core/usage.js';
 import { createSession, loadSession, sessionFile } from '../core/session.js';
-import { loadImageAttachment, loadFileAttachment } from '../core/attachments.js';
+import { loadImageAttachment, loadFileAttachment, detectBinary } from '../core/attachments.js';
 import { resolveRole } from '../core/config.js';
 import { openMemory, projectKey as computeProjectKey } from '../core/memory.js';
 import { formatBytes, formatDuration, formatNumber, formatUsd, timestampSlug } from '../util/text.js';
@@ -23,7 +23,7 @@ import { UsageError, overridesFrom } from './flags.js';
 export { UsageError, overridesFrom };
 
 /**
- * Read piped stdin (returns null when stdin is a TTY or empty).
+ * Read piped stdin (returns null when stdin is a TTY or empty). Binary payloads are refused.
  * @param {{ maxBytes?: number, stdin?: object }} [options] Byte cap and stream. Defaults are 4 MiB and process.stdin.
  * @returns {Promise<string|null>} Text, or null when the stream is a TTY, empty, or unreadable.
  * @exports
@@ -43,24 +43,36 @@ export async function readStdin({ maxBytes = 4 * 1024 * 1024, stdin = process.st
         if (error instanceof UsageError) throw error;
         return null;
     }
-    const text = Buffer.concat(chunks).toString('utf8').replace(/^\uFEFF/, '');
+    const buffer = Buffer.concat(chunks);
+    const binary = detectBinary(buffer);
+    if (binary) throw new UsageError(`stdin похож на бинарные данные (${binary}); текст не отправлен.`);
+    const text = buffer.toString('utf8').replace(/^\uFEFF/, '');
     return text.trim() ? text : null;
 }
 
 /**
  * "@file" → file contents, otherwise the literal string.
- * @param {string|null|undefined} value Argument text. A leading @ reads a file under cwd.
- * @param {{ cwd?: string, what?: string }} [options] cwd resolves the path; what names the value in the error.
+ * @param {string|null|undefined} value Argument text. A leading @ reads a UTF-8 text file under cwd; binaries are refused.
+ * @param {{ cwd?: string, what?: string, maxBytes?: number }} [options] cwd resolves the path; what names the value in the error.
  * @returns {Promise<string|null>} Null when value is not a string.
  * @exports
  * @ai.hint io
  */
-export async function resolveTextArg(value, { cwd = process.cwd(), what = 'текст' } = {}) {
+export async function resolveTextArg(value, { cwd = process.cwd(), what = 'текст', maxBytes = 8 * 1024 * 1024 } = {}) {
     if (typeof value !== 'string') return null;
     if (!value.startsWith('@')) return value;
     const file = path.resolve(cwd, value.slice(1));
-    try { return (await readFile(file, 'utf8')).replace(/^\uFEFF/, ''); }
-    catch (error) { throw new UsageError(`Не удалось прочитать ${what} из ${file}: ${error.message}`); }
+    try {
+        const info = await stat(file);
+        if (!info.isFile()) throw new Error('это не файл');
+        if (info.size > maxBytes) throw new Error(`файл больше лимита ${formatBytes(maxBytes)}`);
+        const buffer = await readFile(file);
+        const binary = detectBinary(buffer, file);
+        if (binary) throw new Error(`бинарный файл (${binary}) не читается как текст`);
+        return new TextDecoder('utf-8', { fatal: true }).decode(buffer).replace(/^\uFEFF/, '');
+    } catch (error) {
+        throw new UsageError(`Не удалось прочитать ${what} из ${file}: ${error.message}`);
+    }
 }
 
 /**
@@ -148,6 +160,29 @@ export async function openSession({ config, name = null, instructions = null }) 
  */
 export function approvalLevel(config, interactive) {
     return config.approve ?? (interactive ? 'ask' : 'read');
+}
+
+/**
+ * Callback for runTurn that asks the operator to extend a spent turn budget.
+ * Returns null when extension is disabled or the operator declines; renderer.ask returns null
+ * in non-interactive and JSON modes, so a detached job stops instead of waiting.
+ * @param {object} renderer Renderer with ask(question, { signal }).
+ * @param {object} config Resolved config. limits.extendTurns is the step (0 disables).
+ * @param {AbortSignal} [signal] Turn signal.
+ * @returns {((info: { turns: number, maxTurns: number }) => Promise<number|null>) | null}
+ * @exports
+ * @ai.hint io
+ */
+export function turnExtender(renderer, config, signal) {
+    const step = Number(config.limits?.extendTurns ?? 0);
+    if (!Number.isSafeInteger(step) || step <= 0 || typeof renderer?.ask !== 'function') return null;
+    return async ({ maxTurns }) => {
+        const answer = await renderer.ask(`Лимит ходов (${maxTurns}) исчерпан. Продлить на ${step} ходов? [y/n]`, { signal });
+        if (answer === null) return null;
+        const key = String(answer).toLowerCase();
+        if (['y', 'yes', 'д', 'да'].includes(key)) return maxTurns + step;
+        return null;
+    };
 }
 
 /**

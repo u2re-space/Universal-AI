@@ -27,7 +27,8 @@ import { structureCode } from '../structure/structure.js';
 import { DESKTOP_TOOL_NAMES, createDesktopHandlers } from './desktop.js';
 import { createImageHandlers } from './image-tools.js';
 import { createChannelHandlers } from '../channels/tool-handlers.js';
-
+import { detectMagick, magickSplit, magickCrop } from './image-magick.js';
+import { generateSvg, downloadFont, downloadIcons } from './assets.js';
 import {
     TOOL_SPECS,
     READ_ONLY_TOOLS,
@@ -237,6 +238,11 @@ export function createToolset({
             case 'type': return `Ввод: ${truncate(args.text ?? '', 400)}`;
             case 'run_ahk': return `Скрипт: ${truncate(args.script ?? '', 400)}`;
             case 'run_batch': return `Пакет: ${truncate(batchSource(args), 400)}`;
+            case 'split_image': return `Разбить ${args.path} на ${args.rows ?? 1}×${args.cols ?? 1} плиток\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
+            case 'crop_image': return `Обрезать ${args.path}: ${args.width ?? '?'}×${args.height ?? '?'} в (${args.x ?? 0},${args.y ?? 0})\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
+            case 'generate_svg': return `SVG ${args.width ?? 512}×${args.height ?? 512}: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}\nПричина: ${args.reason ?? '—'}`;
+            case 'download_font': return `Шрифт: ${args.name || args.url || '?'} ${args.style || ''}\nВыход: ${args.output || 'авто'}`;
+            case 'download_icons': return `Иконки: ${args.name || '?'}${args.icon ? `/${args.icon}` : ' (набор)'} ${args.variant || 'regular'}\nВыход: ${args.output || 'авто'}`;
             default:
                 if (name.startsWith('mcp_')) return `${name} ${truncate(args.arguments_json ?? args.uri ?? '', 400, { singleLine: false })}`;
                 return `${name} ${JSON.stringify(args)}`;
@@ -511,6 +517,65 @@ export function createToolset({
             if (!askUser) return { output: 'Оператор недоступен (неинтерактивный режим). Примите разумное решение самостоятельно и перечислите допущения в итоговом ответе.', summary: 'нет оператора' };
             const answer = await askUser(String(args.question ?? ''));
             return { output: answer === null || answer === '' ? '(оператор не ответил)' : answer, summary: truncate(answer ?? '', 60) };
+        },
+        /** Split an image into a grid of tiles. Returns coordinates for each tile. */
+        async split_image(args) {
+            const { abs, rel } = await resolveInside(root, args.path, { allowRoot: false });
+            const info = await stat(abs).catch(() => null);
+            if (!info?.isFile()) throw new Error(`Файл не найден: ${args.path}`);
+            if (info.size > limits.maxImageBytes) throw new Error(`Изображение больше лимита ${formatBytes(limits.maxImageBytes)}.`);
+            const rows = Math.max(1, Math.min(20, args.rows ?? 1));
+            const cols = Math.max(1, Math.min(20, args.cols ?? 1));
+            if (rows === 1 && cols === 1) throw new Error('Укажите rows > 1 или cols > 1 для разбивки.');
+            const requested = String(args.output ?? '').trim() || `.tmp/split-${Date.now()}`;
+            const outputDir = (await resolveInside(root, requested, { forWrite: true, allowRoot: false })).rel;
+            const exe = await detectMagick({ magickPath: config.magickPath ?? null });
+            if (exe) {
+                const tiles = await magickSplit({ exe, input: abs, outputDir, rows, cols, cwd: root, signal, baseName: 'tile' });
+                const lines = tiles.map((t) => `${t.rel} (${t.width}×${t.height}, x=${t.x}, y=${t.y}, ${formatBytes(t.bytes)})`);
+                return { output: `Разбито ${rel} на ${rows}×${cols} (${tiles.length} плиток):\n${lines.join('\n')}`, summary: `${rows}×${cols} → ${outputDir}/` };
+            }
+            throw new Error('ImageMagick не найден. Установите ImageMagick (magick или convert) или используйте generate_image/edit_image для работы с изображениями.');
+        },
+        /** Crop a region from an image. */
+        async crop_image(args) {
+            const { abs, rel } = await resolveInside(root, args.path, { allowRoot: false });
+            const info = await stat(abs).catch(() => null);
+            if (!info?.isFile()) throw new Error(`Файл не найден: ${args.path}`);
+            const x = Math.max(0, args.x ?? 0);
+            const y = Math.max(0, args.y ?? 0);
+            const width = args.width ?? 0;
+            const height = args.height ?? 0;
+            if (!width || !height) throw new Error('Укажите width и height для обрезки.');
+            const requested = String(args.output ?? '').trim() || `.tmp/crop-${Date.now()}.png`;
+            const output = (await resolveInside(root, requested, { forWrite: true, allowRoot: false })).rel;
+            const exe = await detectMagick({ magickPath: config.magickPath ?? null });
+            if (exe) {
+                const result = await magickCrop({ exe, input: abs, output, x, y, width, height, cwd: root, signal });
+                return { output: `Обрезано ${rel} → ${result.rel} (${width}×${height} в ${x},${y}, ${formatBytes(result.bytes)})`, summary: result.rel };
+            }
+            throw new Error('ImageMagick не найден. Установите ImageMagick (magick или convert).');
+        },
+        /** Generate an SVG file from a prompt. */
+        async generate_svg(args) {
+            const result = await generateSvg({
+                prompt: args.prompt, width: args.width ?? 512, height: args.height ?? 512,
+                output: args.path || '', cwd: root, signal,
+            });
+            return { output: `SVG создан: ${result.rel} (${formatBytes(result.bytes)})`, summary: result.rel };
+        },
+        /** Download a font file. */
+        async download_font(args) {
+            const result = await downloadFont({ name: args.name, style: args.style, url: args.url ?? null, output: args.output, cwd: root, signal });
+            return { output: `Шрифт ${result.family} сохранён: ${result.rel} (${formatBytes(result.bytes)})`, summary: result.rel };
+        },
+        /** Download an icon set or single icon. */
+        async download_icons(args) {
+            const result = await downloadIcons({ name: args.name, icon: args.icon ?? null, variant: args.variant || 'regular', output: args.output, cwd: root, signal });
+            return {
+                output: `Скачано ${result.count} иконок:\n${result.paths.slice(0, 20).join('\n')}${result.paths.length > 20 ? `\n… ещё ${result.paths.length - 20}` : ''}`,
+                summary: `${result.count} иконок`,
+            };
         },
     };
 

@@ -18,7 +18,7 @@ import { formatNumber } from '../util/text.js';
 import { ASSISTANT_BASE } from './instructions.js';
 import { startEncodeHost } from '../encode/host.js';
 import { UsageError, createClientFor, createLedgerFor, openSession, loadAttachments, composeInstructions, resolveTextArg,
-    approvalLevel, backupDirFor, writeOutput, usageRow, STATUS_LABELS, openMemoryFor, resolveRole } from './shared.js';
+    approvalLevel, backupDirFor, writeOutput, usageRow, STATUS_LABELS, openMemoryFor, resolveRole, turnExtender } from './shared.js';
 
 const HELP = `Команды чата:
   /help                     эта справка
@@ -218,6 +218,7 @@ export async function chat(ctx) {
                 client, config, session, ledger, toolset, builtin: builtinTools(config, tools), model,
                 instructions: composeInstructions(ASSISTANT_BASE, config, systemExtra), imageTarget: config.image.outputDir,
                 maxTurns: toolset ? config.limits.maxTurns : 1, signal: turnSignal, emit,
+                onMaxTurns: turnExtender(renderer, config, turnSignal),
             });
             ctx.setTurnController(null);
             renderer.idle();

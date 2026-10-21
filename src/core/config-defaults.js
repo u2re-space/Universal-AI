@@ -6,7 +6,7 @@
  * @exports defaults, ROLE_NAMES, REASONING_EFFORTS, REASONING_SUMMARIES, APPROVAL_LEVELS, IMAGE_DETAILS
  * @ai.tags config
  * @ai.hint pure
- * @changed 2026-10-15 Decisions, moderation, Telegram, and the channel server.
+ * @changed 2026-10-22 Web search is on by default; magickPath and limits.extendTurns are declared.
  */
 import { MODEL_FALLBACKS } from '../openai/model-map.js';
 const KiB = 1024;
@@ -53,11 +53,13 @@ export const defaults = Object.freeze({
     },
     approve: null,                    // ask | read | write | all; null → ask (TTY) or read (no TTY)
     shell: null,                      // run_command shell: null (cmd.exe / sh) | powershell | pwsh | bash | sh | zsh | cmd
-    tools: { fs: true, shell: true, fetch: true, web: false, images: false, askUser: true, desktop: false, mcp: true, channels: false },
+    magickPath: null,                 // ImageMagick executable (magick or convert); null → look it up in PATH
+    tools: { fs: true, shell: true, fetch: true, web: true, images: false, askUser: true, desktop: false, mcp: true, channels: false },
     /** Windows screen, mouse, keyboard, and AutoHotkey v2. Tools stay off until tools.desktop is true. Screen capture stays off until unsafeScreenshot. */
     desktop: { ahkPath: null, shotAfterAction: true, unsafeScreenshot: false },
     limits: {
         maxTurns: 60,
+        extendTurns: 10,              // when maxTurns is reached, ask the operator to extend by this many turns; 0 disables
         maxToolCallsPerTurn: 32,
         budgetUsd: null,
         budgetTokens: null,

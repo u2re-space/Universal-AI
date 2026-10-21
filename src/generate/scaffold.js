@@ -7,7 +7,7 @@
  * @exports filesForKind, filesForStack, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, viteConfig, stackDocuments, kindRules, renderGenerationTask, preparedScaffoldFiles, writePreparedScaffold, ensureDependencies, pathsNamedInTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, scaffoldTarget, retargetScaffold, guardScaffold
  * @ai.tags generate
  * @ai.hint pure
- * @changed 2026-10-21 npm install runs before the first generation step when access allows commands.
+ * @changed 2026-10-22 Web kinds load fonts and icons from a CDN.
  */
 import path from 'node:path';
 import os from 'node:os';
@@ -400,6 +400,7 @@ export function kindRules(kind, recommendations) {
         lines.push(kind === 'app' ? 'server.js serves dist/ after vite build.' : 'No Node server.');
         lines.push('vite.config.js is already written with the Chrome 157 build targets. Do not plan a step to create or verify it.');
         lines.push('Do not run npm run dev or npm run preview inside a step: they do not exit. Verify with npm run build and read the built files.');
+        lines.push('Load fonts and icons from a CDN (Google Fonts, jsDelivr, unpkg). Do not vendor an icon set by hand; use download_font or download_icons only when the task needs local files.');
     } else lines.push('Choose the files the request needs.');
     lines.push('Read .rules/ and .skills/ and follow them. Do not overwrite them.');
     lines.push('Add absent package.json keys only. Keep existing script bodies and versions.');
