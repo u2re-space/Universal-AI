@@ -122,7 +122,7 @@ export async function startMockServer({ script, backgroundPolls = 2 } = {}) {
         const json = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json', 'x-request-id': `req_${randomUUID().slice(0, 8)}` }); res.end(JSON.stringify(data)); };
         requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers: req.headers, body });
 
-        if (req.method === 'GET' && url.pathname === '/v1/models') return json(200, { object: 'list', data: [{ id: 'mock-model' }, { id: 'gpt-6.1-sol' }, { id: 'gpt-image-2' }] });
+        if (req.method === 'GET' && url.pathname === '/v1/models') return json(200, { object: 'list', data: [{ id: 'mock-model' }, { id: 'gpt-6.1-sol' }, { id: 'recraft/recraft-v4.1-flash' }] });
         if (req.method === 'POST' && url.pathname === '/v1/responses/input_tokens') return json(200, { object: 'response.input_tokens', input_tokens: JSON.stringify(body.input).length });
         if (req.method === 'POST' && url.pathname === '/v1/responses/compact') {
             return json(200, { id: `cmp_${++counter}`, object: 'response.compaction', output: [{ type: 'compaction', id: `cmp_item_${counter}`, encrypted_content: 'enc_compacted' }], usage: usageOf({}) });

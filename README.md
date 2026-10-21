@@ -31,7 +31,7 @@
 ```bash
 # Node.js ≥ 26, внешних зависимостей нет
 npm install -g .       # из клона: команда `ai` в PATH
-# npm install -g universal-ai   # то же после публикации пакета
+# npm install -g @u2ai/universal-ai   # то же после публикации пакета
 # либо из любого каталога: bin/ai.cmd, bin/ai.sh, bin/ai.ps1, или node <путь>/bin/ai.js
 export OPENAI_API_KEY=sk-...   # PowerShell: $env:OPENAI_API_KEY = "sk-..."
 ai config init         # создаст ~/.ai-agent/config.json

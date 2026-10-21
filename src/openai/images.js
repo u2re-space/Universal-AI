@@ -13,7 +13,7 @@
 import { randomBytes } from 'node:crypto';
 
 /** Default ProxyAPI image model when imageModel is unset. See https://proxyapi.ru/models/browse/image */
-export const PROXY_IMAGE_MODEL = 'openai/gpt-image-1-mini';
+export const PROXY_IMAGE_MODEL = 'recraft/recraft-v4.1-flash';
 
 /**
  * `images` uses /images/generations and /images/edits. `responses` uses the Responses image_generation tool.
@@ -34,7 +34,7 @@ export function imageTransport(config) {
 }
 
 /**
- * Model id for an images API call. ProxyAPI needs an explicit id such as openai/gpt-image-1-mini.
+ * Model id for an images API call. ProxyAPI needs an explicit id such as recraft/recraft-v4.1-flash.
  * @param {{ imageModel?: string | null, baseURL?: string, image?: { transport?: string | null } }} config
  * @returns {string | null}
  * @exports
