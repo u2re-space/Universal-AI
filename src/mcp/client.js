@@ -194,7 +194,7 @@ export async function connectMcp({ command, args = [], env = {}, cwd = null, sig
         const init = await call('initialize', {
             protocolVersion: CLIENT_PROTOCOL,
             capabilities: { tools: {}, resources: {} },
-            clientInfo: { name: '@u2ai/universal-ai', version: '0.1.1' },
+            clientInfo: { name: '@u2ai/universal-ai', version: '0.1.2' },
         });
         if (!ACCEPTED_PROTOCOLS.includes(init.protocolVersion)) {
             throw new Error(`MCP: протокол ${init.protocolVersion} не поддерживается`);
