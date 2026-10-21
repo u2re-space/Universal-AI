@@ -2,7 +2,7 @@
  * @file src/agent/team.js
  * @module agent/team
  * @purpose Run planner, collector, worker, reviewer, coordinator, and summarizer over one shared context.
- * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, agent/work-plan, agent/handoff, mcp/session, channels/decide, channels/questions, channels/verdict
+ * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, agent/work-plan, agent/handoff, agent/quality, mcp/session, channels/decide, channels/questions, channels/verdict
  * @usedBy commands/run, index.js
  * @exports toolNamesForRole, runTeam
  * @ai.tags team, roles
@@ -41,6 +41,7 @@ import { ANSWER_INSTRUCTIONS, chooseRoute, loadHandoff, openHandoff, readDirecto
 import { applyFromStep, applyPlanUpdate, briefPlan, briefProgress, continuationText, createProgress, expandPlan, findResumable, loadWork, newWorkId, parsePlanUpdate, pathsIn, recordStep, revisionClause, saveWork, syncProgress } from './work-plan.js';
 import { neutralPlan, neutralProgress, neutralSession } from './neutral.js';
 import { CommandBatchError, executeFileCommands, FILE_COMMANDS_SCHEMA } from './file-commands.js';
+import { assessQuality, assessmentImages } from './quality.js';
 
 /**
  * Coder for source files, writer for documents, worker for everything else.
@@ -892,12 +893,44 @@ export async function runTeam({
                 ? Boolean(plan.needsReview) && plan.complexity !== 'trivial' && paced.reviewRounds > 0 && !workIncomplete && !revisionOnly
                 : false;
         let review = null;
+        let decisionsAccepted = false;
         if (shouldReview) {
             progress.stage = 'review';
             work.progress = progress;
             await persist('running');
+            // One decisions call can accept the result and skip the reviewer's tool loop.
+            const assessed = await assessQuality({
+                client, config, ledger, signal, notify,
+                state: {
+                    task,
+                    acceptance: plan.acceptanceCriteria,
+                    plan: plan.summary,
+                    steps: result.steps.map((step) => ({
+                        index: step.index, goal: step.goal, status: step.status,
+                        report: clipMiddle(step.report ?? '', 4000),
+                    })),
+                    changes: workerTools.stats().changes.map((change) => change.path),
+                    commands: workerTools.stats().commands.map((command) => ({ command: command.command, exitCode: command.exitCode ?? null })),
+                    tree: directoryTree,
+                },
+                images: await assessmentImages({ root, parts, produced: result.images }),
+            });
+            if (assessed) {
+                notify({
+                    type: 'decision.review', verdict: assessed.verdict, summary: assessed.summary,
+                    model: assessed.model, vision: assessed.vision, scores: assessed.scores,
+                });
+                if (assessed.verdict === 'accept') {
+                    decisionsAccepted = true;
+                    review = { verdict: 'accept', summary: assessed.summary, issues: [], unverified: [] };
+                    result.review = review;
+                    result.reviewRounds = 0;
+                    notify({ type: 'review.done', round: 0, verdict: 'accept', summary: assessed.summary, issues: [], unverified: [], source: 'decisions' });
+                    notify({ type: 'stage.done', stage: 'review', status: 'accept' });
+                }
+            }
         }
-        for (let round = 1; shouldReview; round++) {
+        for (let round = 1; shouldReview && !decisionsAccepted; round++) {
             notify({ type: 'stage.start', stage: 'review', role: 'reviewer', model: paced.roles.reviewer.model, round });
             ctx.set('diff', 'Changes made by the worker (diff)', await describeChangeSet({ root, changes: workerTools.stats().changes, maxBytes: 48 * 1024 }), { priority: 5 });
             const commands = workerTools.stats().commands.map((c) => `- ${c.command} → exit ${c.exitCode ?? '?'}`).join('\n') || '- (none)';

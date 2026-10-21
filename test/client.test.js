@@ -96,6 +96,15 @@ test('truncated stream reports STREAM_TRUNCATED with the response id and last se
     });
 });
 
+test('a foreground stream that drops after it started is restarted once', async () => {
+    scenarios = [{ truncateAfterEvents: 3 }, { text: 'recovered' }];
+    const events = [];
+    const response = await client().responses.create({ model: 'mock-model', input: 'hi', stream: true }, { onEvent: (event) => events.push(event) });
+    assert.equal(response.output_text, 'recovered');
+    assert.ok(events.some((event) => event.type === 'request.retry' && /Поток оборван/.test(event.reason)));
+    assert.equal(server.requests.filter((request) => request.path === '/v1/responses').length, 2);
+});
+
 test('retrieve with stream and starting_after resumes a background response', async () => {
     scenarios = [{ text: 'resumed text' }];
     const c = client();

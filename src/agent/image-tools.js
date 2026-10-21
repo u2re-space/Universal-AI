@@ -76,7 +76,7 @@ export function createImageHandlers({ root, client, config, signal }) {
             const bytes = await readFile(located.abs);
             const kind = sniffImage(bytes);
             const payloads = await client.images.edit({
-                model: imageModelFor(config), prompt: args.prompt, size: args.size || null, signal,
+                model: imageModelFor(config, { hasImage: true }), prompt: args.prompt, size: args.size || null, signal,
                 files: [{ filename: path.basename(located.rel), mime: kind.mime, bytes }],
             });
             return saveAll(payloads, args.path);

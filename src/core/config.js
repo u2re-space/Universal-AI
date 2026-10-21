@@ -351,6 +351,9 @@ function validateConfig(c) {
         if (!(typeof c.decisions[key] === 'number' && c.decisions[key] >= 0 && c.decisions[key] <= 1)) fail(`decisions.${key}: число 0..1`);
     }
     if (c.decisions.blockAt < c.decisions.reviewAt) fail('decisions.blockAt не меньше decisions.reviewAt');
+    for (const key of ['assess', 'vision']) {
+        if (typeof c.decisions[key] !== 'boolean') fail(`decisions.${key}: true | false`);
+    }
     if (!isRecord(c.moderation)) fail('moderation должен быть объектом');
     for (const key of Object.keys(c.moderation)) if (!(key in defaults.moderation)) fail(`неизвестный параметр moderation.${key}`);
     if (!['auto', 'decisions', 'moderations'].includes(c.moderation.mode)) fail('moderation.mode: auto | decisions | moderations');

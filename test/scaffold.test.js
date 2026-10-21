@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
-import { filesForKind, filesForStack, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, renderGenerationTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, guardScaffold, preparedScaffoldFiles, writePreparedScaffold } from '../src/generate/scaffold.js';
+import { filesForKind, filesForStack, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, renderGenerationTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, guardScaffold, preparedScaffoldFiles, writePreparedScaffold, ensureDependencies } from '../src/generate/scaffold.js';
 
 const platform = { id: 'chrome-157-beta', ecma: { edition: 2026 } };
 
@@ -182,6 +182,30 @@ test('prepared scaffold files are written once and an existing file stays', asyn
         const second = await writePreparedScaffold(root, files);
         assert.deepEqual(second.written, []);
         assert.ok(second.kept.includes('package.json'));
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('ensureDependencies installs once and respects the access level', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-deps-'));
+    try {
+        assert.equal((await ensureDependencies({ root, level: 'all' })).reason, 'no package.json');
+        await writeFile(path.join(root, 'package.json'), JSON.stringify({ dependencies: { vite: '*' } }));
+        assert.equal((await ensureDependencies({ root, level: 'read' })).reason, 'approval level');
+        const calls = [];
+        const run = async (options) => { calls.push(options); return { exitCode: 0, stdout: '', stderr: '' }; };
+        assert.equal((await ensureDependencies({ root, level: 'ask', approve: async () => 'no', run })).reason, 'declined');
+        const first = await ensureDependencies({ root, level: 'all', run });
+        assert.equal(first.ran, true);
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].cwd, root);
+        assert.match(calls[0].command, /npm install/);
+        await mkdir(path.join(root, 'node_modules', '.bin'), { recursive: true });
+        const second = await ensureDependencies({ root, level: 'all', run });
+        assert.equal(second.ran, false);
+        assert.equal(second.reason, 'already installed');
+        assert.equal(calls.length, 1);
     } finally {
         await rm(root, { recursive: true, force: true });
     }

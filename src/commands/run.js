@@ -27,7 +27,7 @@ import { findLatestResumable, resolveResumeStep } from '../agent/work-plan.js';
 import { imageTransport } from '../openai/images.js';
 import { formatWorkspace, scanWorkspace } from '../agent/workspace-scan.js';
 import { buildGenerationBrief, writeGenerationManifest } from '../generate/brief.js';
-import { preparedScaffoldFiles, writePreparedScaffold } from '../generate/scaffold.js';
+import { preparedScaffoldFiles, writePreparedScaffold, ensureDependencies } from '../generate/scaffold.js';
 import { resolvePlatform } from '../generate/platform.js';
 import { stdinFence } from '../core/attachments.js';
 import { startEncodeHost } from '../encode/host.js';
@@ -82,6 +82,18 @@ export async function run(ctx) {
             });
             const saved = await writePreparedScaffold(ctx.cwd, boilerplate);
             if (saved.written.length) renderer.line('info', `Каркас уже записан: ${saved.written.join(', ')}`, { dim: true });
+        }
+        const deps = await ensureDependencies({
+            root: ctx.cwd, level, signal: ctx.signal,
+            approve: (request) => renderer.approve(request, { signal: ctx.signal }),
+        });
+        if (deps.ran) {
+            if (deps.exitCode === 0) renderer.line('info', 'Зависимости установлены: npm install', { dim: true });
+            else renderer.line('warn', `npm install завершился с кодом ${deps.exitCode ?? '—'}${deps.timedOut ? ' (таймаут)' : ''}. Сборка может не работать.`);
+        } else if (deps.reason === 'approval level') {
+            renderer.line('warn', 'Зависимости не установлены: при этом уровне доступа команды запрещены. Выполните npm install вручную.');
+        } else if (deps.reason === 'declined') {
+            renderer.line('warn', 'npm install отклонён. Сборка может не работать.');
         }
         const fidelityLine = brief.manifest.fidelity === brief.manifest.effectiveFidelity
             ? `точность ${brief.manifest.fidelity}%`
@@ -268,6 +280,15 @@ export async function resumeLocal(ctx, { revision = '', stepToken = null } = {})
         ? `Доработка .tmp/${found.id}, ${where}: ${note}`
         : `Продолжение .tmp/${found.id} с места остановки (${where}).`, { dim: true });
     try {
+        if (generation) {
+            const deps = await ensureDependencies({
+                root: ctx.cwd, level, signal: ctx.signal,
+                approve: (request) => renderer.approve(request, { signal: ctx.signal }),
+            });
+            if (deps.ran && deps.exitCode === 0) renderer.line('info', 'Зависимости установлены: npm install', { dim: true });
+            else if (deps.ran) renderer.line('warn', `npm install завершился с кодом ${deps.exitCode ?? '—'}${deps.timedOut ? ' (таймаут)' : ''}. Сборка может не работать.`);
+            else if (deps.reason === 'approval level') renderer.line('warn', 'Зависимости не установлены: при этом уровне доступа команды запрещены. Выполните npm install вручную.');
+        }
         const ensured = await ensureProjectMap(ctx.cwd);
         if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
         return await runTeamFlow(ctx, {

@@ -16,15 +16,15 @@ import { validateQuestions, validateState } from './questions.js';
 /**
  * Ask a decision model. `questions` must already be a Decisions questions object.
  * @param {object} client createClient() result with decisions.create.
- * @param {{ model: string, state: string|object|Array, questions: object, signal?: AbortSignal }} request
+ * @param {{ model: string, state: string|object|Array, questions: object, signal?: AbortSignal, extraHeaders?: object|null }} request
  * @returns {Promise<{ id: string|null, model: string|null, answers: object, usage: object|null }>}
  * @exports
  * @ai.hint io
  */
-export async function requestDecision(client, { model, state, questions, signal } = {}) {
+export async function requestDecision(client, { model, state, questions, signal, extraHeaders = null } = {}) {
     if (typeof model !== 'string' || !model.trim()) throw new TypeError('Нужна модель решений.');
     const body = { model: model.trim(), state: validateState(state), questions: validateQuestions(questions) };
-    const raw = await client.decisions.create(body, { signal });
+    const raw = await client.decisions.create(body, { signal, ...(extraHeaders ? { extraHeaders } : {}) });
     if (!raw || typeof raw !== 'object' || !raw.answers || typeof raw.answers !== 'object' || Array.isArray(raw.answers)) {
         throw new ApiError('Ответ /decisions не содержит answers.', { code: 'INVALID_RESPONSE' });
     }

@@ -2,17 +2,18 @@
  * @file src/generate/scaffold.js
  * @module generate/scaffold
  * @purpose Stack, package.json, recommendations, and the safe scaffold merge for generation.
- * @depends node:path, node:fs/promises, node:os, agent/paths
- * @usedBy generate/brief, agent/tools
- * @exports filesForKind, filesForStack, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, viteConfig, stackDocuments, kindRules, renderGenerationTask, preparedScaffoldFiles, writePreparedScaffold, pathsNamedInTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, scaffoldTarget, retargetScaffold, guardScaffold
+ * @depends node:path, node:fs/promises, node:os, agent/paths, agent/shell
+ * @usedBy generate/brief, agent/tools, commands/run
+ * @exports filesForKind, filesForStack, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, viteConfig, stackDocuments, kindRules, renderGenerationTask, preparedScaffoldFiles, writePreparedScaffold, ensureDependencies, pathsNamedInTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, scaffoldTarget, retargetScaffold, guardScaffold
  * @ai.tags generate
  * @ai.hint pure
- * @changed 2026-10-21 The Vite config is prepared with the Chrome 157 targets.
+ * @changed 2026-10-21 npm install runs before the first generation step when access allows commands.
  */
 import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, rm, readFile, writeFile, mkdir, readdir, copyFile, stat } from 'node:fs/promises';
 import { resolveInside } from '../agent/paths.js';
+import { runCommand } from '../agent/shell.js';
 
 const RULES = ['.rules/stack.md', '.rules/files.md', '.skills/scaffold/SKILL.md'];
 const WEB_TAIL = ['src/main.js', 'src/styles.scss', 'scripts/generate.js', ...RULES];
@@ -406,6 +407,7 @@ export function kindRules(kind, recommendations) {
     const prepared = ['package.json', 'scripts/generate.js', ...(web ? ['vite.config.js'] : []), '.rules/stack.md', '.rules/files.md', '.skills/scaffold/SKILL.md'];
     lines.push(`${prepared.join(', ')} are already written. Do not plan a step to create or rewrite them.`);
     lines.push('Every step must create or change a named file. Do not spend a step only inspecting installed packages, tool versions, or toolchain internals.');
+    lines.push('Dependencies from package.json are installed before the first step. Run npm install only when you add a new package.');
     lines.push('npm test reports 0 tests until the project adds tests. Do not count it as verification.');
     lines.push('Use at most 4 steps. Group the page, styles, and modules into one step when they belong together.');
     if (recommendations.libraries.some((item) => item.name === 'preact' && item.include && recommendations.libraries.some((entry) => entry.name === 'typescript' && entry.include))) {
@@ -460,6 +462,41 @@ export async function writePreparedScaffold(root, files) {
 }
 
 /**
+ * Install package.json dependencies before the first step so `npm run build` can work.
+ * `all` runs at once; `ask` asks the operator; `read` and `write` skip commands.
+ * @param {{ root: string, level?: string, approve?: Function, signal?: AbortSignal, timeoutMs?: number, maxOutputBytes?: number, run?: Function }} request
+ * @returns {Promise<{ ran: boolean, reason?: string, exitCode?: number|null, timedOut?: boolean, cancelled?: boolean, stdout?: string, stderr?: string }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function ensureDependencies({ root, level = 'read', approve = async () => 'no', signal, timeoutMs = 10 * 60_000, maxOutputBytes = 64 * 1024, run = runCommand } = {}) {
+    const manifestPath = path.join(root, 'package.json');
+    const manifestText = await readFile(manifestPath, 'utf8').catch(() => null);
+    if (manifestText === null) return { ran: false, reason: 'no package.json' };
+    let manifest;
+    try { manifest = JSON.parse(manifestText); } catch { return { ran: false, reason: 'invalid package.json' }; }
+    const count = (section) => (manifest?.[section] && typeof manifest[section] === 'object' ? Object.keys(manifest[section]).length : 0);
+    if (count('dependencies') + count('devDependencies') === 0) return { ran: false, reason: 'no dependencies' };
+    const installed = await Promise.all([
+        stat(path.join(root, 'node_modules', '.package-lock.json')).then((info) => info.isFile()).catch(() => false),
+        stat(path.join(root, 'node_modules', '.bin')).then((info) => info.isDirectory()).catch(() => false),
+    ]);
+    if (installed.some(Boolean)) return { ran: false, reason: 'already installed' };
+    if (level !== 'all' && level !== 'ask') return { ran: false, reason: 'approval level' };
+    if (level === 'ask') {
+        const answer = await approve({
+            name: 'npm install', category: 'command',
+            preview: `Установить зависимости из package.json в ${root}`,
+        });
+        if (answer !== 'yes' && answer !== 'always') return { ran: false, reason: 'declined' };
+    }
+    const result = await run({
+        command: 'npm install --no-audit --no-fund', cwd: root, timeoutMs, maxOutputBytes, signal,
+    });
+    return { ran: true, ...result };
+}
+
+/**
  * English task wrapper. Fidelity, references, and the customer fence are added by the brief.
  * @param {{ kind: string | null, prompt?: string, platform: object, recommendations: object, name?: string }} request
  * @returns {string}
@@ -480,6 +517,7 @@ export function renderGenerationTask({ kind, prompt = '', platform, recommendati
         'Plan the work before changing files.',
         'Produce an action plan, a file tree, the stack, the components or modules to recreate or reuse, and the standards to follow.',
         'Prepare scripts for testing, for initial generation, and for installing packages.',
+        'Dependencies from package.json are installed before the plan. Do not plan a step only to run npm install.',
         'List the recommended libraries. Choose them from the mockup, the attached image, and the design name, with CSS and icons first.',
         'When the customer names a library or a link, include it, and include its documentation and its type package when they exist.',
         'When web_search is available, use it to confirm documentation and type packages.',

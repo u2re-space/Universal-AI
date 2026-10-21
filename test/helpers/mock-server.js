@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
  * Every POST /responses produces SSE when body.stream is true, JSON otherwise.
  * Background responses stay 'queued' for `backgroundPolls` GETs, then complete.
  */
-export async function startMockServer({ script, backgroundPolls = 2 } = {}) {
+export async function startMockServer({ script, backgroundPolls = 2, decisions = null } = {}) {
     const requests = [];
     const responses = new Map();   // id -> { body, scenario, polls }
     let counter = 0;
@@ -123,6 +123,15 @@ export async function startMockServer({ script, backgroundPolls = 2 } = {}) {
         requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers: req.headers, body });
 
         if (req.method === 'GET' && url.pathname === '/v1/models') return json(200, { object: 'list', data: [{ id: 'mock-model' }, { id: 'gpt-6.1-sol' }, { id: 'recraft/recraft-v4.1-flash' }] });
+        if (req.method === 'POST' && url.pathname === '/v1/decisions') {
+            const answer = typeof decisions === 'function' ? await decisions(body) : decisions;
+            if (!answer) return json(404, { error: { message: 'no decisions route', type: 'invalid_request_error', code: 'not_found' } });
+            if (answer.httpStatus) return json(answer.httpStatus, answer.httpBody ?? { error: { message: 'decisions error', type: 'invalid_request_error' } });
+            return json(200, {
+                id: `dec_${++counter}`, model: body?.model ?? 'mock-decisions',
+                answers: answer.answers ?? answer, usage: { input_tokens: 50, output_tokens: 0 },
+            });
+        }
         if (req.method === 'POST' && url.pathname === '/v1/responses/input_tokens') return json(200, { object: 'response.input_tokens', input_tokens: JSON.stringify(body.input).length });
         if (req.method === 'POST' && url.pathname === '/v1/responses/compact') {
             return json(200, { id: `cmp_${++counter}`, object: 'response.compaction', output: [{ type: 'compaction', id: `cmp_item_${counter}`, encrypted_content: 'enc_compacted' }], usage: usageOf({}) });

@@ -180,11 +180,15 @@ export const defaults = Object.freeze({
     /**
      * Decision models. ProxyAPI serves them at POST /v1/decisions (input tokens only).
      * reviewAt marks a message for a person. blockAt hides it in a group or channel.
+     * assess judges a finished team result and can skip the reviewer. vision sends reference
+     * and produced PNG/JPEG pictures with that call; a gateway without image input falls back to text.
      */
     decisions: {
         model: 'openai/gpt-6-luna-decisions',
         reviewAt: 0.5,
         blockAt: 0.9,
+        assess: true,
+        vision: true,
     },
     /**
      * auto tries POST /moderations (omni-moderation-latest) and falls back to decisions

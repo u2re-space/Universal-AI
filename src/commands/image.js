@@ -66,8 +66,8 @@ export async function image(ctx) {
  */
 async function runImagesEndpoint(ctx, prompt, count) {
     const { config, renderer, values, signal } = ctx;
-    const model = imageModelFor(config);
     const sources = values.image ?? [];
+    const model = imageModelFor(config, { hasImage: sources.length > 0 });
     const target = values.out ?? config.image.outputDir;
     renderer.line('info', `Изображения API: ${model} · ${sources.length ? 'редактирование' : 'генерация'} → ${target}`, { dim: true });
     const client = createClientFor(config);

@@ -16,6 +16,8 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(imageTransport({ baseURL: 'https://api.openai.com/v1/' }), 'responses');
     assert.equal(imageTransport({ baseURL: 'https://api.proxyapi.ru/v1/', image: { transport: 'responses' } }), 'responses');
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }), 'recraft/recraft-v4.1-flash');
+    assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }, { hasImage: true }), 'recraft/recraft-v4.1');
+    assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/', imageModel: 'custom/model' }, { hasImage: true }), 'custom/model');
     const body = generationBody({ model: 'recraft/recraft-v4.1-flash', prompt: 'маяк', size: 'auto', quality: 'auto', n: 1 });
     assert.deepEqual(body, { model: 'recraft/recraft-v4.1-flash', prompt: 'маяк' });
     assert.equal('partial_images' in body, false);
@@ -55,6 +57,7 @@ test('images client posts generations and edits and the tool saves the file', as
             return;
         }
         assert.match(raw.toString('latin1'), /name="image"/);
+        assert.match(raw.toString('latin1'), /name="model"\r\n\r\nrecraft\/recraft-v4\.1\r\n/);
         res.end(JSON.stringify({ data: [{ b64_json: TINY_PNG }] }));
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));

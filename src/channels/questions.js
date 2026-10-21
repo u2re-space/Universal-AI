@@ -3,10 +3,10 @@
  * @module channels/questions
  * @purpose Question packs and validation for the Decisions API.
  * @usedBy channels/decide, channels/moderate, channels/dispatch, core/config, agent/team
- * @exports PRESETS, PRESET_NAMES, RISK_NAMES, questionsFor, validateQuestions, validateState
+ * @exports PRESETS, PRESET_NAMES, RISK_NAMES, questionsFor, qualityQuestions, validateQuestions, validateState
  * @ai.tags decisions, moderation
  * @ai.hint pure
- * @changed 2026-10-15 Packs for community, support, SMM, guard, and route.
+ * @changed 2026-10-21 The quality pack judges a finished task before the reviewer runs.
  */
 
 /** Noul names that can hide a message when the probability is high. */
@@ -21,6 +21,7 @@ const score = (instructions, criteria) => ({ type: 'score', instructions, criter
  * community — groups and channels. support — a customer conversation.
  * smm — whether a draft is ready to publish. guard — injection and safe-to-show.
  * route — encoder versus planner for the agent team.
+ * quality — whether a finished task can be accepted.
  */
 export const PRESETS = Object.freeze({
     community: Object.freeze({
@@ -135,6 +136,28 @@ export const PRESETS = Object.freeze({
             'Обычная правка в рабочем каталоге.',
         ),
     }),
+    quality: Object.freeze({
+        meets_task: noul(
+            'Результат выполняет задачу и критерии приёмки?',
+            'Все требования задачи выполнены, результатом можно пользоваться.',
+            'Есть невыполненное требование или результатом нельзя пользоваться.',
+        ),
+        complete: noul(
+            'Все обязательные файлы и части результата готовы?',
+            'Нет заглушек, пустых файлов, пропущенных разделов и оборванных мест.',
+            'Что-то пропущено, оставлено заглушкой или не дописано.',
+        ),
+        verified: noul(
+            'Результат действительно проверен после последней правки?',
+            'Есть успешная сборка, тест или чтение результата, и они относятся к текущей версии.',
+            'Проверки не было, она не прошла или относится к другой версии.',
+        ),
+        verdict: choice('Что делать с результатом?', {
+            accept: 'Можно принять без правок.',
+            revise: 'Нужны правки, но основа верная.',
+            fail: 'Результат неверен, нужна переработка.',
+        }),
+    }),
 });
 
 export const PRESET_NAMES = Object.freeze(Object.keys(PRESETS));
@@ -150,6 +173,25 @@ export function questionsFor(name) {
     const preset = PRESETS[name];
     if (!preset) throw new TypeError(`Неизвестный набор вопросов: ${name}. Доступны: ${PRESET_NAMES.join(', ')}.`);
     return structuredClone(preset);
+}
+
+/**
+ * The quality pack. `visual_match` is added only when the state carries an image.
+ * @param {{ hasImages?: boolean }} [request]
+ * @returns {object}
+ * @exports
+ * @ai.hint pure
+ */
+export function qualityQuestions({ hasImages = false } = {}) {
+    const questions = structuredClone(PRESETS.quality);
+    if (hasImages) {
+        questions.visual_match = noul(
+            'Результат визуально соответствует референсу?',
+            'Композиция, типографика, палитра и ключевые элементы близки к референсу.',
+            'Есть заметное расхождение с референсом.',
+        );
+    }
+    return questions;
 }
 
 /**

@@ -17,12 +17,13 @@ import { encodeArtifacts } from '../src/encode/encode.ts';
 
 let server;
 let script = () => ({ text: 'ok' });
+let decision = null;
 let root;
 before(async () => {
-    server = await startMockServer({ script: (body, index) => script(body, index) });
+    server = await startMockServer({ script: (body, index) => script(body, index), decisions: () => decision });
     root = await mkdtemp(path.join(os.tmpdir(), 'ai-agent-team-'));
 });
-beforeEach(() => server.reset());
+beforeEach(() => { server.reset(); decision = null; });
 after(async () => { await server.close(); await rm(root, { recursive: true, force: true }); });
 
 const baseConfig = () => structuredClone({
@@ -216,6 +217,43 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
     // Structured role outputs were not streamed as answer text.
     assert.ok(!events.some((e) => e.type === 'text.delta' && /"verdict"/.test(e.text)));
     memory.close();
+});
+
+test('decisions accept replaces the reviewer pass', async () => {
+    decision = {
+        meets_task: { type: 'noul', noul: 0.95 },
+        complete: { type: 'noul', noul: 0.9 },
+        verified: { type: 'noul', noul: 0.8 },
+        verdict: { type: 'choice', choice: 'accept', confidence: 0.9 },
+    };
+    let reviews = 0;
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 's', complexity: 'normal',
+                steps: [{ goal: 'сделать', details: '', verify: '', complexity: 'normal' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: ['ok'],
+                needsReview: true, imageNotes: null, risks: [],
+            }) };
+        }
+        if (role === 'reviewer') { reviews++; return { text: JSON.stringify({ verdict: 'accept', summary: 'ok', issues: [], unverified: [] }) }; }
+        return { text: 'done' };
+    };
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-decisions-'));
+    try {
+        const config = baseConfig();
+        config.pace.quality = 80;
+        const result = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'сделай', root: dir, approvalLevel: 'read', emit() {},
+        });
+        assert.equal(result.review.verdict, 'accept');
+        assert.equal(result.reviewRounds, 0);
+        assert.equal(reviews, 0);
+        assert.ok(server.requests.some((request) => request.path === '/v1/decisions'));
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
 });
 
 test('team run: trivial plan skips collector and review; worker failure marks the run incomplete', async () => {

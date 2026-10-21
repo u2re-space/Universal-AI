@@ -4,16 +4,19 @@
  * @purpose Image generation and edits through POST /images/generations and /images/edits.
  * @depends node:crypto
  * @usedBy openai/client, agent/loop, agent/tools, commands/image, commands/run
- * @exports PROXY_IMAGE_MODEL, IMAGE_SIZES, imageTransport, imageModelFor, normalizeImageSize, generationBody, encodeMultipart, imagePayloads, sniffImage
+ * @exports PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, IMAGE_SIZES, imageTransport, imageModelFor, normalizeImageSize, generationBody, encodeMultipart, imagePayloads, sniffImage
  * @ai.tags images, proxyapi
  * @ai.hint pure
- * @changed 2026-10-21 Snap unsupported image sizes to the API set.
+ * @changed 2026-10-21 Use the vision-capable recraft model for edits and image-conditioned requests.
  */
 
 import { randomBytes } from 'node:crypto';
 
-/** Default ProxyAPI image model when imageModel is unset. See https://proxyapi.ru/models/browse/image */
+/** Default ProxyAPI text-to-image model when imageModel is unset. See https://proxyapi.ru/models/browse/image */
 export const PROXY_IMAGE_MODEL = 'recraft/recraft-v4.1-flash';
+
+/** Default ProxyAPI model for edits and image-conditioned generation; the flash model has no vision input. */
+export const PROXY_IMAGE_EDIT_MODEL = 'recraft/recraft-v4.1';
 
 /** Sizes accepted by POST /images/generations and /images/edits. */
 export const IMAGE_SIZES = Object.freeze(['1024x1024', '1024x1536', '1536x1024']);
@@ -62,14 +65,17 @@ export function imageTransport(config) {
 
 /**
  * Model id for an images API call. ProxyAPI needs an explicit id such as recraft/recraft-v4.1-flash.
+ * Requests with a source image use the vision-capable default.
  * @param {{ imageModel?: string | null, baseURL?: string, image?: { transport?: string | null } }} config
+ * @param {{ hasImage?: boolean }} [request]
  * @returns {string | null}
  * @exports
  * @ai.hint pure
  */
-export function imageModelFor(config) {
+export function imageModelFor(config, { hasImage = false } = {}) {
     if (config?.imageModel) return config.imageModel;
-    return imageTransport(config) === 'images' ? PROXY_IMAGE_MODEL : null;
+    if (imageTransport(config) !== 'images') return null;
+    return hasImage ? PROXY_IMAGE_EDIT_MODEL : PROXY_IMAGE_MODEL;
 }
 
 /**

@@ -125,8 +125,9 @@ export function createClient({
     /**
    * Core call. `stream` = expect text/event-stream and reduce it; otherwise parse JSON.
    * Retries only before any response byte has been consumed, and only for retryable failures.
+   * A foreground stream that drops after it started is restarted once; a background one is resumed by the caller.
    */
-    async function call(path, { method = 'POST', body, rawBody, contentType, query, stream = false, signal, onEvent, idleTimeout } = {}) {
+    async function call(path, { method = 'POST', body, rawBody, contentType, query, stream = false, signal, onEvent, idleTimeout, extraHeaders = null } = {}) {
         const url = new URL(path, root);
         for (const [key, value] of Object.entries(query ?? {})) {
             if (value === undefined || value === null) continue;
@@ -134,7 +135,9 @@ export function createClient({
         }
         const emit = (event) => { try { onEvent?.(event); globalOnEvent?.(event); } catch { /* observer */ } };
         const payload = rawBody !== undefined ? rawBody : (body === undefined ? undefined : JSON.stringify(body));
+        const background = body?.background === true;
         let attempt = 0;
+        let streamRestarts = 0;
         /**
          * Retry a timeout or a dropped connection. A persistent status ends the call at once.
          * @param {Error} error
@@ -153,6 +156,7 @@ export function createClient({
                 emit({ type: 'request.retry', attempt: attempt + 1, delayMs: delay, reason, status: error.status ?? null });
                 await sleep(delay, undefined, { signal }).catch(() => {});
                 attempt++;
+                if (error.code === 'STREAM_TRUNCATED') streamRestarts++;
                 return true;
             }
             if (error instanceof ApiError && error.retryable && retries > 0) {
@@ -168,7 +172,7 @@ export function createClient({
                 requestBytes: payload ? Buffer.byteLength(payload) : 0, stream });
             let res;
             try {
-                const headers = headersFor(stream, clientRequestId);
+                const headers = { ...headersFor(stream, clientRequestId), ...(extraHeaders ?? {}) };
                 if (contentType) headers['Content-Type'] = contentType;
                 res = await transport.request({ url, method, body: payload, signal, idleTimeout, headers });
             } catch (error) {
@@ -201,6 +205,7 @@ export function createClient({
                         throw new ApiError('Поток завершился без финального состояния ответа.', {
                             code: 'STREAM_TRUNCATED', responseId: response?.id ?? null, requestId, clientRequestId,
                             details: { partialText: reducer.partialText(), lastSequence: reducer.lastSequence },
+                            retryable: !background && streamRestarts < 1,
                         });
                     }
                     if (response.status === 'failed' && !response.error && reducer.streamError) {
@@ -224,7 +229,10 @@ export function createClient({
                 if (error instanceof ApiError && reducer && error.code === 'NETWORK_ERROR' && reducer.lastSequence !== null) {
                     // The connection dropped after the stream had started: report it as a truncated stream
                     // (resumable in background mode) rather than a generic network failure.
-                    error = new ApiError(`Поток оборван: ${caught.message}`, { code: 'STREAM_TRUNCATED', cause: caught, retryable: false });
+                    error = new ApiError(`Поток оборван: ${caught.message}`, {
+                        code: 'STREAM_TRUNCATED', cause: caught,
+                        retryable: !background && streamRestarts < 1,
+                    });
                 }
                 if (error instanceof ApiError) {
                     error.requestId ??= requestId;

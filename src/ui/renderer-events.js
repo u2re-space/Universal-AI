@@ -227,6 +227,11 @@ export function handleRendererEvent(event, api) {
             if (event.error) line('warn', `маршрут decisions: ${event.error}`);
             else line('info', `маршрут decisions: ${event.flag ?? event.choice ?? '—'}`, { dim: true });
             break;
+        case 'decision.review':
+            line(event.verdict === 'accept' ? 'ok' : 'info',
+                `оценка decisions${event.vision ? ' (с картинками)' : ''}: ${event.summary}`,
+                { dim: event.verdict !== 'accept' });
+            break;
         default:
             if (verbose && event.type) line('info', event.type, { dim: true });
     }
