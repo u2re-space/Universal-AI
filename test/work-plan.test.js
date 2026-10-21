@@ -30,6 +30,25 @@ test('a step that names two files becomes one step per file plus a compatibility
     assert.match(plan.steps[2].details, /src\/a\.js/);
 });
 
+test('expandPlan keeps each step complexity, including split steps and the compatibility step', () => {
+    const plan = expandPlan({
+        ...base,
+        complexity: 'complex',
+        steps: [
+            { goal: 'модули', details: 'src/a.js src/b.js', verify: '', complexity: 'normal' },
+            { goal: 'стили', details: 'src/a.scss', verify: '', complexity: 'trivial' },
+        ],
+    });
+    assert.deepEqual(plan.steps.map((step) => step.complexity), ['normal', 'normal', 'trivial', 'normal']);
+});
+
+test('a plan-update keeps the complexity of a new step', () => {
+    const plan = expandPlan({ ...base, complexity: 'complex', steps: [{ goal: 'src/a.js', details: 'src/a.js', verify: '', complexity: 'trivial' }] });
+    const update = parsePlanUpdate('```plan-update\n{"note":"ещё","addSteps":[{"goal":"src/b.js","details":"src/b.js","verify":"да","complexity":"normal"}]}\n```');
+    const next = applyPlanUpdate(plan, update, { maxSteps: 12 });
+    assert.equal(next.plan.steps.find((step) => step.goal === 'src/b.js').complexity, 'normal');
+});
+
 test('a generation plan keeps related files in one step', () => {
     const plan = expandPlan({
         ...base,

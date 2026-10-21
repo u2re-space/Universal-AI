@@ -704,6 +704,99 @@ test('several encoded files get a compatibility pass and a progress file', async
     }
 });
 
+test('each step takes the model for its own complexity, not the plan complexity', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-step-models-'));
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'classifier') return { text: JSON.stringify({ label: 'complex' }) };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'смешанный план', complexity: 'complex',
+                steps: [
+                    { goal: 'Создать src/app.tsx', details: 'export const App = () => null;', verify: 'прочитать', complexity: 'complex' },
+                    { goal: 'Создать README.md', details: 'короткая заметка', verify: 'прочитать', complexity: 'trivial' },
+                ],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, risks: [],
+            }) };
+        }
+        if (role === 'worker') {
+            const text = body.input[0]?.content?.[0]?.text ?? '';
+            const match = /# Your step (\d+) of (\d+)/.exec(text);
+            seen.push({ step: match ? Number(match[1]) : 0, model: body.model });
+            return { text: 'готово' };
+        }
+        return { text: 'ok' };
+    };
+    const config = {
+        ...baseConfig(),
+        roles: structuredClone(defaults.roles),
+        pace: { ...defaults.pace, speed: 10, quality: 80, mode: 'b' },
+        agent: { ...baseConfig().agent, chain: false, resume: false },
+        memory: { ...defaults.memory, enabled: false },
+    };
+    try {
+        const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'смешанный план', root: dir, approvalLevel: 'read', emit() {} });
+        assert.equal(result.status, 'completed', result.error?.message);
+        const first = seen.filter((item) => item.step === 1);
+        const second = seen.filter((item) => item.step === 2);
+        assert.ok(first.length >= 1, JSON.stringify(seen));
+        assert.ok(first.every((item) => item.model === 'gpt-6.1-sol'), JSON.stringify(seen));
+        assert.ok(second.length >= 1, JSON.stringify(seen));
+        assert.ok(second.every((item) => item.model === 'gpt-6-luna'), JSON.stringify(seen));
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('a generation step that runs out of turns gets one cheap verification pass', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-verify-pass-'));
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'classifier') return { text: JSON.stringify({ label: 'complex' }) };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'сложная страница', complexity: 'complex',
+                steps: [{ goal: 'Создать src/app.tsx', details: 'export const App = () => null;', verify: 'npm run build', complexity: 'complex' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, risks: [],
+            }) };
+        }
+        if (role === 'worker') {
+            const text = body.input[0]?.content?.[0]?.text ?? '';
+            const verify = /— verify/.test(text);
+            seen.push({ verify, model: body.model });
+            if (verify) return { text: 'сборка проходит' };
+            const outputs = body.input.filter((item) => item.type === 'function_call_output');
+            if (!outputs.length) return { calls: [{ name: 'write_file', arguments: { path: 'src/app.tsx', content: 'export const App = () => null;\n', overwrite: true } }] };
+            return { calls: [{ name: 'list_files', arguments: { path: '.', depth: 1, include_hidden: false } }] };
+        }
+        return { text: 'ok' };
+    };
+    const config = {
+        ...baseConfig(),
+        roles: structuredClone(defaults.roles),
+        pace: { ...defaults.pace, speed: 10, quality: 80, mode: 'b' },
+        agent: { ...baseConfig().agent, chain: false, resume: false, workerMaxTurnsPerStep: 2 },
+        memory: { ...defaults.memory, enabled: false },
+    };
+    try {
+        const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'сгенерировать страницу', root: dir, approvalLevel: 'all', generation: true, emit() {} });
+        assert.equal(result.status, 'completed', result.error?.message);
+        assert.equal(result.steps[0].status, 'completed');
+        const first = seen.filter((item) => !item.verify);
+        const verify = seen.filter((item) => item.verify);
+        assert.ok(first.length >= 1, JSON.stringify(seen));
+        assert.ok(first.every((item) => item.model === 'gpt-6.1-sol'), JSON.stringify(seen));
+        assert.equal(verify.length, 1, JSON.stringify(seen));
+        assert.equal(verify[0].model, 'gpt-6-luna');
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
 test('a generation step that hits the turn cap still runs the artwork step', async () => {
     script = (body) => {
         const role = roleOf(body);

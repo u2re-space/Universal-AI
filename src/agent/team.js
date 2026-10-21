@@ -674,6 +674,16 @@ export async function runTeam({
         const expanded = lists(expandPlan(drafted, { maxSteps: stepLimit, splitFiles: !generation }));
         const id = handoff?.id ?? newWorkId();
         bind(expanded, createProgress({ id, task, plan: expanded }));
+        // The planner may disagree with the classifier. Its own complexity, and each step's
+        // own complexity, now drive the model rung for every step.
+        const planComplexity = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
+        adopt({
+            label: planComplexity,
+            steps: plan.steps.map((step) => ({
+                complexity: step.complexity, author: authorFor(step.files, step.goal),
+                files: step.files, goal: step.goal, details: step.details, verify: step.verify, kind: step.kind,
+            })),
+        });
         await persist('running');
         showPlan();
         notify({ type: 'stage.done', stage: 'plan', status: 'completed' });
@@ -751,8 +761,9 @@ export async function runTeam({
         const runStep = async (index) => {
             const step = plan.steps[index];
             const number = index + 1;
+            const stepComplexity = step.complexity === 'trivial' || step.complexity === 'complex' ? step.complexity : 'normal';
             const allowance = stepAllowance({
-                complexity: plan.complexity, kind: step.kind,
+                complexity: stepComplexity, kind: step.kind,
                 files: step.files?.length ? step.files : pathsIn(`${step.goal}\n${step.details}`),
                 goal: step.goal, details: step.details, generation, ceiling: config.agent.workerMaxTurnsPerStep,
             });
@@ -814,6 +825,39 @@ export async function runTeam({
                     progress.steps[index].files = [...new Set([...(progress.steps[index].files ?? []), ...files])];
                     work.progress = progress;
                     await persist('running');
+                }
+            }
+            // A generation step often spends its last turns on the same failing check.
+            // One short pass on the cheapest rung gives verification a fresh budget without
+            // keeping the expensive model for the rest of the plan.
+            if (generation && outcome?.status === 'max_turns' && files.length > 0) {
+                const verifyTurns = Math.min(8, Math.max(1, config.agent.workerMaxTurnsPerStep));
+                const verifyChoice = encodeRoute || !paced?.ready ? legacyChoice(chosen.author, 'trivial') : paceChoice(chosen.author, 'trivial');
+                notify({ type: 'stage.start', stage: 'verify', role: chosen.author, model: verifyChoice.model ?? roles.resolve(chosen.author).model });
+                const verifyBody = [
+                    `Goal: ${step.goal}`,
+                    `Verify: ${step.verify || 'Re-read the files and run the project check.'}`,
+                    '',
+                    `The previous attempt ran out of turns before verification. Files already written: ${files.join(', ')}.`,
+                    'Run the verification now. Fix only errors that block it. Do not rewrite files that already work, do not add features, and do not start a dev or preview server.',
+                    'If the check still fails, report the exact error and what remains unverified.',
+                ].join('\n');
+                const repaired = await runWorker(`${title} — verify`, verifyBody, verifyTurns, chosen.author,
+                    { stepId: step.id, phase: 'verify', resume: false, complexity: 'trivial' });
+                result.images.push(...repaired.images);
+                reports.push(repaired.text.trim());
+                files.push(...takeFiles());
+                progress.notes ??= [];
+                progress.notes.push({ kind: 'verify', status: repaired.status, report: repaired.text.trim(), note: step.verify || '' });
+                notify({ type: 'stage.done', stage: 'verify', status: repaired.status });
+                if (repaired.status === 'completed') {
+                    outcome = repaired;
+                    lastPhase = 'body';
+                } else if (HARD_STOP.has(repaired.status)) {
+                    outcome = repaired;
+                } else {
+                    const reason = repaired.error ? `: ${errorMessage(repaired.error)}` : '';
+                    notify({ type: 'warning', message: `Проверка шага ${number} не завершена (${repaired.status}${reason}); шаг остаётся незавершённым.` });
                 }
             }
             return {

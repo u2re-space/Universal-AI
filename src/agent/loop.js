@@ -74,6 +74,8 @@ export function buildRequestBody({
 }
 
 const OUTPUT_KEEP_BYTES = 16 * 1024;
+const REPEATED_FAILURE_HINT = 2;
+const REPEATED_FAILURE_LIMIT = 3;
 
 /**
  * Drop older screenshots and clip old tool output so the next request can fit maxRequestBytes.
@@ -139,6 +141,9 @@ export async function runTurn({
     // function_call items recorded in the session that still need a function_call_output.
     // If the turn is interrupted we answer them synthetically so the history stays valid.
     let pendingCalls = [];
+    // How many times one identical call has failed. A model that repeats a broken call
+    // should change the approach instead of spending every remaining turn on it.
+    const failures = new Map();
     /** Write synthetic tool results so an interrupted turn still has a valid history. */
     const settlePending = (note) => {
         if (!pendingCalls.length) return;
@@ -277,6 +282,7 @@ export async function runTurn({
                 throw new ApiError(`Модель запросила ${calls.length} вызовов инструментов за ход (лимит ${config.limits.maxToolCallsPerTurn}).`, { code: 'TOOL_LIMIT' });
             }
             const outputs = [];
+            let repeated = null;
             for (const call of calls) {
                 signal?.throwIfAborted();
                 result.toolCalls++;
@@ -287,10 +293,32 @@ export async function runTurn({
                 notify({ type: 'tool.exec.done', name: call.name, callId: call.call_id, ok: outcome.ok !== false, summary: outcome.summary ?? '',
                     durationMs: outcome.durationMs ?? 0, category: outcome.category ?? null,
                     outputBytes: typeof outcome.output === 'string' ? Buffer.byteLength(outcome.output) : null });
-                outputs.push({ type: 'function_call_output', call_id: call.call_id, output: outcome.output });
+                let output = outcome.output;
+                const signature = `${call.name}\u0000${call.arguments ?? ''}`;
+                if (outcome.ok === false && typeof output === 'string') {
+                    // The same command may fail again after a fix with a different error.
+                    // Only an identical error means the model is stuck.
+                    const prior = failures.get(signature);
+                    const count = prior?.output === output ? prior.count + 1 : 1;
+                    failures.set(signature, { output, count });
+                    if (count >= REPEATED_FAILURE_HINT) {
+                        output = `${output}\n\n[повтор ${count}] Этот же вызов уже завершился той же ошибкой. Не повторяйте его: измените подход или завершите отчётом о том, что осталось непроверенным.`;
+                    }
+                    if (count >= REPEATED_FAILURE_LIMIT) repeated = { name: call.name, count };
+                } else {
+                    failures.delete(signature);
+                }
+                outputs.push({ type: 'function_call_output', call_id: call.call_id, output });
             }
             pendingCalls = [];
             session.addItems(outputs);
+            if (repeated) {
+                const message = `Инструмент ${repeated.name} повторил один и тот же сбой ${repeated.count} раза; ход остановлен, чтобы не тратить лимит.`;
+                notify({ type: 'warning', message });
+                result.status = 'max_turns';
+                result.error = new Error(message);
+                return result;
+            }
             if (result.turns >= maxTurns) {
                 notify({ type: 'warning', message: `Достигнут лимит ходов (${maxTurns}); остановка.` });
                 result.status = 'max_turns';

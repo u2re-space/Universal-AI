@@ -19,6 +19,33 @@ const PATH_RE = /(?:^|[\s`'"(])((?:[\w.+-]+\/)*[\w.+-]+\.[\w.+-]+)/g;
 const EXT_RE = /^(js|mjs|cjs|ts|tsx|jsx|json|md|css|html|glsl|py|txt|vue|svelte|scss|yml|yaml|toml|rs|go|java|kt|php|rb|sh|ps1|xml|svg)$/;
 const RESUMABLE = new Set(['running', 'incomplete', 'failed', 'budget', 'cancelled', 'max_turns']);
 const ID_RE = /^[0-9a-f]{8}$/;
+const COMPLEXITY_RANK = Object.freeze({ trivial: 0, normal: 1, complex: 2 });
+
+/**
+ * One of the three plan complexities, or null.
+ * @param {unknown} value
+ * @returns {'trivial'|'normal'|'complex'|null}
+ * @ai.hint pure
+ */
+function complexityOf(value) {
+    return value === 'trivial' || value === 'normal' || value === 'complex' ? value : null;
+}
+
+/**
+ * The hardest complexity in a list. `fallback` is used when no item names one.
+ * @param {object[]} steps
+ * @param {'trivial'|'normal'|'complex'|null} [fallback]
+ * @returns {'trivial'|'normal'|'complex'|null}
+ * @ai.hint pure
+ */
+function hardestComplexity(steps, fallback = null) {
+    let best = null;
+    for (const step of steps) {
+        const value = complexityOf(step?.complexity);
+        if (value && (!best || COMPLEXITY_RANK[value] > COMPLEXITY_RANK[best])) best = value;
+    }
+    return best ?? fallback;
+}
 
 /**
  * Collapse whitespace so two copies of a task still match.
@@ -97,9 +124,11 @@ function asStep(step, kind = 'work') {
     const goal = String(step?.goal ?? '');
     const details = String(step?.details ?? '');
     const verify = String(step?.verify ?? '');
+    const complexity = complexityOf(step?.complexity);
     return {
         ...(step?.id ? { id: step.id } : {}),
         kind: step?.kind === 'compat' ? 'compat' : kind,
+        ...(complexity ? { complexity } : {}),
         goal, details, verify,
         files: Array.isArray(step?.files) && step.files.length ? [...step.files] : pathsIn(`${goal}\n${details}`),
     };
@@ -138,12 +167,14 @@ export function expandPlan(plan, { maxSteps = 12, splitFiles = true } = {}) {
     for (const step of source) {
         if (steps.length >= maxSteps) break;
         const files = pathsIn(`${step?.goal ?? ''}\n${step?.details ?? ''}`);
+        const complexity = complexityOf(step?.complexity);
         const room = maxSteps - steps.length;
         if (splitFiles && step?.kind !== 'compat' && files.length >= 2 && files.length <= room) {
             split = true;
             for (const file of files) {
                 steps.push({
                     kind: 'work',
+                    ...(complexity ? { complexity } : {}),
                     goal: `${step.goal} — ${file}`,
                     details: `Work only on ${file}.\n${step.details ?? ''}`,
                     verify: step.verify || `Re-read ${file}.`,
@@ -158,8 +189,10 @@ export function expandPlan(plan, { maxSteps = 12, splitFiles = true } = {}) {
     const hasCompat = steps.some((step) => step.kind === 'compat');
     if (splitFiles && (split || fileCount >= 2) && !hasCompat && steps.length < maxSteps) {
         const files = [...new Set(steps.flatMap((step) => step.files ?? []))];
+        const complexity = hardestComplexity(steps, complexityOf(plan?.complexity));
         steps.push({
             kind: 'compat',
+            ...(complexity ? { complexity } : {}),
             goal: 'Reconcile generated files',
             details: `Read ${files.join(', ')} and fix imports, exports, names, and call sites so they agree. Do not add features.`,
             verify: 'Re-read each touched file and confirm every import names an export that exists.',
@@ -191,10 +224,12 @@ export function parsePlanUpdate(report) {
     if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
     const addSteps = Array.isArray(data.addSteps) ? data.addSteps.flatMap((step) => {
         if (!step || typeof step.goal !== 'string' || !step.goal.trim()) return [];
+        const complexity = complexityOf(step.complexity);
         return [{
             goal: step.goal.trim(),
             details: typeof step.details === 'string' ? step.details : '',
             verify: typeof step.verify === 'string' ? step.verify : '',
+            ...(complexity ? { complexity } : {}),
         }];
     }) : [];
     const revise = Array.isArray(data.revise) ? data.revise.flatMap((step) => {
@@ -238,9 +273,11 @@ export function applyPlanUpdate(plan, update, { maxSteps = 12, afterId = null } 
         if (steps.length >= maxSteps) break;
         const goal = extra.goal.trim();
         const details = extra.details ?? '';
+        const complexity = complexityOf(extra.complexity) ?? complexityOf(plan?.complexity);
         steps.splice(insertAt, 0, {
             id: freshId(steps),
             kind: 'work',
+            ...(complexity ? { complexity } : {}),
             goal,
             details,
             verify: extra.verify || 'Re-read the result.',

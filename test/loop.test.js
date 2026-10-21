@@ -106,6 +106,20 @@ test('max turns limit stops an endless tool loop and settles pending calls', asy
     assert.equal(calls, outs, 'every function_call has an output');
 });
 
+test('the same failing tool call stops the loop before the turn cap', async () => {
+    script = () => ({ calls: [{ name: 'read_file', arguments: { path: 'missing.txt', start_line: null, end_line: null } }] });
+    const { session, ledger, toolset, events, emit, cfg } = setup();
+    const result = await runTurn({ client: client(), config: cfg, session, ledger, toolset, emit, maxTurns: 10 });
+    assert.equal(result.status, 'max_turns');
+    assert.match(result.error.message, /повторил один и тот же сбой/);
+    assert.equal(result.turns, 3);
+    assert.ok(events.some((e) => e.type === 'warning' && /повторил один и тот же сбой/.test(e.message)));
+    const outputs = session.items.filter((i) => i.type === 'function_call_output').map((i) => i.output);
+    assert.equal(outputs.length, 3);
+    assert.match(outputs[1], /Не повторяйте его/);
+    assert.equal(session.items.filter((i) => i.type === 'function_call').length, 3);
+});
+
 test('token budget stops before the next request', async () => {
     script = () => ({ calls: [{ name: 'list_files', arguments: { path: '.', depth: 1, include_hidden: false } }] });
     const { session, toolset, emit, cfg } = setup();
