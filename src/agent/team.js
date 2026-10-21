@@ -374,24 +374,24 @@ export async function runTeam({
                 `# Coordination request\nStage: ${stage}\n${rule}`,
             ].filter(Boolean).join('\n\n');
             notify({ type: 'stage.start', stage: 'coordinate', role: 'coordinator', model: role.model });
-            const result = await roles.run('coordinator', {
+            const reply = await roles.run('coordinator', {
                 text: request, instructions: ROLE_INSTRUCTIONS.coordinator, toolset: coordinatorTools,
                 schema: COORDINATION_SCHEMA, schemaName: 'coordination',
                 maxTurns: coordinatorSettings.maxTurns ?? 6, model: role.model, effort: role.effort,
             });
-            if (result.status === 'cancelled' || result.status === 'budget') {
-                throw result.error ?? new CancelledError('Координатор остановлен.');
+            if (reply.status === 'cancelled' || reply.status === 'budget') {
+                throw reply.error ?? new CancelledError('Координатор остановлен.');
             }
-            if (result.status !== 'completed' || !result.data) {
-                notify({ type: 'warning', message: `Координатор не ответил (${result.status}${result.error ? `: ${errorMessage(result.error)}` : ''}); продолжаем по плану.` });
-                notify({ type: 'stage.done', stage: 'coordinate', status: result.status });
+            if (reply.status !== 'completed' || !reply.data) {
+                notify({ type: 'warning', message: `Координатор не ответил (${reply.status}${reply.error ? `: ${errorMessage(reply.error)}` : ''}); продолжаем по плану.` });
+                notify({ type: 'stage.done', stage: 'coordinate', status: reply.status });
                 return null;
             }
-            const data = result.data;
+            const data = reply.data;
             const summary = String(data.summary ?? '').trim();
             const nextStep = String(data.nextStep ?? '').trim();
             const risks = Array.isArray(data.risks) ? data.risks.filter((item) => typeof item === 'string' && item.trim()) : [];
-            if (nextStep) coordinatorGuidance = nextStep;
+            coordinatorGuidance = nextStep;
             coordinatorLog.push([`[${stage}] ${summary}`, nextStep ? `Next: ${nextStep}` : '', risks.length ? `Risks: ${risks.join('; ')}` : ''].filter(Boolean).join('\n'));
             progress.notes ??= [];
             progress.notes.push({ kind: 'coordinator', stage, status: 'completed', report: summary, note: nextStep });

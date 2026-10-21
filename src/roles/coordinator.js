@@ -46,4 +46,4 @@ Never invent file contents, command output, or a test result. ${UNTRUSTED}`;
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'high', model: null };
+export const settings = { effort: 'high', model: 'gpt-6.1-sol' };

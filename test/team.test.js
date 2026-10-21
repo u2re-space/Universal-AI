@@ -843,9 +843,10 @@ test('coordinator revises the plan after a step and guides the next worker turn'
     assert.equal(coordinatorCalls, 3);
     assert.deepEqual(result.plan.steps.map((step) => step.goal), ['Создать a.js', 'Создать b.js']);
     assert.deepEqual(result.steps.map((step) => step.goal), ['Создать a.js', 'Создать b.js']);
-    assert.match(workerTexts[1], /Your step 2/);
-    assert.match(workerTexts[1], /Coordinator guidance/);
-    assert.match(workerTexts[1], /create b\.js that imports a\.js/);
+    const secondStepTurn = workerTexts.find((text) => /Your step 2/.test(text));
+    assert.ok(secondStepTurn, 'the worker received the added step');
+    assert.match(secondStepTurn, /Coordinator guidance/);
+    assert.match(secondStepTurn, /create b\.js that imports a\.js/);
     assert.equal(events.filter((event) => event.type === 'stage.start' && event.stage === 'coordinate').length, 3);
     assert.ok(events.some((event) => event.type === 'plan.updated' && event.steps === 2));
     assert.ok(events.some((event) => event.type === 'coordinator.done' && event.risks.includes('b.js отсутствует')));
