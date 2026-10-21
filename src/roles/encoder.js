@@ -36,4 +36,4 @@ Use null for unused fields. Reply in JSON only. ${UNTRUSTED}`;
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'high', model: 'gpt-6-luna' };
+export const settings = { effort: 'medium', model: 'gpt-6-luna' };
