@@ -2,9 +2,9 @@
  * @file index.js
  * @module index
  * @purpose Public programmatic API: client, session, ledger, tools, and one-turn runs.
- * @depends openai/client, core/session, core/usage, core/config, core/attachments, core/memory, core/context, agent/tools, agent/loop, agent/roles, agent/team, ui/renderer, jobs/manager, agent/map, agent/task-map, complete/complete, complete/server, complete/context, channels/decide, channels/moderate, channels/reply, channels/handle, channels/server, telegram/client, telegram/update
+ * @depends openai/client, core/session, core/usage, core/config, core/attachments, core/memory, core/context, agent/tools, agent/loop, agent/roles, agent/team, ui/renderer, jobs/manager, agent/map, agent/task-map, complete/complete, complete/channels, complete/server, complete/context, channels/decide, channels/moderate, channels/reply, channels/handle, channels/server, telegram/client, telegram/update
  * @usedBy external
- * @exports createClient, ApiError, createSession, createLedger, loadConfig, configDefaults, resolveRole, buildUserMessage, loadImageAttachment, loadFileAttachment, openMemory, projectKey, createSharedContext, createToolset, runTurn, createRoleRunner, runTeam, createRenderer, createJobManager, loadProjectMap, draftTaskMap, scanWorkspace, formatWorkspace, buildCompletionContext, completeCode, startCompletionServer, structureText, structureCode, STRUCTURE_TASKS, buildGenerationBrief, resolvePlatform, connectMcp, openMcpSources, requestDecision, moderateText, draftReply, handleInbound, startChannelServer, listenProtocol, createHub, createTelegram, normalizeUpdate
+ * @exports createClient, ApiError, createSession, createLedger, loadConfig, configDefaults, resolveRole, buildUserMessage, loadImageAttachment, loadFileAttachment, openMemory, projectKey, createSharedContext, createToolset, runTurn, createRoleRunner, runTeam, createRenderer, createJobManager, loadProjectMap, draftTaskMap, scanWorkspace, formatWorkspace, buildCompletionContext, completeCode, createCompletionChannels, startCompletionServer, structureText, structureCode, STRUCTURE_TASKS, buildGenerationBrief, resolvePlatform, connectMcp, openMcpSources, requestDecision, moderateText, draftReply, handleInbound, startChannelServer, listenProtocol, createHub, createTelegram, normalizeUpdate
  * @ai.tags api, exports
  * @ai.hint keep
  * @changed 2026-10-15 Export the workspace scanner.
@@ -38,6 +38,7 @@ export { draftTaskMap } from './src/agent/task-map.js';
 export { scanWorkspace, formatWorkspace } from './src/agent/workspace-scan.js';
 export { buildCompletionContext } from './src/complete/context.js';
 export { completeCode } from './src/complete/complete.js';
+export { createCompletionChannels } from './src/complete/channels.js';
 export { startCompletionServer } from './src/complete/server.js';
 export { structureText, structureCode, STRUCTURE_TASKS } from './src/structure/structure.js';
 export { buildGenerationBrief } from './src/generate/brief.js';

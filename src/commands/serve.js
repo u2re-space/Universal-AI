@@ -2,7 +2,7 @@
  * @file src/commands/serve.js
  * @module commands/serve
  * @purpose `ai serve` — localhost WebSocket bus for ask, run, chat, and image.
- * @depends node:path, node:fs/promises, node:crypto, node:stream, server/protocol, server/hub, ui/sanitize, ui/renderer, core/config, util/text, commands/shared, commands/flags, commands/ask, commands/run, commands/chat, commands/image, complete/server, complete/complete, complete/errors, structure/structure
+ * @depends node:path, node:fs/promises, node:crypto, node:stream, server/protocol, server/hub, ui/sanitize, ui/renderer, core/config, util/text, commands/shared, commands/flags, commands/ask, commands/run, commands/chat, commands/image, complete/server, complete/complete, complete/channels, complete/errors, structure/structure
  * @usedBy cli
  * @exports pidAlive, startServe, serve
  * @ai.tags cli, websocket
@@ -28,6 +28,7 @@ import { chat } from './chat.js';
 import { image } from './image.js';
 import { createCompletionBridge } from '../complete/server.js';
 import { completeCode } from '../complete/complete.js';
+import { createCompletionChannels } from '../complete/channels.js';
 import { structureCode } from '../structure/structure.js';
 import { CompletionError } from '../complete/errors.js';
 
@@ -235,18 +236,19 @@ export async function startServe({ home, port = 0, token = randomBytes(32).toStr
  */
 function editorCompletion({ baseConfig, cwd, tokens }) {
     let client = null;
+    let channels = null;
     /**
      * @returns {Promise<object>}
      * @ai.hint io
      */
     const configOf = async () => baseConfig ?? await loadConfig({ env: process.env, ensureHome: false });
-    return createCompletionBridge({
+    const bridge = createCompletionBridge({
         tokens,
         handle: async (request, requestSignal) => {
             const config = await configOf();
             if (!config.apiKey) throw new CompletionError('Не задан OPENAI_API_KEY.', { status: 401, code: 'NO_API_KEY' });
-            client ??= createClientFor(config);
-            return completeCode({ client, config, request, cwd, signal: requestSignal });
+            channels ??= createCompletionChannels(config);
+            return completeCode({ channels, config, request, cwd, signal: requestSignal });
         },
         structure: async (request, requestSignal) => {
             const config = await configOf();
@@ -254,6 +256,19 @@ function editorCompletion({ baseConfig, cwd, tokens }) {
             return structureCode({ request, cwd, config, client, signal: requestSignal });
         },
     });
+    return {
+        ...bridge,
+        /**
+         * Stop the bridge and close completion channels.
+         * @returns {void}
+         * @ai.hint io
+         */
+        stop: () => {
+            bridge.stop();
+            channels?.close();
+            client?.close();
+        },
+    };
 }
 
 /**

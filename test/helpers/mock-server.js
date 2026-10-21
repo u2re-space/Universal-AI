@@ -112,6 +112,8 @@ export async function startMockServer({ script, backgroundPolls = 2 } = {}) {
     }
 
     const server = http.createServer(async (req, res) => {
+        res.on('error', () => {});
+        req.on('error', () => {});
         const chunks = [];
         for await (const chunk of req) chunks.push(chunk);
         const raw = Buffer.concat(chunks).toString('utf8');
@@ -147,6 +149,8 @@ export async function startMockServer({ script, backgroundPolls = 2 } = {}) {
                 // An assertion inside a test script must fail the test quickly, not hang the client.
                 return json(500, { error: { message: `mock script error: ${error.message}`, type: 'server_error', code: 'mock_script_error' } });
             }
+            if (scenario.delayMs) await new Promise((resolve) => setTimeout(resolve, scenario.delayMs));
+            if (res.destroyed) return;
             if (scenario.httpStatus) return json(scenario.httpStatus, scenario.httpBody ?? { error: { message: 'mock http error', type: 'server_error', code: 'mock_error' } });
             const id = `resp_${++counter}`;
             responses.set(id, { body, scenario, polls: 0 });

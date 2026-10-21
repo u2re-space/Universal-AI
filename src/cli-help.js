@@ -107,6 +107,9 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --file, --line, --character, --language   файл и курсор, если JSON не передан
   --listen    сервер только на 127.0.0.1. Токен: --token или AI_COMPLETE_TOKEN (Bearer или ?token=)
   Строка длиннее 0.5 МиБ в модель не попадает; берутся ближайшие обычные строки. Контекст файла сокращается.
+  Самый быстрый канал под модель: основной baseURL и fallback.providers (свои apiKey/env). Каналы
+  опрашиваются параллельно, выбор запоминается на completion.probeTtlMs (60 000 мс); channelProbe false
+  отключает поиск, probeTimeoutMs (1500 мс) ограничивает пробу.
   Структура: POST /v1/structure и кадр WebSocket {"type":"structure",...}. tasks: sort-imports, sort-rules,
   sort-properties, group-properties, group-selectors, layers, clean, dedupe, merge, sort-lines.
   rules — порядок импортов, группы свойств, слои. prompt — своя задача. selection правит только диапазон.

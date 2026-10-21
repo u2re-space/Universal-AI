@@ -2,7 +2,7 @@
  * @file src/commands/complete.js
  * @module commands/complete
  * @purpose Editor completion: one JSON request, or a local HTTP and WebSocket server.
- * @depends commands/shared, complete/complete, complete/server, complete/errors
+ * @depends commands/shared, complete/complete, complete/channels, complete/server, complete/errors
  * @usedBy cli
  * @exports complete
  * @ai.tags cli, complete
@@ -13,6 +13,7 @@
 import { isRecord } from '../util/text.js';
 import { UsageError, readStdin, createClientFor } from './shared.js';
 import { completeCode } from '../complete/complete.js';
+import { createCompletionChannels } from '../complete/channels.js';
 import { startCompletionServer } from '../complete/server.js';
 import { CompletionError } from '../complete/errors.js';
 import { structureCode } from '../structure/structure.js';
@@ -86,14 +87,15 @@ async function listen(ctx) {
     const port = parsePort(values.port);
     const token = values.token || process.env.AI_COMPLETE_TOKEN || config.completion.token || null;
     let client = null;
+    let channels = null;
     let server;
     try {
         server = await startCompletionServer({
             port, token, signal,
             handle: (request, requestSignal) => {
                 if (!config.apiKey) throw new CompletionError('Не задан OPENAI_API_KEY.', { status: 401, code: 'NO_API_KEY' });
-                client ??= createClientFor(config);
-                return completeCode({ client, config, request, cwd, signal: requestSignal });
+                channels ??= createCompletionChannels(config);
+                return completeCode({ channels, config, request, cwd, signal: requestSignal });
             },
             structure: (request, requestSignal) => structureCode({
                 request, cwd, config, client: config.apiKey ? (client ??= createClientFor(config)) : null, signal: requestSignal,
@@ -114,6 +116,7 @@ async function listen(ctx) {
         });
     } finally {
         await server.close();
+        channels?.close();
         client?.close();
     }
     return 130;
@@ -140,14 +143,14 @@ export async function complete(ctx) {
         } finally { client?.close(); }
     }
     if (!config.apiKey) throw new UsageError('Не задан OPENAI_API_KEY. Укажите его в .env, в окружении или в ~/.ai-agent/config.json.');
-    const client = createClientFor(config);
+    const channels = createCompletionChannels(config);
     try {
-        const result = await completeCode({ client, config, request, cwd, signal });
+        const result = await completeCode({ channels, config, request, cwd, signal });
         if (renderer.mode === 'json') renderer.json({ type: 'completion', ...result });
         else {
             renderer.line('info', result.model, { dim: true });
             process.stdout.write(result.text);
         }
         return 0;
-    } finally { client.close(); }
+    } finally { channels.close(); }
 }

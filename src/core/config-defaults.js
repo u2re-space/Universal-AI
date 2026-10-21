@@ -229,6 +229,14 @@ export const defaults = Object.freeze({
         maxContextBytes: 24 * 1024,
         neighborLines: 16,
         token: null,
+        /**
+         * Probe the primary host and every fallback provider in parallel and keep the fastest
+         * channel per model. The probe is a tiny completion, so it also checks that the model
+         * is served there. A failed channel moves to the next probe winner.
+         */
+        channelProbe: true,
+        probeTtlMs: 60_000,
+        probeTimeoutMs: 1_500,
     },
     /** Prices in USD per 1M tokens, e.g. { "gpt-6.1-sol": { "input": 1.25, "cachedInput": 0.125, "output": 10 } }. */
     prices: {},

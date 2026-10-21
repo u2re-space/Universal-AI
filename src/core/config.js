@@ -311,6 +311,13 @@ function validateConfig(c) {
     if (c.completion.token !== null && (typeof c.completion.token !== 'string' || c.completion.token.length < 8 || /[\r\n]/.test(c.completion.token))) {
         fail('completion.token: null или строка от 8 символов без перевода строки');
     }
+    if (typeof c.completion.channelProbe !== 'boolean') fail('completion.channelProbe: true | false');
+    if (!Number.isSafeInteger(c.completion.probeTtlMs) || c.completion.probeTtlMs < 0 || c.completion.probeTtlMs > 3_600_000) {
+        fail('completion.probeTtlMs: 0..3600000');
+    }
+    if (!Number.isSafeInteger(c.completion.probeTimeoutMs) || c.completion.probeTimeoutMs < 100 || c.completion.probeTimeoutMs > 30_000) {
+        fail('completion.probeTimeoutMs: 100..30000');
+    }
     if (!isRecord(c.generate)) fail('generate должен быть объектом');
     for (const key of Object.keys(c.generate)) {
         if (!(key in defaults.generate)) fail(`неизвестный параметр generate.${key}`);

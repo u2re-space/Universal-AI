@@ -8,10 +8,12 @@
  * @ai.tags complete, openai
  * @ai.hint io
  * @changed 2026-10-16 Imports and open files are names for the insertion, not text to copy.
+ * @changed 2026-10-21 A completion may go through the fastest-channel router.
  */
 
 import { readFile, stat } from 'node:fs/promises';
 import { supportsVerbosity, REASONING_EFFORTS } from '../core/config.js';
+import { fallbackModel, modelMissing } from '../openai/fallback.js';
 import { resolveCompletionModel, COMPLETION_MODEL_CHOICES } from './models.js';
 import { resolveInside } from '../agent/paths.js';
 import { buildCompletionContext, readCompletionWindow } from './context.js';
@@ -327,15 +329,55 @@ export function buildCompletionBody({ model, effort, prompt, maxOutputTokens, co
 }
 
 /**
- * One Responses call.
- * @param {object} client
+ * One Responses call through a plain client or a fastest-channel router.
+ * @param {{ client?: object, channels?: { create: Function } }} transport
  * @param {object} body
  * @param {AbortSignal} [signal]
  * @returns {Promise<object>}
  * @ai.hint io
  */
-function createCompletion(client, body, signal) {
-    return client.responses.create(body, { signal });
+function createCompletion(transport, body, signal) {
+    if (transport.channels) return transport.channels.create(body, { signal });
+    return transport.client.responses.create(body, { signal });
+}
+
+/**
+ * A body for the stand-in model when the requested id is missing on every channel.
+ * @param {{ model: string, prompt: string, prepared: object, config: object }} options
+ * @returns {object|null}
+ * @ai.hint pure
+ */
+function fallbackCompletionBody({ model, prompt, prepared, config }) {
+    const alt = fallbackModel(model, config.fallback?.models);
+    if (!alt || alt === model) return null;
+    const row = resolveCompletionModel(alt);
+    const effort = row ? (row.clampNone && row.reasoning === 'none' ? 'low' : row.reasoning) : null;
+    return buildCompletionBody({
+        model: alt,
+        effort,
+        prompt,
+        maxOutputTokens: row?.maxOutputTokens ?? prepared.maxOutputTokens,
+        config,
+    });
+}
+
+/**
+ * Send a completion. The channel router also retries once on a stand-in model when the id is missing.
+ * @param {{ client?: object, channels?: object }} transport
+ * @param {object} body
+ * @param {{ signal?: AbortSignal, prompt: string, prepared: object, config: object }} options
+ * @returns {Promise<object>}
+ * @ai.hint io
+ */
+async function sendCompletion(transport, body, { signal, prompt, prepared, config }) {
+    try {
+        return await createCompletion(transport, body, signal);
+    } catch (error) {
+        if (!transport.channels || !modelMissing(error)) throw error;
+        const fallback = fallbackCompletionBody({ model: body.model, prompt, prepared, config });
+        if (!fallback) throw error;
+        return createCompletion(transport, fallback, signal);
+    }
 }
 
 /**
@@ -350,12 +392,15 @@ function policyFlagged(error) {
 
 /**
  * Complete code at the cursor. The default model is gpt-6-luna at effort none.
- * @param {{ client: object, config: object, request: object, cwd?: string, signal?: AbortSignal }} options
+ * Pass `channels` to search for the fastest host for this model; `client` is used otherwise.
+ * @param {{ client?: object, channels?: { create: Function, close?: Function }, config: object, request: object, cwd?: string, signal?: AbortSignal }} options
  * @returns {Promise<{ text: string, model: string, omittedLines: number[], truncated: boolean, cursorLineOmitted: boolean, startLine: number }>}
  * @exports
  * @ai.hint io
  */
-export async function completeCode({ client, config, request, cwd = process.cwd(), signal }) {
+export async function completeCode({ client, channels = null, config, request, cwd = process.cwd(), signal }) {
+    if (!channels && !client) throw new CompletionError('Нужен client или channels.', { status: 500, code: 'NO_CLIENT' });
+    const transport = { client, channels };
     const prepared = await prepareCompletionRequest(request, { cwd, config });
     const built = buildCompletionContext(prepared);
     const body = buildCompletionBody({
@@ -365,20 +410,25 @@ export async function completeCode({ client, config, request, cwd = process.cwd(
         maxOutputTokens: prepared.maxOutputTokens,
         config,
     });
-    const response = await createCompletion(client, body, signal).catch(async (error) => {
+    const response = await sendCompletion(transport, body, {
+        signal, prompt: built.prompt, prepared, config,
+    }).catch(async (error) => {
         if (!policyFlagged(error) || prepared.neighborLines === 0) {
             if (policyFlagged(error)) return null;
             throw error;
         }
         const narrower = await prepareCompletionRequest({ ...request, neighborLines: 0 }, { cwd, config });
+        const narrowerContext = buildCompletionContext(narrower);
         const retry = buildCompletionBody({
             model: narrower.model,
             effort: narrower.effort,
-            prompt: buildCompletionContext(narrower).prompt,
+            prompt: narrowerContext.prompt,
             maxOutputTokens: narrower.maxOutputTokens,
             config,
         });
-        return createCompletion(client, retry, signal).catch((retryError) => {
+        return sendCompletion(transport, retry, {
+            signal, prompt: narrowerContext.prompt, prepared: narrower, config,
+        }).catch((retryError) => {
             if (policyFlagged(retryError)) return null;
             throw retryError;
         });

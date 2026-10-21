@@ -122,6 +122,8 @@ ai serve --port 8765
 
 Сервер слушает только `127.0.0.1`. Секрет `--token` или `AI_COMPLETE_TOKEN` (либо `completion.token` в конфигурации) передаётся заголовком `Authorization: Bearer` или параметром `?token=`. У `ai serve` тот же заголовок принимает токен из `serve.json`.
 
+Для каждой модели дополнение ищет самый быстрый канал. Каналы — основной `baseURL` с `OPENAI_API_KEY` и `fallback.providers` (у каждого свой `apiKey` или `env`). При первом запросе и после `completion.probeTtlMs` (60 с) каналы параллельно получают короткий пробный запрос; побеждает первый ответивший, остальные остаются запасными в порядке задержки. Если канал не обслуживает модель или отвечает ошибкой, запрос уходит следующему. Выбор запоминается отдельно для каждой модели. `completion.channelProbe: false` отключает поиск (порядок: основной, затем запасные), `completion.probeTimeoutMs` (1500 мс) ограничивает пробу.
+
 Тот же сервер принимает правку структуры: `POST /v1/structure` и кадр WebSocket `{"type":"structure"}`. В `tasks` — `sort-imports`, `dedupe`, `merge`, `group-properties`, `group-selectors`, `sort-rules`, `sort-properties`, `layers`, `clean`, `sort-lines`. В `rules` — свой порядок импортов, группы свойств и слои. `prompt` описывает задачу, которую встроенные шаги не покрывают. `selection` ограничивает правку открытым диапазоном; без `write` сервер только возвращает текст. Агент делает то же самое инструментом `structure_file`.
 
 ### Примеры
@@ -383,7 +385,8 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
              "coordinator": { "enabled": false, "after": ["plan", "collect", "work", "review", "fix"], "maxContextBytes": 4194304, "applyPlan": true } },
   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
   "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": "." },
-  "completion": { "model": "gpt-6-luna", "effort": "none", "maxLineBytes": 524288, "maxContextBytes": 24576 },
+  "completion": { "model": "gpt-6-luna", "effort": "none", "maxLineBytes": 524288, "maxContextBytes": 24576,
+                  "channelProbe": true, "probeTtlMs": 60000, "probeTimeoutMs": 1500 },
   "compaction": { "auto": false, "afterInputTokens": 200000 },
   "decisions": { "model": "openai/gpt-6-luna-decisions", "reviewAt": 0.5, "blockAt": 0.9 },
   "moderation": { "mode": "auto", "model": "omni-moderation-latest", "preset": "community", "guardReplies": false },
