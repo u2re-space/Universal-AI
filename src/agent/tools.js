@@ -255,7 +255,8 @@ export function createToolset({
         async list_files(args) {
             const result = await listFiles({ root, dir: args.path || '.', depth: Math.min(6, Math.max(1, args.depth ?? 2)),
                 includeHidden: Boolean(args.include_hidden), maxEntries: limits.maxListEntries });
-            return { output: result.text, summary: `${result.count} записей` };
+            const summary = result.missing ? `${result.missing} не найден; записей рядом: ${result.count}` : `${result.count} записей`;
+            return { output: result.text, summary };
         },
         /** Read numbered lines from a UTF-8 file. */
         async read_file(args) {

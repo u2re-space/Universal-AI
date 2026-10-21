@@ -7,7 +7,7 @@
  * @exports listFiles, readTextFile, searchFiles, writeTextFile, replaceInFile, deleteFile, makeDirectory
  * @ai.tags filesystem, tools
  * @ai.hint io
- * @changed 2026-10-21 A direct search can include noisy directories.
+ * @changed 2026-10-21 A direct search can include noisy directories; a missing path lists its parent.
  */
 
 import path from 'node:path';
@@ -48,17 +48,46 @@ async function backup(abs, rel, backupDir) {
 }
 
 /**
+ * Nearest existing directory at or above `rel`. `listFiles` uses this for a missing path.
+ * @param {string} root
+ * @param {string} rel Posix path relative to `root`.
+ * @returns {Promise<string | null>}
+ * @ai.hint io
+ */
+async function nearestDirectory(root, rel) {
+    const parts = String(rel).split('/').filter((part) => part && part !== '.');
+    while (parts.length) {
+        parts.pop();
+        const candidate = parts.join('/') || '.';
+        const info = await stat(path.join(root, ...parts)).catch(() => null);
+        if (info?.isDirectory()) return candidate;
+    }
+    return null;
+}
+
+/**
  * List a directory tree, mark noisy folders, and stop at `maxEntries`.
+ * A path that does not exist yet lists the nearest existing parent instead of failing,
+ * so a probe of a directory that `write_file` will create still returns the tree.
  * The `list_files` tool calls this.
  * @param {{ root: string, dir?: string, depth?: number, includeHidden?: boolean, maxEntries?: number }} options
- * @returns {Promise<{ text: string, count: number, truncated: boolean }>}
+ * @returns {Promise<{ text: string, count: number, truncated: boolean, missing?: string }>}
  * @exports
  * @ai.hint io
  */
 export async function listFiles({ root, dir = '.', depth = 2, includeHidden = false, maxEntries = 400 }) {
     const { abs, rel } = await resolveInside(root, dir);
     const info = await stat(abs).catch(() => null);
-    if (!info) throw new Error(`Каталог не найден: ${dir}`);
+    if (!info) {
+        const parent = await nearestDirectory(root, rel);
+        if (!parent) throw new Error(`Каталог не найден: ${dir}`);
+        const listing = await listFiles({ root, dir: parent, depth, includeHidden, maxEntries });
+        const where = parent === '.' ? 'корня проекта' : `каталога ${parent}`;
+        return {
+            text: `Каталог не найден: ${rel}. Его создаст write_file при записи файла. Содержимое ${where}:\n${listing.text}`,
+            count: listing.count, truncated: listing.truncated, missing: rel,
+        };
+    }
     if (!info.isDirectory()) throw new Error(`Не каталог: ${dir}`);
     const lines = [];
     let truncated = false;

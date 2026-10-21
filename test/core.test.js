@@ -8,7 +8,8 @@ import { loadConfig } from '../src/core/config.js';
 import { createLedger, priceFor, costOf } from '../src/core/usage.js';
 import { loadImageAttachment, loadFileAttachment, buildUserMessage, detectImageMime, stdinFence } from '../src/core/attachments.js';
 import { resolveInside } from '../src/agent/paths.js';
-import { searchFiles } from '../src/agent/fs-tools.js';
+import { searchFiles, listFiles } from '../src/agent/fs-tools.js';
+import { createToolset } from '../src/agent/tools.js';
 import { runCommand } from '../src/agent/shell.js';
 import { sanitizeTerminal } from '../src/ui/sanitize.js';
 import { normalizeUsage } from '../src/openai/stream.js';
@@ -126,6 +127,38 @@ test('paths: confinement, protected names, symlink escape', async () => {
         try { await symlink(outside, path.join(dir, 'sub', 'link'), 'junction'); } catch { linked = false; }
         if (linked) await assert.rejects(resolveInside(dir, 'sub/link/file.txt'), /символическую/);
     } finally { await rm(dir, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
+});
+
+test('listFiles answers a missing directory with the nearest existing parent', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-agent-list-'));
+    try {
+        await writeFile(path.join(dir, 'index.html'), '<!doctype html>\n');
+        await mkdir(path.join(dir, 'src'));
+        await writeFile(path.join(dir, 'src', 'main.js'), 'export {};\n');
+        const rootProbe = await listFiles({ root: dir, dir: 'styles' });
+        assert.equal(rootProbe.missing, 'styles');
+        assert.match(rootProbe.text, /Каталог не найден: styles/);
+        assert.match(rootProbe.text, /index\.html/);
+        const nestedProbe = await listFiles({ root: dir, dir: 'src/styles/parts' });
+        assert.equal(nestedProbe.missing, 'src/styles/parts');
+        assert.match(nestedProbe.text, /каталога src/);
+        assert.match(nestedProbe.text, /main\.js/);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('a list_files probe of a missing directory succeeds with the parent tree', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-agent-list-tool-'));
+    try {
+        await writeFile(path.join(dir, 'index.html'), '<!doctype html>\n');
+        const toolset = createToolset({
+            root: dir, config: { limits: { maxListEntries: 100 } }, names: ['list_files'], approvalLevel: 'read',
+        });
+        const result = await toolset.execute({ name: 'list_files', arguments: JSON.stringify({ path: 'src', depth: 2, include_hidden: false }) });
+        assert.equal(result.ok, true);
+        assert.match(result.summary, /src не найден; записей рядом: 1/);
+        assert.match(result.output, /Каталог не найден: src/);
+        assert.match(result.output, /index\.html/);
+    } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test('searchFiles can look inside a noisy directory when asked directly', async () => {

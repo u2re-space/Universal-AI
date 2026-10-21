@@ -55,7 +55,7 @@ const schema = (properties) => ({ type: 'object', properties, required: Object.k
 export const TOOL_SPECS = {
     list_files: {
         category: 'read', group: 'fs',
-        description: 'List files and directories under a path of the working directory (noisy folders like node_modules/.git are skipped).',
+        description: 'List files and directories under a path of the working directory (noisy folders like node_modules/.git are skipped). A path that does not exist yet returns the nearest existing parent instead of an error; write_file creates the missing parents.',
         parameters: schema({
             path: str('Directory path relative to the working directory; "." for the root.'),
             depth: nullableInt('How many levels deep to list (1-6). Default 2.'),
