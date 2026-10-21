@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS } from '../src/roles/index.js';
 import { defaults } from '../src/core/config.js';
 
-const NAMES = ['default', 'planner', 'collector', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier'];
+const NAMES = ['default', 'planner', 'collector', 'worker', 'coder', 'writer', 'reviewer', 'coordinator', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier'];
 
 test('role modules match config role names', () => {
     assert.deepEqual(Object.keys(ROLE_MODULES).sort(), NAMES.slice().sort());
@@ -24,6 +24,8 @@ test('existing role instructions keep their job', () => {
     assert.match(ROLE_INSTRUCTIONS.worker, /delegate_role/);
     assert.match(ROLE_INSTRUCTIONS.reviewer, /independent reviewer/);
     assert.match(ROLE_INSTRUCTIONS.reviewer, /delegate_role/);
+    assert.match(ROLE_INSTRUCTIONS.coordinator, /coordinator of a team/);
+    assert.match(ROLE_INSTRUCTIONS.coordinator, /planUpdate/);
     assert.match(ROLE_INSTRUCTIONS.vision, /Plain text\./);
     assert.match(ROLE_INSTRUCTIONS.summarizerMemory, /long-term memory/);
     assert.match(ROLE_INSTRUCTIONS.summarizerFile, /Do not propose changes\./);

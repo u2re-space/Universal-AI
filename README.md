@@ -149,6 +149,9 @@ ai run "исправь падающий тест в test/"
 ai run --role planner=gpt-6.1-sol:high --role reviewer=gpt-6.1-sol --role worker=gpt-6-luna \
        --role collector=gpt-6-luna --role summarizer=gpt-6-luna "добавь кеширование в src/api.js"
 
+# координатор после каждого этапа: правки плана и указания следующему шагу
+ai run --coordinator --role coordinator=gpt-6.1-sol:high "перепиши слой доступа к данным на репозитории"
+
 # рабочий стол Windows: --desktop включает screenshot, click, type, run_ahk, run_batch и delegate_role для worker и reviewer
 ai run --desktop --approve ask "посмотри экран и закрой лишний диалог"
 
@@ -197,6 +200,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 | `collector` | собрать контекст из файлов для остальных: ответить на вопросы планировщика, выписать нужные фрагменты и соглашения | только чтение: `list_files`, `search_files`, `read_file`, `summarize_file`, `recall` | младшая модель, effort `low` |
 | `worker` | выполнять шаги плана по одному: генерировать вызовы инструментов (JSON для локального исполнителя), проверять, отчитываться | все (по политике `--approve`) | младшая/средняя модель |
 | `reviewer` | независимо проверить результат по diff и критериям приёмки; `accept` или `revise` с конкретными замечаниями → worker исправляет (до `agent.maxReviewRounds` раундов) | чтение + `run_command` | старшая модель |
+| `coordinator` | после этапа (план, сбор контекста, шаг worker, ревью, исправления) посмотреть план, progress, находки коллектора и свежий diff; вернуть правку плана и указания следующему шагу | только чтение: `list_files`, `search_files`, `read_file`, `summarize_file`, `recall` | общая `model`, effort `high`; бюджет контекста `agent.coordinator.maxContextBytes` (4 МиБ ≈ 1M токенов) |
 | `vision` | описывать изображения для других ролей (`view_image` делегирует ей, когда у неё своя модель — `agent.visionDelegate`) | — | длинная сторона до 512 px: `gpt-6-luna` / `low`; до 1280 px: `gpt-6-luna` / `medium`; крупнее и любой скриншот экрана: `gpt-6.1-sol` / `high` |
 | `summarizer` | сводки больших файлов (`summarize_file`, кешируются по хешу), извлечение фактов в память после задачи | — | самая дешёвая модель, без рассуждений |
 | `solver` | решить шаг по экрану или файлу (формула, фрагмент текста, капча) и указать, где элементы | `screenshot`, `view_image` | trivial: `gpt-6-luna` / `low`; normal: `gpt-6-luna` / `medium`; complex: `gpt-6.1-sol` / `high` |
@@ -213,6 +217,20 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 простые задачи как `trivial` — тогда сбор контекста и ревью пропускаются. `--single` возвращает одиночный цикл.
 
 Крупный шаг, в котором названо несколько файлов, режется на шаг на файл. План и progress пишутся в `.tmp/<id>/plan.json` и `progress.json`, а в общий контекст попадает только краткая сводка. Файл собирается двумя ходами (каркас, затем тела), после файлов идёт шаг согласования импортов и имён. Повтор той же задачи продолжает незавершённый progress; `--no-resume` начинает заново. По ходу worker может дописать план блоком `plan-update`.
+
+### Координатор
+
+`--coordinator` (или `agent.coordinator.enabled: true`) включает роль `coordinator`. Она вызывается после выбранных
+этапов (`agent.coordinator.after`, по умолчанию `plan`, `collect`, `work`, `review`, `fix`) и получает не только
+общий контекст, но и свежий diff изменений с прошлого этапа. Ответ — JSON: оценка состояния, `nextStep` для
+следующего хода worker и необязательная правка плана (`addSteps`, `revise`). Правка применяется после этапов
+`plan`, `collect` и `work`; на ревью и исправлениях координатор только даёт указания. Его заметки попадают в
+`progress.json` и в общий контекст, поэтому следующие роли видят, что уже сделано и что менять дальше.
+
+Бюджет контекста координатора — `agent.coordinator.maxContextBytes` (по умолчанию 4 МиБ, примерно 1M токенов);
+он больше общего `agent.maxContextBytes`, поэтому координатор видит больше плана, отчётов и diff. Модель роли
+задаётся как у остальных: `roles.coordinator.model` или `--role coordinator=<модель>[:effort]`. Роль выключена
+по умолчанию: каждый её вызов — дополнительный запрос к старшей модели.
 
 ### Рабочий стол
 
@@ -355,12 +373,14 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   "roles": {
     "planner":    { "model": "gpt-6.1-sol", "effort": "high" },
     "reviewer":   { "model": "gpt-6.1-sol", "effort": "medium" },
+    "coordinator": { "model": "gpt-6.1-sol", "effort": "high" },
     "collector":  { "model": "gpt-6-luna", "effort": "low" },
     "worker":     { "model": "gpt-6-luna", "effort": "medium" },
     "vision":     { "model": "gpt-6-luna" },
     "summarizer": { "model": "gpt-6-luna", "summary": "none" }
   },
-  "agent": { "mode": "team", "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": 98304, "visionDelegate": "auto" },
+  "agent": { "mode": "team", "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": 98304, "visionDelegate": "auto",
+             "coordinator": { "enabled": false, "after": ["plan", "collect", "work", "review", "fix"], "maxContextBytes": 4194304, "applyPlan": true } },
   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
   "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": "." },
   "completion": { "model": "gpt-6-luna", "effort": "none", "maxLineBytes": 524288, "maxContextBytes": 24576 },

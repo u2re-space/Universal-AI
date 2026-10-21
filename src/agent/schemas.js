@@ -3,7 +3,7 @@
  * @module agent/schemas
  * @purpose Strict JSON schemas for structured role outputs (Responses API text.format = json_schema).
  * @usedBy agent/team, agent/roles
- * @exports PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA
+ * @exports PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA
  * @ai.tags schema, roles
  * @ai.hint pure
  * @changed 2026-10-15 JSDoc card, 4-space indent.
@@ -99,6 +99,32 @@ export const REVIEW_SCHEMA = object({
         }),
     },
     unverified: { ...strings, description: 'Acceptance criteria that could not be verified.' },
+});
+
+export const COORDINATION_SCHEMA = object({
+    summary: { ...string, description: 'Current state: what was just done and whether the plan is on track.' },
+    nextStep: { ...string, description: 'Concrete guidance for the next worker turn; empty string when none.' },
+    planUpdate: object({
+        note: { ...string, description: 'Short reason for the change; empty string when the plan is unchanged.' },
+        addSteps: {
+            type: 'array',
+            items: object({
+                goal: { ...string, description: 'Imperative, verifiable goal of the new step.' },
+                details: { ...string, description: 'Files, functions, commands, and edge cases.' },
+                verify: { ...string, description: 'How the worker should verify the step.' },
+            }),
+        },
+        revise: {
+            type: 'array',
+            items: object({
+                id: { ...string, description: 'Pending step id such as s03.' },
+                goal: { ...string, description: 'New goal; empty string keeps the current one.' },
+                details: { ...string, description: 'New details; empty string keeps the current ones.' },
+                verify: { ...string, description: 'New verification; empty string keeps the current one.' },
+            }),
+        },
+    }),
+    risks: strings,
 });
 
 export const MEMORY_SCHEMA = object({

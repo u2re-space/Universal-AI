@@ -114,6 +114,7 @@ export function overridesFrom(values, { command = null } = {}) {
     if (values.team) (o.agent ??= {}).mode = 'team';
     if (values['no-chain']) (o.agent ??= {}).chain = false;
     if (values['no-resume']) (o.agent ??= {}).resume = false;
+    if (values.coordinator !== undefined) (o.agent ??= {}).coordinator = { enabled: values.coordinator };
     if (values.route) {
         if (!['encoder', 'planner', 'decisions'].includes(values.route)) throw new UsageError('--route: encoder | planner | decisions');
         (o.agent ??= {}).route = values.route;

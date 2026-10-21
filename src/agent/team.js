@@ -1,13 +1,13 @@
 /**
  * @file src/agent/team.js
  * @module agent/team
- * @purpose Run planner, collector, worker, reviewer, and summarizer over one shared context.
+ * @purpose Run planner, collector, worker, reviewer, coordinator, and summarizer over one shared context.
  * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, agent/work-plan, agent/handoff, mcp/session, channels/decide, channels/questions, channels/verdict
  * @usedBy commands/run, index.js
  * @exports toolNamesForRole, runTeam
  * @ai.tags team, roles
  * @ai.hint keep
- * @changed 2026-10-16 Plan and progress are stored in `.tmp`; a run resumes from the newest unfinished progress.
+ * @changed 2026-10-21 The optional coordinator reviews the plan after every stage and may revise it.
  */
 
 import path from 'node:path';
@@ -15,7 +15,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createSession, loadSession } from '../core/session.js';
 import { createSharedContext } from '../core/context.js';
 import { renderMemories } from '../core/memory.js';
-import { isAbortError, CancelledError } from '../openai/errors.js';
+import { isAbortError, CancelledError, BudgetError } from '../openai/errors.js';
 import { clipMiddle, errorMessage } from '../util/text.js';
 import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { SPECIALISTS } from '../roles/index.js';
@@ -30,7 +30,7 @@ import { createRoleRunner } from './roles.js';
 import { builtinTools } from './loop.js';
 import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
-import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA } from './schemas.js';
+import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA } from './schemas.js';
 import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace } from './pace.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
@@ -167,6 +167,7 @@ export async function runTeam({
         describeScreen: roles.describeScreen, delegate, extras: mcp.extras,
     });
     const collectorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('collector'), extras: mcpRead });
+    const coordinatorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('coordinator'), extras: mcpRead });
     const reviewerTools = createToolset({
         ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer'),
         describeScreen: roles.describeScreen, delegate, extras: mcpRead,
@@ -177,7 +178,10 @@ export async function runTeam({
     let work = null;
     const finish = () => {
         result.changes = [...fileChanges, ...workerTools.stats().changes];
-        result.stats = { worker: workerTools.stats(), collector: collectorTools.stats(), reviewer: reviewerTools.stats() };
+        result.stats = {
+            worker: workerTools.stats(), collector: collectorTools.stats(), reviewer: reviewerTools.stats(),
+            coordinator: coordinatorTools.stats(),
+        };
         return result;
     };
     /** Write the current plan and progress. A missing work record is a no-op. */
@@ -327,6 +331,87 @@ export async function runTeam({
             const paths = workerTools.stats().changes.slice(seenChanges).map((change) => change.path);
             seenChanges = workerTools.stats().changes.length;
             return paths;
+        };
+        const coordinatorSettings = config.agent.coordinator ?? {};
+        const coordinatorOn = Boolean(coordinatorSettings.enabled);
+        const coordinatorAfter = new Set(Array.isArray(coordinatorSettings.after) ? coordinatorSettings.after : []);
+        let coordinatorSeenChanges = 0;
+        const coordinatorLog = [];
+        let coordinatorGuidance = '';
+        /**
+         * Consult the coordinator after a stage. Its plan update is applied when configured;
+         * its nextStep becomes explicit guidance for the next worker turn. A failed coordinator
+         * is advisory: the run continues on the existing plan.
+         * @param {'plan'|'collect'|'work'|'review'|'fix'} stage
+         * @param {{ step?: object|null, status?: string, report?: string, review?: object|null }} [input]
+         * @returns {Promise<object|null>}
+         */
+        const coordinate = async (stage, { step = null, status = '', report = '', review = null } = {}) => {
+            if (!coordinatorOn || !coordinatorAfter.has(stage) || !plan || !progress) return null;
+            const recent = workerTools.stats().changes.slice(coordinatorSeenChanges);
+            coordinatorSeenChanges = workerTools.stats().changes.length;
+            let diff = '(no file changes since the previous stage)';
+            if (recent.length) {
+                try { diff = await describeChangeSet({ root, changes: recent, maxBytes: coordinatorSettings.diffMaxBytes ?? 256 * 1024 }); }
+                catch (error) { notify({ type: 'warning', message: `Координатор: diff не собран (${errorMessage(error)}).` }); }
+            }
+            ctx.set('recentDiff', 'Recent changes (since the previous stage)', diff, { priority: 8 });
+            const role = roles.resolve('coordinator');
+            const sections = [];
+            if (step) {
+                sections.push(`# Step just finished\nID: ${step.id ?? '(none)'}\nGoal: ${step.goal}\nStatus: ${status || 'unknown'}\nReport:\n${clipMiddle(report || '(empty)', 8000)}`);
+            }
+            if (review) {
+                const issues = (review.issues ?? []).map((issue) => `- [${issue.severity}] ${issue.path ? `${issue.path}: ` : ''}${issue.message} -> ${issue.requestedChange}`).join('\n') || '- (none)';
+                sections.push(`# Review just finished\nVerdict: ${review.verdict}\nSummary: ${review.summary}\nIssues:\n${issues}`);
+            }
+            const rule = stage === 'review' || stage === 'fix'
+                ? 'Plan updates are not applied at this stage. Put every concrete change into nextStep.'
+                : 'Plan updates returned here are applied to the plan before the next worker turn.';
+            const request = [
+                ctx.render({ maxBytes: coordinatorSettings.maxContextBytes ?? 4 * 1024 * 1024, exclude: ['tree'] }),
+                ...sections,
+                `# Coordination request\nStage: ${stage}\n${rule}`,
+            ].filter(Boolean).join('\n\n');
+            notify({ type: 'stage.start', stage: 'coordinate', role: 'coordinator', model: role.model });
+            const result = await roles.run('coordinator', {
+                text: request, instructions: ROLE_INSTRUCTIONS.coordinator, toolset: coordinatorTools,
+                schema: COORDINATION_SCHEMA, schemaName: 'coordination',
+                maxTurns: coordinatorSettings.maxTurns ?? 6, model: role.model, effort: role.effort,
+            });
+            if (result.status === 'cancelled' || result.status === 'budget') {
+                throw result.error ?? new CancelledError('Координатор остановлен.');
+            }
+            if (result.status !== 'completed' || !result.data) {
+                notify({ type: 'warning', message: `Координатор не ответил (${result.status}${result.error ? `: ${errorMessage(result.error)}` : ''}); продолжаем по плану.` });
+                notify({ type: 'stage.done', stage: 'coordinate', status: result.status });
+                return null;
+            }
+            const data = result.data;
+            const summary = String(data.summary ?? '').trim();
+            const nextStep = String(data.nextStep ?? '').trim();
+            const risks = Array.isArray(data.risks) ? data.risks.filter((item) => typeof item === 'string' && item.trim()) : [];
+            if (nextStep) coordinatorGuidance = nextStep;
+            coordinatorLog.push([`[${stage}] ${summary}`, nextStep ? `Next: ${nextStep}` : '', risks.length ? `Risks: ${risks.join('; ')}` : ''].filter(Boolean).join('\n'));
+            progress.notes ??= [];
+            progress.notes.push({ kind: 'coordinator', stage, status: 'completed', report: summary, note: nextStep });
+            ctx.set('coordination', 'Coordinator notes', clipMiddle(coordinatorLog.join('\n\n'), coordinatorSettings.logMaxBytes ?? 32 * 1024), { priority: 9 });
+            notify({ type: 'coordinator.done', stage, summary, nextStep, risks });
+            const update = data.planUpdate ?? {};
+            const addSteps = Array.isArray(update.addSteps) ? update.addSteps : [];
+            const revise = Array.isArray(update.revise) ? update.revise : [];
+            if (coordinatorSettings.applyPlan !== false && stage !== 'review' && stage !== 'fix' && (addSteps.length || revise.length)) {
+                const applied = applyPlanUpdate(plan, { note: update.note ?? '', addSteps, revise }, { maxSteps: stepLimit, afterId: step?.id ?? null });
+                plan = applied.plan;
+                progress = syncProgress(progress, plan);
+                if (work) { work.plan = plan; work.progress = progress; }
+                result.plan = plan;
+                publish();
+                await persist();
+                notify({ type: 'plan.updated', stage, note: applied.note, steps: plan.steps.length });
+            }
+            notify({ type: 'stage.done', stage: 'coordinate', status: 'completed' });
+            return { ...data, summary, nextStep, risks };
         };
         let workerSession = createSession({ store: false, model: roles.resolve('worker').model });
         let sessionModel = workerSession ? roles.resolve('worker').model : null;
@@ -617,6 +702,8 @@ export async function runTeam({
         }
         }
 
+        await coordinate('plan');
+
         // 2. Collector (cheap model, read-only). Skipped when this run already moved past it.
         const wantsContext = plan.complexity !== 'trivial' && (
             plan.filesOfInterest.length || plan.searchQueries.length || plan.questionsForCollector.length
@@ -642,6 +729,8 @@ export async function runTeam({
             } else notify({ type: 'warning', message: `Сбор контекста не завершён (${collected.status}${collected.error ? `: ${errorMessage(collected.error)}` : ''}); продолжаем без него.` });
             notify({ type: 'stage.done', stage: 'collect', status: collected.status });
         }
+
+        await coordinate('collect');
 
         // 3. Worker: one conversation, one step at a time, starting at the saved cursor.
         notify({ type: 'stage.start', stage: 'work', role: 'worker', model: roles.resolve('worker').model });
@@ -673,7 +762,8 @@ export async function runTeam({
             const resumeSession = interrupted && progress.checkpoint?.stepId === step.id && pendingSession?.model === chosen.model;
             const extra = index === revisionAt ? revisionClause(revision) : '';
             if (extra) revisionUsed = true;
-            const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}${extra}${paced?.guarantees === 'broken' ? `\n\n${guaranteesParagraph('broken')}` : ''}`;
+            const advice = coordinatorGuidance ? `\n\nCoordinator guidance (from the previous stage):\n${coordinatorGuidance}` : '';
+            const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}${extra}${advice}${paced?.guarantees === 'broken' ? `\n\n${guaranteesParagraph('broken')}` : ''}`;
             const passes = [];
             if (interrupted) {
                 const phase = prior.phase === 'surface' ? 'surface' : 'body';
@@ -758,6 +848,7 @@ export async function runTeam({
             result.steps.push({ index: recordAt + 1, goal: step.goal, status: ran.outcome.status, report: ran.report });
             notify({ type: 'step.done', index: recordAt + 1, total: plan.steps.length, status: ran.outcome.status, summary: ran.report });
             if (HARD_STOP.has(ran.outcome.status)) return stop(ran.outcome, `шаг ${number}`);
+            await coordinate('work', { step, status: ran.outcome.status, report: ran.report });
             if (ran.outcome.status !== 'completed') {
                 workIncomplete = true;
                 if (generation && ran.outcome.status === 'max_turns') {
@@ -822,10 +913,12 @@ export async function runTeam({
             result.reviewRounds = round;
             notify({ type: 'review.done', round, verdict: review.verdict, summary: review.summary, issues: review.issues, unverified: review.unverified });
             notify({ type: 'stage.done', stage: 'review', status: review.verdict });
+            const reviewAdvice = await coordinate('review', { review, status: review.verdict });
             if (review.verdict === 'accept' || round >= paced.reviewRounds) break;
             notify({ type: 'stage.start', stage: 'fix', role: 'worker', model: roles.resolve('worker').model, round });
             const issues = review.issues.map((i) => `- [${i.severity}] ${i.path ? `${i.path}: ` : ''}${i.message} → ${i.requestedChange}`).join('\n') || '- (see summary)';
-            const fixed = await runWorker(`Review round ${round}: changes requested`, `${review.summary}\n${issues}\n\nAddress every issue, verify, and report what you changed.`, config.agent.workerMaxTurnsPerStep, plan.steps.some((step) => authorFor(step.files, step.goal) === 'coder') ? 'coder' : plan.steps.some((step) => authorFor(step.files, step.goal) === 'writer') ? 'writer' : 'worker', { complexity: [...plan.steps].sort((a, b) => (({ trivial: 0, normal: 1, complex: 2 })[b.complexity] ?? 1) - (({ trivial: 0, normal: 1, complex: 2 })[a.complexity] ?? 1))[0]?.complexity ?? plan.complexity });
+            const fixGuidance = reviewAdvice?.nextStep ? `\n\nCoordinator guidance:\n${reviewAdvice.nextStep}` : '';
+            const fixed = await runWorker(`Review round ${round}: changes requested`, `${review.summary}\n${issues}${fixGuidance}\n\nAddress every issue, verify, and report what you changed.`, config.agent.workerMaxTurnsPerStep, plan.steps.some((step) => authorFor(step.files, step.goal) === 'coder') ? 'coder' : plan.steps.some((step) => authorFor(step.files, step.goal) === 'writer') ? 'writer' : 'worker', { complexity: [...plan.steps].sort((a, b) => (({ trivial: 0, normal: 1, complex: 2 })[b.complexity] ?? 1) - (({ trivial: 0, normal: 1, complex: 2 })[a.complexity] ?? 1))[0]?.complexity ?? plan.complexity });
             result.images.push(...fixed.images);
             result.steps.push({ index: `fix-${round}`, goal: 'Устранение замечаний ревью', status: fixed.status, report: fixed.text.trim() });
             progress.notes ??= [];
@@ -835,6 +928,7 @@ export async function runTeam({
             await persist();
             notify({ type: 'stage.done', stage: 'fix', status: fixed.status });
             if (HARD_STOP.has(fixed.status)) return stop(fixed, 'исправления');
+            await coordinate('fix', { status: fixed.status, report: fixed.text.trim(), review });
         }
 
         // 5. Outcome.
@@ -880,7 +974,8 @@ export async function runTeam({
         }
         return finish();
     } catch (error) {
-        result.status = isAbortError(error) || signal?.aborted || error instanceof CancelledError ? 'cancelled' : 'failed';
+        result.status = error instanceof BudgetError ? 'budget'
+            : isAbortError(error) || signal?.aborted || error instanceof CancelledError ? 'cancelled' : 'failed';
         result.error = error;
         await persist(result.status);
         return finish();

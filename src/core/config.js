@@ -258,6 +258,27 @@ function validateConfig(c) {
     if (typeof c.agent.resume !== 'boolean') fail('agent.resume: true | false');
     if (c.agent.route !== null && !['encoder', 'planner', 'decisions'].includes(c.agent.route)) fail('agent.route: encoder | planner | decisions');
     if (!['encoder', 'mcp'].includes(c.agent.encode)) fail('agent.encode: encoder | mcp');
+    if (!isRecord(c.agent.coordinator)) fail('agent.coordinator должен быть объектом');
+    for (const key of Object.keys(c.agent.coordinator)) {
+        if (!(key in defaults.agent.coordinator)) fail(`неизвестный параметр agent.coordinator.${key}`);
+    }
+    if (typeof c.agent.coordinator.enabled !== 'boolean') fail('agent.coordinator.enabled: true | false');
+    const coordinatorStages = ['plan', 'collect', 'work', 'review', 'fix'];
+    if (!Array.isArray(c.agent.coordinator.after) || c.agent.coordinator.after.some((stage) => !coordinatorStages.includes(stage))) {
+        fail(`agent.coordinator.after: ${coordinatorStages.join(' | ')}`);
+    }
+    if (!Number.isSafeInteger(c.agent.coordinator.maxContextBytes) || c.agent.coordinator.maxContextBytes < 1024) {
+        fail('agent.coordinator.maxContextBytes ≥ 1024');
+    }
+    if (c.agent.coordinator.maxContextBytes > c.limits.maxRequestBytes) fail('agent.coordinator.maxContextBytes не больше limits.maxRequestBytes');
+    for (const key of ['diffMaxBytes', 'logMaxBytes']) {
+        if (!Number.isSafeInteger(c.agent.coordinator[key]) || c.agent.coordinator[key] < 1024) fail(`agent.coordinator.${key} ≥ 1024`);
+        if (c.agent.coordinator[key] > c.agent.coordinator.maxContextBytes) fail(`agent.coordinator.${key} не больше agent.coordinator.maxContextBytes`);
+    }
+    if (!Number.isSafeInteger(c.agent.coordinator.maxTurns) || c.agent.coordinator.maxTurns < 1 || c.agent.coordinator.maxTurns > 50) {
+        fail('agent.coordinator.maxTurns: 1..50');
+    }
+    if (typeof c.agent.coordinator.applyPlan !== 'boolean') fail('agent.coordinator.applyPlan: true | false');
     for (const key of ['enabled', 'autoSave']) if (typeof c.memory[key] !== 'boolean') fail(`memory.${key}: true | false`);
     if (!Number.isSafeInteger(c.memory.maxRecall) || c.memory.maxRecall < 0 || c.memory.maxRecall > 50) fail('memory.maxRecall: 0..50');
     if (c.memory.notesFile !== null && (typeof c.memory.notesFile !== 'string' || !c.memory.notesFile.trim())) fail('memory.notesFile: имя файла или null');

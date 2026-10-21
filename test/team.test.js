@@ -41,6 +41,7 @@ function roleOf(body) {
     if (format === 'file_commands') return 'encoder';
     if (format === 'context_report') return 'collector';
     if (format === 'review') return 'reviewer';
+    if (format === 'coordination') return 'coordinator';
     if (format === 'memory_update') return 'summarizer';
     if (format === 'task_label') return 'classifier';
     if (typeof body.instructions === 'string' && body.instructions.includes('route: encode')) return 'answer';
@@ -62,7 +63,7 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.deepEqual(overrides.agent, { mode: 'single' });
     assert.deepEqual(overrides.memory, { enabled: false });
     assert.throws(() => overridesFrom({ role: ['nobody=x'] }), /неизвестная роль/);
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 15);
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 16);
 });
 
 test('memory store: remember / recall (FTS) / list / forget / tasks / file summaries', () => {
@@ -799,4 +800,55 @@ test('encode host failure does not call the encoder model', async () => {
     });
     assert.equal(result.status, 'failed');
     assert.match(result.error.message, /encode failed/);
+});
+
+test('coordinator revises the plan after a step and guides the next worker turn', async () => {
+    let coordinatorCalls = 0;
+    const workerTexts = [];
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'planner') return { text: JSON.stringify({ summary: 'два модуля', complexity: 'normal', steps: [
+            { goal: 'Создать a.js', details: 'export const a = 1', verify: 'прочитать a.js', complexity: 'normal' },
+        ], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: ['a.js и b.js согласованы'], needsReview: false, imageNotes: null, risks: [] }) };
+        if (role === 'coordinator') {
+            coordinatorCalls++;
+            if (coordinatorCalls === 1) {
+                assert.match(body.input[0].content[0].text, /Plan/);
+                return { text: JSON.stringify({ summary: 'План верный', nextStep: 'Сначала a.js', planUpdate: { note: '', addSteps: [], revise: [] }, risks: [] }) };
+            }
+            if (coordinatorCalls === 2) {
+                assert.match(body.input[0].content[0].text, /Recent changes/);
+                return { text: JSON.stringify({ summary: 'a.js готов, нужен b.js', nextStep: 'create b.js that imports a.js', planUpdate: { note: 'нужен второй модуль', addSteps: [
+                    { goal: 'Создать b.js', details: 'export const b = a', verify: 'прочитать b.js' },
+                ], revise: [] }, risks: ['b.js отсутствует'] }) };
+            }
+            return { text: JSON.stringify({ summary: 'Готово', nextStep: '', planUpdate: { note: '', addSteps: [], revise: [] }, risks: [] }) };
+        }
+        if (role === 'worker') {
+            const lastUser = [...body.input].reverse().find((item) => item.type === 'message' && item.role === 'user').content[0].text;
+            workerTexts.push(lastUser);
+            return { text: /Your step 1/.test(lastUser) ? 'a.js готов' : 'b.js готов' };
+        }
+        return { text: 'unexpected' };
+    };
+    const config = baseConfig();
+    config.agent = {
+        ...defaults.agent, chain: false, resume: false,
+        coordinator: { ...defaults.agent.coordinator, enabled: true, after: ['plan', 'work'], maxContextBytes: 2 * 1024 * 1024 },
+    };
+    config.memory = { ...defaults.memory, enabled: false };
+    const events = [];
+    const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'два модуля', root, approvalLevel: 'read', emit: (event) => events.push(event) });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(coordinatorCalls, 3);
+    assert.deepEqual(result.plan.steps.map((step) => step.goal), ['Создать a.js', 'Создать b.js']);
+    assert.deepEqual(result.steps.map((step) => step.goal), ['Создать a.js', 'Создать b.js']);
+    assert.match(workerTexts[1], /Your step 2/);
+    assert.match(workerTexts[1], /Coordinator guidance/);
+    assert.match(workerTexts[1], /create b\.js that imports a\.js/);
+    assert.equal(events.filter((event) => event.type === 'stage.start' && event.stage === 'coordinate').length, 3);
+    assert.ok(events.some((event) => event.type === 'plan.updated' && event.steps === 2));
+    assert.ok(events.some((event) => event.type === 'coordinator.done' && event.risks.includes('b.js отсутствует')));
+    const progress = JSON.parse(await readFile(path.join(root, '.tmp', result.workId, 'progress.json'), 'utf8'));
+    assert.equal(progress.notes.filter((note) => note.kind === 'coordinator').length, 3);
 });

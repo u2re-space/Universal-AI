@@ -207,6 +207,14 @@ export function handleRendererEvent(event, api) {
             for (const item of event.unverified ?? []) line('info', `  не проверено: ${truncate(item, 160)}`, { dim: true });
             break;
         }
+        case 'coordinator.done':
+            line('info', `координатор (${event.stage}): ${truncate(event.summary, 300)}`, { dim: true });
+            if (event.nextStep) line('info', `  дальше: ${truncate(event.nextStep, 240)}`, { dim: true });
+            for (const risk of event.risks ?? []) line('warn', `  риск: ${truncate(risk, 200)}`);
+            break;
+        case 'plan.updated':
+            line('ok', `план обновлён координатором (${event.steps} шаг(ов))${event.note ? `: ${truncate(event.note, 200)}` : ''}`);
+            break;
         case 'memory.recalled':
             line('info', `память: найдено ${event.count} подходящих записей`, { dim: true });
             if (verbose) for (const item of event.items ?? []) line('info', `  #${item.id} ${truncate(item.content, 160)}`, { dim: true });
