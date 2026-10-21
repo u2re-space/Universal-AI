@@ -97,6 +97,8 @@ export const defaults = Object.freeze({
      *   typer      — types into a named UI field
      *   encoder    — returns a batch for later execution
      *   tester     — checks whether the step result is true
+     *   classifier — labels a task as trivial, normal, or complex
+     *   extractor  — cleans a verbose answer and writes clean file bodies to .tmp
      */
     roles: {
         default: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
@@ -115,6 +117,7 @@ export const defaults = Object.freeze({
         encoder: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         tester: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         classifier: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+        extractor: { model: null, effort: 'low', summary: null, verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
     },
     /** Multi-role orchestration used by `ai run`. */
     agent: {
@@ -128,6 +131,7 @@ export const defaults = Object.freeze({
         visionDelegate: 'auto',         // auto (when roles.vision has its own model) | always | never
         chain: true,                    // first answer, then encoder or planner
         route: null,                    // null | encoder | planner; null lets the answer and the heuristic choose
+        extract: 'auto',                // off | auto (encode route) | always (encode and plan); clean fenced code into .tmp/<id>/extracted
         encode: 'encoder',              // encoder (file-command model) | mcp (this process hosts the encode server)
         resume: true,                   // continue the newest unfinished step and its saved turn
         /**

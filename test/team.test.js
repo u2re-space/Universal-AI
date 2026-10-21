@@ -17,13 +17,27 @@ import { encodeArtifacts } from '../src/encode/encode.ts';
 
 let server;
 let script = () => ({ text: 'ok' });
+let extractScript = null;
+let extractModel = null;
 let decision = null;
 let root;
 before(async () => {
-    server = await startMockServer({ script: (body, index) => script(body, index), decisions: () => decision });
+    server = await startMockServer({
+        script: (body, index) => {
+            if (roleOf(body) === 'extractor') {
+                extractModel = body.model;
+                if (extractScript) return extractScript(body, index);
+                const text = JSON.stringify(body.input);
+                const source = /\[artifact (a\d+)\]/.exec(text)?.[1] ?? 'a001';
+                return { text: JSON.stringify({ summary: 'clean', files: [{ source, path: '', language: 'js', content: '', removeLines: [] }] }) };
+            }
+            return script(body, index);
+        },
+        decisions: () => decision,
+    });
     root = await mkdtemp(path.join(os.tmpdir(), 'ai-agent-team-'));
 });
-beforeEach(() => { server.reset(); decision = null; });
+beforeEach(() => { server.reset(); decision = null; extractScript = null; extractModel = null; });
 after(async () => { await server.close(); await rm(root, { recursive: true, force: true }); });
 
 const baseConfig = () => structuredClone({
@@ -45,6 +59,7 @@ function roleOf(body) {
     if (format === 'coordination') return 'coordinator';
     if (format === 'memory_update') return 'summarizer';
     if (format === 'task_label') return 'classifier';
+    if (format === 'extraction') return 'extractor';
     if (typeof body.instructions === 'string' && body.instructions.includes('route: encode')) return 'answer';
     if (body.input.some((i) => i.type === 'message' && i.content?.some?.((c) => c.type === 'input_image'))) return 'vision';
     if (body.model === 'gpt-6-luna-nano') return 'summarizer-file';
@@ -64,7 +79,10 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.deepEqual(overrides.agent, { mode: 'single' });
     assert.deepEqual(overrides.memory, { enabled: false });
     assert.throws(() => overridesFrom({ role: ['nobody=x'] }), /неизвестная роль/);
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 16);
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 17);
+    assert.equal(overridesFrom({ extract: 'always' }).agent.extract, 'always');
+    assert.equal(overridesFrom({ 'no-extract': true }).agent.extract, 'off');
+    assert.throws(() => overridesFrom({ extract: 'nope' }), /--extract/);
 });
 
 test('memory store: remember / recall (FTS) / list / forget / tasks / file summaries', () => {
@@ -332,6 +350,56 @@ test('encode branch writes the file and does not call the planner', async () => 
     assert.equal(result.status, 'completed', result.error?.message);
     assert.equal(result.plan, null);
     assert.equal(await readFile(path.join(root, 'out.js'), 'utf8'), 'export const n = 1;\n');
+});
+
+test('the extractor writes clean tmp files and the encoder copies them into the workspace', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-extract-team-'));
+    extractScript = (body) => {
+        assert.match(JSON.stringify(body.input), /\[artifact a001\]/);
+        return { text: JSON.stringify({ summary: 'clean module', files: [{
+            source: 'a001', path: 'src/app.js', language: 'js',
+            content: "export const app = 'clean';\n", removeLines: [],
+        }] }) };
+    };
+    let encoderText = '';
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: "Here is the module.\n\n```js\nexport const app = 'dirty';\n```\nroute: encode" };
+        if (role === 'encoder') {
+            encoderText = JSON.stringify(body.input);
+            const source = /(\.tmp\/[0-9a-f]{8}\/extracted\/src\/app\.js)/.exec(encoderText)?.[1];
+            assert.ok(source, 'the encoder sees the extracted source');
+            return { text: JSON.stringify({ summary: 'clean file', commands: [{
+                command: 'fs:write', path: 'src/app.js', cwd: '.', type: 'code', language: 'js',
+                content: null, lines: null, source, start: null, end: null,
+            }] }) };
+        }
+        return { text: 'unexpected' };
+    };
+    try {
+        const events = [];
+        const result = await runTeam({
+            client: client(), config: { ...baseConfig(), memory: { ...defaults.memory, enabled: false } },
+            ledger: createLedger(), task: 'запиши модуль', root: dir, approvalLevel: 'all', emit: (event) => events.push(event),
+        });
+        assert.equal(result.status, 'completed', result.error?.message);
+        assert.equal(await readFile(path.join(dir, 'src', 'app.js'), 'utf8'), "export const app = 'clean';\n");
+        assert.match(encoderText, /# Extracted files/);
+        assert.match(encoderText, /extracted/);
+        assert.equal(extractModel, 'gpt-6-luna');
+        assert.ok(events.some((event) => event.type === 'stage.start' && event.stage === 'extract' && event.role === 'extractor'));
+        const { readdir } = await import('node:fs/promises');
+        const id = (await readdir(path.join(dir, '.tmp'))).find((name) => /^[0-9a-f]{8}$/.test(name));
+        assert.ok(id);
+        assert.equal(await readFile(path.join(dir, '.tmp', id, 'extracted', 'src', 'app.js'), 'utf8'), "export const app = 'clean';\n");
+        assert.match(await readFile(path.join(dir, '.tmp', id, 'answer.md'), 'utf8'), /dirty/);
+        const handoff = JSON.parse(await readFile(path.join(dir, '.tmp', id, 'handoff.json'), 'utf8'));
+        assert.equal(handoff.raw, `.tmp/${id}/answer.md`);
+        assert.equal(handoff.artifacts.some((item) => item.extracted && item.hintPath === 'src/app.js'), true);
+        assert.equal(handoff.artifacts.find((item) => item.id === 'a001').supersededBy, 'a002');
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
 });
 
 test('a plan list stores a nested directory for the next role', async () => {

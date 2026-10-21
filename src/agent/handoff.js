@@ -176,7 +176,7 @@ export async function openHandoff(root, { profile = null } = {}) {
     const dir = path.join(root, '.tmp', id);
     await mkdir(dir, { recursive: true });
     const state = {
-        id, relDir, from: 'operator', to: 'answer', route: null, text: '', artifacts: [], commands: [], profile,
+        id, relDir, from: 'operator', to: 'answer', route: null, text: '', raw: null, artifacts: [], commands: [], profile,
     };
     await saveHandoff(root, state);
     return state;
@@ -250,7 +250,11 @@ export async function writeArtifact(root, state, block) {
  * @ai.hint io
  */
 export async function spillAnswer(root, state, answer) {
-    const { text, label } = stripRoute(answer);
+    const raw = String(answer ?? '');
+    const rawRel = `${state.relDir}/answer.md`;
+    await writeFile(path.join(root, state.relDir, 'answer.md'), raw, 'utf8');
+    state.raw = rawRel;
+    const { text, label } = stripRoute(raw);
     const spilled = spillFences(text);
     let rendered = spilled.text;
     for (const block of spilled.blocks) {

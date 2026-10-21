@@ -30,7 +30,7 @@ import { createRoleRunner } from './roles.js';
 import { builtinTools } from './loop.js';
 import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
-import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA } from './schemas.js';
+import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA } from './schemas.js';
 import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace } from './pace.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
@@ -41,6 +41,7 @@ import { ANSWER_INSTRUCTIONS, chooseRoute, loadHandoff, openHandoff, readDirecto
 import { applyFromStep, applyPlanUpdate, briefPlan, briefProgress, continuationText, createProgress, expandPlan, findResumable, loadWork, newWorkId, parsePlanUpdate, pathsIn, recordStep, revisionClause, saveWork, syncProgress } from './work-plan.js';
 import { neutralPlan, neutralProgress, neutralSession } from './neutral.js';
 import { CommandBatchError, executeFileCommands, FILE_COMMANDS_SCHEMA } from './file-commands.js';
+import { EXTRACT_MAX_BYTES, EXTRACT_MAX_FILES, extractHandoff, hasExtractableArtifacts } from './extract.js';
 import { assessQuality, assessmentImages } from './quality.js';
 
 /**
@@ -261,7 +262,7 @@ export async function runTeam({
             if (encodeHost) {
                 const workspaceText = ctx.get('workspace') ?? '';
                 const artifacts = [];
-                for (const item of handoff.artifacts) {
+                for (const item of handoff.artifacts.filter((entry) => !entry.supersededBy)) {
                     let body = item.body;
                     if (typeof body !== 'string') {
                         try { body = await readFile(path.join(root, item.rel), 'utf8'); }
@@ -285,7 +286,7 @@ export async function runTeam({
                     return { ok: false, done: finish() };
                 }
             }
-            const index = handoff.artifacts.map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''} ${item.hintPath ?? ''}`.trim()).join('\n') || '(none)';
+            const index = handoff.artifacts.filter((item) => !item.supersededBy).map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''} ${item.hintPath ?? ''}${item.extracted ? ' extracted' : ''}`.trim()).join('\n') || '(none)';
             const workspaceText = ctx.get('workspace');
             const encoded = await roles.run('encoder', {
                 text: `${handoff.text}\n\n# Directory tree\n${directoryTree}${workspaceText ? `\n\n# Workspace scan\n${workspaceText}` : ''}\n\n# Artifacts\n${index}`,
@@ -504,7 +505,7 @@ export async function runTeam({
             bind(lists(resumedWork.plan), resumedWork.progress);
             if (handoff?.text) {
                 ctx.set('answer', 'First answer', handoff.text, { priority: 5 });
-                ctx.set('artifacts', 'Artifacts', handoff.artifacts.map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''}`.trim()).join('\n') || '(none)', { priority: 8 });
+                ctx.set('artifacts', 'Artifacts', handoff.artifacts.filter((item) => !item.supersededBy).map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''}`.trim()).join('\n') || '(none)', { priority: 8 });
             }
             const findings = await readFile(path.join(root, '.tmp', work.id, 'findings.md'), 'utf8').catch(() => '');
             if (findings.trim()) ctx.set('findings', 'Collected context (by the collector)', findings, { priority: 6 });
@@ -570,9 +571,32 @@ export async function runTeam({
             handoff.route = route;
             handoff.to = route === 'encode' ? 'encoder' : 'planner';
             await saveHandoff(root, handoff);
-            ctx.set('answer', 'First answer', handoff.text, { priority: 5 });
-            ctx.set('artifacts', 'Artifacts', handoff.artifacts.map((item) => `${item.id} ${item.rel}`).join('\n') || '(none)', { priority: 8 });
             notify({ type: 'stage.done', stage: 'answer', status: 'completed', route });
+            const extractMode = config.agent.extract ?? 'auto';
+            if (extractMode !== 'off' && (route === 'encode' || extractMode === 'always') && hasExtractableArtifacts(handoff)) {
+                const extractorPace = paced?.roles?.extractor;
+                const extractor = {
+                    model: extractorPace?.model ?? config.roles?.extractor?.model ?? config.roles?.default?.model
+                        ?? paceSettings.models?.[0] ?? roles.resolve('extractor').model,
+                    effort: config.roles?.extractor?.effort ?? extractorPace?.effort ?? 'low',
+                };
+                notify({ type: 'stage.start', stage: 'extract', role: 'extractor', model: extractor.model });
+                const extracted = await extractHandoff({
+                    root, state: handoff, maxBytes: EXTRACT_MAX_BYTES, maxFiles: EXTRACT_MAX_FILES,
+                    run: (text) => roles.run('extractor', {
+                        text, instructions: ROLE_INSTRUCTIONS.extractor, instructionsOnly: true,
+                        schema: EXTRACT_SCHEMA, schemaName: 'extraction',
+                        silent: true, model: extractor.model, effort: extractor.effort,
+                    }),
+                    notify,
+                });
+                notify({
+                    type: 'stage.done', stage: 'extract', status: extracted.files.length ? 'completed' : 'skipped',
+                    files: extracted.files.map((item) => item.hintPath ?? item.rel), calls: extracted.calls,
+                });
+            }
+            ctx.set('answer', 'First answer', handoff.text, { priority: 5 });
+            ctx.set('artifacts', 'Artifacts', handoff.artifacts.filter((item) => !item.supersededBy).map((item) => `${item.id} ${item.rel}`).join('\n') || '(none)', { priority: 8 });
             if (route === 'encode') {
                 encodeRoute = true;
                 const encoded = await encodeHandoff();
@@ -712,7 +736,7 @@ export async function runTeam({
                 }
             }
             ctx.set('answer', 'First answer', handoff.text, { priority: 5 });
-            ctx.set('artifacts', 'Artifacts', handoff.artifacts.map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''}`.trim()).join('\n') || '(none)', { priority: 8 });
+            ctx.set('artifacts', 'Artifacts', handoff.artifacts.filter((item) => !item.supersededBy).map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''}`.trim()).join('\n') || '(none)', { priority: 8 });
         }
         }
 

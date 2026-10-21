@@ -272,6 +272,7 @@ export function resolvePace({
             planner, collector: role(0, 'low', false),
             reviewer: role(modelQuality >= 67 ? adjusted : Math.min(adjusted, 1), reviewerBase, true),
             summarizer: role(0, 'low', false),
+            extractor: role(0, 'low', false),
         },
         steps: null,
     };

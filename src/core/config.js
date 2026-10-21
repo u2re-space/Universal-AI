@@ -256,6 +256,7 @@ function validateConfig(c) {
     if (!['auto', 'always', 'never'].includes(c.agent.visionDelegate)) fail('agent.visionDelegate: auto | always | never');
     if (typeof c.agent.chain !== 'boolean') fail('agent.chain: true | false');
     if (typeof c.agent.resume !== 'boolean') fail('agent.resume: true | false');
+    if (!['off', 'auto', 'always'].includes(c.agent.extract)) fail('agent.extract: off | auto | always');
     if (c.agent.route !== null && !['encoder', 'planner', 'decisions'].includes(c.agent.route)) fail('agent.route: encoder | planner | decisions');
     if (!['encoder', 'mcp'].includes(c.agent.encode)) fail('agent.encode: encoder | mcp');
     if (!isRecord(c.agent.coordinator)) fail('agent.coordinator должен быть объектом');

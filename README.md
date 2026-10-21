@@ -209,6 +209,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 | `clicker` | кликнуть | `click`, `screenshot` | общая `model`, effort `low` |
 | `typer` | ввести текст в поле | `type`, `screenshot` | общая `model`, effort `low` |
 | `encoder` | вернуть пакет действий | `screenshot` | общая `model`, effort `medium` |
+| `extractor` | очистить verbose-ответ и разложить чистые файлы по `.tmp/<id>/extracted/`; один вызов на пачку артефактов | — | дешёвая модель, effort `low` |
 | `tester` | проверить результат, в том числе по экрану | `screenshot` | общая `model`, effort `medium` |
 | `default` | `ask`, `chat`, `run --single` | — | общая `model` |
 
@@ -219,6 +220,8 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 простые задачи как `trivial` — тогда сбор контекста и ревью пропускаются. `--single` возвращает одиночный цикл.
 
 Крупный шаг, в котором названо несколько файлов, режется на шаг на файл. План и progress пишутся в `.tmp/<id>/plan.json` и `progress.json`, а в общий контекст попадает только краткая сводка. Файл собирается двумя ходами (каркас, затем тела), после файлов идёт шаг согласования импортов и имён. Повтор той же задачи продолжает незавершённый progress; `--no-resume` начинает заново. По ходу worker может дописать план блоком `plan-update`.
+
+Первый ответ сохраняется целиком в `.tmp/<id>/answer.md`, вместе с markdown и описаниями. Для маршрута `encoder` роль `extractor` (по умолчанию `agent.extract: "auto"`) режет ответ на пачки, убирает prose и fences и пишет чистые `js`, `ts`, `html`, `css`, `json` и другие файлы в `.tmp/<id>/extracted/`. Encoder получает ссылки на них и переносит в рабочий каталог через `fs:write`; исходный ответ остаётся в `answer.md`, а его артефакты помечаются `supersededBy`. `--extract always` включает очистку и для маршрута `planner`, `--extract off` или `--no-extract` выключает её. Ошибка extractor не останавливает запуск: остаются исходные артефакты.
 
 ### Координатор
 

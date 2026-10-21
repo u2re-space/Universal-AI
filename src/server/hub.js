@@ -20,7 +20,7 @@ const START_FIELDS = new Set([
     'type', 'command', 'prompt', 'cwd', 'approve', 'effort', 'summary', 'instructions', 'images', 'files', 'detail',
     'out', 'session', 'store', 'web', 'imagesTool', 'tools', 'noTools', 'maxTurns', 'budgetUsd', 'budgetTokens',
     'maxOutputTokens', 'temperature', 'verbosity', 'shell', 'stream', 'size', 'quality', 'format', 'imageBackground',
-    'partials', 'imageModel', 'count', 'schema', 'role', 'single', 'team', 'memory', 'processing',
+    'partials', 'imageModel', 'count', 'schema', 'role', 'single', 'team', 'memory', 'processing', 'extract', 'noExtract',
 ]);
 const REJECTED = new Set(['background', 'detach', 'job']);
 

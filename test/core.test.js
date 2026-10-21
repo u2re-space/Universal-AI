@@ -200,6 +200,25 @@ test('a retired scanner role in config is dropped', async () => {
     }
 });
 
+test('agent.extract accepts off, auto, and always', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-extract-cfg-'));
+    const env = { AI_AGENT_HOME: home };
+    try {
+        const config = await loadConfig({ env, ensureHome: false });
+        assert.equal(config.agent.extract, 'auto');
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ agent: { extract: 'always' } }));
+        const always = await loadConfig({ env, ensureHome: false });
+        assert.equal(always.agent.extract, 'always');
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ agent: { extract: 'nope' } }));
+        await assert.rejects(
+            loadConfig({ env, ensureHome: false }),
+            /agent\.extract: off \| auto \| always/,
+        );
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
 test('agent.encode accepts encoder or mcp and rejects anything else', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-encode-cfg-'));
     const env = { AI_AGENT_HOME: home };

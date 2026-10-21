@@ -42,6 +42,8 @@ test('default pace keeps a complex author on luna and the planner on sol', () =>
     assert.equal(pace.steps[0].effort, 'high');
     assert.equal(pace.roles.classifier.model, 'gpt-6-luna');
     assert.equal(pace.roles.classifier.effort, 'low');
+    assert.equal(pace.roles.extractor.model, 'gpt-6-luna');
+    assert.equal(pace.roles.extractor.effort, 'low');
     assert.equal(pace.reviewRounds, 1);
     assert.equal(pace.reviewMode, 'force');
     assert.equal(pace.collect, 'allow');

@@ -52,6 +52,8 @@ test('writes keep a .comp path beside language glsl and default a missing path',
         const state = await openHandoff(root);
         const spilled = await spillAnswer(root, state, '```glsl\nvoid main() {}\n```\nroute: encode');
         assert.equal(spilled.label, 'encode');
+        assert.equal(state.raw, `.tmp/${state.id}/answer.md`);
+        assert.equal(await readFile(path.join(root, state.raw), 'utf8'), '```glsl\nvoid main() {}\n```\nroute: encode');
         assert.equal(state.artifacts[0].hintLanguage, 'glsl');
         const source = state.artifacts[0].rel;
         assert.equal(source.endsWith('/a001'), true);

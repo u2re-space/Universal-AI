@@ -3,7 +3,7 @@
  * @module agent/schemas
  * @purpose Strict JSON schemas for structured role outputs (Responses API text.format = json_schema).
  * @usedBy agent/team, agent/roles
- * @exports PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA
+ * @exports PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA
  * @ai.tags schema, roles
  * @ai.hint pure
  * @changed 2026-10-15 JSDoc card, 4-space indent.
@@ -125,6 +125,24 @@ export const COORDINATION_SCHEMA = object({
         },
     }),
     risks: strings,
+});
+
+export const EXTRACT_SCHEMA = object({
+    summary: { ...string, description: 'What was extracted and what was dropped.' },
+    files: {
+        type: 'array',
+        items: object({
+            source: { ...string, description: 'Artifact id such as a001.' },
+            path: { ...string, description: 'Relative destination path, or an empty string when unknown.' },
+            language: { ...string, description: 'Language tag such as js, ts, html, css, json, or md.' },
+            content: { ...string, description: 'Clean file body for a small artifact. Empty for a large artifact.' },
+            removeLines: {
+                type: 'array',
+                items: { type: 'integer' },
+                description: '1-based lines to drop from the original body when content is empty.',
+            },
+        }),
+    },
 });
 
 export const MEMORY_SCHEMA = object({

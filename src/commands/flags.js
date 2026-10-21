@@ -114,6 +114,11 @@ export function overridesFrom(values, { command = null } = {}) {
     if (values.team) (o.agent ??= {}).mode = 'team';
     if (values['no-chain']) (o.agent ??= {}).chain = false;
     if (values['no-resume']) (o.agent ??= {}).resume = false;
+    if (values['no-extract']) (o.agent ??= {}).extract = 'off';
+    if (values.extract) {
+        if (!['off', 'auto', 'always'].includes(values.extract)) throw new UsageError('--extract: off | auto | always');
+        (o.agent ??= {}).extract = values.extract;
+    }
     if (values.coordinator !== undefined) (o.agent ??= {}).coordinator = { enabled: values.coordinator };
     if (values.route) {
         if (!['encoder', 'planner', 'decisions'].includes(values.route)) throw new UsageError('--route: encoder | planner | decisions');
