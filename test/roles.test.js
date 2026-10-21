@@ -41,7 +41,7 @@ test('specialists do not delegate or run batches', () => {
     assert.deepEqual(SPECIALISTS.typer, { tools: ['type', 'screenshot'], turns: 4, schema: null });
     assert.deepEqual(SPECIALISTS.encoder, { tools: ['screenshot'], turns: 3, schema: 'batch' });
     assert.deepEqual(SPECIALISTS.tester, { tools: ['screenshot'], turns: 4, schema: null });
-    assert.deepEqual(SPECIALISTS.measurer, { tools: ['view_image', 'crop_image', 'split_image'], turns: 6, schema: 'measure' });
+    assert.deepEqual(SPECIALISTS.measurer, { tools: ['view_image', 'crop_image', 'split_image'], turns: 12, schema: 'measure' });
     for (const spec of Object.values(SPECIALISTS)) {
         assert.equal(spec.tools.includes('delegate_role'), false);
         assert.equal(spec.tools.includes('run_batch'), false);

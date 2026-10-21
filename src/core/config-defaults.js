@@ -143,7 +143,7 @@ export const defaults = Object.freeze({
          * context and to `.tmp/<id>/measurements.json`.
          */
         measure: 'auto',                // off | auto | always
-        measurerMaxTurns: 6,            // tool turns the measurer may spend on crops and close looks
+        measurerMaxTurns: 12,           // tool turns the measurer may spend on crops and close looks
         encode: 'encoder',              // encoder (file-command model) | mcp (this process hosts the encode server)
         resume: true,                   // continue the newest unfinished step and its saved turn
         /**

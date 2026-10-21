@@ -1092,3 +1092,39 @@ test('measurer stage runs before collector when image parts are present', async 
     assert.ok(events.some((e) => e.type === 'stage.start' && e.stage === 'measure' && e.role === 'measurer'));
     await rm(dir, { recursive: true, force: true });
 });
+
+test('a spent measurement budget still returns the sheet for what the role already looked at', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-cap-'));
+    const events = [];
+    const measureBodies = [];
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({ summary: 'замер', complexity: 'normal', steps: [{ goal: 'Создать стили', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: ['Какой стиль?'], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        }
+        if (role === 'measurer') {
+            measureBodies.push(body);
+            if (measureBodies.length === 1) return { calls: [{ name: 'view_image', arguments: { path: 'missing.png', detail: 'auto', question: 'что на макете?' } }] };
+            return { text: JSON.stringify({ summary: 'Замерено частично', source: 'mockup.png', unit: 'px', canvas: { width: 400, height: 300 }, elements: [], regions: [], rules: [], notes: 'Часть деталей не разглядена' }) };
+        }
+        if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [{ question: 'Какой стиль?', answer: 'минимализм' }], conventions: [], notes: '' }) };
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.agent = { ...config.agent, chain: false, resume: false, measurerMaxTurns: 1 };
+    const result = await runTeam({
+        client: client(), config, ledger: createLedger(), task: 'замерь макет',
+        root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+        emit: (event) => events.push(event),
+    });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(measureBodies.length, 2, 'one capped pass plus one tool-less report pass');
+    assert.equal(measureBodies[1].tools, undefined, 'the report pass has no tools left');
+    assert.ok(events.some((event) => event.type === 'warning' && /отдаёт лист/.test(event.message)));
+    const sheet = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.json'), 'utf8'));
+    assert.equal(sheet.summary, 'Замерено частично');
+    await rm(dir, { recursive: true, force: true });
+});

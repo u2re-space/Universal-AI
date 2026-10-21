@@ -161,7 +161,8 @@ export async function runTeam({
             model = clampModel(model ?? roles.resolve(role).model, paceSettings.models, paced.ceilingIndex, Boolean(pins[role]?.model));
         }
         const result = await roles.run(role, {
-            text: task, instructions: ROLE_INSTRUCTIONS[role], toolset, maxTurns: spec.turns, silent: true,
+            text: task, instructions: ROLE_INSTRUCTIONS[role], toolset, maxTurns: role === 'measurer' ? (config.agent.measurerMaxTurns ?? spec.turns) : spec.turns,
+            silent: true,
             ...(spec.schema === 'batch' ? { schema: BATCH_SCHEMA, schemaName: 'batch' } : {}),
             ...(spec.schema === 'measure' ? { schema: MEASURER_SCHEMA, schemaName: 'measure' } : {}),
             ...(model ? { model } : {}),
@@ -767,20 +768,33 @@ export async function runTeam({
                 ? createToolset({ ...toolBase, names: measureNames, approvalLevel, describeScreen: roles.describeScreen })
                 : null;
             notify({ type: 'stage.start', stage: 'measure', role: 'measurer', model });
-            const measured = await roles.run('measurer', {
-                text: `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Measurement brief\n` +
-                    `Plan: ${plan.summary}\nSteps:\n${bullets(plan.steps.map((step) => step.goal))}\n` +
-                    'Measure the attached references: element boxes, rotation angles, where the borders pass, how the picture divides into regions, ' +
-                    'the spacing rules, and where each element is placed.',
+            const measureText = `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Measurement brief\n` +
+                `Plan: ${plan.summary}\nSteps:\n${bullets(plan.steps.map((step) => step.goal))}\n` +
+                'Measure the attached references: element boxes, rotation angles, where the borders pass, how the picture divides into regions, ' +
+                'the spacing rules, and where each element is placed.';
+            const measureSession = createSession({ store: false, model });
+            let measured = await roles.run('measurer', {
+                text: measureText,
                 parts: referenceParts, instructions: ROLE_INSTRUCTIONS.measurer, toolset: measureTools,
-                schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns: config.agent.measurerMaxTurns ?? 6,
-                model, effort: choice.effort,
+                schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns: config.agent.measurerMaxTurns ?? 12,
+                model, effort: choice.effort, onMaxTurns, session: measureSession,
             });
             if (HARD_STOP.has(measured.status)) return stop(measured, 'замеры');
-            if (measured.status === 'completed' && measured.data) {
+            // A spent turn budget must not throw the crops away: one tool-less pass writes the sheet from what it already looked at.
+            if (!measured.data && ['max_turns', 'incomplete'].includes(measured.status)) {
+                notify({ type: 'warning', message: 'Лимит ходов замеров исчерпан; роли отдаёт лист по уже просмотренному.' });
+                const report = await roles.run('measurer', {
+                    text: 'Turn budget is spent and no more tools are available. Reply with the measurement sheet for everything you already looked at. ' +
+                        'Use null for a number you did not read and name the unchecked parts in notes. JSON only.',
+                    instructions: ROLE_INSTRUCTIONS.measurer, schema: MEASURER_SCHEMA, schemaName: 'measure',
+                    maxTurns: 1, model, effort: choice.effort, session: measureSession,
+                });
+                if (report.data) measured = report;
+            }
+            if (measured.data) {
                 ctx.set('metrics', 'Reference measurements (by the measurer)', renderMeasurements(measured.data), { priority: 8 });
                 await writeFile(path.join(root, '.tmp', work.id, 'measurements.json'), `${JSON.stringify(measured.data, null, 2)}\n`, 'utf8').catch(() => {});
-            } else {
+            } else if (measured.status !== 'completed') {
                 notify({ type: 'warning', message: `Замеры референсов не завершены (${measured.status}${measured.error ? `: ${errorMessage(measured.error)}` : ''}); продолжаем без них.` });
             }
             notify({ type: 'stage.done', stage: 'measure', status: measured.status });
