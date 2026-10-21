@@ -28,6 +28,7 @@ import { findLatestResumable, resolveResumeStep } from '../agent/work-plan.js';
 import { imageTransport } from '../openai/images.js';
 import { formatWorkspace, scanWorkspace } from '../agent/workspace-scan.js';
 import { buildGenerationBrief, writeGenerationManifest } from '../generate/brief.js';
+import { stageReferences } from '../generate/references.js';
 import { preparedScaffoldFiles, writePreparedScaffold, ensureDependencies } from '../generate/scaffold.js';
 import { resolvePlatform } from '../generate/platform.js';
 import { stdinFence } from '../core/attachments.js';
@@ -68,11 +69,24 @@ export async function run(ctx) {
     ctx.backupDir = backupDirFor(config);
     let extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
     if (prepared.wantsProfile) {
+        // Stage reference images into .ai/refs/ so every tool can reach them by path.
+        const mockups = values.image ?? [];
+        let stagedRefs = [];
+        let stagingWarnings = [];
+        if (mockups.length) {
+            const result = await stageReferences({ images: mockups, cwd: ctx.cwd, maxBytes: config.limits.maxImageBytes, signal: ctx.signal, magickPath: config.magickPath ?? null });
+            stagedRefs = result.refs;
+            stagingWarnings = result.warnings;
+        }
+        if (stagingWarnings.length) {
+            for (const w of stagingWarnings) renderer.line('warn', w, { dim: true });
+        }
         const brief = buildGenerationBrief({
             kind: prepared.kind, prompt: task, fidelity: config.generate.fidelity, creativity: config.generate.creativity,
             quality: config.pace.quality,
             platform: resolvePlatform(config.generate.platform),
-            references: { images: values.image ?? [], files: values.file ?? [], examples: values.example ?? [] },
+            references: { images: mockups, files: values.file ?? [], examples: values.example ?? [] },
+            stagedRefs,
             name: path.basename(ctx.cwd),
         });
         await writeGenerationManifest(ctx.cwd, brief.manifest);
@@ -276,7 +290,21 @@ export async function resumeLocal(ctx, { revision = '', stepToken = null } = {})
         throw new UsageError('Все инструменты отключены; для resume нужен хотя бы один (fs, shell, fetch, web, images).');
     }
     ctx.backupDir = backupDirFor(config);
-    const extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
+    let extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
+
+    // Stage any new reference images passed to resume.
+    const resumeImages = values.image ?? [];
+    if (resumeImages.length) {
+        const result = await stageReferences({ images: resumeImages, cwd: ctx.cwd, maxBytes: config.limits.maxImageBytes, signal: ctx.signal, magickPath: config.magickPath ?? null });
+        if (result.warnings.length) {
+            for (const w of result.warnings) renderer.line('warn', w, { dim: true });
+        }
+        if (result.refs.length) {
+            const lines = result.refs.map((r) => `- ${r.rel}${r.width && r.height ? ` (${r.width}×${r.height})` : ''}`);
+            extra = [extra, 'Newly staged references:', ...lines].filter(Boolean).join('\n');
+        }
+    }
+
     const where = fromStep == null ? `шаг ${Math.min(found.progress.cursor + 1, steps.length)}` : `шаг ${fromStep + 1}`;
     renderer.line('info', note
         ? `Доработка .tmp/${found.id}, ${where}: ${note}`

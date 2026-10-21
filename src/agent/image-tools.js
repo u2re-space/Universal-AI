@@ -7,7 +7,7 @@
  * @exports createImageHandlers
  * @ai.tags images, tools
  * @ai.hint io
- * @changed 2026-10-15 ProxyAPI generations and edits.
+ * @changed 2026-10-22 generate_image accepts optional reference; edit_image accepts extra_images.
  */
 
 import path from 'node:path';
@@ -61,23 +61,67 @@ export function createImageHandlers({ root, client, config, signal }) {
     }
 
     return {
-        /** POST /images/generations and save every returned image. */
+        /**
+         * POST /images/generations (no image) or POST /images/edits (with reference).
+         * When `reference` is set, routes to the vision-capable edit endpoint
+         * so the model conditions on the pixel data instead of text description alone.
+         */
         async generate_image(args) {
             if (!client?.images) throw new Error('Клиент API недоступен для generate_image.');
+
+            const ref = String(args.reference ?? '').trim();
+            if (ref) {
+                // Direct reference path: edit the reference with the prompt.
+                const located = await resolveInside(root, ref, { allowRoot: false });
+                const bytes = await readFile(located.abs);
+                const kind = sniffImage(bytes);
+                const payloads = await client.images.edit({
+                    model: imageModelFor(config, { hasImage: true }),
+                    prompt: args.prompt,
+                    size: args.size || null,
+                    signal,
+                    files: [{ filename: path.basename(located.rel), mime: kind.mime, bytes }],
+                });
+                return saveAll(payloads, args.path);
+            }
+
+            // No reference: pure text-to-image generation.
             const payloads = await client.images.generate({
                 model: imageModelFor(config), prompt: args.prompt, size: args.size || null, quality: args.quality || null, signal,
             });
             return saveAll(payloads, args.path);
         },
-        /** POST /images/edits with one source file and save the result. */
+        /**
+         * POST /images/edits with one required source image and optional extra references.
+         * All images are sent as `image` fields in the multipart form.
+         */
         async edit_image(args) {
             if (!client?.images) throw new Error('Клиент API недоступен для edit_image.');
             const located = await resolveInside(root, args.image, { allowRoot: false });
             const bytes = await readFile(located.abs);
             const kind = sniffImage(bytes);
+            const files = [{ filename: path.basename(located.rel), mime: kind.mime, bytes }];
+
+            // Optional additional reference images (JSON array of paths).
+            const extra = String(args.extra_images ?? '').trim();
+            if (extra) {
+                let paths;
+                try { paths = JSON.parse(extra); }
+                catch { paths = []; }
+                if (Array.isArray(paths)) {
+                    for (const p of paths) {
+                        if (typeof p !== 'string' || !p.trim()) continue;
+                        const eloc = await resolveInside(root, p, { allowRoot: false });
+                        const ebytes = await readFile(eloc.abs);
+                        const ekind = sniffImage(ebytes);
+                        files.push({ filename: path.basename(eloc.rel), mime: ekind.mime, bytes: ebytes });
+                    }
+                }
+            }
+
             const payloads = await client.images.edit({
                 model: imageModelFor(config, { hasImage: true }), prompt: args.prompt, size: args.size || null, signal,
-                files: [{ filename: path.basename(located.rel), mime: kind.mime, bytes }],
+                files,
             });
             return saveAll(payloads, args.path);
         },

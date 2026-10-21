@@ -27,7 +27,7 @@ import { structureCode } from '../structure/structure.js';
 import { DESKTOP_TOOL_NAMES, createDesktopHandlers } from './desktop.js';
 import { createImageHandlers } from './image-tools.js';
 import { createChannelHandlers } from '../channels/tool-handlers.js';
-import { detectMagick, magickSplit, magickCrop } from './image-magick.js';
+import { detectMagick, magickSplit, magickCrop, magickIdentify } from './image-magick.js';
 import { generateSvg, downloadFont, downloadIcons } from './assets.js';
 import {
     TOOL_SPECS,
@@ -232,8 +232,8 @@ export function createToolset({
             case 'moderate_text': return `Модерация (${args.preset}): ${truncate(args.text ?? '', 300)}`;
             case 'channel_reply': return `Черновик ${args.purpose}: ${truncate(args.text ?? '', 300)}`;
             case 'telegram_call': return `Telegram ${args.method}`;
-            case 'generate_image': return `Нарисовать: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}`;
-            case 'edit_image': return `Изменить ${args.image}: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}`;
+            case 'generate_image': return `Нарисовать: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}${args.reference ? `\nРеференс: ${args.reference}` : ''}`;
+            case 'edit_image': return `Изменить ${args.image}: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}${args.extra_images ? `\nДоп. референсы: ${args.extra_images}` : ''}`;
             case 'click': return `Клик: ${truncate(clickTarget(args), 400)}`;
             case 'type': return `Ввод: ${truncate(args.text ?? '', 400)}`;
             case 'run_ahk': return `Скрипт: ${truncate(args.script ?? '', 400)}`;
@@ -518,7 +518,7 @@ export function createToolset({
             const answer = await askUser(String(args.question ?? ''));
             return { output: answer === null || answer === '' ? '(оператор не ответил)' : answer, summary: truncate(answer ?? '', 60) };
         },
-        /** Split an image into a grid of tiles. Returns coordinates for each tile. */
+        /** Split an image into a grid of tiles. Returns coordinates and source dimensions for each tile. */
         async split_image(args) {
             const { abs, rel } = await resolveInside(root, args.path, { allowRoot: false });
             const info = await stat(abs).catch(() => null);
@@ -531,13 +531,19 @@ export function createToolset({
             const outputDir = (await resolveInside(root, requested, { forWrite: true, allowRoot: false })).rel;
             const exe = await detectMagick({ magickPath: config.magickPath ?? null });
             if (exe) {
+                // Get source dimensions for planning
+                let srcDims = '';
+                try {
+                    const id = await magickIdentify({ exe, input: abs, cwd: root, signal });
+                    srcDims = ` (исходный: ${id.width}x${id.height})`;
+                } catch { /* optional */ }
                 const tiles = await magickSplit({ exe, input: abs, outputDir, rows, cols, cwd: root, signal, baseName: 'tile' });
                 const lines = tiles.map((t) => `${t.rel} (${t.width}×${t.height}, x=${t.x}, y=${t.y}, ${formatBytes(t.bytes)})`);
-                return { output: `Разбито ${rel} на ${rows}×${cols} (${tiles.length} плиток):\n${lines.join('\n')}`, summary: `${rows}×${cols} → ${outputDir}/` };
+                return { output: `Разбито ${rel}${srcDims} на ${rows}×${cols} (${tiles.length} плиток):\n${lines.join('\n')}`, summary: `${rows}×${cols} → ${outputDir}/` };
             }
             throw new Error('ImageMagick не найден. Установите ImageMagick (magick или convert) или используйте generate_image/edit_image для работы с изображениями.');
         },
-        /** Crop a region from an image. */
+        /** Crop a region from an image. Reports source dimensions in the output. */
         async crop_image(args) {
             const { abs, rel } = await resolveInside(root, args.path, { allowRoot: false });
             const info = await stat(abs).catch(() => null);
@@ -551,8 +557,14 @@ export function createToolset({
             const output = (await resolveInside(root, requested, { forWrite: true, allowRoot: false })).rel;
             const exe = await detectMagick({ magickPath: config.magickPath ?? null });
             if (exe) {
+                // Get source dimensions for planning
+                let srcDims = '';
+                try {
+                    const id = await magickIdentify({ exe, input: abs, cwd: root, signal });
+                    srcDims = ` (исходный: ${id.width}x${id.height})`;
+                } catch { /* optional */ }
                 const result = await magickCrop({ exe, input: abs, output, x, y, width, height, cwd: root, signal });
-                return { output: `Обрезано ${rel} → ${result.rel} (${width}×${height} в ${x},${y}, ${formatBytes(result.bytes)})`, summary: result.rel };
+                return { output: `Обрезано ${rel}${srcDims} → ${result.rel} (${width}×${height} в ${x},${y}, ${formatBytes(result.bytes)})`, summary: result.rel };
             }
             throw new Error('ImageMagick не найден. Установите ImageMagick (magick или convert).');
         },

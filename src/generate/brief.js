@@ -7,7 +7,7 @@
  * @exports GENERATION_KINDS, KIND_OUTPUTS, buildGenerationBrief, writeGenerationManifest
  * @ai.tags generate
  * @ai.hint pure
- * @changed 2026-10-16 English scaffold wrapper.
+ * @changed 2026-10-22 Reference images carry staged paths and pixel dimensions.
  */
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -39,13 +39,23 @@ function referenceLines(label, items) {
 }
 
 /**
+ * Format a staged reference as a bullet line with optional dimensions.
+ * @param {object} ref
+ * @returns {string}
+ */
+function formatStagedRef(ref) {
+    const dim = ref.width && ref.height ? ` (${ref.width}×${ref.height})` : '';
+    return `- ${ref.rel}${dim}`;
+}
+
+/**
  * Build the task, the operator instructions, and the manifest that is written to disk.
- * @param {{ kind: string, prompt?: string, name?: string, fidelity: number, creativity: number, platform: object, references?: { images?: string[], files?: string[], templates?: string[], examples?: string[] } }} request
+ * @param {{ kind: string, prompt?: string, name?: string, fidelity: number, creativity: number, platform: object, references?: { images?: string[], files?: string[], templates?: string[], examples?: string[] }, stagedRefs?: object[] }} request
  * @returns {{ task: string, instructions: string, manifest: object }}
  * @exports
  * @ai.hint pure
  */
-export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', fidelity, creativity, platform, quality = 40, references = {} }) {
+export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', fidelity, creativity, platform, quality = 40, references = {}, stagedRefs = [] }) {
     if (kind != null && !GENERATION_KINDS.includes(kind)) throw new Error(`Вид генерации: ${GENERATION_KINDS.join('|')}`);
     const contract = fidelityContract({ fidelity, creativity });
     const effective = effectiveFidelity(contract.fidelity, quality);
@@ -61,12 +71,19 @@ export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', f
         ...referenceLines('Templates', refs.templates),
         ...referenceLines('Design examples', refs.examples),
     ];
+
+    // Staged reference bullets (project-relative paths with dimensions).
+    const stagedLines = stagedRefs.length
+        ? ['', 'Staged references (project-relative, ready for crop/generate):', ...stagedRefs.map(formatStagedRef)]
+        : [];
+
     const recommendations = recommendStack({ kind, prompt, references: refs });
     const outputs = kind ? [...filesForStack({ kind, libraries: recommendations.libraries })] : [];
     const manifest = {
         kind, prompt, fidelity: contract.fidelity, effectiveFidelity: effective, creativity: contract.creativity, measured: null,
         method: 'unmeasured', reason: contract.reason, platform: platform.id, experimentalFlags: false,
         references: refs, outputs, stack: { kind, text: stackText(kind, platform, recommendations.libraries) }, recommendations,
+        stagedRefs: stagedRefs.map((r) => ({ rel: r.rel, bytes: r.bytes, mime: r.mime, width: r.width, height: r.height })),
     };
     const task = [
         renderGenerationTask({ kind, prompt, platform, recommendations, name }),
@@ -79,7 +96,18 @@ export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', f
         ...listed,
         '',
         'A contract file .ai/generation.json is already written. You may add the paths you created. Leave measured null.',
-        ...(refs.images.length ? ['', 'Reference images are mockups. Recreate their photographs, illustrations, and textures with generate_image, or change a reference file with edit_image. If the only image tool is image_generation, use that. Point the page at the new files. Do not use a reference image as the page background or as a screenshot of the whole layout. Type, controls, and layout are HTML and CSS.'] : []),
+        ...stagedLines,
+        '',
+        ...(refs.images.length ? [
+            'Reference images are mockups. Recreate their photographs, illustrations, and textures. Do not use a reference image as the page background or as a screenshot of the whole layout. Type, controls, and layout are HTML and CSS.',
+            '',
+            '# Reference workflow (do NOT paraphrase the mockup in prose)',
+            '1. Use view_image to inspect the reference files listed above.',
+            '2. For each artwork region: crop_image or split_image the reference to isolate that region, then generate_image(reference=<crop_path>, prompt="keep the composition, style, and colors of the reference; change only ...") or edit_image(image=<crop_path>, prompt="...").',
+            '3. The reference pixels are sent directly to the image generator — do not describe them in words instead.',
+            '4. If the only image tool available is image_generation (text-to-image), use that with the reference description.',
+            '5. Verify by view_image: compare the generated image with the original crop side by side.',
+        ] : []),
         '',
         'Customer task:',
         '',
@@ -93,7 +121,7 @@ export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', f
         kindRules(kind, recommendations),
         '',
         fidelityInstructions({ ...contract, fidelity: effective }),
-        ...(refs.images.length ? ['', 'The worker must create each artwork region with generate_image or edit_image before the page is finished. The saved image paths belong in the HTML and CSS.'] : []),
+        ...(refs.images.length ? ['', 'The worker must create each artwork region with generate_image or edit_image before the page is finished. The saved image paths belong in the HTML and CSS. Use generate_image(reference=...) to send cropped regions directly to the generator.'] : []),
     ].join('\n');
     return { task, instructions, manifest };
 }
