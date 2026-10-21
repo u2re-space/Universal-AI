@@ -119,6 +119,11 @@ export function overridesFrom(values, { command = null } = {}) {
         if (!['off', 'auto', 'always'].includes(values.extract)) throw new UsageError('--extract: off | auto | always');
         (o.agent ??= {}).extract = values.extract;
     }
+    if (values['no-measure']) (o.agent ??= {}).measure = 'off';
+    if (values.measure) {
+        if (!['off', 'auto', 'always'].includes(values.measure)) throw new UsageError('--measure: off | auto | always');
+        (o.agent ??= {}).measure = values.measure;
+    }
     if (values.coordinator !== undefined) (o.agent ??= {}).coordinator = { enabled: values.coordinator };
     if (values.route) {
         if (!['encoder', 'planner', 'decisions'].includes(values.route)) throw new UsageError('--route: encoder | planner | decisions');

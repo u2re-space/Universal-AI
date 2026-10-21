@@ -139,6 +139,7 @@ export async function configCommand(ctx) {
                 vision: { model: null, effort: 'low' },
                 summarizer: { model: null, effort: 'low' },
                 extractor: { model: null, effort: 'low' },
+                measurer: { model: null, effort: null },
             },
             agent: { mode: 'team', maxReviewRounds: 2, resume: true, extract: 'auto', coordinator: { enabled: false } },
             memory: { enabled: true, autoSave: true, maxRecall: 8, notesFile: 'AGENTS.md' },

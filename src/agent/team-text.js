@@ -1,12 +1,12 @@
 /**
  * @file src/agent/team-text.js
  * @module agent/team-text
- * @purpose Render planner and collector JSON as text the worker and reviewer can read.
+ * @purpose Render planner, collector, and measurer JSON as text the worker and reviewer can read.
  * @usedBy agent/team
- * @exports renderPlan, renderFindings, bullets
+ * @exports renderPlan, renderFindings, renderMeasurements, bullets
  * @ai.tags team
  * @ai.hint pure
- * @changed 2026-10-15 Split from agent/team.js.
+ * @changed 2026-10-22 Added the measurer sheet.
  */
 
 /**
@@ -49,3 +49,36 @@ export function renderFindings(report) {
  * @ai.hint pure
  */
 export const bullets = (items, empty = '- (none)') => (items.length ? items.map((i) => `- ${i}`).join('\n') : empty);
+
+/**
+ * Render one measurer sheet as the text stored on the shared context.
+ * `runTeam` calls this when the measurer completes.
+ * @param {object} sheet
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function renderMeasurements(sheet) {
+    const side = (value) => (Number.isFinite(value) ? `${value}` : '?');
+    const rect = (value) => `x ${side(value?.x)} y ${side(value?.y)} · ${side(value?.width)}×${side(value?.height)}`;
+    const elements = (sheet.elements ?? []).map((item) => {
+        const bits = [rect(item.box)];
+        if (Number.isFinite(item.rotation)) bits.push(`rotated ${item.rotation}°`);
+        if (Number.isFinite(item.radius)) bits.push(`radius ${item.radius}`);
+        const lines = [`- ${item.name}: ${bits.join(' · ')}`];
+        for (const [label, value] of [['borders', item.borders], ['spacing', item.spacing], ['placement', item.placement]]) {
+            if (value) lines.push(`  ${label}: ${value}`);
+        }
+        return lines.join('\n');
+    }).join('\n');
+    const regions = (sheet.regions ?? []).map((item) => `- ${item.name}: ${rect(item.box)} — ${item.how}`).join('\n');
+    const rules = (sheet.rules ?? []).map((item) => `- ${item.name}: ${item.value}${item.from ? ` (measured ${item.from})` : ''}`).join('\n');
+    return [
+        sheet.summary ?? '',
+        `Source: ${sheet.source || '(not named)'} · unit: ${sheet.unit || 'px'} · canvas ${rect(sheet.canvas)}`,
+        elements && `Elements:\n${elements}`,
+        regions && `Regions to cut out:\n${regions}`,
+        rules && `Rules:\n${rules}`,
+        sheet.notes && `Notes:\n${sheet.notes}`,
+    ].filter(Boolean).join('\n\n');
+}

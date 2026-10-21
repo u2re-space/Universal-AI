@@ -293,9 +293,9 @@ export const TOOL_SPECS = {
     },
     delegate_role: {
         category: 'read', group: 'desktop',
-        description: 'Send one task to a specialist and return its answer. encoder returns a batch and does not run it; pass that batch to run_batch.',
+        description: 'Send one task to a specialist and return its answer. encoder returns a batch and does not run it; pass that batch to run_batch. measurer re-measures a crop or a layer and returns its measurement sheet.',
         parameters: schema({
-            role: { type: 'string', enum: ['solver', 'clicker', 'typer', 'encoder', 'tester'], description: 'Specialist to call.' },
+            role: { type: 'string', enum: ['solver', 'clicker', 'typer', 'encoder', 'tester', 'measurer'], description: 'Specialist to call.' },
             task: str('One task for that specialist.'),
         }),
     },

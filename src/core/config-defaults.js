@@ -101,6 +101,7 @@ export const defaults = Object.freeze({
      *   tester     — checks whether the step result is true
      *   classifier — labels a task as trivial, normal, or complex
      *   extractor  — cleans a verbose answer and writes clean file bodies to .tmp
+     *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
      */
     roles: {
         default: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
@@ -120,6 +121,7 @@ export const defaults = Object.freeze({
         tester: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         classifier: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         extractor: { model: null, effort: 'low', summary: null, verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
+        measurer: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
     },
     /** Multi-role orchestration used by `ai run`. */
     agent: {
@@ -134,6 +136,14 @@ export const defaults = Object.freeze({
         chain: true,                    // first answer, then encoder or planner
         route: null,                    // null | encoder | planner; null lets the answer and the heuristic choose
         extract: 'auto',                // off | auto (encode route) | always (encode and plan); clean fenced code into .tmp/<id>/extracted
+        /**
+         * Reference measurements taken by the `measurer` role right after the plan and before the worker
+         * writes styles or artwork. auto = only when reference images are attached and the plan is not
+         * trivial; always = whenever references are attached; off = never. The sheet goes to the shared
+         * context and to `.tmp/<id>/measurements.json`.
+         */
+        measure: 'auto',                // off | auto | always
+        measurerMaxTurns: 6,            // tool turns the measurer may spend on crops and close looks
         encode: 'encoder',              // encoder (file-command model) | mcp (this process hosts the encode server)
         resume: true,                   // continue the newest unfinished step and its saved turn
         /**

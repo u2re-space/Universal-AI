@@ -60,6 +60,7 @@ function roleOf(body) {
     if (format === 'memory_update') return 'summarizer';
     if (format === 'task_label') return 'classifier';
     if (format === 'extraction') return 'extractor';
+    if (format === 'measure') return 'measurer';
     if (typeof body.instructions === 'string' && body.instructions.includes('route: encode')) return 'answer';
     if (body.input.some((i) => i.type === 'message' && i.content?.some?.((c) => c.type === 'input_image'))) return 'vision';
     if (body.model === 'gpt-6-luna-nano') return 'summarizer-file';
@@ -79,7 +80,7 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.deepEqual(overrides.agent, { mode: 'single' });
     assert.deepEqual(overrides.memory, { enabled: false });
     assert.throws(() => overridesFrom({ role: ['nobody=x'] }), /неизвестная роль/);
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 17);
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 18);
     assert.equal(overridesFrom({ extract: 'always' }).agent.extract, 'always');
     assert.equal(overridesFrom({ 'no-extract': true }).agent.extract, 'off');
     assert.throws(() => overridesFrom({ extract: 'nope' }), /--extract/);
@@ -1051,4 +1052,43 @@ test('coordinator revises the plan after a step and guides the next worker turn'
     assert.ok(events.some((event) => event.type === 'coordinator.done' && event.risks.includes('b.js отсутствует')));
     const progress = JSON.parse(await readFile(path.join(root, '.tmp', result.workId, 'progress.json'), 'utf8'));
     assert.equal(progress.notes.filter((note) => note.kind === 'coordinator').length, 3);
+});
+
+test('measurer stage runs before collector when image parts are present', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-'));
+    const events = [];
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'classifier') return { text: JSON.stringify({ label: 'normal' }) };
+        if (role === 'planner') {
+            return { text: JSON.stringify({ summary: 'стили по референсу', complexity: 'normal', steps: [{ goal: 'Создать стили', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: ['Какой стиль?'], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        }
+        if (role === 'measurer') {
+            assert.equal(body.model, 'gpt-6.1-sol');
+            assert.equal(body.reasoning?.effort, 'medium');
+            return { text: JSON.stringify({ summary: 'Кнопка 120×40, угол 0, радиус 8', source: 'mockup.png', unit: 'px', canvas: { width: 400, height: 300 }, elements: [{ box: { x: 50, y: 100, w: 120, h: 40 }, rotation: 0, radius: 8, padding: null, margin: null, gap: null, placement: 'center' }], regions: [], rules: [{ name: 'spacing', value: 8, scale: null }], notes: '' }) };
+        }
+        if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [{ question: 'Какой стиль?', answer: 'минимализм' }], conventions: [], notes: '' }) };
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.roles = { ...config.roles, measurer: { ...config.roles.measurer, model: 'gpt-6.1-sol' } };
+    const result = await runTeam({
+        client: client(), config, ledger: createLedger(), task: 'стили по референсу',
+        root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+        emit: (event) => events.push(event),
+    });
+    assert.equal(result.status, 'completed', result.error?.message);
+    const stages = events.filter((e) => e.type === 'stage.start').map((e) => e.stage);
+    assert.ok(stages.includes('measure'), 'measure stage present: ' + stages.join(', '));
+    const measureIdx = stages.indexOf('measure');
+    const collectIdx = stages.indexOf('collect');
+    assert.ok(measureIdx >= 0 && collectIdx > measureIdx, `measure(${measureIdx}) should run before collect(${collectIdx}), stages: ${stages.join(', ')}`);
+    assert.ok(events.some((e) => e.type === 'stage.start' && e.stage === 'measure' && e.role === 'measurer'));
+    await rm(dir, { recursive: true, force: true });
 });

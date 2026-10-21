@@ -1,7 +1,7 @@
 /**
  * @file src/agent/team.js
  * @module agent/team
- * @purpose Run planner, collector, worker, reviewer, coordinator, and summarizer over one shared context.
+ * @purpose Run planner, measurer, collector, worker, reviewer, coordinator, and summarizer over one shared context.
  * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, agent/work-plan, agent/handoff, agent/quality, mcp/session, channels/decide, channels/questions, channels/verdict
  * @usedBy commands/run, index.js
  * @exports toolNamesForRole, runTeam
@@ -21,6 +21,7 @@ import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { SPECIALISTS } from '../roles/index.js';
 import { coderChoice, isCodingStep } from '../roles/coder.js';
 import { solverChoice } from '../roles/solver.js';
+import { measurerChoice } from '../roles/measurer.js';
 import { writerChoice, isWritingStep } from '../roles/writer.js';
 import { createToolset, enabledToolNames, READ_ONLY_TOOLS } from './tools.js';
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
@@ -30,7 +31,7 @@ import { createRoleRunner } from './roles.js';
 import { builtinTools } from './loop.js';
 import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
-import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA } from './schemas.js';
+import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
 import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace } from './pace.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
@@ -62,7 +63,7 @@ import { questionsFor } from '../channels/questions.js';
 import { routeFlag } from '../channels/verdict.js';
 import { safeReviewerModel } from '../roles/reviewer.js';
 
-import { bullets, renderFindings } from './team-text.js';
+import { bullets, renderFindings, renderMeasurements } from './team-text.js';
 const HARD_STOP = new Set(['cancelled', 'budget', 'failed']);
 
 
@@ -154,15 +155,18 @@ export async function runTeam({
         const toolset = createToolset({ ...toolBase, names, approvalLevel, describeScreen: roles.describeScreen });
         const known = stepState.complexity === 'trivial' || stepState.complexity === 'complex' ? stepState.complexity : 'normal';
         const solver = role === 'solver' ? solverChoice(known, config.roles?.solver ?? {}) : null;
-        let model = solver?.model ?? null;
+        const measurer = role === 'measurer' ? measurerChoice(known, config.roles?.measurer ?? {}) : null;
+        let model = solver?.model ?? measurer?.model ?? null;
         if (!encodeRoute && paced?.ready) {
             model = clampModel(model ?? roles.resolve(role).model, paceSettings.models, paced.ceilingIndex, Boolean(pins[role]?.model));
         }
         const result = await roles.run(role, {
             text: task, instructions: ROLE_INSTRUCTIONS[role], toolset, maxTurns: spec.turns, silent: true,
             ...(spec.schema === 'batch' ? { schema: BATCH_SCHEMA, schemaName: 'batch' } : {}),
+            ...(spec.schema === 'measure' ? { schema: MEASURER_SCHEMA, schemaName: 'measure' } : {}),
             ...(model ? { model } : {}),
             ...(solver ? { effort: solver.effort } : {}),
+            ...(measurer ? { effort: measurer.effort } : {}),
         });
         return { output: result.text, summary: role + ' ' + result.status, data: result.data ?? null };
     }
@@ -511,6 +515,11 @@ export async function runTeam({
             }
             const findings = await readFile(path.join(root, '.tmp', work.id, 'findings.md'), 'utf8').catch(() => '');
             if (findings.trim()) ctx.set('findings', 'Collected context (by the collector)', findings, { priority: 6 });
+            const sheet = await readFile(path.join(root, '.tmp', work.id, 'measurements.json'), 'utf8').catch(() => null);
+            if (sheet) {
+                try { ctx.set('metrics', 'Reference measurements (by the measurer)', renderMeasurements(JSON.parse(sheet)), { priority: 8 }); }
+                catch { /* a damaged sheet is skipped, the run continues on the plan */ }
+            }
             pendingSession = await loadSession(path.join(root, '.tmp', work.id, 'worker-session.json')).catch(() => null);
             if (pendingSession) neutralSession(pendingSession);
             if (Number.isInteger(fromStep)) progress = applyFromStep(progress, fromStep);
@@ -743,6 +752,39 @@ export async function runTeam({
         }
 
         await coordinate('plan');
+
+        // 2. Measurer: numbers for the references before any style, SVG, or artwork is written.
+        const referenceParts = parts.filter((part) => part?.type === 'input_image');
+        const measureMode = config.agent.measure ?? 'auto';
+        if (measureMode !== 'off' && !resumedWork && referenceParts.length && (measureMode === 'always' || plan.complexity !== 'trivial')) {
+            const tier = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
+            const choice = measurerChoice(tier, config.roles?.measurer ?? {});
+            const model = encodeRoute || !paced?.ready
+                ? choice.model
+                : clampModel(choice.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.measurer?.model));
+            const measureNames = ['view_image', 'crop_image', 'split_image'].filter((name) => allNames.includes(name));
+            const measureTools = measureNames.length
+                ? createToolset({ ...toolBase, names: measureNames, approvalLevel, describeScreen: roles.describeScreen })
+                : null;
+            notify({ type: 'stage.start', stage: 'measure', role: 'measurer', model });
+            const measured = await roles.run('measurer', {
+                text: `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Measurement brief\n` +
+                    `Plan: ${plan.summary}\nSteps:\n${bullets(plan.steps.map((step) => step.goal))}\n` +
+                    'Measure the attached references: element boxes, rotation angles, where the borders pass, how the picture divides into regions, ' +
+                    'the spacing rules, and where each element is placed.',
+                parts: referenceParts, instructions: ROLE_INSTRUCTIONS.measurer, toolset: measureTools,
+                schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns: config.agent.measurerMaxTurns ?? 6,
+                model, effort: choice.effort,
+            });
+            if (HARD_STOP.has(measured.status)) return stop(measured, 'замеры');
+            if (measured.status === 'completed' && measured.data) {
+                ctx.set('metrics', 'Reference measurements (by the measurer)', renderMeasurements(measured.data), { priority: 8 });
+                await writeFile(path.join(root, '.tmp', work.id, 'measurements.json'), `${JSON.stringify(measured.data, null, 2)}\n`, 'utf8').catch(() => {});
+            } else {
+                notify({ type: 'warning', message: `Замеры референсов не завершены (${measured.status}${measured.error ? `: ${errorMessage(measured.error)}` : ''}); продолжаем без них.` });
+            }
+            notify({ type: 'stage.done', stage: 'measure', status: measured.status });
+        }
 
         // 2. Collector (cheap model, read-only). Skipped when this run already moved past it.
         const wantsContext = plan.complexity !== 'trivial' && (

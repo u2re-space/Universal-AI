@@ -2,7 +2,7 @@
  * @file src/roles/index.js
  * @module roles/index
  * @purpose Collect role prompts, settings, and desktop specialist limits.
- * @depends roles/default, roles/planner, roles/collector, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/coordinator, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor
+ * @depends roles/default, roles/planner, roles/collector, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/coordinator, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer
  * @usedBy commands/instructions, agent/team
  * @exports ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS
  * @ai.tags roles, prompts, desktop
@@ -27,6 +27,7 @@ import * as encoder from './encoder.js';
 import * as tester from './tester.js';
 import * as classifier from './classifier.js';
 import * as extractor from './extractor.js';
+import * as measurer from './measurer.js';
 
 /**
  * Instructions and settings for every named role.
@@ -52,10 +53,11 @@ export const ROLE_MODULES = {
     tester: { instructions: tester.instructions, settings: tester.settings },
     classifier: { instructions: classifier.instructions, settings: classifier.settings },
     extractor: { instructions: extractor.instructions, settings: extractor.settings },
+    measurer: { instructions: measurer.instructions, settings: measurer.settings },
 };
 
 /**
- * Prompt strings keyed by role, plus summarizer and vision variants.
+ * Prompt strings keyed by role, plus summarizer, vision, and measurer variants.
  * @returns {object}
  * @exports
  * @ai.hint pure
@@ -65,6 +67,7 @@ export const ROLE_INSTRUCTIONS = {
     summarizerMemory: summarizer.memoryInstructions,
     summarizerFile: summarizer.fileInstructions,
     visionScreen: vision.screenInstructions,
+    measurerFragment: measurer.reMeasureInstructions,
 };
 
 /**
@@ -79,4 +82,5 @@ export const SPECIALISTS = {
     typer: { tools: ['type', 'screenshot'], turns: 4, schema: null },
     encoder: { tools: ['screenshot'], turns: 3, schema: 'batch' },
     tester: { tools: ['screenshot'], turns: 4, schema: null },
+    measurer: { tools: ['view_image', 'crop_image', 'split_image'], turns: 6, schema: 'measure' },
 };

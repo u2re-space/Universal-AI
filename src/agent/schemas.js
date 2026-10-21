@@ -3,16 +3,17 @@
  * @module agent/schemas
  * @purpose Strict JSON schemas for structured role outputs (Responses API text.format = json_schema).
  * @usedBy agent/team, agent/roles
- * @exports PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA
+ * @exports PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA
  * @ai.tags schema, roles
  * @ai.hint pure
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-22 Added the measurer sheet.
  */
 
 const string = { type: 'string' };
 const strings = { type: 'array', items: string };
 const nullableString = { type: ['string', 'null'] };
 const nullableInteger = { type: ['integer', 'null'] };
+const nullableNumber = { type: ['number', 'null'] };
 /**
  * Build a strict object schema: every property is required and extras are rejected.
  * Each exported role schema is built with this.
@@ -201,4 +202,51 @@ export const BATCH_SCHEMA = object({
             script: nullableString,
         }),
     },
+});
+
+/** A rectangle in source pixels. Every side is null when it cannot be read. */
+const box = object({
+    x: { ...nullableNumber, description: 'Left edge in source pixels.' },
+    y: { ...nullableNumber, description: 'Top edge in source pixels.' },
+    width: { ...nullableNumber, description: 'Width in source pixels.' },
+    height: { ...nullableNumber, description: 'Height in source pixels.' },
+});
+
+export const MEASURER_SCHEMA = object({
+    summary: { ...string, description: 'What the reference shows and how it was measured.' },
+    source: { ...string, description: 'The reference file or image this sheet measures.' },
+    unit: { ...string, description: 'Unit of every number here, usually px of the source image.' },
+    canvas: { ...box, description: 'The whole reference size.' },
+    elements: {
+        type: 'array',
+        description: 'Every element that carries a number: text block, control, icon, image, ornament.',
+        items: object({
+            name: { ...string, description: 'Short element name the author can reuse.' },
+            box,
+            rotation: { ...nullableNumber, description: 'Turn clockwise from upright, in degrees. Null when straight or unreadable.' },
+            borders: { ...string, description: 'Where the borders and edges fall and how thick they are; empty when none.' },
+            radius: { ...nullableNumber, description: 'Corner radius in source pixels. Null when square or unknown.' },
+            spacing: { ...string, description: 'Padding, margin, and gap around the element; empty when unknown.' },
+            placement: { ...string, description: 'How to place it: grid or flex track, absolute anchor, stacking order; empty when unknown.' },
+        }),
+    },
+    regions: {
+        type: 'array',
+        description: 'How the picture divides into crops, artwork regions, and layers.',
+        items: object({
+            name: { ...string, description: 'Region name the author can reuse.' },
+            box,
+            how: { ...string, description: 'What the crop contains and how to cut it out (crop_image or split_image with these numbers).' },
+        }),
+    },
+    rules: {
+        type: 'array',
+        description: 'Repeated measures: spacing scale, ratios, column width, baseline step.',
+        items: object({
+            name: { ...string, description: 'What this rule covers.' },
+            value: { ...string, description: 'The measured value with its unit, for example "8 px step" or "1:1.6".' },
+            from: { ...string, description: 'What it was measured between; empty for a global rule.' },
+        }),
+    },
+    notes: { ...string, description: 'What is uncertain and what needs a re-measure on a crop; empty when nothing.' },
 });
