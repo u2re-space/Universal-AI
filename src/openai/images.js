@@ -13,10 +13,10 @@
 import { randomBytes } from 'node:crypto';
 
 /** Default ProxyAPI text-to-image model when imageModel is unset. See https://proxyapi.ru/models/browse/image */
-export const PROXY_IMAGE_MODEL = 'recraft/recraft-v4.1-flash';
+export const PROXY_IMAGE_MODEL = 'recraft/recraft-v4.1';
 
 /** Default ProxyAPI model for edits and image-conditioned generation; the flash model has no vision input. */
-export const PROXY_IMAGE_EDIT_MODEL = 'recraft/recraft-v4.1';
+export const PROXY_IMAGE_EDIT_MODEL = 'recraft/recraft-v4.1-utility-pro';
 
 /** Sizes accepted by POST /images/generations and /images/edits. */
 export const IMAGE_SIZES = Object.freeze(['1024x1024', '1024x1536', '1536x1024']);
@@ -64,7 +64,7 @@ export function imageTransport(config) {
 }
 
 /**
- * Model id for an images API call. ProxyAPI needs an explicit id such as recraft/recraft-v4.1-flash.
+ * Model id for an images API call. ProxyAPI needs an explicit id such as recraft/recraft-v4.1.
  * Requests with a source image use the vision-capable default.
  * @param {{ imageModel?: string | null, baseURL?: string, image?: { transport?: string | null } }} config
  * @param {{ hasImage?: boolean }} [request]

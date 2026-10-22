@@ -50,7 +50,7 @@ export function createImageSink({ target = '.', format = 'png', prefix = 'ai-ima
         await resolveTarget();
         if (paths.has(itemId)) return paths.get(itemId);
         counter++;
-        const ext = EXT[outputFormat ?? format] ?? 'png';
+        const ext = EXT[(outputFormat ?? format) || 0] ?? 'png';
         let file;
         if (targetIsFile) {
             const parsed = path.parse(target);

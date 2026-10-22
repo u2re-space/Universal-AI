@@ -109,7 +109,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --size WxH|auto  --quality low|medium|high|xhigh|max|auto  --format png|webp|jpeg
   Целое --quality задаёт качество работы, слово low|medium|high|xhigh|max|auto — качество картинки.
   --image-background transparent|opaque|auto  --partials 0..3  --image-model <id>  --count, -n <n>
-  Для api.proxyapi.ru картинки идут через /images/generations и /images/edits (recraft/recraft-v4.1-flash для генерации по тексту,
+  Для api.proxyapi.ru картинки идут через /images/generations и /images/edits (recraft/recraft-v4.1 для генерации по тексту,
   recraft/recraft-v4.1 для правки и генерации по картинке, если не задана --image-model).
 
 Дополнение кода (complete):

@@ -417,7 +417,7 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   "agent": { "mode": "team", "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": 98304, "visionDelegate": "auto",
              "coordinator": { "enabled": false, "after": ["plan", "collect", "work", "review", "fix"], "maxContextBytes": 4194304, "applyPlan": true } },
   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
-  "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": "." },
+  "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": ".", "image_format": "png" },
   "completion": { "model": "gpt-6-luna", "effort": "none", "maxLineBytes": 524288, "maxContextBytes": 24576,
                   "channelProbe": true, "probeTtlMs": 60000, "probeTimeoutMs": 1500 },
   "compaction": { "auto": false, "afterInputTokens": 200000 },
