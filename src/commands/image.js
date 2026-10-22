@@ -45,7 +45,7 @@ export async function image(ctx) {
     for (let i = 0; i < count; i++) {
         if (count > 1) renderer.line('info', `Изображение ${i + 1} из ${count}`);
         const exit = await runOnce({ ...ctx, values: { ...values, session: null, out: null } }, {
-            prompt: parts.length ? `${prompt}\n(Use the attached image(s) as the reference / source to edit.)` : prompt,
+            prompt: parts.length ? `${prompt}\n(Use the attached image(s) as the reference / source to edit. Make transparent background when or where possible.)` : prompt,
             parts, instructions, builtin, toolChoice: { type: 'image_generation' }, imageTarget: target, maxTurns: 1,
             summaryTitle: count > 1 ? `изображение ${i + 1}/${count}` : 'итог',
             extraRows: (result) => { produced.push(...result.images); return []; },
