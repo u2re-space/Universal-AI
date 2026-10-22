@@ -15,11 +15,11 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(imageTransport({ baseURL: 'https://api.proxyapi.ru/v1/' }), 'images');
     assert.equal(imageTransport({ baseURL: 'https://api.openai.com/v1/' }), 'responses');
     assert.equal(imageTransport({ baseURL: 'https://api.proxyapi.ru/v1/', image: { transport: 'responses' } }), 'responses');
-    assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }), 'recraft/recraft-v4.1');
+    assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }), 'recraft/recraft-v4.1-utility');
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }, { hasImage: true }), 'recraft/recraft-v4.1-utility-pro');
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/', imageModel: 'custom/model' }, { hasImage: true }), 'custom/model');
-    const body = generationBody({ model: 'recraft/recraft-v4.1', prompt: 'маяк', size: 'auto', quality: 'auto', n: 1, image_format: "png" });
-    assert.deepEqual(body, { model: 'recraft/recraft-v4.1', prompt: 'маяк' });
+    const body = generationBody({ model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', size: 'auto', quality: 'auto', n: 1, image_format: "png" });
+    assert.deepEqual(body, { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png', });
     assert.equal('partial_images' in body, false);
     assert.deepEqual(imagePayloads({ data: [{ b64_json: TINY_PNG }, { b64_json: '' }] }), [TINY_PNG]);
     assert.equal(normalizeImageSize('auto'), null);
@@ -31,7 +31,7 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(generationBody({ model: 'm', prompt: 'p', size: '768x1024' }).size, '1024x1536');
     assert.equal(generationBody({ model: 'm', prompt: 'p', size: 'auto' }).size, undefined);
     const png = Buffer.from(TINY_PNG, 'base64');
-    const form = encodeMultipart({ fields: { model: 'recraft/recraft-v4.1', prompt: 'утро' }, files: [{ filename: 'shot.png', mime: 'image/png', bytes: png }] });
+    const form = encodeMultipart({ fields: { model: 'recraft/recraft-v4.1-utility', prompt: 'утро' }, files: [{ filename: 'shot.png', mime: 'image/png', bytes: png }] });
     assert.match(form.contentType, /multipart\/form-data; boundary=/);
     assert.ok(form.body.includes(png));
     assert.match(form.body.toString('latin1'), /filename="shot.png"/);
@@ -51,7 +51,7 @@ test('images client posts generations and edits and the tool saves the file', as
         res.writeHead(200, { 'Content-Type': 'application/json' });
         if (req.url === '/v1/images/generations') {
             const body = JSON.parse(raw.toString('utf8'));
-            assert.equal(body.model, 'recraft/recraft-v4.1');
+            assert.equal(body.model, 'recraft/recraft-v4.1-utility');
             assert.equal(body.size, undefined);
             res.end(JSON.stringify({ data: [{ b64_json: TINY_PNG }] }));
             return;
@@ -65,7 +65,7 @@ test('images client posts generations and edits and the tool saves the file', as
     const client = createClient({ apiKey: 'sk-test', baseURL: `http://127.0.0.1:${port}/v1/`, retries: 0 });
     const root = await mkdtemp(path.join(os.tmpdir(), 'ai-images-'));
     try {
-        const drawn = await client.images.generate({ model: 'recraft/recraft-v4.1', prompt: 'маяк', size: 'auto' });
+        const drawn = await client.images.generate({ model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', size: 'auto' });
         assert.equal(drawn[0], TINY_PNG);
         await import('node:fs/promises').then((fs) => fs.writeFile(path.join(root, 'shot.png'), png));
         const toolset = createToolset({

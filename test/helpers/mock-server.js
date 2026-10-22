@@ -122,7 +122,7 @@ export async function startMockServer({ script, backgroundPolls = 2, decisions =
         const json = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json', 'x-request-id': `req_${randomUUID().slice(0, 8)}` }); res.end(JSON.stringify(data)); };
         requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers: req.headers, body });
 
-        if (req.method === 'GET' && url.pathname === '/v1/models') return json(200, { object: 'list', data: [{ id: 'mock-model' }, { id: 'gpt-6.1-sol' }, { id: 'recraft/recraft-v4.1' }] });
+        if (req.method === 'GET' && url.pathname === '/v1/models') return json(200, { object: 'list', data: [{ id: 'mock-model' }, { id: 'gpt-6.1-sol' }, { id: 'recraft/recraft-v4.1-utility' }] });
         if (req.method === 'POST' && url.pathname === '/v1/decisions') {
             const answer = typeof decisions === 'function' ? await decisions(body) : decisions;
             if (!answer) return json(404, { error: { message: 'no decisions route', type: 'invalid_request_error', code: 'not_found' } });
