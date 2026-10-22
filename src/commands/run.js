@@ -68,19 +68,15 @@ export async function run(ctx) {
     }
     ctx.backupDir = backupDirFor(config);
     let extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
+    // Stage reference images into .ai/refs/ so every tool can reach them by path. This also
+    // lets the measurer crop the real file instead of working from a data URL.
+    let stagedRefs = [];
+    if (mockups.length) {
+        const result = await stageReferences({ images: mockups, cwd: ctx.cwd, maxBytes: config.limits.maxImageBytes, signal: ctx.signal, magickPath: config.magickPath ?? null });
+        stagedRefs = result.refs;
+        for (const w of result.warnings) renderer.line('warn', w, { dim: true });
+    }
     if (prepared.wantsProfile) {
-        // Stage reference images into .ai/refs/ so every tool can reach them by path.
-        const mockups = values.image ?? [];
-        let stagedRefs = [];
-        let stagingWarnings = [];
-        if (mockups.length) {
-            const result = await stageReferences({ images: mockups, cwd: ctx.cwd, maxBytes: config.limits.maxImageBytes, signal: ctx.signal, magickPath: config.magickPath ?? null });
-            stagedRefs = result.refs;
-            stagingWarnings = result.warnings;
-        }
-        if (stagingWarnings.length) {
-            for (const w of stagingWarnings) renderer.line('warn', w, { dim: true });
-        }
         const brief = buildGenerationBrief({
             kind: prepared.kind, prompt: task, fidelity: config.generate.fidelity, creativity: config.generate.creativity,
             quality: config.pace.quality,
@@ -117,6 +113,10 @@ export async function run(ctx) {
         task = brief.task;
         extra = [brief.instructions, extra].filter(Boolean).join('\n\n');
     }
+    if (stagedRefs.length && !prepared.wantsProfile) {
+        const lines = stagedRefs.map((item) => `- ${item.rel}${item.width && item.height ? ` (${item.width}×${item.height})` : ''}`);
+        task = `${task}\n\nReference images (project-relative paths; use them with view_image, crop_image, split_image, and generate_image reference):\n${lines.join('\n')}`;
+    }
     if (level === 'read' && !interactive) renderer.line('warn', 'Неинтерактивный режим без --approve write|all: агент сможет только читать файлы.');
 
     let encodeHost = null;
@@ -135,7 +135,7 @@ export async function run(ctx) {
     try {
         const ensured = await ensureProjectMap(ctx.cwd);
         if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
-        if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra, seedFiles: prepared.seedFiles, generation: prepared.wantsProfile });
+        if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra, seedFiles: prepared.seedFiles, generation: prepared.wantsProfile, referencePaths: stagedRefs.map((item) => item.rel) });
         return await runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra });
     } finally {
         await encodeHost?.close();
@@ -197,7 +197,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
  * @returns {Promise<number>}
  * @ai.hint io
  */
-async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null }) {
+async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, referencePaths = [] }) {
     const { config, renderer, values, signal, emit } = ctx;
     const client = createClientFor(config);
     const ledger = createLedgerFor(config);
@@ -209,7 +209,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
         memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
         backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles, generation, revision, fromStep, resumeId,
-        processTool: ctx.processTool, encodeHost: ctx.encodeHost ?? null,
+        processTool: ctx.processTool, encodeHost: ctx.encodeHost ?? null, referencePaths,
         onMaxTurns: turnExtender(renderer, config, signal),
     });
     renderer.idle();
@@ -294,11 +294,13 @@ export async function resumeLocal(ctx, { revision = '', stepToken = null } = {})
 
     // Stage any new reference images passed to resume.
     const resumeImages = values.image ?? [];
+    let resumeRefs = [];
     if (resumeImages.length) {
         const result = await stageReferences({ images: resumeImages, cwd: ctx.cwd, maxBytes: config.limits.maxImageBytes, signal: ctx.signal, magickPath: config.magickPath ?? null });
         if (result.warnings.length) {
             for (const w of result.warnings) renderer.line('warn', w, { dim: true });
         }
+        resumeRefs = result.refs;
         if (result.refs.length) {
             const lines = result.refs.map((r) => `- ${r.rel}${r.width && r.height ? ` (${r.width}×${r.height})` : ''}`);
             extra = [extra, 'Newly staged references:', ...lines].filter(Boolean).join('\n');
@@ -323,6 +325,7 @@ export async function resumeLocal(ctx, { revision = '', stepToken = null } = {})
         if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
         return await runTeamFlow(ctx, {
             task, parts: [], level, interactive, store, names, extra, generation, revision: note, fromStep, resumeId: found.id,
+            referencePaths: resumeRefs.map((item) => item.rel),
         });
     } finally {
         store?.memory.close();

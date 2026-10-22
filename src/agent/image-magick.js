@@ -4,14 +4,14 @@
  * @purpose Detect ImageMagick and provide crop, split, resize, convert operations via CLI.
  * @depends node:path, node:fs/promises, agent/shell
  * @usedBy agent/tools
- * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify
- * @ai.tags imagemagick, image, crop, split
+ * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify, magickIsOpaque, magickRemoveFlatBackground, ensureTransparentBackground
+ * @ai.tags imagemagick, image, crop, split, alpha
  * @ai.hint io
- * @changed 2026-10-22 Initial implementation.
+ * @changed 2026-10-22 Added the local transparent-background fallback.
  */
 
 import path from 'node:path';
-import { stat, mkdir } from 'node:fs/promises';
+import { stat, mkdir, rename, unlink } from 'node:fs/promises';
 import { runProgram } from './shell.js';
 
 /** Cached detection result. null = not checked, false = not available, string = executable path. */
@@ -156,4 +156,79 @@ export async function magickIdentify({ exe, input, cwd, signal }) {
     const res = await magickRun(exe, [input, '-format', '%w %h %m %B', 'info:'], { cwd, signal });
     const parts = res.stdout.trim().split(/\s+/);
     return { width: Number(parts[0]) || 0, height: Number(parts[1]) || 0, format: parts[2] ?? '', bytes: Number(parts[3]) || 0 };
+}
+
+/**
+ * Whether every pixel of the image is fully opaque. `false` means at least one pixel is transparent.
+ * @param {{ exe: string, input: string, cwd: string, signal?: AbortSignal }} opts
+ * @returns {Promise<boolean|null>} null when ImageMagick cannot answer
+ * @exports
+ * @ai.hint io
+ */
+export async function magickIsOpaque({ exe, input, cwd, signal }) {
+    const res = await magickRun(exe, [input, '-format', '%[opaque]', 'info:'], { cwd, signal });
+    const value = res.stdout.trim().toLowerCase();
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return null;
+}
+
+/**
+ * Remove a flat background by flood-filling from all four corners with the corner color.
+ * Interior areas of the same color stay untouched because the fill is connected only to the edges.
+ * @param {{ exe: string, input: string, output?: string, cwd: string, signal?: AbortSignal, fuzz?: number }} opts
+ * @returns {Promise<{ changed: boolean, reason: string, color?: string }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function magickRemoveFlatBackground({ exe, input, output = input, cwd, signal, fuzz = 10 }) {
+    const info = await magickIdentify({ exe, input, cwd, signal });
+    if (!info.width || !info.height) return { changed: false, reason: 'unreadable' };
+    const colorRes = await magickRun(exe, [input, '-format', '%[pixel:p{0,0}]', 'info:'], { cwd, signal });
+    const color = colorRes.stdout.trim();
+    if (!color || /\bnone\b/i.test(color) || /,\s*0(?:\.0+)?\s*\)$/.test(color)) return { changed: false, reason: 'already' };
+    const outPath = path.isAbsolute(output) ? output : path.join(cwd, output);
+    const suffix = path.extname(outPath) || '.png';
+    const tmpPath = path.join(path.dirname(outPath), `.tmp-alpha-${process.pid}-${Date.now()}${suffix}`);
+    const corners = [
+        [0, 0],
+        [Math.max(0, info.width - 1), 0],
+        [0, Math.max(0, info.height - 1)],
+        [Math.max(0, info.width - 1), Math.max(0, info.height - 1)],
+    ];
+    const args = [input, '-alpha', 'set', '-channel', 'RGBA', '-fuzz', `${fuzz}%`, '-fill', 'none'];
+    for (const [x, y] of corners) args.push('-floodfill', `+${x}+${y}`, color);
+    args.push('+channel', tmpPath);
+    try {
+        await magickRun(exe, args, { cwd, signal });
+        await rename(tmpPath, outPath);
+    } catch (error) {
+        await unlink(tmpPath).catch(() => {});
+        throw error;
+    }
+    return { changed: true, reason: 'removed', color };
+}
+
+/**
+ * Make a saved image's flat background transparent, in place. Already transparent images are left alone.
+ * JPEG cannot carry alpha, so it is reported instead of silently flattened.
+ * @param {{ file: string, magickPath?: string|null, signal?: AbortSignal, fuzz?: number }} opts
+ * @returns {Promise<{ changed: boolean, reason: string, color?: string, error?: Error }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function ensureTransparentBackground({ file, magickPath = null, signal, fuzz = 10 }) {
+    const ext = path.extname(file).toLowerCase();
+    if (ext === '.jpg' || ext === '.jpeg') return { changed: false, reason: 'format' };
+    const exe = await detectMagick({ magickPath });
+    if (!exe) return { changed: false, reason: 'no-magick' };
+    const cwd = path.dirname(file);
+    const opaque = await magickIsOpaque({ exe, input: file, cwd, signal }).catch(() => null);
+    if (opaque === false) return { changed: false, reason: 'already' };
+    if (opaque === null) return { changed: false, reason: 'unknown' };
+    try {
+        return await magickRemoveFlatBackground({ exe, input: file, output: file, cwd, signal, fuzz });
+    } catch (error) {
+        return { changed: false, reason: 'failed', error };
+    }
 }

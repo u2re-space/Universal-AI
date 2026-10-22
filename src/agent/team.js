@@ -44,6 +44,7 @@ import { neutralPlan, neutralProgress, neutralSession } from './neutral.js';
 import { CommandBatchError, executeFileCommands, FILE_COMMANDS_SCHEMA } from './file-commands.js';
 import { EXTRACT_MAX_BYTES, EXTRACT_MAX_FILES, extractHandoff, hasExtractableArtifacts } from './extract.js';
 import { assessQuality, assessmentImages } from './quality.js';
+import { stageMeasurementCrops } from './measure-crops.js';
 
 /**
  * Coder for source files, writer for documents, worker for everything else.
@@ -89,7 +90,7 @@ export async function runTeam({
     client, config, ledger, task, parts = [], root, approvalLevel = 'read', interactive = false, approve, askUser = null,
     memory = null, projectKey = null, projectName = null, backupDir = null, extraInstructions = null, emit = () => {}, signal,
     seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, processTool = null, encodeHost = null,
-    onMaxTurns = null,
+    onMaxTurns = null, referencePaths = [],
 }) {
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
     const roles = createRoleRunner({ client, config, ledger, emit, signal });
@@ -211,6 +212,9 @@ export async function runTeam({
     try {
         ctx.set('environment', 'Environment', `Platform: ${process.platform}; shell for run_command: ${config.shell ?? (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh')}; ` +
             `access policy: ${approvalLevel}; interactive operator: ${interactive ? 'yes' : 'no'}; date: ${new Date().toISOString().slice(0, 10)}`, { priority: 9 });
+        if (referencePaths.length) {
+            ctx.set('references', 'Reference images (project-relative paths)', referencePaths.map((item) => `- ${item}`).join('\n'), { priority: 9 });
+        }
         if (extraInstructions) ctx.set('operator', 'Operator instructions', extraInstructions, { priority: 9 });
         if (mcp.describe()) ctx.set('mcp', 'MCP sources', mcp.describe(), { priority: 8 });
 
@@ -792,6 +796,13 @@ export async function runTeam({
                 if (report.data) measured = report;
             }
             if (measured.data) {
+                // Cut the regions once here, so the worker can pass a ready crop to generate_image
+                // instead of spending another tool turn on the same mockup fragment.
+                const stagedCrops = await stageMeasurementCrops({
+                    root, workId: work.id, sheet: measured.data, referencePaths, config, signal,
+                });
+                for (const warning of stagedCrops.warnings) notify({ type: 'warning', message: warning });
+                if (stagedCrops.crops.length) notify({ type: 'measure.crops', count: stagedCrops.crops.length, crops: stagedCrops.crops });
                 ctx.set('metrics', 'Reference measurements (by the measurer)', renderMeasurements(measured.data), { priority: 8 });
                 await writeFile(path.join(root, '.tmp', work.id, 'measurements.json'), `${JSON.stringify(measured.data, null, 2)}\n`, 'utf8').catch(() => {});
             } else if (measured.status !== 'completed') {

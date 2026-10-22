@@ -228,6 +228,7 @@ export const MEASURER_SCHEMA = object({
             radius: { ...nullableNumber, description: 'Corner radius in source pixels. Null when square or unknown.' },
             spacing: { ...string, description: 'Padding, margin, and gap around the element; empty when unknown.' },
             placement: { ...string, description: 'How to place it: grid or flex track, absolute anchor, stacking order; empty when unknown.' },
+            crop: { ...nullableString, description: 'Project-relative path to an existing crop of this element, or null.' },
         }),
     },
     regions: {
@@ -237,6 +238,7 @@ export const MEASURER_SCHEMA = object({
             name: { ...string, description: 'Region name the author can reuse.' },
             box,
             how: { ...string, description: 'What the crop contains and how to cut it out (crop_image or split_image with these numbers).' },
+            crop: { ...nullableString, description: 'Project-relative path to an existing crop of this region, or null. The worker reuses it as a generate_image reference.' },
         }),
     },
     rules: {

@@ -193,6 +193,10 @@ export function handleRendererEvent(event, api) {
             event.steps.forEach((goal, index) => line('info', `  ${index + 1}. ${truncate(goal, 160)}`, { dim: true }));
             if (verbose) for (const criterion of event.acceptanceCriteria ?? []) line('info', `  критерий: ${truncate(criterion, 160)}`, { dim: true });
             break;
+        case 'measure.crops':
+            line('info', `кропы замеров: ${event.count} готово`, { dim: true });
+            if (verbose) for (const item of event.crops ?? []) line('info', `  ${item.crop}`, { dim: true });
+            break;
         case 'step.start':
             line('action', `шаг ${event.index}/${event.total}: ${truncate(event.goal, 160)}`);
             setStatus(`шаг ${event.index}/${event.total}…`);

@@ -271,13 +271,14 @@ export const TOOL_SPECS = {
     },
     generate_image: {
         category: 'write', group: 'images',
-        description: 'Draw a new image and save it in the working directory. Use this for artwork that does not exist yet. When reference is set, the source image is sent directly to the generator (not only a text description) for higher visual fidelity.',
+        description: 'Draw a new image and save it in the working directory. Use this for artwork that does not exist yet. When reference is set, the source image is sent directly to the generator (not only a text description) for higher visual fidelity. Ready measurement crops from .tmp/<id>/crops/ can be passed as reference, so the worker does not crop the same region again.',
         parameters: schema({
             prompt: str('What to draw or how the reference should look after regeneration. Describe style and composition; do not repeat pixel-level details the image already carries.'),
             path: str('Relative output path such as assets/portrait.png. Empty string lets the tool choose a name.'),
             size: str('WIDTHxHEIGHT. Supported frames: 1024x1024, 1024x1536 (portrait), 1536x1024 (landscape). Other sizes snap to the nearest frame. Empty string uses the server default.'),
             quality: str('low, medium, high, or an empty string for the server default. Ignored when reference is set.'),
-            reference: str('Relative path to a reference image (e.g. .ai/refs/abc.png or a crop from .tmp/crop-*.png). The generator conditions on this image. Empty string = pure text-to-image.'),
+            reference: str('Relative path to a reference image (e.g. .ai/refs/abc.png or a ready crop from .tmp/<id>/crops/*.png). The generator conditions on this image. Empty string = pure text-to-image.'),
+            extra_images: str('JSON array of additional reference paths sent with reference, e.g. ["assets/ref1.png",".tmp/<id>/crops/icon.png"]. Empty string = none.'),
         }),
     },
     edit_image: {

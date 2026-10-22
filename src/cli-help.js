@@ -111,6 +111,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --image-background transparent|opaque|auto  --partials 0..3  --image-model <id>  --count, -n <n>
   Для api.proxyapi.ru картинки идут через /images/generations и /images/edits (recraft/recraft-v4.1-utility для генерации по тексту,
   recraft/recraft-v4.1-utility-pro для правки и генерации по картинке, если не задана --image-model).
+  transparent: gpt-image-* получают нативную альфу; у recraft и подобных моделей фон удаляется локально через ImageMagick.
 
 Дополнение кода (complete):
   JSON: content и/или prefix+suffix, cursor или selection (line/character с нуля, как в LSP), либо символ | в тексте.

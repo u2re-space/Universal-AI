@@ -16,6 +16,7 @@ import { IMAGE_BASE } from './instructions.js';
 import { runOnce } from './flow.js';
 import { UsageError, readStdin, loadAttachments, composeInstructions, resolveTextArg, createClientFor } from './shared.js';
 import { imageModelFor, imageTransport, sniffImage } from '../openai/images.js';
+import { ensureTransparentBackground } from '../agent/image-magick.js';
 import { resolveInside } from '../agent/paths.js';
 
 /**
@@ -69,19 +70,22 @@ async function runImagesEndpoint(ctx, prompt, count) {
     const sources = values.image ?? [];
     const model = imageModelFor(config, { hasImage: sources.length > 0 });
     const target = values.out ?? config.image.outputDir;
-    renderer.line('info', `Изображения API: ${model} · ${sources.length ? 'редактирование' : 'генерация'} → ${target}`, { dim: true });
+    const format = config.image.format;
+    const background = config.image.background;
+    const wantsTransparent = background === 'transparent';
+    renderer.line('info', `Изображения API: ${model} · ${sources.length ? 'редактирование' : 'генерация'} · ${format} · фон ${background} → ${target}`, { dim: true });
     const client = createClientFor(config);
     try {
         const payloads = sources.length
             ? await client.images.edit({
-                model, prompt, size: config.image.size, signal,
+                model, prompt, size: config.image.size, format, background, signal,
                 files: await Promise.all(sources.map(async (file) => {
                     const located = await resolveInside(ctx.cwd, file, { allowRoot: false });
                     const bytes = await readFile(located.abs);
                     return { filename: path.basename(located.rel), mime: sniffImage(bytes).mime, bytes };
                 })),
             })
-            : await client.images.generate({ model, prompt, size: config.image.size, quality: config.image.quality, n: count, signal });
+            : await client.images.generate({ model, prompt, size: config.image.size, quality: config.image.quality, n: count, format, background, signal });
         const saved = [];
         for (const [index, b64] of payloads.entries()) {
             const buffer = Buffer.from(b64, 'base64');
@@ -91,6 +95,12 @@ async function runImagesEndpoint(ctx, prompt, count) {
             await mkdir(path.dirname(dest), { recursive: true });
             await writeFile(dest, buffer);
             saved.push(path.relative(ctx.cwd, dest));
+            if (wantsTransparent) {
+                const alpha = await ensureTransparentBackground({ file: dest, magickPath: config.magickPath ?? null, signal });
+                if (alpha.changed) renderer.line('info', `Фон удалён локально: ${saved.at(-1)}`, { dim: true });
+                else if (alpha.reason === 'no-magick') renderer.line('warn', `Прозрачность ${saved.at(-1)}: ImageMagick не найден.`);
+                else if (alpha.reason === 'format') renderer.line('warn', `Прозрачность ${saved.at(-1)}: JPEG не хранит альфа-канал, нужен PNG.`);
+            }
             renderer.line('ok', `Изображение сохранено: ${saved.at(-1)}`);
         }
         renderer.line('ok', `Готово: ${saved.join(', ')}`);

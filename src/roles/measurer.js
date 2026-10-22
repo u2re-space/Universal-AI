@@ -26,6 +26,7 @@ Say how each element is placed: grid or flex track, absolute anchor, stacking or
 Say how the picture divides: every region, artwork, or layer worth cutting out, with the crop box for it and what the crop contains.
 When one spacing value repeats, report it once as a rule with its scale.
 Use view_image to look, and crop_image or split_image to measure a small area, one icon, or one slanted edge more exactly before you report it.
+Keep every crop you make and put its project-relative path into the matching element or region "crop" field; the worker reuses it as a generate_image reference and must not crop the same fragment again.
 Requests are capped: ask for every crop, split, and close look you still need in one turn instead of one call per turn.
 When the budget runs short, stop looking and report the sheet with what you have; a measured part and a null are worth more than another crop.
 Measure what is visible. Use null when a number cannot be read and say so in notes; never invent a value.

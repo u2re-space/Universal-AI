@@ -4,10 +4,10 @@
  * @purpose Image generation and edits through POST /images/generations and /images/edits.
  * @depends node:crypto
  * @usedBy openai/client, agent/loop, agent/tools, commands/image, commands/run
- * @exports PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, IMAGE_SIZES, imageTransport, imageModelFor, normalizeImageSize, generationBody, encodeMultipart, imagePayloads, sniffImage
+ * @exports PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, IMAGE_SIZES, imageTransport, imageModelFor, normalizeImageSize, normalizeImageFormat, supportsTransparentBackground, imageFormatField, generationBody, encodeMultipart, imagePayloads, pngHasAlphaChannel, sniffImage
  * @ai.tags images, proxyapi
  * @ai.hint pure
- * @changed 2026-10-21 Use the vision-capable recraft model for edits and image-conditioned requests.
+ * @changed 2026-10-22 Model-aware background/output_format fields and a PNG alpha check.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -79,14 +79,53 @@ export function imageModelFor(config, { hasImage = false } = {}) {
 }
 
 /**
+ * Normalize a requested output format. `auto` and an empty value return null.
+ * @param {string | null | undefined} format
+ * @returns {string | null}
+ * @exports
+ * @ai.hint pure
+ */
+export function normalizeImageFormat(format) {
+    const value = String(format ?? '').trim().toLowerCase();
+    if (!value || value === 'auto') return null;
+    if (value === 'jpg') return 'jpeg';
+    return value;
+}
+
+/**
+ * OpenAI image models accept `background: transparent` and `output_format`; Recraft and most
+ * other vendors accept only `image_format` and render an opaque background. The caller uses
+ * this to decide whether native alpha is possible or a local background removal is needed.
+ * @param {string | null | undefined} model
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function supportsTransparentBackground(model) {
+    return /^(?:openai\/)?gpt-image-/i.test(String(model ?? '').trim());
+}
+
+/**
+ * Field name for the output format: OpenAI uses `output_format`, Recraft uses `image_format`.
+ * @param {string | null | undefined} model
+ * @returns {'output_format' | 'image_format'}
+ * @exports
+ * @ai.hint pure
+ */
+export function imageFormatField(model) {
+    return supportsTransparentBackground(model) ? 'output_format' : 'image_format';
+}
+
+/**
  * JSON body for POST /images/generations. `auto` size and quality are omitted; partial frames are never sent.
- * An unsupported size is snapped to the nearest supported frame.
- * @param {{ model: string, prompt: string, size?: string | null, quality?: string | null, n?: number | null }} request
+ * An unsupported size is snapped to the nearest supported frame. `background` and the format field
+ * are sent only where the model understands them, so a Recraft request never gets OpenAI-only fields.
+ * @param {{ model: string, prompt: string, size?: string | null, quality?: string | null, n?: number | null, format?: string | null, background?: string | null }} request
  * @returns {object}
  * @exports
  * @ai.hint pure
  */
-export function generationBody({ model, prompt, size = null, quality = null, n = null }) {
+export function generationBody({ model, prompt, size = null, quality = null, n = null, format = null, background = null }) {
     const body = { model, prompt };
     const frame = normalizeImageSize(size);
     if (frame) body.size = frame;
@@ -94,8 +133,9 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
     if (size_pair?.[0] <= 1024 && size_pair?.[1] <= 1024) body.model = body.model?.replace?.(/\-pro$/, "") || body.model;
     if (quality && quality !== 'auto') body.quality = quality;
     if (Number.isInteger(n) && n > 1) body.n = n;
-    body.image_format = "png";
-    body.background = "transparent";
+    const fmt = normalizeImageFormat(format);
+    if (fmt) body[imageFormatField(model)] = fmt;
+    if ((background === 'transparent' || background === 'opaque') && supportsTransparentBackground(model)) body.background = background;
     return body;
 }
 
@@ -133,6 +173,29 @@ export function encodeMultipart({ fields, files }) {
 export function imagePayloads(body) {
     const rows = Array.isArray(body?.data) ? body.data : [];
     return rows.map((row) => row?.b64_json).filter((value) => typeof value === 'string' && value);
+}
+
+/**
+ * True when a PNG buffer carries an alpha channel: color type 4/6 in IHDR or a tRNS chunk.
+ * This does not prove that any pixel is actually transparent, but it rules out alpha entirely.
+ * @param {Buffer} buffer
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function pngHasAlphaChannel(buffer) {
+    if (!Buffer.isBuffer(buffer) || buffer.length < 33) return false;
+    if (buffer[0] !== 0x89 || buffer[1] !== 0x50 || buffer[2] !== 0x4e || buffer[3] !== 0x47) return false;
+    const colorType = buffer[25];
+    if (colorType === 4 || colorType === 6) return true;
+    if (colorType !== 3) return false;
+    for (let offset = 8; offset + 8 <= buffer.length;) {
+        const length = buffer.readUInt32BE(offset);
+        const type = buffer.toString('latin1', offset + 4, offset + 8);
+        if (type === 'tRNS') return true;
+        offset += 12 + length;
+    }
+    return false;
 }
 
 /**

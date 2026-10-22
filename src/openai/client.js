@@ -15,7 +15,7 @@ import { ApiError } from './errors.js';
 import { createHttp, readBody } from './http.js';
 import { parseSSE } from './sse.js';
 import { createStreamReducer, outputText } from './stream.js';
-import { encodeMultipart, generationBody, imagePayloads, normalizeImageSize } from './images.js';
+import { encodeMultipart, generationBody, imageFormatField, imagePayloads, normalizeImageFormat, normalizeImageSize, supportsTransparentBackground } from './images.js';
 
 export { ApiError };
 
@@ -278,17 +278,21 @@ export function createClient({
     };
     const images = {
         /** POST /images/generations. Returns base64 payloads from data[].b64_json. */
-        async generate({ model, prompt, size, quality, n, signal } = {}) {
-            const result = await call('images/generations', { body: generationBody({ model, prompt, size, quality, n }), signal });
+        async generate({ model, prompt, size, quality, n, format, background, signal } = {}) {
+            const result = await call('images/generations', { body: generationBody({ model, prompt, size, quality, n, format, background }), signal });
             const payloads = imagePayloads(result);
             if (!payloads.length) throw new ApiError('Ответ images/generations не содержит b64_json.', { code: 'INVALID_RESPONSE' });
             return payloads;
         },
         /** POST /images/edits as multipart form data. `files` are { filename, mime, bytes }. */
-        async edit({ model, prompt, files, size, signal } = {}) {
+        async edit({ model, prompt, files, size, format, background, signal } = {}) {
             const frame = normalizeImageSize(size);
+            const fields = { model, prompt, ...(frame ? { size: frame } : {}) };
+            const fmt = normalizeImageFormat(format);
+            if (fmt) fields[imageFormatField(model)] = fmt;
+            if ((background === 'transparent' || background === 'opaque') && supportsTransparentBackground(model)) fields.background = background;
             const form = encodeMultipart({
-                fields: { model, prompt, ...(frame ? { size: frame } : {}) },
+                fields,
                 files: files.map((file) => ({ ...file, field: 'image' })),
             });
             const result = await call('images/edits', { rawBody: form.body, contentType: form.contentType, signal });

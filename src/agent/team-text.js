@@ -65,19 +65,24 @@ export function renderMeasurements(sheet) {
         const bits = [rect(item.box)];
         if (Number.isFinite(item.rotation)) bits.push(`rotated ${item.rotation}°`);
         if (Number.isFinite(item.radius)) bits.push(`radius ${item.radius}`);
-        const lines = [`- ${item.name}: ${bits.join(' · ')}`];
+        const crop = item.crop ? ` · crop: ${item.crop}` : '';
+        const lines = [`- ${item.name}: ${bits.join(' · ')}${crop}`];
         for (const [label, value] of [['borders', item.borders], ['spacing', item.spacing], ['placement', item.placement]]) {
             if (value) lines.push(`  ${label}: ${value}`);
         }
         return lines.join('\n');
     }).join('\n');
-    const regions = (sheet.regions ?? []).map((item) => `- ${item.name}: ${rect(item.box)} — ${item.how}`).join('\n');
+    const regions = (sheet.regions ?? []).map((item) => {
+        const crop = item.crop ? ` · crop: ${item.crop}` : '';
+        return `- ${item.name}: ${rect(item.box)} — ${item.how}${crop}`;
+    }).join('\n');
+    const ready = (sheet.regions ?? []).filter((item) => item.crop).length;
     const rules = (sheet.rules ?? []).map((item) => `- ${item.name}: ${item.value}${item.from ? ` (measured ${item.from})` : ''}`).join('\n');
     return [
         sheet.summary ?? '',
         `Source: ${sheet.source || '(not named)'} · unit: ${sheet.unit || 'px'} · canvas ${rect(sheet.canvas)}`,
         elements && `Elements:\n${elements}`,
-        regions && `Regions to cut out:\n${regions}`,
+        regions && `Regions to cut out${ready ? ` (${ready} ready crop(s); pass the path as generate_image reference, do not crop again)` : ''}:\n${regions}`,
         rules && `Rules:\n${rules}`,
         sheet.notes && `Notes:\n${sheet.notes}`,
     ].filter(Boolean).join('\n\n');
