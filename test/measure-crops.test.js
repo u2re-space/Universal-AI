@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { runProgram } from '../src/agent/shell.js';
-import { detectMagick, ensureTransparentBackground, magickIsOpaque } from '../src/agent/image-magick.js';
+import { detectMagick, ensureTransparentBackground, magickIsOpaque, assessVectorSuitability, magickColorCount, magickPaletteStats } from '../src/agent/image-magick.js';
 import { stageMeasurementCrops } from '../src/agent/measure-crops.js';
 import { renderMeasurements } from '../src/agent/team-text.js';
 import { MEASURER_SCHEMA } from '../src/agent/schemas.js';
@@ -72,6 +72,33 @@ test('local alpha fallback removes a flat background and keeps the subject', asy
         assert.equal(await magickIsOpaque({ exe, input: file, cwd: dir }), false);
         const corner = await runProgram({ file: exe, args: [file, '-format', '%[pixel:p{0,0}]', 'info:'], cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096 });
         assert.match(corner.stdout.trim(), /,0\)$/);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('vector suitability accepts flat artwork and refuses a photographic palette', async (t) => {
+    const exe = await detectMagick();
+    if (!exe) return t.skip('ImageMagick is not installed');
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-vector-fit-'));
+    try {
+        await makeFlatImage({ exe, dir, file: 'flat.png', width: 64, height: 64 });
+        const flat = await assessVectorSuitability({ exe, input: 'flat.png', cwd: dir });
+        assert.equal(flat.suitable, true);
+        assert.ok(['flat', 'limited-palette'].includes(flat.reason));
+        assert.ok(flat.colors <= 4);
+        assert.equal(flat.width, 64);
+        assert.equal(flat.ratio, 1);
+
+        // A plasma frame has thousands of colors spread evenly over the palette.
+        await runProgram({ file: exe, args: ['-size', '64x64', 'plasma:fractal', 'photo.png'], cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096 });
+        const colors = await magickColorCount({ exe, input: 'photo.png', cwd: dir });
+        assert.ok(colors > 256, `expected a rich palette, got ${colors}`);
+        const palette = await magickPaletteStats({ exe, input: 'photo.png', cwd: dir });
+        assert.ok(palette && palette.top2 < 0.8, `top2=${palette?.top2}`);
+        const photo = await assessVectorSuitability({ exe, input: 'photo.png', cwd: dir });
+        assert.equal(photo.suitable, false);
+        assert.equal(photo.reason, 'too-many-colors');
     } finally {
         await rm(dir, { recursive: true, force: true });
     }

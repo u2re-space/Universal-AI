@@ -241,6 +241,7 @@ export function createToolset({
             case 'split_image': return `Разбить ${args.path} на ${args.rows ?? 1}×${args.cols ?? 1} плиток\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
             case 'crop_image': return `Обрезать ${args.path}: ${args.width ?? '?'}×${args.height ?? '?'} в (${args.x ?? 0},${args.y ?? 0})\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
             case 'generate_svg': return `SVG ${args.width ?? 512}×${args.height ?? 512}: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}\nПричина: ${args.reason ?? '—'}`;
+            case 'vectorize_image': return `Векторизовать ${args.image || 'кроп из замеров'} в SVG`;
             case 'download_font': return `Шрифт: ${args.name || args.url || '?'} ${args.style || ''}\nВыход: ${args.output || 'авто'}`;
             case 'download_icons': return `Иконки: ${args.name || '?'}${args.icon ? `/${args.icon}` : ' (набор)'} ${args.variant || 'regular'}\nВыход: ${args.output || 'авто'}`;
             default:
@@ -591,10 +592,11 @@ export function createToolset({
         },
     };
 
-    if (allowed.has('generate_image') || allowed.has('edit_image')) {
-        const imageHandlers = createImageHandlers({ root, client, config, signal });
+    if (allowed.has('generate_image') || allowed.has('edit_image') || allowed.has('vectorize_image')) {
+        const imageHandlers = createImageHandlers({ root, client, config, signal, describeImage });
         if (allowed.has('generate_image')) handlers.generate_image = imageHandlers.generate_image;
         if (allowed.has('edit_image')) handlers.edit_image = imageHandlers.edit_image;
+        if (allowed.has('vectorize_image')) handlers.vectorize_image = imageHandlers.vectorize_image;
     }
     const desktopNames = DESKTOP_TOOL_NAMES.filter((name) => allowed.has(name));
     if (desktopNames.length) {

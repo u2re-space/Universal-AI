@@ -264,6 +264,8 @@ function validateConfig(c) {
     if (!(c.image.size === 'auto' || /^\d{2,4}x\d{2,4}$/.test(c.image.size))) fail('image.size: auto | WIDTHxHEIGHT');
     if (!Number.isSafeInteger(c.image.partialImages) || c.image.partialImages < 0 || c.image.partialImages > 3) fail('image.partialImages: 0..3');
     if (c.image.transport != null && c.image.transport !== 'images' && c.image.transport !== 'responses') fail('image.transport: images | responses');
+    if (c.image.vectorModel != null && (typeof c.image.vectorModel !== 'string' || !c.image.vectorModel.trim())) fail('image.vectorModel: непустая строка или null');
+    if (!Number.isSafeInteger(c.image.vectorMaxColors) || c.image.vectorMaxColors < 2 || c.image.vectorMaxColors > 65536) fail('image.vectorMaxColors: 2..65536');
     if (c.webSearch.contextSize != null && !['low', 'medium', 'high'].includes(c.webSearch.contextSize)) fail('webSearch.contextSize: null | low | medium | high');
     if (typeof c.compaction.auto !== 'boolean' || !Number.isSafeInteger(c.compaction.afterInputTokens) || c.compaction.afterInputTokens < 1000) {
         fail('compaction: { auto: boolean, afterInputTokens ≥ 1000 }');

@@ -78,7 +78,11 @@ export const defaults = Object.freeze({
         maxStdinBytes: 4 * MiB,
         pollIntervalMs: 2_000,
     },
-    image: { size: 'auto', quality: 'auto', format: 'png', background: 'auto', partialImages: 2, outputDir: '.', transport: null },
+    image: {
+        size: 'auto', quality: 'auto', format: 'png', background: 'auto', partialImages: 2, outputDir: '.', transport: null,
+        vectorModel: null,           // null → recraft/recraft-v4.1-vector through the images API
+        vectorMaxColors: 256,        // raw unique-color ceiling for vectorize_image; above it the top-two coverage decides
+    },
     webSearch: { contextSize: null },       // null → { type: "web_search" }. low | medium | high adds search_context_size
     compaction: { auto: false, afterInputTokens: 200_000 },
     /**

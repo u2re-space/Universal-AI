@@ -7,7 +7,7 @@
  * @exports ApiError, createClient, retryDelayMs
  * @ai.tags openai, http
  * @ai.hint io
- * @changed 2026-10-21 Image edit sizes are normalized.
+ * @changed 2026-10-22 Vector models use aspect_ratio and svg on the edit route.
  */
 import { randomUUID } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -15,7 +15,7 @@ import { ApiError } from './errors.js';
 import { createHttp, readBody } from './http.js';
 import { parseSSE } from './sse.js';
 import { createStreamReducer, outputText } from './stream.js';
-import { encodeMultipart, generationBody, imageFormatField, imagePayloads, normalizeImageFormat, normalizeImageSize, supportsTransparentBackground } from './images.js';
+import { encodeMultipart, generationBody, imageFormatField, imagePayloads, isVectorModel, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, supportsTransparentBackground } from './images.js';
 
 export { ApiError };
 
@@ -286,11 +286,18 @@ export function createClient({
         },
         /** POST /images/edits as multipart form data. `files` are { filename, mime, bytes }. */
         async edit({ model, prompt, files, size, format, background, signal } = {}) {
-            const frame = normalizeImageSize(size);
-            const fields = { model, prompt, ...(frame ? { size: frame } : {}) };
-            const fmt = normalizeImageFormat(format);
-            if (fmt) fields[imageFormatField(model)] = fmt;
-            if ((background === 'transparent' || background === 'opaque') && supportsTransparentBackground(model)) fields.background = background;
+            const fields = { model, prompt };
+            if (isVectorModel(model)) {
+                const aspect = normalizeVectorRatio(size);
+                if (aspect) fields.aspect_ratio = aspect;
+                fields[imageFormatField(model)] = 'svg';
+            } else {
+                const frame = normalizeImageSize(size);
+                if (frame) fields.size = frame;
+                const fmt = normalizeImageFormat(format);
+                if (fmt) fields[imageFormatField(model)] = fmt;
+                if ((background === 'transparent' || background === 'opaque') && supportsTransparentBackground(model)) fields.background = background;
+            }
             const form = encodeMultipart({
                 fields,
                 files: files.map((file) => ({ ...file, field: 'image' })),
@@ -299,6 +306,20 @@ export function createClient({
             const payloads = imagePayloads(result);
             if (!payloads.length) throw new ApiError('Ответ images/edits не содержит b64_json.', { code: 'INVALID_RESPONSE' });
             return payloads;
+        },
+        /**
+         * Vectorize one raster into SVG with a vector model. The source goes through the edit
+         * route as a multipart `image` field: the generation route ignores an image reference
+         * for these models, while the edit route conditions on the pixels and keeps the source frame.
+         * @param {{ model: string, prompt: string, image: { mime: string, bytes: Buffer }, signal?: AbortSignal }} options
+         * @returns {Promise<string[]>} base64 SVG payloads
+         */
+        async vectorize({ model, prompt, image, signal } = {}) {
+            if (!image?.bytes?.length) throw new ApiError('vectorize: нужен исходный растр.', { code: 'INVALID_REQUEST' });
+            return images.edit({
+                model, prompt, format: 'svg', signal,
+                files: [{ filename: 'source.png', mime: image.mime, bytes: image.bytes }],
+            });
         },
     };
     const models = {

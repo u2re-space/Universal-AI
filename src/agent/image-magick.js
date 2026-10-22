@@ -4,10 +4,10 @@
  * @purpose Detect ImageMagick and provide crop, split, resize, convert operations via CLI.
  * @depends node:path, node:fs/promises, agent/shell
  * @usedBy agent/tools
- * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify, magickIsOpaque, magickRemoveFlatBackground, ensureTransparentBackground
- * @ai.tags imagemagick, image, crop, split, alpha
+ * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify, magickIsOpaque, magickColorCount, magickPaletteStats, assessVectorSuitability, magickRemoveFlatBackground, ensureTransparentBackground
+ * @ai.tags imagemagick, image, crop, split, alpha, vector
  * @ai.hint io
- * @changed 2026-10-22 Added the local transparent-background fallback.
+ * @changed 2026-10-22 Added the color count and the vector-suitability check.
  */
 
 import path from 'node:path';
@@ -207,6 +207,78 @@ export async function magickRemoveFlatBackground({ exe, input, output = input, c
         throw error;
     }
     return { changed: true, reason: 'removed', color };
+}
+
+/**
+ * Number of unique colors in the image, or null when ImageMagick cannot answer.
+ * A low count means flat fills — the kind of artwork (logos, badges, icons) that vectorizes well.
+ * @param {{ exe: string, input: string, cwd: string, signal?: AbortSignal }} opts
+ * @returns {Promise<number|null>}
+ * @exports
+ * @ai.hint io
+ */
+export async function magickColorCount({ exe, input, cwd, signal }) {
+    const res = await magickRun(exe, [input, '-format', '%k', 'info:'], { cwd, signal }).catch(() => null);
+    const value = Number(String(res?.stdout ?? '').trim());
+    return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/**
+ * Quantized palette shares: how much of the picture the few dominant colors cover.
+ * Anti-aliased logos and badges keep two colors over most pixels even when the raw
+ * unique-color count is high; a photograph spreads evenly across the palette.
+ * @param {{ exe: string, input: string, cwd: string, signal?: AbortSignal }} opts
+ * @returns {Promise<{ colors: number, total: number, top1: number, top2: number, top4: number }|null>}
+ * @exports
+ * @ai.hint io
+ */
+export async function magickPaletteStats({ exe, input, cwd, signal }) {
+    const res = await magickRun(exe, [input, '-colors', '8', '-format', '%c', 'histogram:info:'], { cwd, signal }).catch(() => null);
+    const counts = [];
+    for (const line of String(res?.stdout ?? '').split(/\r?\n/)) {
+        const match = /^\s*(\d+):/.exec(line);
+        if (match && Number(match[1]) > 0) counts.push(Number(match[1]));
+    }
+    const total = counts.reduce((sum, value) => sum + value, 0);
+    if (!total) return null;
+    counts.sort((a, b) => b - a);
+    const share = (count) => counts.slice(0, count).reduce((sum, value) => sum + value, 0) / total;
+    return { colors: counts.length, total, top1: share(1), top2: share(2), top4: share(4) };
+}
+
+/**
+ * Decide whether a raster is worth sending to a vector model. Logos, badges, and icons have a
+ * small palette or two dominant colors; photographs spread across the palette and lose detail.
+ * `maxColors` is the raw unique-color ceiling; above it the quantized top-two coverage decides.
+ * A null color count is reported as unknown, not refused.
+ * @param {{ exe: string, input: string, cwd: string, signal?: AbortSignal, maxColors?: number }} opts
+ * @returns {Promise<{ suitable: boolean, reason: string, colors: number|null, width: number, height: number, ratio: number, coverage: number|null }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function assessVectorSuitability({ exe, input, cwd, signal, maxColors = 256 }) {
+    let width = 0;
+    let height = 0;
+    try {
+        const info = await magickIdentify({ exe, input, cwd, signal });
+        width = info.width;
+        height = info.height;
+    } catch { /* an unreadable size stays 0 and is reported as unknown */ }
+    const colors = await magickColorCount({ exe, input, cwd, signal });
+    const ratio = width && height ? width / height : 0;
+    if (!width || !height) return { suitable: false, reason: 'unreadable', colors, width, height, ratio, coverage: null };
+    if (colors === null) return { suitable: true, reason: 'unknown', colors, width, height, ratio, coverage: null };
+    if (colors <= maxColors) {
+        return { suitable: true, reason: colors <= 8 ? 'flat' : 'limited-palette', colors, width, height, ratio, coverage: null };
+    }
+    const palette = await magickPaletteStats({ exe, input, cwd, signal });
+    if (palette && palette.top2 >= 0.8) {
+        return { suitable: true, reason: 'two-tone', colors, width, height, ratio, coverage: palette.top2 };
+    }
+    if (palette && palette.top4 >= 0.9) {
+        return { suitable: true, reason: 'flat', colors, width, height, ratio, coverage: palette.top4 };
+    }
+    return { suitable: false, reason: 'too-many-colors', colors, width, height, ratio, coverage: palette?.top2 ?? null };
 }
 
 /**

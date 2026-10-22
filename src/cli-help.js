@@ -113,6 +113,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   Для api.proxyapi.ru картинки идут через /images/generations и /images/edits (recraft/recraft-v4.1-utility для генерации по тексту,
   recraft/recraft-v4.1-utility-pro для правки и генерации по картинке, если не задана --image-model).
   transparent: gpt-image-* получают нативную альфу; у recraft и подобных моделей фон удаляется локально через ImageMagick.
+  Инструмент vectorize_image конвертирует плоские PNG/WebP (логотипы, бейджи, иконки) в SVG через
+  recraft/recraft-v4.1-vector: удаляет фон, проверяет палитру, сохраняет .svg вместо .png.
 
 Дополнение кода (complete):
   JSON: content и/или prefix+suffix, cursor или selection (line/character с нуля, как в LSP), либо символ | в тексте.

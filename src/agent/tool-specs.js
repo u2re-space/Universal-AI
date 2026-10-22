@@ -370,6 +370,18 @@ export const TOOL_SPECS = {
             reason: str('One sentence: why this SVG is needed (shown to the user for approval).'),
         }),
     },
+    vectorize_image: {
+        category: 'write', group: 'images',
+        description: 'Convert a flat raster (logo, badge, icon, two-tone PNG/WebP) into a real SVG with the vector model (recraft/recraft-v4.1-vector). A flat background is removed locally first, so the vector keeps transparency. Prefer a ready measurement crop from .tmp/<id>/crops/ as the source; leave image empty to list the crops that are still there and their palette. The vector model follows the prompt closely: name the artwork shapes and colors, or leave prompt empty and the vision role describes the crop first. Square 1:1 logos are the usual case, but a crop of another shape keeps its own frame. Photographs and rich gradients are refused — use generate_image or generate_svg for those.',
+        parameters: schema({
+            image: str('Source PNG/WebP path relative to the working directory, e.g. a crop from .tmp/<id>/crops/logo.png. Empty string lists the remaining measurement crops instead of converting.'),
+            path: str('Output SVG path such as assets/logo.svg. Empty string puts an .svg next to the source (or in assets/).'),
+            prompt: str('What the artwork contains: shapes, layout, and colors (e.g. "black ring, white bar, two-tone badge"). Empty string asks the vision role to describe the crop first.'),
+            remove_background: bool('Strip a flat background color before converting. False keeps the source pixels as they are.'),
+            force: bool('Convert even when the palette looks too rich for a vector (a photo or a heavy gradient).'),
+            reason: str('One sentence: why this image must become a vector (shown to the user for approval).'),
+        }),
+    },
     download_font: {
         category: 'write', group: 'assets',
         description: 'Download a font file (TTF/OTF/WOFF/WOFF2) from Google Fonts by family name, or from a direct http(s) URL. Saves under fonts/.',
@@ -421,7 +433,7 @@ export function enabledToolNames(tools, { interactive = false, memory = false, s
     if (tools.desktop) names.push(...DESKTOP_TOOL_NAMES.filter((name) => name !== 'screenshot' || unsafeScreenshot));
     if (memory) names.push('recall', 'remember');
     if (tools.askUser && interactive) names.push('ask_user');
-    if (tools.images && imageApi) names.push('generate_image', 'edit_image');
+    if (tools.images && imageApi) names.push('generate_image', 'edit_image', 'vectorize_image');
     if (tools.images && images) names.push('split_image', 'crop_image', 'generate_svg');
     if (tools.fetch) names.push('download_font', 'download_icons');
     if (tools.channels) names.push('decide', 'moderate_text', 'channel_reply', 'telegram_call');
