@@ -34,8 +34,8 @@ export const settings = { effort: null, model: null };
 
 /** Model and effort for each plan-step complexity. */
 export const SOLVER_TIERS = Object.freeze({
-    trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'low' }),
-    normal: Object.freeze({ model: 'gpt-6-luna', effort: 'medium' }),
+    trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'medium' }),
+    normal: Object.freeze({ model: 'gpt-6-luna', effort: 'high' }),
     complex: Object.freeze({ model: 'gpt-6.1-sol', effort: 'high' }),
 });
 

@@ -37,7 +37,7 @@ export const settings = { effort: null, model: null };
 export const CODER_TIERS = Object.freeze({
     trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'low' }),
     normal: Object.freeze({ model: 'gpt-6-luna', effort: 'medium' }),
-    complex: Object.freeze({ model: 'gpt-6.1-sol', effort: 'high' }),
+    complex: Object.freeze({ model: 'gpt-6-luna', effort: 'high' }),
 });
 
 /**

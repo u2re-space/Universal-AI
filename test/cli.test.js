@@ -228,7 +228,7 @@ test('run (team mode): roles use their own models; memory command sees what was 
 test('models and config commands work', async () => {
     const models = await runCli(['models', 'gpt']);
     assert.equal(models.code, 0);
-    assert.match(models.stdout, /gpt-6\.1-sol/);
+    assert.match(models.stdout, /gpt-6-luna/);
     const config = await runCli(['config', 'show', '--json']);
     const data = jsonLines(config.stdout).find((l) => l.type === 'config');
     assert.equal(data.config.model, 'mock-model');
