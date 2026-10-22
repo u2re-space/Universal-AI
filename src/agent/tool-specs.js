@@ -271,7 +271,7 @@ export const TOOL_SPECS = {
     },
     generate_image: {
         category: 'write', group: 'images',
-        description: 'Draw a new image and save it in the working directory. Use this for artwork that does not exist yet. When reference is set, the source image is sent directly to the generator (not only a text description) for higher visual fidelity. Ready measurement crops from .tmp/<id>/crops/ can be passed as reference, so the worker does not crop the same region again.',
+        description: 'Draw a new image and save it in the working directory. Use this for artwork that does not exist yet. When reference is set, the source image is sent directly to the generator (not only a text description) for higher visual fidelity. Ready measurement crops from .tmp/<id>/crops/ can be passed as reference, so the worker does not crop the same region again. With image.background=transparent a real alpha channel is built from a grayscale mask drawn by the model and merged by ImageMagick.',
         parameters: schema({
             prompt: str('What to draw or how the reference should look after regeneration. Describe style and composition; do not repeat pixel-level details the image already carries.'),
             path: str('Relative output path such as assets/portrait.png. Empty string lets the tool choose a name.'),
@@ -283,7 +283,7 @@ export const TOOL_SPECS = {
     },
     edit_image: {
         category: 'write', group: 'images',
-        description: 'Edit an existing image with POST /images/edits and save the result. Use this to restyle or extract a region of a reference file. extra_images sends more reference pictures together with the source image.',
+        description: 'Edit an existing image with POST /images/edits and save the result. Use this to restyle or extract a region of a reference file. extra_images sends more reference pictures together with the source image. With image.background=transparent a real alpha channel is built from a grayscale mask drawn by the model and merged by ImageMagick.',
         parameters: schema({
             prompt: str('How to change the source image.'),
             image: str('Source image path relative to the working directory.'),

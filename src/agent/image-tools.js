@@ -7,13 +7,14 @@
  * @exports createImageHandlers
  * @ai.tags images, tools
  * @ai.hint io
- * @changed 2026-10-22 Transparent background fallback, extra references, model-aware format fields, and vectorize_image.
+ * @changed 2026-10-22 Transparent background through a model-drawn mask, extra references, model-aware format fields, and vectorize_image.
  */
 
 import path from 'node:path';
 import { mkdir, readFile, writeFile, stat, unlink, readdir } from 'node:fs/promises';
 import { resolveInside } from './paths.js';
-import { ensureTransparentBackground, detectMagick, magickRemoveFlatBackground, assessVectorSuitability } from './image-magick.js';
+import { detectMagick, magickRemoveFlatBackground, assessVectorSuitability } from './image-magick.js';
+import { applyGeneratedAlphaMask } from './image-alpha.js';
 import { imageModelFor, sniffImage, PROXY_VECTOR_MODEL } from '../openai/images.js';
 import { formatBytes } from '../util/text.js';
 
@@ -57,7 +58,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
         await mkdir(path.dirname(abs), { recursive: true });
         await writeFile(abs, buffer);
         const alpha = wantsTransparent
-            ? await ensureTransparentBackground({ file: abs, magickPath: config.magickPath ?? null, signal })
+            ? await applyGeneratedAlphaMask({ client, config, file: abs, signal })
             : null;
         return { rel: safe, bytes: buffer.length, alpha };
     }
@@ -73,8 +74,11 @@ export function createImageHandlers({ root, client, config, signal, describeImag
         for (const [index, b64] of payloads.entries()) saved.push(await save(b64, requested, index, payloads.length));
         const notes = [];
         if (wantsTransparent) {
-            const changed = saved.filter((item) => item.alpha?.changed).length;
-            if (changed) notes.push(`Прозрачность: фон удалён локально у ${changed} файл(ов).`);
+            const masked = saved.filter((item) => item.alpha?.reason === 'mask').length;
+            const flat = saved.filter((item) => item.alpha?.reason === 'flat').length;
+            if (masked) notes.push(`Прозрачность: альфа-канал собран по маске модели у ${masked} файл(ов).`);
+            if (flat) notes.push(`Прозрачность: маска не удалась, фон удалён заливкой от углов у ${flat} файл(ов).`);
+            if (saved.some((item) => item.alpha?.reason === 'opaque')) notes.push('Прозрачность: маска пустая, фон не найден — файл оставлен непрозрачным.');
             if (saved.some((item) => item.alpha?.reason === 'no-magick')) notes.push('Прозрачность: ImageMagick не найден, альфа-канал не гарантирован.');
             if (saved.some((item) => item.alpha?.reason === 'format')) notes.push('Прозрачность: JPEG не хранит альфа-канал, сохраните результат в PNG.');
             if (saved.some((item) => item.alpha?.reason === 'failed')) notes.push('Прозрачность: локальное удаление фона не удалось.');

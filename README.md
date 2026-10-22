@@ -145,8 +145,9 @@ ai --image chart.png --web "что это за график и актуальн�
 # правка картинки (image-to-image)
 ai image --image logo.png "сделай фон прозрачным" --image-background transparent --out logo2.png
 # прозрачность: gpt-image-* (кроме gpt-image-2) получают background=transparent и output_format=png нативно;
-# у recraft и подобных моделей альфа-канала в генерации нет, поэтому PNG обрабатывается локально
-# через ImageMagick (заливка от углов по цвету фона).
+# у recraft и подобных моделей модель рисует чёрно-белую маску (белое — объект, чёрное — фон),
+# а ImageMagick вливает её в RGB+A: -colorspace Gray -compose CopyOpacity -composite.
+# если маска не удалась, остаётся запасной путь — заливка от углов по цвету фона.
 # по умолчанию для растра берутся openai/gpt-image-2.5-flare (генерация) и openai/gpt-image-2.5-sunburst
 # (правка): они держат палитру источника, тогда как recraft v4.1 сдвигает нейтральные цвета в сине-фиолетовый.
 
@@ -539,6 +540,7 @@ src/agent/tool-specs.js   схемы и список включённых инс
 src/agent/tools.js        политика подтверждений и исполнение (память, vision, сводки)
 src/agent/assets.js       SVG, шрифты Google Fonts, наборы иконок с CDN
 src/agent/image-magick.js поиск ImageMagick, обрезка и разбивка изображений
+src/agent/image-alpha.js  маска модели → альфа-канал (CopyOpacity), запасная заливка от углов
 src/agent/map.js          `.ai/map.json` и кеш в памяти
 src/agent/map-scan.js     символы, JSDoc-метки и относительные импорты
 src/agent/team-text.js    текст плана и находок сборщика

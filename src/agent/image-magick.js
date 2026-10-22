@@ -4,10 +4,10 @@
  * @purpose Detect ImageMagick and provide crop, split, resize, convert operations via CLI.
  * @depends node:path, node:fs/promises, agent/shell
  * @usedBy agent/tools
- * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify, magickIsOpaque, magickColorCount, magickPaletteStats, assessVectorSuitability, magickRemoveFlatBackground, ensureTransparentBackground
+ * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify, magickIsOpaque, magickColorCount, magickPaletteStats, assessVectorSuitability, magickRemoveFlatBackground, magickApplyAlphaMask, ensureTransparentBackground
  * @ai.tags imagemagick, image, crop, split, alpha, vector
  * @ai.hint io
- * @changed 2026-10-22 Added the color count and the vector-suitability check; relative paths work in ensureTransparentBackground.
+ * @changed 2026-10-22 Added the color count, the vector-suitability check, and the grayscale-mask alpha merge.
  */
 
 import path from 'node:path';
@@ -282,10 +282,47 @@ export async function assessVectorSuitability({ exe, input, cwd, signal, maxColo
 }
 
 /**
+ * Use a grayscale mask as the alpha channel of the image: white stays visible, black becomes
+ * transparent, gray gives a soft edge. The mask is resized to the image frame, so a mask drawn
+ * on a coarser grid still fits. A mask whose corners are white is inverted first: the background
+ * is expected to be black, and a model occasionally returns the polarity the other way round.
+ * @param {{ exe: string, input: string, mask: string, output?: string, cwd: string, signal?: AbortSignal }} opts
+ * @returns {Promise<{ changed: boolean, reason: string, inverted?: boolean, width?: number, height?: number }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function magickApplyAlphaMask({ exe, input, mask, output = input, cwd, signal }) {
+    const info = await magickIdentify({ exe, input, cwd, signal });
+    if (!info.width || !info.height) return { changed: false, reason: 'unreadable' };
+    const probe = await magickRun(exe, [mask, '-colorspace', 'Gray', '-format',
+        '%[fx:mean] %[fx:(p{0,0}.intensity+p{w-1,0}.intensity+p{0,h-1}.intensity+p{w-1,h-1}.intensity)/4]', 'info:'], { cwd, signal });
+    const [mean, corner] = probe.stdout.trim().split(/\s+/).map(Number);
+    if (!Number.isFinite(mean) || !Number.isFinite(corner)) return { changed: false, reason: 'unreadable' };
+    if (mean <= 0.005) return { changed: false, reason: 'empty-mask' };
+    if (mean >= 0.995) return { changed: false, reason: 'full-mask' };
+    const inverted = corner > 0.5;
+    const outPath = path.isAbsolute(output) ? output : path.join(cwd, output);
+    const suffix = path.extname(outPath) || '.png';
+    const tmpPath = path.join(path.dirname(outPath), `.tmp-mask-${process.pid}-${Date.now()}${suffix}`);
+    const args = [input, '(', mask, '-colorspace', 'Gray'];
+    if (inverted) args.push('-negate');
+    args.push('-resize', `${info.width}x${info.height}!`, ')', '-alpha', 'off', '-compose', 'CopyOpacity', '-composite', tmpPath);
+    try {
+        await magickRun(exe, args, { cwd, signal });
+        await rename(tmpPath, outPath);
+    } catch (error) {
+        await unlink(tmpPath).catch(() => {});
+        throw error;
+    }
+    return { changed: true, reason: 'mask', inverted, width: info.width, height: info.height };
+}
+
+/**
  * Make a saved image's flat background transparent, in place. Already transparent images are left alone.
  * The file is resolved to an absolute path first: ImageMagick runs with the file's directory as cwd,
  * so a relative path would otherwise be looked up inside that directory and fail.
  * JPEG cannot carry alpha, so it is reported instead of silently flattened.
+ * This is the fallback path: `applyGeneratedAlphaMask` prefers a mask drawn by the model.
  * @param {{ file: string, magickPath?: string|null, signal?: AbortSignal, fuzz?: number }} opts
  * @returns {Promise<{ changed: boolean, reason: string, color?: string, error?: Error }>}
  * @exports

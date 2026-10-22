@@ -16,7 +16,7 @@ import { IMAGE_BASE } from './instructions.js';
 import { runOnce } from './flow.js';
 import { UsageError, readStdin, loadAttachments, composeInstructions, resolveTextArg, createClientFor } from './shared.js';
 import { imageModelFor, imageTransport, sniffImage } from '../openai/images.js';
-import { ensureTransparentBackground } from '../agent/image-magick.js';
+import { applyGeneratedAlphaMask } from '../agent/image-alpha.js';
 import { resolveInside } from '../agent/paths.js';
 
 /**
@@ -46,7 +46,7 @@ export async function image(ctx) {
     for (let i = 0; i < count; i++) {
         if (count > 1) renderer.line('info', `Изображение ${i + 1} из ${count}`);
         const exit = await runOnce({ ...ctx, values: { ...values, session: null, out: null } }, {
-            prompt: parts.length ? `${prompt}\n(Use the attached image(s) as the reference / source to edit. Make transparent background when or where possible.)` : prompt,
+            prompt: parts.length ? `${prompt}\n(Use the attached image(s) as the reference / source to edit. Never paint a checkerboard or a fake transparency pattern; keep the background flat and even.)` : prompt,
             parts, instructions, builtin, toolChoice: { type: 'image_generation' }, imageTarget: target, maxTurns: 1,
             summaryTitle: count > 1 ? `изображение ${i + 1}/${count}` : 'итог',
             extraRows: (result) => { produced.push(...result.images); return []; },
@@ -96,8 +96,11 @@ async function runImagesEndpoint(ctx, prompt, count) {
             await writeFile(dest, buffer);
             saved.push(path.relative(ctx.cwd, dest));
             if (wantsTransparent) {
-                const alpha = await ensureTransparentBackground({ file: dest, magickPath: config.magickPath ?? null, signal });
-                if (alpha.changed) renderer.line('info', `Фон удалён локально: ${saved.at(-1)}`, { dim: true });
+                const alpha = await applyGeneratedAlphaMask({ client, config, file: dest, signal });
+                if (alpha.changed) {
+                    const how = alpha.reason === 'mask' ? `по маске ${alpha.model}` : 'заливкой от углов';
+                    renderer.line('info', `Альфа-канал собран ${how}: ${saved.at(-1)}`, { dim: true });
+                } else if (alpha.reason === 'opaque') renderer.line('info', `Прозрачность ${saved.at(-1)}: маска пустая, фон не найден.`, { dim: true });
                 else if (alpha.reason === 'no-magick') renderer.line('warn', `Прозрачность ${saved.at(-1)}: ImageMagick не найден.`);
                 else if (alpha.reason === 'format') renderer.line('warn', `Прозрачность ${saved.at(-1)}: JPEG не хранит альфа-канал, нужен PNG.`);
             }

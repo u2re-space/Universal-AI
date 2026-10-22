@@ -80,6 +80,7 @@ export const defaults = Object.freeze({
     },
     image: {
         size: 'auto', quality: 'auto', format: 'png', background: 'auto', partialImages: 2, outputDir: '.', transport: null,
+        maskModel: null,             // null → the edit model draws the alpha matte (openai/gpt-image-2.5-sunburst)
         vectorModel: null,           // null → recraft/recraft-v4.1-vector through the images API
         vectorMaxColors: 256,        // raw unique-color ceiling for vectorize_image; above it the top-two coverage decides
     },
