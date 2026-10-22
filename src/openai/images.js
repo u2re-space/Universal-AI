@@ -95,6 +95,7 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
     if (quality && quality !== 'auto') body.quality = quality;
     if (Number.isInteger(n) && n > 1) body.n = n;
     body.image_format = "png";
+    body.background = "transparent";
     return body;
 }
 

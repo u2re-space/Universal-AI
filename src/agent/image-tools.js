@@ -79,7 +79,7 @@ export function createImageHandlers({ root, client, config, signal }) {
                     model: imageModelFor(config, { hasImage: true }),
                     prompt: args.prompt,
                     size: args.size || null,
-                    signal, image_format: "png",
+                    signal, image_format: "png", background: "transparent",
                     files: [{ filename: path.basename(located.rel), mime: kind.mime, bytes }],
                 });
                 return saveAll(payloads, args.path);
@@ -87,7 +87,7 @@ export function createImageHandlers({ root, client, config, signal }) {
 
             // No reference: pure text-to-image generation.
             const payloads = await client.images.generate({
-                model: imageModelFor(config), prompt: args.prompt, size: args.size || null, quality: args.quality || null, signal, image_format: "png"
+                model: imageModelFor(config), prompt: args.prompt, size: args.size || null, quality: args.quality || null, signal, background: "transparent", image_format: "png"
             });
             return saveAll(payloads, args.path);
         },
@@ -120,7 +120,7 @@ export function createImageHandlers({ root, client, config, signal }) {
             }
 
             const payloads = await client.images.edit({
-                model: imageModelFor(config, { hasImage: true }), prompt: args.prompt, size: args.size || null, signal, image_format: "png",
+                model: imageModelFor(config, { hasImage: true }), prompt: args.prompt, size: args.size || null, signal, image_format: "png", background: "transparent",
                 files,
             });
             return saveAll(payloads, args.path);

@@ -18,8 +18,8 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }), 'recraft/recraft-v4.1-utility');
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }, { hasImage: true }), 'recraft/recraft-v4.1-utility-pro');
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/', imageModel: 'custom/model' }, { hasImage: true }), 'custom/model');
-    const body = generationBody({ model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', size: 'auto', quality: 'auto', n: 1, image_format: "png" });
-    assert.deepEqual(body, { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png', });
+    const body = generationBody({ model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', size: 'auto', quality: 'auto', n: 1, image_format: "png", background: "transparent" });
+    assert.deepEqual(body, { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png', background: "transparent" });
     assert.equal('partial_images' in body, false);
     assert.deepEqual(imagePayloads({ data: [{ b64_json: TINY_PNG }, { b64_json: '' }] }), [TINY_PNG]);
     assert.equal(normalizeImageSize('auto'), null);
