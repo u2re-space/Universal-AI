@@ -6,20 +6,23 @@
  * @usedBy openai/client, agent/loop, agent/tools, commands/image, commands/run
  * @exports PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, IMAGE_SIZES, VECTOR_RATIOS,
  *   imageTransport, imageModelFor, normalizeImageSize, normalizeImageFormat, normalizeVectorRatio,
- *   isVectorModel, supportsTransparentBackground, imageFormatField, generationBody, encodeMultipart,
+ *   isVectorModel, supportsTransparentBackground, backgroundValue, imageFormatField, generationBody, encodeMultipart,
  *   imagePayloads, pngHasAlphaChannel, sniffImage
  * @ai.tags images, proxyapi
  * @ai.hint pure
- * @changed 2026-10-22 Model-aware background/output_format fields, PNG alpha check, and vector model support.
+ * @changed 2026-10-22 gpt-image-2.5 defaults for raster, gpt-image-2 alpha exception, vector model support.
  */
 
 import { randomBytes } from 'node:crypto';
 
 /** Default ProxyAPI text-to-image model when imageModel is unset. See https://proxyapi.ru/models/browse/image */
-export const PROXY_IMAGE_MODEL = 'recraft/recraft-v4.1-utility';
+export const PROXY_IMAGE_MODEL = 'openai/gpt-image-2.5-flare';
 
-/** Default ProxyAPI model for edits and image-conditioned generation; the flash model has no vision input. */
-export const PROXY_IMAGE_EDIT_MODEL = 'recraft/recraft-v4.1-utility-pro';
+/**
+ * Default ProxyAPI model for edits and image-conditioned generation. Same gpt-image-2.5 family as
+ * the generation default; both ids accept a source image and are interchangeable through --image-model.
+ */
+export const PROXY_IMAGE_EDIT_MODEL = 'openai/gpt-image-2.5-sunburst';
 
 /** Default ProxyAPI vector (SVG) model. See https://proxyapi.ru/models/recraft/recraft-v4.1-vector */
 export const PROXY_VECTOR_MODEL = 'recraft/recraft-v4.1-vector';
@@ -73,8 +76,8 @@ export function imageTransport(config) {
 }
 
 /**
- * Model id for an images API call. ProxyAPI needs an explicit id such as recraft/recraft-v4.1.
- * Requests with a source image use the vision-capable default.
+ * Model id for an images API call. ProxyAPI needs an explicit id such as openai/gpt-image-2.5-flare.
+ * Requests with a source image use the edit default.
  * @param {{ imageModel?: string | null, baseURL?: string, image?: { transport?: string | null } }} config
  * @param {{ hasImage?: boolean }} [request]
  * @returns {string | null}
@@ -145,27 +148,46 @@ export function normalizeImageFormat(format) {
 }
 
 /**
- * OpenAI image models accept `background: transparent` and `output_format`; Recraft and most
- * other vendors accept only `image_format` and render an opaque background. The caller uses
- * this to decide whether native alpha is possible or a local background removal is needed.
- * @param {string | null | undefined} model
- * @returns {boolean}
- * @exports
- * @ai.hint pure
- */
-export function supportsTransparentBackground(model) {
-    return /^(?:openai\/)?gpt-image-/i.test(String(model ?? '').trim());
-}
-
-/**
- * Field name for the output format: OpenAI uses `output_format`, Recraft uses `image_format`.
+ * OpenAI image models accept `output_format`; Recraft and most other vendors accept only
+ * `image_format`.
  * @param {string | null | undefined} model
  * @returns {'output_format' | 'image_format'}
  * @exports
  * @ai.hint pure
  */
 export function imageFormatField(model) {
-    return supportsTransparentBackground(model) ? 'output_format' : 'image_format';
+    return /^(?:openai\/)?gpt-image-/i.test(String(model ?? '').trim()) ? 'output_format' : 'image_format';
+}
+
+/**
+ * OpenAI gpt-image models accept `background: transparent`; gpt-image-2 is the exception and
+ * rejects the field, so it is treated as an opaque-only model. Recraft and most other vendors
+ * render an opaque background. The caller uses this to decide whether native alpha is possible
+ * or a local background removal is needed.
+ * @param {string | null | undefined} model
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function supportsTransparentBackground(model) {
+    const version = /^(?:openai\/)?gpt-image-(\d+(?:\.\d+)?)/i.exec(String(model ?? '').trim())?.[1];
+    return Boolean(version) && version !== '2';
+}
+
+/**
+ * Value for the `background` field, or null to omit it. Transparent output needs a model that
+ * accepts the field and a format that can store alpha: the API rejects transparent JPEG, so that
+ * combination falls back to a local background removal (reported by the caller).
+ * @param {{ model: string, format?: string | null, background?: string | null }} request
+ * @returns {'transparent' | 'opaque' | null}
+ * @exports
+ * @ai.hint pure
+ */
+export function backgroundValue({ model, format = null, background = null }) {
+    if (background !== 'transparent' && background !== 'opaque') return null;
+    if (!supportsTransparentBackground(model)) return null;
+    if (background === 'transparent' && normalizeImageFormat(format) === 'jpeg') return null;
+    return background;
 }
 
 /**
@@ -198,7 +220,8 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
     if (Number.isInteger(n) && n > 1) body.n = n;
     const fmt = normalizeImageFormat(format);
     if (fmt) body[imageFormatField(model)] = fmt;
-    if ((background === 'transparent' || background === 'opaque') && supportsTransparentBackground(model)) body.background = background;
+    const backgroundField = backgroundValue({ model, format: fmt, background });
+    if (backgroundField) body.background = backgroundField;
     return body;
 }
 

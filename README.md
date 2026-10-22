@@ -144,9 +144,11 @@ ai --image chart.png --web "что это за график и актуальн�
 
 # правка картинки (image-to-image)
 ai image --image logo.png "сделай фон прозрачным" --image-background transparent --out logo2.png
-# прозрачность: gpt-image-* получают background=transparent и output_format=png нативно;
+# прозрачность: gpt-image-* (кроме gpt-image-2) получают background=transparent и output_format=png нативно;
 # у recraft и подобных моделей альфа-канала в генерации нет, поэтому PNG обрабатывается локально
 # через ImageMagick (заливка от углов по цвету фона).
+# по умолчанию для растра берутся openai/gpt-image-2.5-flare (генерация) и openai/gpt-image-2.5-sunburst
+# (правка): они держат палитру источника, тогда как recraft v4.1 сдвигает нейтральные цвета в сине-фиолетовый.
 
 # команда агентов с подтверждением каждой записи/команды (по умолчанию в терминале)
 ai run "исправь падающий тест в test/"

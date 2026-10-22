@@ -77,6 +77,23 @@ test('local alpha fallback removes a flat background and keeps the subject', asy
     }
 });
 
+test('local alpha fallback works on a path relative to the process cwd', async (t) => {
+    const exe = await detectMagick();
+    if (!exe) return t.skip('ImageMagick is not installed');
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-alpha-relative-'));
+    try {
+        await makeFlatImage({ exe, dir, file: 'relative.png', width: 64, height: 64 });
+        const relative = path.relative(process.cwd(), path.join(dir, 'relative.png'));
+        if (path.isAbsolute(relative)) return t.skip('temp directory is on another drive');
+        const result = await ensureTransparentBackground({ file: relative });
+        assert.equal(result.changed, true);
+        assert.equal(result.reason, 'removed');
+        assert.equal(await magickIsOpaque({ exe, input: path.join(dir, 'relative.png'), cwd: dir }), false);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
 test('vector suitability accepts flat artwork and refuses a photographic palette', async (t) => {
     const exe = await detectMagick();
     if (!exe) return t.skip('ImageMagick is not installed');

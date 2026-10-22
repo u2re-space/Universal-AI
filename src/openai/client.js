@@ -15,7 +15,7 @@ import { ApiError } from './errors.js';
 import { createHttp, readBody } from './http.js';
 import { parseSSE } from './sse.js';
 import { createStreamReducer, outputText } from './stream.js';
-import { encodeMultipart, generationBody, imageFormatField, imagePayloads, isVectorModel, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, supportsTransparentBackground } from './images.js';
+import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imagePayloads, isVectorModel, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio } from './images.js';
 
 export { ApiError };
 
@@ -296,7 +296,8 @@ export function createClient({
                 if (frame) fields.size = frame;
                 const fmt = normalizeImageFormat(format);
                 if (fmt) fields[imageFormatField(model)] = fmt;
-                if ((background === 'transparent' || background === 'opaque') && supportsTransparentBackground(model)) fields.background = background;
+                const backgroundField = backgroundValue({ model, format: fmt, background });
+                if (backgroundField) fields.background = backgroundField;
             }
             const form = encodeMultipart({
                 fields,

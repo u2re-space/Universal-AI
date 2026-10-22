@@ -7,7 +7,7 @@
  * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify, magickIsOpaque, magickColorCount, magickPaletteStats, assessVectorSuitability, magickRemoveFlatBackground, ensureTransparentBackground
  * @ai.tags imagemagick, image, crop, split, alpha, vector
  * @ai.hint io
- * @changed 2026-10-22 Added the color count and the vector-suitability check.
+ * @changed 2026-10-22 Added the color count and the vector-suitability check; relative paths work in ensureTransparentBackground.
  */
 
 import path from 'node:path';
@@ -283,6 +283,8 @@ export async function assessVectorSuitability({ exe, input, cwd, signal, maxColo
 
 /**
  * Make a saved image's flat background transparent, in place. Already transparent images are left alone.
+ * The file is resolved to an absolute path first: ImageMagick runs with the file's directory as cwd,
+ * so a relative path would otherwise be looked up inside that directory and fail.
  * JPEG cannot carry alpha, so it is reported instead of silently flattened.
  * @param {{ file: string, magickPath?: string|null, signal?: AbortSignal, fuzz?: number }} opts
  * @returns {Promise<{ changed: boolean, reason: string, color?: string, error?: Error }>}
@@ -290,16 +292,17 @@ export async function assessVectorSuitability({ exe, input, cwd, signal, maxColo
  * @ai.hint io
  */
 export async function ensureTransparentBackground({ file, magickPath = null, signal, fuzz = 10 }) {
-    const ext = path.extname(file).toLowerCase();
+    const abs = path.resolve(file);
+    const ext = path.extname(abs).toLowerCase();
     if (ext === '.jpg' || ext === '.jpeg') return { changed: false, reason: 'format' };
     const exe = await detectMagick({ magickPath });
     if (!exe) return { changed: false, reason: 'no-magick' };
-    const cwd = path.dirname(file);
-    const opaque = await magickIsOpaque({ exe, input: file, cwd, signal }).catch(() => null);
+    const cwd = path.dirname(abs);
+    const opaque = await magickIsOpaque({ exe, input: abs, cwd, signal }).catch(() => null);
     if (opaque === false) return { changed: false, reason: 'already' };
     if (opaque === null) return { changed: false, reason: 'unknown' };
     try {
-        return await magickRemoveFlatBackground({ exe, input: file, output: file, cwd, signal, fuzz });
+        return await magickRemoveFlatBackground({ exe, input: abs, output: abs, cwd, signal, fuzz });
     } catch (error) {
         return { changed: false, reason: 'failed', error };
     }
