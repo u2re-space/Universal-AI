@@ -26,4 +26,4 @@ Do not click except by asking the caller to delegate a clicker. Report the text 
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'low', model: 'gpt-6-luna' };
+export const settings = { effort: 'high', model: 'gpt-6-luna' };

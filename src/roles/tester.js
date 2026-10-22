@@ -26,4 +26,4 @@ Pass only with evidence from the screen or from text you were given. Report pass
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'medium', model: 'gpt-6-luna' };
+export const settings = { effort: 'high', model: 'gpt-6-luna' };
