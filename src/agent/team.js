@@ -1,7 +1,7 @@
 /**
  * @file src/agent/team.js
  * @module agent/team
- * @purpose Run planner, measurer, collector, worker, reviewer, coordinator, and summarizer over one shared context.
+ * @purpose Run planner, measurer, orchestrator, worker, reviewer, and summarizer over one shared context.
  * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, agent/work-plan, agent/handoff, agent/quality, mcp/session, channels/decide, channels/questions, channels/verdict
  * @usedBy commands/run, index.js
  * @exports toolNamesForRole, runTeam
@@ -70,9 +70,9 @@ const HARD_STOP = new Set(['cancelled', 'budget', 'failed']);
 
 
 
-/** Collector stays read-only. Reviewer may run commands and use the desktop. Worker keeps every enabled name. */
+/** The orchestrator stays read-only. Reviewer may run commands and use the desktop. Worker keeps every enabled name. */
 export function toolNamesForRole(allNames, role) {
-    if (role === 'collector') return allNames.filter((name) => READ_ONLY_TOOLS.includes(name));
+    if (role === 'orchestrator' || role === 'collector' || role === 'coordinator') return allNames.filter((name) => READ_ONLY_TOOLS.includes(name));
     if (role === 'reviewer') {
         return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name));
     }
@@ -80,8 +80,8 @@ export function toolNamesForRole(allNames, role) {
 }
 
 /**
- * Multi-role run: planner (senior) → collector (cheap, read-only) → worker (tool calls, step by step)
- * → reviewer (+ fix rounds) → summarizer (long-term memory). All roles share one context document.
+ * Multi-role run: planner (senior) → orchestrator (collects context, coordinates after stages)
+ * → worker (tool calls, step by step) → reviewer (+ fix rounds) → summarizer (long-term memory).
  *
  * Returns { status, text, plan, review, steps, images, changes, stats, recalled, memoriesSaved, error }.
  * status: completed | revise (review not accepted) | incomplete | cancelled | budget | failed
@@ -137,7 +137,7 @@ export async function runTeam({
     const mcpRead = mcp.extras.filter((extra) => extra.category === 'read');
     const imageApi = imageTransport(config) === 'images';
     const enabled = enabledToolNames(config.tools, { interactive, memory: Boolean(memory), summarize: true, imageApi, unsafeScreenshot: config.desktop?.unsafeScreenshot === true });
-    const readNames = toolNamesForRole(enabled, 'collector');
+    const readNames = toolNamesForRole(enabled, 'orchestrator');
     const reviewerNames = toolNamesForRole(enabled, 'reviewer');
     const allNames = toolNamesForRole(enabled, 'worker');
     const vision = (role) => {
@@ -176,8 +176,7 @@ export async function runTeam({
         ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker'), editPaths: () => taskMarks.edit,
         describeScreen: roles.describeScreen, delegate, extras: mcp.extras,
     });
-    const collectorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('collector'), extras: mcpRead });
-    const coordinatorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('coordinator'), extras: mcpRead });
+    const orchestratorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('orchestrator'), extras: mcpRead });
     const reviewerTools = createToolset({
         ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer'),
         describeScreen: roles.describeScreen, delegate, extras: mcpRead,
@@ -189,8 +188,7 @@ export async function runTeam({
     const finish = () => {
         result.changes = [...fileChanges, ...workerTools.stats().changes];
         result.stats = {
-            worker: workerTools.stats(), collector: collectorTools.stats(), reviewer: reviewerTools.stats(),
-            coordinator: coordinatorTools.stats(),
+            worker: workerTools.stats(), orchestrator: orchestratorTools.stats(), reviewer: reviewerTools.stats(),
         };
         return result;
     };
@@ -326,7 +324,7 @@ export async function runTeam({
             ctx.set('plan', 'Plan', briefPlan(plan, progress), { priority: 8 });
             ctx.set('progress', 'Progress (worker reports)', briefProgress(progress), { priority: 6 });
         };
-        /** Confirmed read/edit/scan marks for the worker and the collector. */
+        /** Confirmed read/edit/scan marks for the worker and the orchestrator. */
         const applyMarks = (source) => {
             marks = filterTaskMap(source?.taskMap, projectMap);
             taskMarks.edit = new Set(marks.filter((item) => item.role === 'edit').map((item) => item.path));
@@ -345,31 +343,31 @@ export async function runTeam({
             seenChanges = workerTools.stats().changes.length;
             return paths;
         };
-        const coordinatorSettings = config.agent.coordinator ?? {};
-        const coordinatorOn = Boolean(coordinatorSettings.enabled);
-        const coordinatorAfter = new Set(Array.isArray(coordinatorSettings.after) ? coordinatorSettings.after : []);
-        let coordinatorSeenChanges = 0;
-        const coordinatorLog = [];
-        let coordinatorGuidance = '';
+        const orchestratorSettings = config.agent.orchestrator ?? {};
+        const orchestratorOn = Boolean(orchestratorSettings.enabled);
+        const orchestratorAfter = new Set(Array.isArray(orchestratorSettings.after) ? orchestratorSettings.after : []);
+        let orchestratorSeenChanges = 0;
+        const orchestratorLog = [];
+        let orchestratorGuidance = '';
         /**
-         * Consult the coordinator after a stage. Its plan update is applied when configured;
-         * its nextStep becomes explicit guidance for the next worker turn. A failed coordinator
+         * Consult the orchestrator after a stage. Its plan update is applied when configured;
+         * its nextStep becomes explicit guidance for the next worker turn. A failed orchestrator
          * is advisory: the run continues on the existing plan.
          * @param {'plan'|'collect'|'work'|'review'|'fix'} stage
          * @param {{ step?: object|null, status?: string, report?: string, review?: object|null }} [input]
          * @returns {Promise<object|null>}
          */
-        const coordinate = async (stage, { step = null, status = '', report = '', review = null } = {}) => {
-            if (!coordinatorOn || !coordinatorAfter.has(stage) || !plan || !progress) return null;
-            const recent = workerTools.stats().changes.slice(coordinatorSeenChanges);
-            coordinatorSeenChanges = workerTools.stats().changes.length;
+        const orchestrate = async (stage, { step = null, status = '', report = '', review = null } = {}) => {
+            if (!orchestratorOn || !orchestratorAfter.has(stage) || !plan || !progress) return null;
+            const recent = workerTools.stats().changes.slice(orchestratorSeenChanges);
+            orchestratorSeenChanges = workerTools.stats().changes.length;
             let diff = '(no file changes since the previous stage)';
             if (recent.length) {
-                try { diff = await describeChangeSet({ root, changes: recent, maxBytes: coordinatorSettings.diffMaxBytes ?? 256 * 1024 }); }
-                catch (error) { notify({ type: 'warning', message: `Координатор: diff не собран (${errorMessage(error)}).` }); }
+                try { diff = await describeChangeSet({ root, changes: recent, maxBytes: orchestratorSettings.diffMaxBytes ?? 256 * 1024 }); }
+                catch (error) { notify({ type: 'warning', message: `Оркестратор: diff не собран (${errorMessage(error)}).` }); }
             }
             ctx.set('recentDiff', 'Recent changes (since the previous stage)', diff, { priority: 8 });
-            const role = roles.resolve('coordinator');
+            const role = roles.resolve('orchestrator');
             const sections = [];
             if (step) {
                 sections.push(`# Step just finished\nID: ${step.id ?? '(none)'}\nGoal: ${step.goal}\nStatus: ${status || 'unknown'}\nReport:\n${clipMiddle(report || '(empty)', 8000)}`);
@@ -382,38 +380,38 @@ export async function runTeam({
                 ? 'Plan updates are not applied at this stage. Put every concrete change into nextStep.'
                 : 'Plan updates returned here are applied to the plan before the next worker turn.';
             const request = [
-                ctx.render({ maxBytes: coordinatorSettings.maxContextBytes ?? 4 * 1024 * 1024, exclude: ['tree'] }),
+                ctx.render({ maxBytes: orchestratorSettings.maxContextBytes ?? 4 * 1024 * 1024, exclude: ['tree'] }),
                 ...sections,
-                `# Coordination request\nStage: ${stage}\n${rule}`,
+                `# Orchestration request\nStage: ${stage}\n${rule}`,
             ].filter(Boolean).join('\n\n');
-            notify({ type: 'stage.start', stage: 'coordinate', role: 'coordinator', model: role.model });
-            const reply = await roles.run('coordinator', {
-                text: request, instructions: ROLE_INSTRUCTIONS.coordinator, toolset: coordinatorTools,
+            notify({ type: 'stage.start', stage: 'orchestrate', role: 'orchestrator', model: role.model });
+            const reply = await roles.run('orchestrator', {
+                text: request, instructions: ROLE_INSTRUCTIONS.orchestrator, toolset: orchestratorTools,
                 schema: COORDINATION_SCHEMA, schemaName: 'coordination',
-                maxTurns: coordinatorSettings.maxTurns ?? 6, model: role.model, effort: role.effort,
+                maxTurns: orchestratorSettings.maxTurns ?? 6, model: role.model, effort: role.effort,
             });
             if (reply.status === 'cancelled' || reply.status === 'budget') {
-                throw reply.error ?? new CancelledError('Координатор остановлен.');
+                throw reply.error ?? new CancelledError('Оркестратор остановлен.');
             }
             if (reply.status !== 'completed' || !reply.data) {
-                notify({ type: 'warning', message: `Координатор не ответил (${reply.status}${reply.error ? `: ${errorMessage(reply.error)}` : ''}); продолжаем по плану.` });
-                notify({ type: 'stage.done', stage: 'coordinate', status: reply.status });
+                notify({ type: 'warning', message: `Оркестратор не ответил (${reply.status}${reply.error ? `: ${errorMessage(reply.error)}` : ''}); продолжаем по плану.` });
+                notify({ type: 'stage.done', stage: 'orchestrate', status: reply.status });
                 return null;
             }
             const data = reply.data;
             const summary = String(data.summary ?? '').trim();
             const nextStep = String(data.nextStep ?? '').trim();
             const risks = Array.isArray(data.risks) ? data.risks.filter((item) => typeof item === 'string' && item.trim()) : [];
-            coordinatorGuidance = nextStep;
-            coordinatorLog.push([`[${stage}] ${summary}`, nextStep ? `Next: ${nextStep}` : '', risks.length ? `Risks: ${risks.join('; ')}` : ''].filter(Boolean).join('\n'));
+            orchestratorGuidance = nextStep;
+            orchestratorLog.push([`[${stage}] ${summary}`, nextStep ? `Next: ${nextStep}` : '', risks.length ? `Risks: ${risks.join('; ')}` : ''].filter(Boolean).join('\n'));
             progress.notes ??= [];
-            progress.notes.push({ kind: 'coordinator', stage, status: 'completed', report: summary, note: nextStep });
-            ctx.set('coordination', 'Coordinator notes', clipMiddle(coordinatorLog.join('\n\n'), coordinatorSettings.logMaxBytes ?? 32 * 1024), { priority: 9 });
-            notify({ type: 'coordinator.done', stage, summary, nextStep, risks });
+            progress.notes.push({ kind: 'orchestrator', stage, status: 'completed', report: summary, note: nextStep });
+            ctx.set('orchestration', 'Orchestrator notes', clipMiddle(orchestratorLog.join('\n\n'), orchestratorSettings.logMaxBytes ?? 32 * 1024), { priority: 9 });
+            notify({ type: 'orchestrator.done', stage, summary, nextStep, risks });
             const update = data.planUpdate ?? {};
             const addSteps = Array.isArray(update.addSteps) ? update.addSteps : [];
             const revise = Array.isArray(update.revise) ? update.revise : [];
-            if (coordinatorSettings.applyPlan !== false && stage !== 'review' && stage !== 'fix' && (addSteps.length || revise.length)) {
+            if (orchestratorSettings.applyPlan !== false && stage !== 'review' && stage !== 'fix' && (addSteps.length || revise.length)) {
                 const applied = applyPlanUpdate(plan, { note: update.note ?? '', addSteps, revise }, { maxSteps: stepLimit, afterId: step?.id ?? null });
                 plan = applied.plan;
                 progress = syncProgress(progress, plan);
@@ -423,7 +421,7 @@ export async function runTeam({
                 await persist();
                 notify({ type: 'plan.updated', stage, note: applied.note, steps: plan.steps.length });
             }
-            notify({ type: 'stage.done', stage: 'coordinate', status: 'completed' });
+            notify({ type: 'stage.done', stage: 'orchestrate', status: 'completed' });
             return { ...data, summary, nextStep, risks };
         };
         let workerSession = createSession({ store: false, model: roles.resolve('worker').model });
@@ -495,7 +493,7 @@ export async function runTeam({
             if (plan.imageNotes) ctx.set('images', 'Attached images (planner notes)', plan.imageNotes, { priority: 7 });
             publish();
         };
-        /** Fill lists the planner schema always sends, so a resumed file cannot crash the collector. */
+        /** Fill lists the planner schema always sends, so a resumed file cannot crash the orchestrator. */
         const lists = (source) => {
             for (const key of ['filesOfInterest', 'searchQueries', 'questionsForCollector', 'acceptanceCriteria', 'risks']) {
                 if (!Array.isArray(source[key])) source[key] = [];
@@ -519,7 +517,7 @@ export async function runTeam({
                 ctx.set('artifacts', 'Artifacts', handoff.artifacts.filter((item) => !item.supersededBy).map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''}`.trim()).join('\n') || '(none)', { priority: 8 });
             }
             const findings = await readFile(path.join(root, '.tmp', work.id, 'findings.md'), 'utf8').catch(() => '');
-            if (findings.trim()) ctx.set('findings', 'Collected context (by the collector)', findings, { priority: 6 });
+            if (findings.trim()) ctx.set('findings', 'Collected context (by the orchestrator)', findings, { priority: 6 });
             const sheet = await readFile(path.join(root, '.tmp', work.id, 'measurements.json'), 'utf8').catch(() => null);
             if (sheet) {
                 try { ctx.set('metrics', 'Reference measurements (by the measurer)', renderMeasurements(JSON.parse(sheet)), { priority: 8 }); }
@@ -756,7 +754,7 @@ export async function runTeam({
         }
         }
 
-        await coordinate('plan');
+        await orchestrate('plan');
 
         // 2. Measurer: numbers for the references before any style, SVG, or artwork is written.
         const referenceParts = parts.filter((part) => part?.type === 'input_image');
@@ -811,7 +809,7 @@ export async function runTeam({
             notify({ type: 'stage.done', stage: 'measure', status: measured.status });
         }
 
-        // 2. Collector (cheap model, read-only). Skipped when this run already moved past it.
+        // 2. Context collection by the orchestrator (read-only). Skipped when this run already moved past it.
         const wantsContext = plan.complexity !== 'trivial' && (
             plan.filesOfInterest.length || plan.searchQueries.length || plan.questionsForCollector.length
             || marks.some((item) => item.role === 'read' || item.role === 'edit')
@@ -820,24 +818,24 @@ export async function runTeam({
             progress.cursor > 0 || Boolean(ctx.get('findings')) || ['work', 'review', 'fix', 'done'].includes(progress.stage)
         );
         if (!pastCollect && paced?.collect !== 'off' && wantsContext && readNames.length) {
-            notify({ type: 'stage.start', stage: 'collect', role: 'collector', model: paced.roles.collector.model });
+            notify({ type: 'stage.start', stage: 'collect', role: 'orchestrator', model: paced.roles.orchestrator.model });
             const focus = marks.filter((item) => item.role === 'read' || item.role === 'edit').map((item) => `${item.role} ${item.path} — ${item.reason}`);
-            const brief = `# Collector brief\nTask map (read/edit):\n${bullets(focus)}\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`;
-            const collected = await roles.run('collector', {
-                text: `${ctx.render({ maxBytes })}\n\n${brief}`, instructions: ROLE_INSTRUCTIONS.collector, toolset: collectorTools,
-                schema: COLLECTOR_SCHEMA, schemaName: 'context_report', maxTurns: config.agent.collectorMaxTurns,
-                model: paced.roles.collector.model, effort: paced.roles.collector.effort,
+            const brief = `# Orchestrator brief (collect context)\nTask map (read/edit):\n${bullets(focus)}\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`;
+            const collected = await roles.run('orchestrator', {
+                text: `${ctx.render({ maxBytes })}\n\n${brief}`, instructions: ROLE_INSTRUCTIONS.orchestrator, toolset: orchestratorTools,
+                schema: COLLECTOR_SCHEMA, schemaName: 'context_report', maxTurns: config.agent.orchestratorMaxTurns,
+                model: paced.roles.orchestrator.model, effort: paced.roles.orchestrator.effort,
             });
             if (HARD_STOP.has(collected.status)) return stop(collected, 'сбор контекста');
             if (collected.status === 'completed' && collected.data) {
                 const text = renderFindings(collected.data);
-                ctx.set('findings', 'Collected context (by the collector)', text, { priority: 6 });
+                ctx.set('findings', 'Collected context (by the orchestrator)', text, { priority: 6 });
                 await writeFile(path.join(root, '.tmp', work.id, 'findings.md'), text, 'utf8').catch(() => {});
             } else notify({ type: 'warning', message: `Сбор контекста не завершён (${collected.status}${collected.error ? `: ${errorMessage(collected.error)}` : ''}); продолжаем без него.` });
             notify({ type: 'stage.done', stage: 'collect', status: collected.status });
         }
 
-        await coordinate('collect');
+        await orchestrate('collect');
 
         // 3. Worker: one conversation, one step at a time, starting at the saved cursor.
         notify({ type: 'stage.start', stage: 'work', role: 'worker', model: roles.resolve('worker').model });
@@ -870,7 +868,7 @@ export async function runTeam({
             const resumeSession = interrupted && progress.checkpoint?.stepId === step.id && pendingSession?.model === chosen.model;
             const extra = index === revisionAt ? revisionClause(revision) : '';
             if (extra) revisionUsed = true;
-            const advice = coordinatorGuidance ? `\n\nCoordinator guidance (from the previous stage):\n${coordinatorGuidance}` : '';
+            const advice = orchestratorGuidance ? `\n\nOrchestrator guidance (from the previous stage):\n${orchestratorGuidance}` : '';
             const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}${extra}${advice}${paced?.guarantees === 'broken' ? `\n\n${guaranteesParagraph('broken')}` : ''}`;
             const passes = [];
             if (interrupted) {
@@ -989,7 +987,7 @@ export async function runTeam({
             result.steps.push({ index: recordAt + 1, goal: step.goal, status: ran.outcome.status, report: ran.report });
             notify({ type: 'step.done', index: recordAt + 1, total: plan.steps.length, status: ran.outcome.status, summary: ran.report });
             if (HARD_STOP.has(ran.outcome.status)) return stop(ran.outcome, `шаг ${number}`);
-            await coordinate('work', { step, status: ran.outcome.status, report: ran.report });
+            await orchestrate('work', { step, status: ran.outcome.status, report: ran.report });
             if (ran.outcome.status !== 'completed') {
                 workIncomplete = true;
                 if (generation && ran.outcome.status === 'max_turns') {
@@ -1086,11 +1084,11 @@ export async function runTeam({
             result.reviewRounds = round;
             notify({ type: 'review.done', round, verdict: review.verdict, summary: review.summary, issues: review.issues, unverified: review.unverified });
             notify({ type: 'stage.done', stage: 'review', status: review.verdict });
-            const reviewAdvice = await coordinate('review', { review, status: review.verdict });
+            const reviewAdvice = await orchestrate('review', { review, status: review.verdict });
             if (review.verdict === 'accept' || round >= paced.reviewRounds) break;
             notify({ type: 'stage.start', stage: 'fix', role: 'worker', model: roles.resolve('worker').model, round });
             const issues = review.issues.map((i) => `- [${i.severity}] ${i.path ? `${i.path}: ` : ''}${i.message} → ${i.requestedChange}`).join('\n') || '- (see summary)';
-            const fixGuidance = reviewAdvice?.nextStep ? `\n\nCoordinator guidance:\n${reviewAdvice.nextStep}` : '';
+            const fixGuidance = reviewAdvice?.nextStep ? `\n\nOrchestrator guidance:\n${reviewAdvice.nextStep}` : '';
             const fixed = await runWorker(`Review round ${round}: changes requested`, `${review.summary}\n${issues}${fixGuidance}\n\nAddress every issue, verify, and report what you changed.`, config.agent.workerMaxTurnsPerStep, plan.steps.some((step) => authorFor(step.files, step.goal) === 'coder') ? 'coder' : plan.steps.some((step) => authorFor(step.files, step.goal) === 'writer') ? 'writer' : 'worker', { complexity: [...plan.steps].sort((a, b) => (({ trivial: 0, normal: 1, complex: 2 })[b.complexity] ?? 1) - (({ trivial: 0, normal: 1, complex: 2 })[a.complexity] ?? 1))[0]?.complexity ?? plan.complexity });
             result.images.push(...fixed.images);
             result.steps.push({ index: `fix-${round}`, goal: 'Устранение замечаний ревью', status: fixed.status, report: fixed.text.trim() });
@@ -1101,7 +1099,7 @@ export async function runTeam({
             await persist();
             notify({ type: 'stage.done', stage: 'fix', status: fixed.status });
             if (HARD_STOP.has(fixed.status)) return stop(fixed, 'исправления');
-            await coordinate('fix', { status: fixed.status, report: fixed.text.trim(), review });
+            await orchestrate('fix', { status: fixed.status, report: fixed.text.trim(), review });
         }
 
         // 5. Outcome.

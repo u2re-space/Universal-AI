@@ -394,7 +394,7 @@ export const TOOL_SPECS = {
 
 export const READ_ONLY_TOOLS = ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall', 'list_backups'];
 
-/** Shell tools enabled together by tools.shell. Reviewer may run these; collector may not. */
+/** Shell tools enabled together by tools.shell. Orchestrator may run these during coordination; collector context-report uses read-only tools only. */
 export const SHELL_TOOL_NAMES = ['run_command', 'run_script', 'ssh'];
 
 /**

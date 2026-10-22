@@ -43,7 +43,7 @@ after(async () => { await server.close(); await rm(root, { recursive: true, forc
 const baseConfig = () => structuredClone({
     ...defaults, model: 'gpt-6.1-sol', home: root, baseURL: server.baseURL,
     pace: { ...defaults.pace, quality: 20 },
-    roles: { ...defaults.roles, worker: { ...defaults.roles.worker, model: 'gpt-6-luna' }, collector: { ...defaults.roles.collector, model: 'gpt-6-luna' },
+    roles: { ...defaults.roles, worker: { ...defaults.roles.worker, model: 'gpt-6-luna' }, orchestrator: { ...defaults.roles.orchestrator, model: 'gpt-6-luna' },
         vision: { ...defaults.roles.vision, model: 'gpt-6-luna-vision' }, summarizer: { ...defaults.roles.summarizer, model: 'gpt-6-luna-nano' } },
     memory: { ...defaults.memory, dbFile: ':memory:' },
 });
@@ -80,7 +80,7 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.deepEqual(overrides.agent, { mode: 'single' });
     assert.deepEqual(overrides.memory, { enabled: false });
     assert.throws(() => overridesFrom({ role: ['nobody=x'] }), /неизвестная роль/);
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 18);
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 17);
     assert.equal(overridesFrom({ extract: 'always' }).agent.extract, 'always');
     assert.equal(overridesFrom({ 'no-extract': true }).agent.extract, 'off');
     assert.throws(() => overridesFrom({ extract: 'nope' }), /--extract/);
@@ -1002,7 +1002,7 @@ test('encode host failure does not call the encoder model', async () => {
     assert.match(result.error.message, /encode failed/);
 });
 
-test('coordinator revises the plan after a step and guides the next worker turn', async () => {
+test('orchestrator revises the plan after a step and guides the next worker turn', async () => {
     let coordinatorCalls = 0;
     const workerTexts = [];
     script = (body) => {
@@ -1034,7 +1034,7 @@ test('coordinator revises the plan after a step and guides the next worker turn'
     const config = baseConfig();
     config.agent = {
         ...defaults.agent, chain: false, resume: false,
-        coordinator: { ...defaults.agent.coordinator, enabled: true, after: ['plan', 'work'], maxContextBytes: 2 * 1024 * 1024 },
+        orchestrator: { ...defaults.agent.orchestrator, enabled: true, after: ['plan', 'work'], maxContextBytes: 2 * 1024 * 1024 },
     };
     config.memory = { ...defaults.memory, enabled: false };
     const events = [];
@@ -1045,13 +1045,13 @@ test('coordinator revises the plan after a step and guides the next worker turn'
     assert.deepEqual(result.steps.map((step) => step.goal), ['Создать a.js', 'Создать b.js']);
     const secondStepTurn = workerTexts.find((text) => /Your step 2/.test(text));
     assert.ok(secondStepTurn, 'the worker received the added step');
-    assert.match(secondStepTurn, /Coordinator guidance/);
+    assert.match(secondStepTurn, /Orchestrator guidance/);
     assert.match(secondStepTurn, /create b\.js that imports a\.js/);
-    assert.equal(events.filter((event) => event.type === 'stage.start' && event.stage === 'coordinate').length, 3);
+    assert.equal(events.filter((event) => event.type === 'stage.start' && event.stage === 'orchestrate').length, 3);
     assert.ok(events.some((event) => event.type === 'plan.updated' && event.steps === 2));
-    assert.ok(events.some((event) => event.type === 'coordinator.done' && event.risks.includes('b.js отсутствует')));
+    assert.ok(events.some((event) => event.type === 'orchestrator.done' && event.risks.includes('b.js отсутствует')));
     const progress = JSON.parse(await readFile(path.join(root, '.tmp', result.workId, 'progress.json'), 'utf8'));
-    assert.equal(progress.notes.filter((note) => note.kind === 'coordinator').length, 3);
+    assert.equal(progress.notes.filter((note) => note.kind === 'orchestrator').length, 3);
 });
 
 test('measurer stage runs before collector when image parts are present', async () => {

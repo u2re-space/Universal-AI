@@ -1,7 +1,7 @@
 /**
  * @file src/agent/team-text.js
  * @module agent/team-text
- * @purpose Render planner, collector, and measurer JSON as text the worker and reviewer can read.
+ * @purpose Render planner, orchestrator, and measurer JSON as text the worker and reviewer can read.
  * @usedBy agent/team
  * @exports renderPlan, renderFindings, renderMeasurements, bullets
  * @ai.tags team
@@ -24,8 +24,8 @@ export function renderPlan(plan) {
 }
 
 /**
- * Render a collector report as findings, answers, conventions, and notes.
- * `runTeam` calls this when collection completes.
+ * Render a context report from the orchestrator as findings, answers, conventions, and notes.
+ * `runTeam` calls this when context collection completes.
  * @param {object} report
  * @returns {string}
  * @exports

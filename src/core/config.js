@@ -152,6 +152,35 @@ function pinsFrom(sources) {
 }
 
 /**
+ * Fold the retired `collector` and `coordinator` roles into the unified `orchestrator` role.
+ * Older configs keep working: their settings migrate to `orchestrator`, and the legacy keys are dropped.
+ * An explicit `orchestrator` setting always wins over a legacy one.
+ * @param {object} c Merged config (mutated in place).
+ * @returns {void}
+ * @ai.hint pure
+ */
+function migrateLegacyRoles(c) {
+    if (isRecord(c.roles)) {
+        for (const legacy of ['collector', 'coordinator']) {
+            if (!isRecord(c.roles[legacy])) continue;
+            const merged = { ...c.roles[legacy], ...(c.roles.orchestrator ?? {}) };
+            c.roles.orchestrator = merged;
+            delete c.roles[legacy];
+        }
+    }
+    if (isRecord(c.agent)) {
+        if (c.agent.collectorMaxTurns != null && c.agent.orchestratorMaxTurns == null) {
+            c.agent.orchestratorMaxTurns = c.agent.collectorMaxTurns;
+        }
+        delete c.agent.collectorMaxTurns;
+        if (isRecord(c.agent.coordinator)) {
+            c.agent.orchestrator = { ...c.agent.coordinator, ...(c.agent.orchestrator ?? {}) };
+            delete c.agent.coordinator;
+        }
+    }
+}
+
+/**
  * Resolve the effective configuration.
  * Precedence: defaults < ~/.ai-agent/config.json < --config file < environment < overrides (CLI).
  * The CLI passes environment after reading .env and repairing a split Windows credential pair.
@@ -165,6 +194,7 @@ export async function loadConfig({ configPath = null, overrides = {}, env = proc
     config.baseURL ||= 'https://api.openai.com/v1/';
     config.memory.dbFile ||= path.join(home, 'memory.db');
     config.configFiles = [path.join(home, 'config.json'), ...(configPath ? [path.resolve(configPath)] : [])];
+    migrateLegacyRoles(config);
     validateConfig(config);
     const pins = pinsFrom([homeConfig, fileConfig, overrides]);
     config.rolePins = pins.rolePins;
@@ -253,7 +283,7 @@ function validateConfig(c) {
         if (role.instructions != null && typeof role.instructions !== 'string') fail(`roles.${name}.instructions должен быть строкой`);
     }
     if (!['team', 'single'].includes(c.agent.mode)) fail('agent.mode: team | single');
-    for (const key of ['maxSteps', 'maxReviewRounds', 'collectorMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'maxContextBytes']) {
+    for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'maxContextBytes']) {
         if (!Number.isSafeInteger(c.agent[key]) || c.agent[key] < (key === 'maxReviewRounds' ? 0 : 1)) fail(`agent.${key} должен быть целым числом`);
     }
     if (!['auto', 'always', 'never'].includes(c.agent.visionDelegate)) fail('agent.visionDelegate: auto | always | never');
@@ -263,27 +293,27 @@ function validateConfig(c) {
     if (!['off', 'auto', 'always'].includes(c.agent.measure)) fail('agent.measure: off | auto | always');
     if (c.agent.route !== null && !['encoder', 'planner', 'decisions'].includes(c.agent.route)) fail('agent.route: encoder | planner | decisions');
     if (!['encoder', 'mcp'].includes(c.agent.encode)) fail('agent.encode: encoder | mcp');
-    if (!isRecord(c.agent.coordinator)) fail('agent.coordinator должен быть объектом');
-    for (const key of Object.keys(c.agent.coordinator)) {
-        if (!(key in defaults.agent.coordinator)) fail(`неизвестный параметр agent.coordinator.${key}`);
+    if (!isRecord(c.agent.orchestrator)) fail('agent.orchestrator должен быть объектом');
+    for (const key of Object.keys(c.agent.orchestrator)) {
+        if (!(key in defaults.agent.orchestrator)) fail(`неизвестный параметр agent.orchestrator.${key}`);
     }
-    if (typeof c.agent.coordinator.enabled !== 'boolean') fail('agent.coordinator.enabled: true | false');
-    const coordinatorStages = ['plan', 'collect', 'work', 'review', 'fix'];
-    if (!Array.isArray(c.agent.coordinator.after) || c.agent.coordinator.after.some((stage) => !coordinatorStages.includes(stage))) {
-        fail(`agent.coordinator.after: ${coordinatorStages.join(' | ')}`);
+    if (typeof c.agent.orchestrator.enabled !== 'boolean') fail('agent.orchestrator.enabled: true | false');
+    const orchestratorStages = ['plan', 'collect', 'work', 'review', 'fix'];
+    if (!Array.isArray(c.agent.orchestrator.after) || c.agent.orchestrator.after.some((stage) => !orchestratorStages.includes(stage))) {
+        fail(`agent.orchestrator.after: ${orchestratorStages.join(' | ')}`);
     }
-    if (!Number.isSafeInteger(c.agent.coordinator.maxContextBytes) || c.agent.coordinator.maxContextBytes < 1024) {
-        fail('agent.coordinator.maxContextBytes ≥ 1024');
+    if (!Number.isSafeInteger(c.agent.orchestrator.maxContextBytes) || c.agent.orchestrator.maxContextBytes < 1024) {
+        fail('agent.orchestrator.maxContextBytes ≥ 1024');
     }
-    if (c.agent.coordinator.maxContextBytes > c.limits.maxRequestBytes) fail('agent.coordinator.maxContextBytes не больше limits.maxRequestBytes');
+    if (c.agent.orchestrator.maxContextBytes > c.limits.maxRequestBytes) fail('agent.orchestrator.maxContextBytes не больше limits.maxRequestBytes');
     for (const key of ['diffMaxBytes', 'logMaxBytes']) {
-        if (!Number.isSafeInteger(c.agent.coordinator[key]) || c.agent.coordinator[key] < 1024) fail(`agent.coordinator.${key} ≥ 1024`);
-        if (c.agent.coordinator[key] > c.agent.coordinator.maxContextBytes) fail(`agent.coordinator.${key} не больше agent.coordinator.maxContextBytes`);
+        if (!Number.isSafeInteger(c.agent.orchestrator[key]) || c.agent.orchestrator[key] < 1024) fail(`agent.orchestrator.${key} ≥ 1024`);
+        if (c.agent.orchestrator[key] > c.agent.orchestrator.maxContextBytes) fail(`agent.orchestrator.${key} не больше agent.orchestrator.maxContextBytes`);
     }
-    if (!Number.isSafeInteger(c.agent.coordinator.maxTurns) || c.agent.coordinator.maxTurns < 1 || c.agent.coordinator.maxTurns > 50) {
-        fail('agent.coordinator.maxTurns: 1..50');
+    if (!Number.isSafeInteger(c.agent.orchestrator.maxTurns) || c.agent.orchestrator.maxTurns < 1 || c.agent.orchestrator.maxTurns > 50) {
+        fail('agent.orchestrator.maxTurns: 1..50');
     }
-    if (typeof c.agent.coordinator.applyPlan !== 'boolean') fail('agent.coordinator.applyPlan: true | false');
+    if (typeof c.agent.orchestrator.applyPlan !== 'boolean') fail('agent.orchestrator.applyPlan: true | false');
     for (const key of ['enabled', 'autoSave']) if (typeof c.memory[key] !== 'boolean') fail(`memory.${key}: true | false`);
     if (!Number.isSafeInteger(c.memory.maxRecall) || c.memory.maxRecall < 0 || c.memory.maxRecall > 50) fail('memory.maxRecall: 0..50');
     if (c.memory.notesFile !== null && (typeof c.memory.notesFile !== 'string' || !c.memory.notesFile.trim())) fail('memory.notesFile: имя файла или null');

@@ -23,8 +23,8 @@ You see the task, the shared context (project notes, long-term memories, a direc
 When a Workspace scan is present, package.json, tsconfig.json or jsconfig.json, import maps, and the listed files are the layout. Prefer those resolved paths.
 Produce a JSON plan: a short summary, complexity, 1–${'{maxSteps}'} concrete steps for a junior worker agent (each step small, ordered,
 verifiable, with precise file paths and commands). Each step includes its own complexity: trivial, normal, or complex. Put at most one project file in each step. A step that names several files is split,
-and a compatibility step is added so imports, exports, and names can be reconciled. Files the context collector should read first, literal search queries,
-questions the collector must answer, acceptance criteria, risks, and whether an independent review is worth it.
+and a compatibility step is added so imports, exports, and names can be reconciled. Files the orchestrator should read first, literal search queries,
+questions the orchestrator must answer, acceptance criteria, risks, and whether an independent review is worth it.
 Mark trivial tasks (one obvious small edit, a question answered from a single file) as "trivial" with a single step and needsReview=false.
 Do not perform the task yourself. Reply in JSON only.
 fileActions may ask the encoder to turn artifacts into fs:write commands, read a file or a line range, copy one artifact to a path, or list a directory.
@@ -36,4 +36,4 @@ You do not write files. Use an empty fileActions list when no file work is neede
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'high', model: 'gpt-6.1-sol' };
+export const settings = { effort: 'high', model: 'gpt-6-luna' };

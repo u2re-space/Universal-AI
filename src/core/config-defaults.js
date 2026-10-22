@@ -86,12 +86,12 @@ export const defaults = Object.freeze({
      * top-level settings (model, reasoning.effort, …). Roles:
      *   default    — ask / chat / single-agent run
      *   planner    — understands the task, writes the plan (senior model)
-     *   collector  — gathers context from files for the others (cheap model, read-only tools)
+     *   orchestrator — knows the project best: collects context from files, then reads the plan, progress,
+     *                  findings, and recent diff after every stage and decides what to do next
      *   worker     — executes plan steps that are not code generation
      *   coder      — writes code; model and effort follow plan complexity unless config pins them
      *   writer     — writes documents, reports, and Markdown; stays on the cheaper model, effort follows complexity
      *   reviewer   — verifies the result (read-only tools, may run tests)
-     *   coordinator — reads the plan, progress, findings, and recent diff after every stage and decides what to do next
      *   vision     — describes images; model and effort follow the long side, unless config pins them
      *   summarizer — compaction, file summaries, memory extraction (cheapest model)
      *   solver     — solves a step from the screen or an image; model and effort follow step complexity
@@ -106,12 +106,11 @@ export const defaults = Object.freeze({
     roles: {
         default: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         planner: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        collector: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+        orchestrator: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         worker: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         coder: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         writer: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         reviewer: { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        coordinator: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         vision: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         summarizer: { model: null, effort: 'low', summary: 'none', verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
         solver: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
@@ -125,10 +124,10 @@ export const defaults = Object.freeze({
     },
     /** Multi-role orchestration used by `ai run`. */
     agent: {
-        mode: 'team',                   // team (planner → collector → worker → reviewer) | single (one model, one loop)
+        mode: 'team',                   // team (planner → orchestrator → worker → reviewer) | single (one model, one loop)
         maxSteps: 12,                   // plan steps accepted from the planner
         maxReviewRounds: 2,             // reviewer → worker fix cycles
-        collectorMaxTurns: 12,
+        orchestratorMaxTurns: 12,       // tool turns the orchestrator may spend collecting context
         workerMaxTurnsPerStep: 25,
         reviewerMaxTurns: 10,
         maxContextBytes: 96 * KiB,      // rendered shared context per request
@@ -147,14 +146,14 @@ export const defaults = Object.freeze({
         encode: 'encoder',              // encoder (file-command model) | mcp (this process hosts the encode server)
         resume: true,                   // continue the newest unfinished step and its saved turn
         /**
-         * The coordinator reads the plan, progress, findings, and the recent diff after a stage
+         * The orchestrator reads the plan, progress, findings, and the recent diff after a stage
          * and returns plan updates plus guidance for the next worker turn. It is off by default
          * because it adds a senior-model request per stage. maxContextBytes is its context budget
          * (~1M tokens at 4 MiB); the configured model must support that window.
          */
-        coordinator: {
+        orchestrator: {
             enabled: false,
-            after: ['plan', 'collect', 'work', 'review', 'fix'],
+            after: ['plan', 'work', 'review', 'fix'],
             maxContextBytes: 4 * MiB,
             diffMaxBytes: 256 * KiB,
             logMaxBytes: 32 * KiB,

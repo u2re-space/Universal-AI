@@ -53,6 +53,19 @@ function number(value, name, { integer = false, min = 0 } = {}) {
  */
 const IMAGE_QUALITY = ['low', 'medium', 'high', 'xhigh', 'max', 'auto'];
 
+/** The retired collector/coordinator roles are accepted as aliases for the unified orchestrator role. */
+const ROLE_ALIASES = { collector: 'orchestrator', coordinator: 'orchestrator' };
+
+/**
+ * Map a legacy or current role name to the name stored in configuration.
+ * @param {string} name
+ * @returns {string}
+ * @ai.hint pure
+ */
+function canonicalRole(name) {
+    return ROLE_ALIASES[name] ?? name;
+}
+
 export function overridesFrom(values, { command = null } = {}) {
     const o = { limits: {}, reasoning: {}, image: {}, tools: {} };
     if (values.model) o.model = values.model;
@@ -101,8 +114,9 @@ export function overridesFrom(values, { command = null } = {}) {
         for (const spec of values.role) {
             const match = /^([\w*]+)=([^:]+?)(?::([a-z]+))?$/.exec(spec.trim());
             if (!match) throw new UsageError(`--role: ожидается имя=модель[:effort], получено "${spec}"`);
-            const [, name, model, effort] = match;
-            if (effort && !REASONING_EFFORTS.includes(effort)) throw new UsageError(`--role ${name}: effort должен быть одним из ${REASONING_EFFORTS.join(' | ')}`);
+            const [, rawName, model, effort] = match;
+            const name = canonicalRole(rawName);
+            if (effort && !REASONING_EFFORTS.includes(effort)) throw new UsageError(`--role ${rawName}: effort должен быть одним из ${REASONING_EFFORTS.join(' | ')}`);
             const targets = name === 'all' || name === '*' ? ROLE_NAMES : [name];
             for (const target of targets) {
                 if (!ROLE_NAMES.includes(target)) throw new UsageError(`--role: неизвестная роль "${target}" (${ROLE_NAMES.join(', ')})`);
@@ -124,7 +138,9 @@ export function overridesFrom(values, { command = null } = {}) {
         if (!['off', 'auto', 'always'].includes(values.measure)) throw new UsageError('--measure: off | auto | always');
         (o.agent ??= {}).measure = values.measure;
     }
-    if (values.coordinator !== undefined) (o.agent ??= {}).coordinator = { enabled: values.coordinator };
+    if (values.orchestrator !== undefined) (o.agent ??= {}).orchestrator = { enabled: values.orchestrator };
+    // --coordinator is the retired name of --orchestrator; both enable the unified role.
+    if (values.coordinator !== undefined && values.orchestrator === undefined) (o.agent ??= {}).orchestrator = { enabled: values.coordinator };
     if (values.route) {
         if (!['encoder', 'planner', 'decisions'].includes(values.route)) throw new UsageError('--route: encoder | planner | decisions');
         (o.agent ??= {}).route = values.route;

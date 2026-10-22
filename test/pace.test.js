@@ -134,7 +134,7 @@ test('rungs and review rounds follow the tables', () => {
     const high = resolvePace({ ...base, speed: 90, quality: 80, label: 'normal' });
     // gpt-6-astra is forbidden for the reviewer: the ladder steps down to the previous rung.
     assert.equal(high.roles.reviewer.model, 'gpt-6.1-sol');
-    assert.equal(high.roles.collector.rung, 0);
+    assert.equal(high.roles.orchestrator.rung, 0);
     assert.equal(high.roles.summarizer.model, 'gpt-6-luna');
     const normalAuthor = resolvePace({
         ...base, speed: 90, quality: 80, label: 'normal',

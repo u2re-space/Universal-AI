@@ -72,11 +72,12 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 
 Команда (run и gen):
-  --role <роль=модель[:effort]>  модель для роли: planner, collector, worker, coder, writer, reviewer, coordinator, vision,
+  --role <роль=модель[:effort]>  модель для роли: planner, orchestrator, worker, coder, writer, reviewer, vision,
                          summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, default, all
                          (например: --role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
-   --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
-   --coordinator          координатор после этапов: свежий взгляд на план, правки плана и указания следующему шагу
+                         --role collector=... и --role coordinator=... принимают orchestrator (объединённая роль)
+    --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
+    --orchestrator         оркестратор после этапов: сбор контекста, свежий взгляд на план, правки плана и указания следующему шагу
    --extract off|auto|always  extractor чистит ответ и кладёт готовые файлы в .tmp/<id>/extracted.
                          auto — только для маршрута encoder, always — и для planner. --no-extract выключает
    --measure off|auto|always  measurer снимает метрики с референсов после плана: блоки, углы, границы, деление, отступы, расстановку.

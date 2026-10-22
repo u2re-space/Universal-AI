@@ -40,7 +40,7 @@ const FIELD_MAP = {
     maxOutputTokens: 'max-output-tokens', temperature: 'temperature', verbosity: 'verbosity', shell: 'shell',
     stream: 'stream', size: 'size', quality: 'quality', format: 'format', imageBackground: 'image-background',
     partials: 'partials', imageModel: 'image-model', count: 'count', schema: 'schema', role: 'role',
-    single: 'single', team: 'team', memory: 'memory', coordinator: 'coordinator',
+    single: 'single', team: 'team', memory: 'memory', coordinator: 'coordinator', orchestrator: 'orchestrator',
     extract: 'extract', noExtract: 'no-extract',
 };
 const AS_STRING = new Set(['max-turns', 'budget-usd', 'budget-tokens', 'max-output-tokens', 'temperature', 'partials', 'count']);

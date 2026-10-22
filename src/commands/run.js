@@ -38,7 +38,7 @@ const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло 
 
 /**
  * `ai run <task>` — autonomous agent in the working directory.
- *   team   (default): planner → collector → worker steps → reviewer (+fix rounds) → summarizer/memory,
+ *   team   (default): planner → orchestrator (collect+coordinate) → worker steps → reviewer (+fix rounds) → summarizer/memory,
  *                     each role with its own model (config.roles / --role).
  *   single (--single): one model, one tool loop (plus memory tools).
  * @param {object} ctx Command context from cli.main.
@@ -191,7 +191,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
 }
 
 /**
- * Planner, collector, worker, and reviewer. Prints the summary and writes --out.
+ * Planner, orchestrator, worker, and reviewer. Prints the summary and writes --out.
  * @param {object} ctx Command context.
  * @param {{ task: string, parts: object[], level: string, interactive: boolean, store: object|null, extra: string|null }} options Task text, attachments, approval level, and extra instructions.
  * @returns {Promise<number>}
@@ -233,7 +233,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
             ...(result.workId ? [['план на диске', `.tmp/${result.workId}/`]] : []),
             ['шагов', result.steps.length ? `${result.steps.length} (${result.steps.map((s) => `${s.index}: ${s.status}`).join(', ')})` : '0'],
             ...(result.review ? [['ревью', `${result.review.verdict === 'accept' ? 'принято' : 'правки'} после ${result.reviewRounds} раунд(а/ов) · ${truncate(result.review.summary, 200)}`]] : []),
-            ['вызовов инструментов', toolCalls ? `${toolCalls} (worker ${worker.calls}, collector ${result.stats.collector.calls}, reviewer ${result.stats.reviewer.calls}, coordinator ${result.stats.coordinator?.calls ?? 0})${worker.denied ? `, отклонено ${worker.denied}` : ''}` : '0'],
+            ['вызовов инструментов', toolCalls ? `${toolCalls} (worker ${worker.calls}, orchestrator ${result.stats.orchestrator.calls}, reviewer ${result.stats.reviewer.calls})${worker.denied ? `, отклонено ${worker.denied}` : ''}` : '0'],
             ...backupSummaryRows(result.changes, ctx.backupDir),
             ...(worker?.commands?.length ? [['команды', worker.commands.map((c) => `${c.command} → ${c.exitCode ?? '?'}`).join('; ')]] : []),
             ...(result.images.length ? [['изображения', result.images.join(', ')]] : []),

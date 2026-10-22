@@ -133,14 +133,14 @@ import { toolNamesForRole } from '../src/agent/team.js';
 import { DESKTOP_TOOL_NAMES } from '../src/agent/desktop.js';
 import { READ_ONLY_TOOLS } from '../src/agent/tools.js';
 
-test('reviewer receives desktop tools and the collector does not', () => {
+test('reviewer receives desktop tools and the orchestrator does not', () => {
     const all = [...READ_ONLY_TOOLS, 'run_command', 'write_file', ...DESKTOP_TOOL_NAMES];
     const reviewer = toolNamesForRole(all, 'reviewer');
     assert.equal(reviewer.includes('click'), true);
     assert.equal(reviewer.includes('write_file'), false);
-    const collector = toolNamesForRole(all, 'collector');
-    assert.equal(collector.includes('click'), false);
-    assert.equal(collector.includes('read_file'), true);
+    const orchestrator = toolNamesForRole(all, 'orchestrator');
+    assert.equal(orchestrator.includes('click'), false);
+    assert.equal(orchestrator.includes('read_file'), true);
 });
 
 test('performAction does not pass OPENAI_API_KEY to AutoHotkey', async () => {

@@ -152,10 +152,10 @@ ai run "исправь падающий тест в test/"
 
 # свои модели под роли: старшая планирует и ревьюит, младшая делает, самая дешёвая пишет сводки и память
 ai run --role planner=gpt-6.1-sol:high --role reviewer=gpt-6.1-sol --role worker=gpt-6-luna \
-       --role collector=gpt-6-luna --role summarizer=gpt-6-luna "добавь кеширование в src/api.js"
+       --role orchestrator=gpt-6.1-sol --role summarizer=gpt-6-luna "добавь кеширование в src/api.js"
 
-# координатор после каждого этапа: правки плана и указания следующему шагу
-ai run --coordinator --role coordinator=gpt-6.1-sol:high "перепиши слой доступа к данным на репозитории"
+# оркестратор после каждого этапа: правки плана и указания следующему шагу
+ai run --orchestrator --role orchestrator=gpt-6.1-sol:high "перепиши слой доступа к данным на репозитории"
 
 # рабочий стол Windows: --desktop включает screenshot, click, type, run_ahk, run_batch и delegate_role для worker и reviewer
 ai run --desktop --approve ask "посмотри экран и закрой лишний диалог"
@@ -203,10 +203,9 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 | --- | --- | --- | --- |
 | `planner` | понять задачу, составить план (JSON: шаги, файлы, вопросы, критерии приёмки, нужно ли ревью), посмотреть приложенные картинки | — | старшая модель, effort `high` |
 | `measurer` | снять метрики с референсов после плана: блоки элементов в пикселях, на какой угол повёрнут каждый, где проходят границы и скругления, как картинка делится на области и слои (с коробками кропа), правила отступов, куда и как ставить каждый элемент | `view_image`, `crop_image`, `split_image` | тривиально (только разделить): `gpt-6-luna` / `low`; стили: `gpt-6.1-sol` / `medium`; стили, SVG и геометрия: `gpt-6.1-sol` / `high` |
-| `collector` | собрать контекст из файлов для остальных: ответить на вопросы планировщика, выписать нужные фрагменты и соглашения | только чтение: `list_files`, `search_files`, `read_file`, `summarize_file`, `recall` | младшая модель, effort `low` |
+| `orchestrator` | знает проект лучше всех и делает две работы: (1) собрать контекст из файлов для остальных — ответить на вопросы планировщика, выписать нужные фрагменты и соглашения; (2) после этапа (план, сбор контекста, шаг worker, ревью, исправления) посмотреть план, progress, свои находки и свежий diff — вернуть правку плана и указания следующему шагу | только чтение: `list_files`, `search_files`, `read_file`, `summarize_file`, `recall` | старшая модель, effort `high`; координация включается `--orchestrator`, бюджет контекста `agent.orchestrator.maxContextBytes` (4 МиБ ≈ 1M токенов) |
 | `worker` | выполнять шаги плана по одному: генерировать вызовы инструментов (JSON для локального исполнителя), проверять, отчитываться | все (по политике `--approve`) | младшая/средняя модель |
 | `reviewer` | независимо проверить результат по diff и критериям приёмки; `accept` или `revise` с конкретными замечаниями → worker исправляет (до `agent.maxReviewRounds` раундов) | чтение + `run_command` | старшая модель |
-| `coordinator` | после этапа (план, сбор контекста, шаг worker, ревью, исправления) посмотреть план, progress, находки коллектора и свежий diff; вернуть правку плана и указания следующему шагу | только чтение: `list_files`, `search_files`, `read_file`, `summarize_file`, `recall` | общая `model`, effort `high`; бюджет контекста `agent.coordinator.maxContextBytes` (4 МиБ ≈ 1M токенов) |
 | `vision` | описывать изображения для других ролей (`view_image` делегирует ей, когда у неё своя модель — `agent.visionDelegate`) | — | длинная сторона до 512 px: `gpt-6-luna` / `low`; до 1280 px: `gpt-6-luna` / `medium`; крупнее и любой скриншот экрана: `gpt-6.1-sol` / `high` |
 | `summarizer` | сводки больших файлов (`summarize_file`, кешируются по хешу), извлечение фактов в память после задачи | — | самая дешёвая модель, без рассуждений |
 | `solver` | решить шаг по экрану или файлу (формула, фрагмент текста, капча) и указать, где элементы | `screenshot`, `view_image` | trivial: `gpt-6-luna` / `low`; normal: `gpt-6-luna` / `medium`; complex: `gpt-6.1-sol` / `high` |
@@ -219,7 +218,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 
 Поток: память + заметки проекта → **план** → (если к задаче приложены референсы) **замеры** → (если задача не тривиальная) **сбор контекста** → **выполнение**
 по шагам → **ревью** и правки → **память**. Все роли читают один **общий контекст** (задача, окружение,
-заметки `AGENTS.md`, релевантные записи памяти, план, находки коллектора, отчёты по шагам, diff изменений);
+заметки `AGENTS.md`, релевантные записи памяти, план, находки оркестратора, отчёты по шагам, diff изменений);
 при переполнении бюджета `agent.maxContextBytes` менее важные разделы обрезаются. Планировщик помечает
 простые задачи как `trivial` — тогда сбор контекста и ревью пропускаются. `--single` возвращает одиночный цикл.
 
@@ -255,19 +254,21 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 `--measure always` заставляет снимать метрики и с тривиальными планами. Ошибка замеров запуск не останавливает:
 работник продолжает по плану и референсам.
 
-### Координатор
+### Оркестратор
 
-`--coordinator` (или `agent.coordinator.enabled: true`) включает роль `coordinator`. Она вызывается после выбранных
-этапов (`agent.coordinator.after`, по умолчанию `plan`, `collect`, `work`, `review`, `fix`) и получает не только
-общий контекст, но и свежий diff изменений с прошлого этапа. Ответ — JSON: оценка состояния, `nextStep` для
+Единая роль `orchestrator` делает две работы: собирает контекст из файлов для остальных и координирует команду
+между этапами. Координация включается `--orchestrator` (алиасы `--coordinator` и `--collector` тоже мигрируют в неё;
+или `agent.orchestrator.enabled: true`). Она вызывается после выбранных этапов (`agent.orchestrator.after`,
+по умолчанию `plan`, `work`, `review`, `fix`; сбор контекста идёт до этапа `work`) и получает не только общий
+контекст, но и свежий diff изменений с прошлого этапа. Ответ координации — JSON: оценка состояния, `nextStep` для
 следующего хода worker и необязательная правка плана (`addSteps`, `revise`). Правка применяется после этапов
-`plan`, `collect` и `work`; на ревью и исправлениях координатор только даёт указания. Его заметки попадают в
-`progress.json` и в общий контекст, поэтому следующие роли видят, что уже сделано и что менять дальше.
+`plan` и `work`; на ревью и исправлениях оркестратор только даёт указания. Его заметки попадают в `progress.json`
+и в общий контекст, поэтому следующие роли видят, что уже сделано и что менять дальше.
 
-Бюджет контекста координатора — `agent.coordinator.maxContextBytes` (по умолчанию 4 МиБ, примерно 1M токенов);
-он больше общего `agent.maxContextBytes`, поэтому координатор видит больше плана, отчётов и diff. Модель роли
-задаётся как у остальных: `roles.coordinator.model` или `--role coordinator=<модель>[:effort]`. Роль выключена
-по умолчанию: каждый её вызов — дополнительный запрос к старшей модели.
+Бюджет контекста оркестратора — `agent.orchestrator.maxContextBytes` (по умолчанию 4 МиБ, примерно 1M токенов);
+он больше общего `agent.maxContextBytes`, поэтому оркестратор видит больше плана, отчётов и diff. Модель роли
+задаётся как у остальных: `roles.orchestrator.model` или `--role orchestrator=<модель>[:effort]`. Координация
+выключена по умолчанию: каждый её вызов — дополнительный запрос к старшей модели.
 
 ### Рабочий стол
 
@@ -414,14 +415,13 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   "roles": {
     "planner":    { "model": "gpt-6.1-sol", "effort": "high" },
     "reviewer":   { "model": "gpt-6.1-sol", "effort": "medium" },
-    "coordinator": { "model": "gpt-6.1-sol", "effort": "high" },
-    "collector":  { "model": "gpt-6-luna", "effort": "low" },
+    "orchestrator": { "model": "gpt-6.1-sol", "effort": "high" },
     "worker":     { "model": "gpt-6-luna", "effort": "medium" },
     "vision":     { "model": "gpt-6-luna" },
     "summarizer": { "model": "gpt-6-luna", "summary": "none" }
   },
   "agent": { "mode": "team", "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": 98304, "visionDelegate": "auto",
-             "coordinator": { "enabled": false, "after": ["plan", "collect", "work", "review", "fix"], "maxContextBytes": 4194304, "applyPlan": true } },
+             "orchestrator": { "enabled": false, "after": ["plan", "work", "review", "fix"], "maxContextBytes": 4194304, "applyPlan": true } },
   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
   "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": ".", "image_format": "png" },
   "completion": { "model": "gpt-6-luna", "effort": "none", "maxLineBytes": 524288, "maxContextBytes": 24576,
@@ -474,7 +474,7 @@ Google Fonts или прямой URL, `download_icons` — набор иконо
 | `write` | да | да | нет | нет |
 | `all` / `--yes` | да | да | да | да |
 
-Коллектор всегда работает в режиме только чтения; ревьюер — чтение плюс `run_command`, `run_script` и `ssh` по той же политике.
+Оркестратор всегда работает в режиме только чтения; ревьюер — чтение плюс `run_command`, `run_script` и `ssh` по той же политике.
 `--approve ask` подтверждает каждое действие рабочего стола. `--approve read` и `--approve write` рабочий стол не разрешают. `--approve all` разрешает.
 
 Инструменты работают только внутри `--cwd` (по умолчанию текущий каталог): выход за его пределы,
