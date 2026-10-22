@@ -1,6 +1,6 @@
 {
   "name": "@u2ai/universal-ai",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "description": "CLI-агент на OpenAI Responses API: промптинг, генерация кода/документов/картинок, автономные задачи, фоновые job'ы. Node.js 26, ESM, без SDK.",
   "type": "module",
   "main": "./index.js",
