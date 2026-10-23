@@ -100,7 +100,7 @@ async function runImagesEndpoint(ctx, prompt, count) {
                     renderer.line('info', `Альфа-канал настоящий: модель отдала прозрачный фон, маска не потребовалась (${saved.at(-1)})`, { dim: true });
                 } else if (alpha.changed) {
                     const how = alpha.reason === 'mask'
-                        ? `по мягкой маске ${alpha.model}${alpha.painted ? ' после заливки фона цветом объекта' : ''}`
+                        ? `по anti-aliased маске ${alpha.model}${alpha.painted ? ' после заливки фона цветом объекта' : ''}`
                         : alpha.reason === 'contour' ? 'по локальному контуру' : 'заливкой от углов';
                     renderer.line('info', `Альфа-канал собран ${how}: ${saved.at(-1)}`, { dim: true });
                 } else if (alpha.reason === 'opaque') renderer.line('info', `Прозрачность ${saved.at(-1)}: фоном оказался сам объект, файл оставлен непрозрачным.`, { dim: true });

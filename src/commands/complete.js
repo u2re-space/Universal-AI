@@ -11,6 +11,7 @@
  */
 
 import { isRecord } from '../util/text.js';
+import { envValue } from '../core/runtime-env.js';
 import { UsageError, readStdin, createClientFor } from './shared.js';
 import { completeCode } from '../complete/complete.js';
 import { createCompletionChannels } from '../complete/channels.js';
@@ -85,7 +86,7 @@ async function requestFromCli(ctx) {
 async function listen(ctx) {
     const { config, renderer, values, signal, cwd } = ctx;
     const port = parsePort(values.port);
-    const token = values.token || process.env.AI_COMPLETE_TOKEN || config.completion.token || null;
+    const token = values.token || envValue('AI_COMPLETE_TOKEN') || config.completion.token || null;
     let client = null;
     let channels = null;
     let server;

@@ -13,6 +13,7 @@
 import { createClient } from './client.js';
 import { ApiError } from './errors.js';
 import { isReasoningModel, supportsVerbosity } from '../core/config.js';
+import { envValue, liveEnv } from '../core/runtime-env.js';
 import { MODEL_FALLBACKS } from './model-map.js';
 
 /** Default stand-ins. Keys may be bare or prefixed with openai/. */
@@ -78,13 +79,15 @@ export function routeMissing(error) {
 
 /**
  * Hosts to try after the primary one. Entries without a key are skipped.
+ * The key of an `env` entry is read from the live environment, so a value that exists only in
+ * `.env` is found — `process.env` never sees it.
  * @param {object} config
  * @param {object} [env]
  * @returns {{ baseURL: string, apiKey: string }[]}
  * @exports
  * @ai.hint pure
  */
-export function providerList(config, env = process.env) {
+export function providerList(config, env = liveEnv()) {
     if (config?.fallback?.enabled === false) return [];
     const listed = Array.isArray(config?.fallback?.providers) ? config.fallback.providers : [];
     const extra = env.AI_FALLBACK_BASE_URL && env.AI_FALLBACK_API_KEY
@@ -168,7 +171,7 @@ export function createFallbackClient(config, { create = createClient } = {}) {
         organization: config.organization, project: config.project,
     };
     const primary = create({
-        apiKey: config.apiKey ?? process.env.OPENAI_API_KEY, baseURL: config.baseURL, ...timeouts,
+        apiKey: config.apiKey ?? envValue('OPENAI_API_KEY'), baseURL: config.baseURL, ...timeouts,
     });
     const opened = [];
     const map = config.fallback?.models ?? MODEL_FALLBACKS;
@@ -189,7 +192,7 @@ export function createFallbackClient(config, { create = createClient } = {}) {
      * @param {object[]} chain
      * @param {object} body
      * @param {object} options
-     * @param {'responses'|'images'} kind
+     * @param {'responses'|'images'|'images-edit'|'images-vector'} kind
      */
     const sendBody = (chain, body, options, kind) => attemptChain({
         endpoints: chain,
@@ -200,6 +203,8 @@ export function createFallbackClient(config, { create = createClient } = {}) {
             active = endpoint.client;
             const next = adaptBody(body ?? {}, model, switchedHost);
             if (kind === 'images') return endpoint.client.images.generate({ ...next, signal: options?.signal });
+            if (kind === 'images-edit') return endpoint.client.images.edit({ ...next, signal: options?.signal });
+            if (kind === 'images-vector') return endpoint.client.images.vectorize({ ...next, signal: options?.signal });
             return endpoint.client.responses.create(next, options);
         },
     });
@@ -217,6 +222,8 @@ export function createFallbackClient(config, { create = createClient } = {}) {
         images: {
             ...primary.images,
             generate: (args = {}) => sendBody(endpoints(), args, { signal: args.signal, onEvent: args.onEvent }, 'images'),
+            edit: (args = {}) => sendBody(endpoints(), args, { signal: args.signal, onEvent: args.onEvent }, 'images-edit'),
+            vectorize: (args = {}) => sendBody(endpoints(), args, { signal: args.signal, onEvent: args.onEvent }, 'images-vector'),
         },
         decisions: {
             create: async (body, options = {}) => {

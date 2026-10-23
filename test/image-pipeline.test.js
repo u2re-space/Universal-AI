@@ -148,9 +148,10 @@ test('end-to-end: native alpha, paint + matte, RGBA composition, and SVG', async
         // Technical passes stay on the raster model the caller uses, not on a separate default.
         assert.equal(paintedCalls[0].model, 'openai/gpt-image-2.5-flare');
         assert.equal(paintedCalls[1].model, 'openai/gpt-image-2.5-flare');
-        // The paint pass receives the clean source, the matte pass receives the painted picture.
+        // The paint pass receives the clean source; the matte pass also receives the clean source,
+        // because the matte is the geometry of the subject and must not follow a repainted edge.
         assert.equal(Buffer.compare(paintedCalls[0].files[0].bytes, await readFile(path.join(dir, 'src.png'))), 0);
-        assert.equal(Buffer.compare(paintedCalls[1].files[0].bytes, await readFile(path.join(dir, 'painted.png'))), 0);
+        assert.equal(Buffer.compare(paintedCalls[1].files[0].bytes, await readFile(path.join(dir, 'src.png'))), 0);
         // The composed file is RGBA: transparent corner, opaque subject in the painted color.
         assert.equal(await magickIsOpaque({ exe, input: path.join(dir, 'assets', 'opaque.png'), cwd: dir }), false);
         assert.equal((await pixel(exe, dir, 'assets/opaque.png', 4, 4))[3], 0);

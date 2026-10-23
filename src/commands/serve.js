@@ -19,6 +19,7 @@ import { createHub } from '../server/hub.js';
 import { sanitizeValue } from '../ui/sanitize.js';
 import { createRenderer } from '../ui/renderer.js';
 import { loadConfig } from '../core/config.js';
+import { envValue, hasLiveEnv, liveEnv, refreshRuntimeEnv } from '../core/runtime-env.js';
 import { deepMerge } from '../util/text.js';
 import { UsageError, createClientFor } from './shared.js';
 import { overridesFrom } from './flags.js';
@@ -121,7 +122,7 @@ function commandRunner({ hub, baseConfig = null }) {
             const overrides = overridesFrom(values, { command: 'serve' });
             config = baseConfig
                 ? deepMerge(structuredClone(baseConfig), overrides)
-                : await loadConfig({ overrides, env: process.env, ensureHome: false });
+                : await loadConfig({ overrides, env: hasLiveEnv() ? await refreshRuntimeEnv({ cwd }) : liveEnv(), ensureHome: false });
         } catch (error) {
             hub.publish(run.id, { type: 'warning', message: error.message });
             hub.finish(run.id, 'failed', error.exitCode ?? 2);
@@ -242,7 +243,7 @@ function editorCompletion({ baseConfig, cwd, tokens }) {
      * @returns {Promise<object>}
      * @ai.hint io
      */
-    const configOf = async () => baseConfig ?? await loadConfig({ env: process.env, ensureHome: false });
+    const configOf = async () => baseConfig ?? await loadConfig({ env: hasLiveEnv() ? await refreshRuntimeEnv({ cwd }) : liveEnv(), ensureHome: false });
     const bridge = createCompletionBridge({
         tokens,
         handle: async (request, requestSignal) => {
@@ -315,7 +316,7 @@ export async function serve(ctx) {
         port = Number(ctx.values.port);
         if (!Number.isInteger(port) || port < 0 || port > 65535) throw new UsageError('--port: 0..65535');
     }
-    const extraTokens = [ctx.values.token, process.env.AI_COMPLETE_TOKEN, ctx.config.completion?.token].filter((item) => typeof item === 'string' && item);
+    const extraTokens = [ctx.values.token, envValue('AI_COMPLETE_TOKEN'), ctx.config.completion?.token].filter((item) => typeof item === 'string' && item);
     const handle = await startServe({
         home: ctx.config.home, port, signal: ctx.signal, baseConfig: ctx.config, cwd: ctx.cwd, completionTokens: extraTokens,
     });

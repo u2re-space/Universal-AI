@@ -15,6 +15,7 @@ import { ApiError } from './errors.js';
 import { createHttp, readBody } from './http.js';
 import { parseSSE } from './sse.js';
 import { createStreamReducer, outputText } from './stream.js';
+import { envValue } from '../core/runtime-env.js';
 import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imagePayloads, isVectorModel, normalizeImageSize, normalizeVectorRatio, resolveImageFormat } from './images.js';
 
 export { ApiError };
@@ -71,8 +72,8 @@ export function retryDelayMs(attempt, retryAfter, status = null) {
  * transport events: request.start / request.retry / request.headers / request.done.
  */
 export function createClient({
-    apiKey = process.env.OPENAI_API_KEY, baseURL = process.env.OPENAI_BASE_URL || defaults.baseURL,
-    organization = process.env.OPENAI_ORG_ID, project = process.env.OPENAI_PROJECT_ID,
+    apiKey = envValue('OPENAI_API_KEY'), baseURL = envValue('OPENAI_BASE_URL') || defaults.baseURL,
+    organization = envValue('OPENAI_ORG_ID'), project = envValue('OPENAI_PROJECT_ID'),
     http, retries = defaults.retries, idleTimeoutMs, connectTimeoutMs, maxErrorBytes = defaults.maxErrorBytes,
     maxResponseBytes = defaults.maxResponseBytes, maxEventBytes = defaults.maxEventBytes,
     onEvent: globalOnEvent,

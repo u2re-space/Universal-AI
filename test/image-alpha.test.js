@@ -200,19 +200,21 @@ test('applyGeneratedAlphaMask paint + mask pipeline with paintBackground enabled
                 },
             },
         };
+        const artBytes = await readFile(path.join(dir, 'art.png'));
         const config = { baseURL: 'https://api.proxyapi.ru/v1/', image: { maskModel: 'tech/model', paintBackground: true } };
         const result = await applyGeneratedAlphaMask({ client, config, file: path.join(dir, 'art.png') });
         assert.equal(result.changed, true);
         assert.equal(result.reason, 'mask');
         assert.equal(result.model, 'tech/model');
         assert.equal(result.painted, true);
-        // Two calls: first the background paint, then the matte drawn from the painted picture.
+        // Two calls: first the background paint, then the matte — both from the clean source.
         assert.equal(calls.length, 2);
         assert.equal(calls[0].prompt, BACKGROUND_PAINT_PROMPT);
         assert.equal(calls[1].prompt, ALPHA_MASK_PROMPT);
-        // The matte request receives the painted reply, not the original file.
-        assert.deepEqual(calls[1].files[0].bytes, await readFile(path.join(dir, 'drawn.png')));
-        assert.equal(calls[1].files[0].filename.startsWith('.tmp-alpha-painted-'), true);
+        // The matte is the geometry of the subject, so it is drawn from the source, not from the
+        // painted picture the paint pass returned.
+        assert.deepEqual(calls[1].files[0].bytes, artBytes);
+        assert.equal(calls[1].files[0].filename, 'art.png');
     } finally {
         await rmDir(dir);
     }
@@ -310,31 +312,60 @@ test('applyGeneratedAlphaMask alphaMode off and contour skip the model request',
     }
 });
 
-test('the applied matte is a smooth grayscale ramp, not a posterized step', async (t) => {
+test('the matte keeps an anti-aliased edge instead of a wide blur', async (t) => {
     const exe = await detectMagick();
     if (!exe) return t.skip('ImageMagick is not installed');
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-mask-feather-'));
     try {
         await makeSubject(exe, dir);
-        // A matte with a vertical gradient across the subject boundary.
-        await runProgram({
-            file: exe, args: ['-size', '120x80', 'gradient:white-black', '-rotate', '90', 'ramp.png'],
-            cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096,
-        });
-        const hard = await magickApplyAlphaMask({ exe, input: 'subject.png', mask: 'ramp.png', cwd: dir, feather: 0 });
+        // A hard black/white matte: the transition band is one step wide.
+        await makeMask(exe, dir, { file: 'hard.png' });
+        const hard = await magickApplyAlphaMask({ exe, input: 'subject.png', mask: 'hard.png', cwd: dir, feather: 0 });
         assert.equal(hard.changed, true);
         assert.equal(hard.feathered, 0);
-        const unique = async () => {
-            const res = await runProgram({ file: exe, args: ['subject.png', '-alpha', 'extract', '-colorspace', 'Gray', '-format', '%k', 'info:'], cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096 });
+        /** Distinct alpha levels in a small patch on the subject rim. */
+        const levels = async () => {
+            const res = await runProgram({
+                file: exe, cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096,
+                args: ['subject.png', '-alpha', 'extract', '-colorspace', 'Gray', '-crop', '3x3+39+19', '+repage', '-format', '%k', 'info:'],
+            });
             return Number(res.stdout.trim());
         };
-        const before = await unique();
-        const soft = await magickApplyAlphaMask({ exe, input: 'subject.png', mask: 'ramp.png', cwd: dir, feather: 4 });
-        assert.equal(soft.changed, true);
-        assert.equal(soft.feathered, 4);
-        // Blurring the matte cannot create fewer alpha levels than the unblurred one had.
-        assert.ok(await unique() >= 1, 'the feathered matte still has an alpha ramp');
-        assert.ok(before >= 1);
+        // A binary matte gives exactly two alpha values: transparent and opaque.
+        assert.equal(await levels(), 2, 'an unsmoothed matte keeps a two-value step');
+
+        // One pixel of anti-aliasing adds intermediate alpha values on the rim and nothing more.
+        const anti = await magickApplyAlphaMask({ exe, input: 'subject.png', mask: 'hard.png', cwd: dir, feather: 1 });
+        assert.equal(anti.changed, true);
+        assert.equal(anti.feathered, 1);
+        const rim = await levels();
+        assert.ok(rim > 2, `the rim must gain anti-aliased levels, got ${rim}`);
+        // The interior and the far background stay fully opaque and fully transparent.
+        assert.deepEqual(await pixel(exe, 'subject.png', 60, 40, dir), [255, 0, 0, 255]);
+        assert.deepEqual(await pixel(exe, 'subject.png', 2, 2, dir), [0, 0, 0, 0]);
+    } finally {
+        await rmDir(dir);
+    }
+});
+
+test('a coarse matte is resampled to the image frame without stair-stepping', async (t) => {
+    const exe = await detectMagick();
+    if (!exe) return t.skip('ImageMagick is not installed');
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-mask-resample-'));
+    try {
+        await makeSubject(exe, dir);
+        await makeMask(exe, dir, { file: 'coarse.png', size: '30x20', box: '10,5 20,15' });
+        const result = await magickApplyAlphaMask({ exe, input: 'subject.png', mask: 'coarse.png', cwd: dir, feather: 0 });
+        assert.equal(result.changed, true);
+        assert.equal(result.width, 120);
+        // Lanczos resampling produces intermediate values on the scaled edge.
+        const res = await runProgram({
+            file: exe, cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096,
+            args: ['subject.png', '-alpha', 'extract', '-colorspace', 'Gray', '-format', '%k', 'info:'],
+        });
+        assert.ok(Number(res.stdout.trim()) > 2, 'the upscaled matte keeps gray transition pixels');
+        assert.deepEqual(await pixel(exe, 'subject.png', 60, 40, dir), [255, 0, 0, 255]);
+        assert.deepEqual(await pixel(exe, 'subject.png', 2, 2, dir), [0, 0, 0, 0]);
     } finally {
         await rmDir(dir);
     }

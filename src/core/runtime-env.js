@@ -3,22 +3,34 @@
  * @module core/runtime-env
  * @purpose Load a project .env and keep an API key with the base URL that belongs to it.
  * @depends node:child_process, node:fs/promises, node:path
- * @usedBy cli
- * @exports parseEnvFile, applyEnvFile, reconcileCredentialScopes, readWindowsEnvValue, resolveRuntimeEnv
+ * @usedBy cli, commands/serve, openai/client, openai/fallback, complete/channels
+ * @exports parseEnvFile, applyEnvFile, reconcileCredentialScopes, readWindowsEnvValue, resolveRuntimeEnv,
+ *   setLiveEnv, liveEnv, envValue, refreshRuntimeEnv, resetLiveEnv
  * @ai.tags config, env
  * @ai.hint io
- * @changed 2026-10-15 Project .env overrides inherited credentials. A Windows user key no longer splits a system pair.
+ * @changed 2026-10-23 Live environment: modules read the merged .env instead of the process snapshot,
+ *           and refreshRuntimeEnv re-reads the file so an edited .env is not stale.
  */
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 const CREDENTIALS = ['OPENAI_API_KEY', 'OPENAI_BASE_URL'];
 const ENV_FILE_LIMIT = 256 * 1024;
 const REGISTRY = {
-    user: 'HKCU\\Environment',
-    machine: 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment',
+    user: 'HKCU\Environment',
+    machine: 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
 };
+
+/**
+ * The environment merged by the last resolve or refresh. `process.env` is a snapshot taken at
+ * process start, so a value that came from `.env` is invisible there; every module that needs a
+ * credential or a provider key reads this store instead.
+ * @type {Record<string, string>|null}
+ */
+let live = null;
+/** File signature of the `.env` that produced `live`, so a changed file forces a re-read. */
+let liveSignature = null;
 
 /**
  * A non-empty credential string, or null.
@@ -162,4 +174,93 @@ export async function resolveRuntimeEnv({ cwd, env = process.env, platform = pro
         if (error.code === 'ENOENT') return next;
         throw new Error(`Не удалось прочитать ${file}: ${error.message}`);
     }
+}
+
+/**
+ * Publish the environment a command resolved, so every module reads the same values — including
+ * the ones that came from `.env` and therefore never reached `process.env`.
+ * @param {object|null} env
+ * @returns {void}
+ * @exports
+ * @ai.hint pure
+ */
+export function setLiveEnv(env) {
+    live = env ? { ...env } : null;
+    liveSignature = null;
+}
+
+/**
+ * The published environment, or `process.env` when nothing was published yet.
+ * @param {object} [fallback]
+ * @returns {object}
+ * @exports
+ * @ai.hint pure
+ */
+export function liveEnv(fallback = process.env) {
+    return live ?? fallback;
+}
+
+/**
+ * One value from the published environment, falling back to `process.env` and then to a default.
+ * @param {string} name
+ * @param {string|null} [fallback]
+ * @param {object|null} [env] Explicit environment, used by tests.
+ * @returns {string|null}
+ * @exports
+ * @ai.hint pure
+ */
+export function envValue(name, fallback = null, env = null) {
+    const value = (env ?? liveEnv())?.[name];
+    if (typeof value === 'string' && value.trim()) return value;
+    const inherited = process.env?.[name];
+    return typeof inherited === 'string' && inherited.trim() ? inherited : fallback;
+}
+
+/**
+ * Re-read `.env` for `cwd` and publish the result. A file whose size and modification time did not
+ * change reuses the published environment, so a per-request call is cheap; an edited file is picked
+ * up without restarting the process.
+ * @param {{ cwd?: string, env?: object, platform?: string, readScope?: Function, force?: boolean }} [options]
+ * @returns {Promise<object>}
+ * @exports
+ * @ai.hint io
+ */
+export async function refreshRuntimeEnv({ cwd = process.cwd(), env = process.env, platform = process.platform, readScope = readWindowsEnvValue, force = false } = {}) {
+    const file = path.join(cwd, '.env');
+    const info = await stat(file).catch(() => null);
+    const signature = info ? `${file}|${info.mtimeMs}|${info.size}` : `${file}|absent`;
+    const inherited = env === process.env;
+    if (!force && inherited && live && signature === liveSignature) return live;
+    const next = await resolveRuntimeEnv({ cwd, env, platform, readScope });
+    live = next;
+    liveSignature = signature;
+    return next;
+}
+
+/**
+ * Drop the published environment. Used by tests so one case cannot leak into the next.
+ * @returns {void}
+ * @exports
+ * @ai.hint pure
+ */
+/**
+ * Whether a runtime environment has been published by the CLI (or a test).
+ * Used by serve to decide whether to re-read `.env` per run.
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function hasLiveEnv() {
+    return live !== null;
+}
+
+/**
+ * Drop the published environment. Used by tests so one case cannot leak into the next.
+ * @returns {void}
+ * @exports
+ * @ai.hint pure
+ */
+export function resetLiveEnv() {
+    live = null;
+    liveSignature = null;
 }

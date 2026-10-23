@@ -283,13 +283,14 @@ export async function assessVectorSuitability({ exe, input, cwd, signal, maxColo
 
 /**
  * Use a grayscale matte as the alpha channel of the image: white stays visible, black becomes
- * transparent, gray gives a soft edge. The matte is resized to the image frame, so a matte drawn
- * on a coarser grid still fits. A matte whose corners are white is inverted first: the background
- * is expected to be black, and a model occasionally returns the polarity the other way round.
+ * transparent, gray gives the anti-aliased edge. The matte is resized to the image frame with a
+ * Lanczos filter, so a matte drawn on a coarser grid still lands on the same silhouette without
+ * stair-stepping. A matte whose corners are white is inverted first: the background is expected to
+ * be black, and a model occasionally returns the polarity the other way round.
  *
- * The matte is smoothed before it is applied (`feather` pixels of blur) and its extremes are
- * stretched to full black and full white. A model-drawn matte is rarely a clean gradient — it comes
- * back posterized or washed out — and without this the cut has stair-stepped edges and a halo.
+ * `feather` is an anti-aliasing radius, not a soft-focus blur: it smooths the one-pixel transition
+ * a hard matte produces, and a value of 0 keeps the matte exactly as the model drew it. A large
+ * value makes the rim milky and eats into the artwork, which is why it is capped at 8.
  * @param {{ exe: string, input: string, mask: string, output?: string, cwd: string, signal?: AbortSignal, feather?: number }} opts
  * @returns {Promise<{ changed: boolean, reason: string, inverted?: boolean, feathered?: number, width?: number, height?: number }>}
  * @exports
@@ -305,17 +306,18 @@ export async function magickApplyAlphaMask({ exe, input, mask, output = input, c
     if (mean <= 0.005) return { changed: false, reason: 'empty-mask' };
     if (mean >= 0.995) return { changed: false, reason: 'full-mask' };
     const inverted = corner > 0.5;
-    const blur = Number.isFinite(feather) ? Math.max(0, Math.min(8, feather)) : 1;
+    const smooth = Number.isFinite(feather) ? Math.max(0, Math.min(8, feather)) : 1;
     const outPath = path.isAbsolute(output) ? output : path.join(cwd, output);
     const suffix = path.extname(outPath) || '.png';
     const tmpPath = path.join(path.dirname(outPath), `.tmp-mask-${process.pid}-${Date.now()}${suffix}`);
     const args = [input, '(', mask, '-colorspace', 'Gray'];
     if (inverted) args.push('-negate');
-    // Normalize first, then blur: stretching the matte keeps the interior solid while the blur
-    // softens only the transition band.
-    args.push('-auto-level');
-    if (blur > 0) args.push('-gaussian-blur', `0x${blur}`);
-    args.push('-resize', `${info.width}x${info.height}!`, ')', '-alpha', 'off', '-compose', 'CopyOpacity', '-composite', tmpPath);
+    // Stretch the range first, then resample, then smooth the transition band. Auto-level after a
+    // Lanczos resize would renormalize the ringing the filter adds and wash out the interior, and
+    // smoothing before the resize would lose the anti-aliasing the resize just produced.
+    args.push('-auto-level', '-filter', 'Lanczos', '-resize', `${info.width}x${info.height}!`);
+    if (smooth > 0) args.push('-gaussian-blur', `0x${smooth}`);
+    args.push(')', '-alpha', 'off', '-compose', 'CopyOpacity', '-composite', tmpPath);
     try {
         await magickRun(exe, args, { cwd, signal });
         await rename(tmpPath, outPath);
@@ -323,7 +325,7 @@ export async function magickApplyAlphaMask({ exe, input, mask, output = input, c
         await unlink(tmpPath).catch(() => {});
         throw error;
     }
-    return { changed: true, reason: 'mask', inverted, feathered: blur, width: info.width, height: info.height };
+    return { changed: true, reason: 'mask', inverted, feathered: smooth, width: info.width, height: info.height };
 }
 
 /**

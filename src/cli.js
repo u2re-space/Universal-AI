@@ -15,7 +15,7 @@ import { stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { loadConfig } from './core/config.js';
-import { resolveRuntimeEnv } from './core/runtime-env.js';
+import { refreshRuntimeEnv, setLiveEnv } from './core/runtime-env.js';
 import { createRenderer, detectMode } from './ui/renderer.js';
 import { createJobManager } from './jobs/manager.js';
 import { ApiError, BudgetError, CancelledError, isAbortError } from './openai/errors.js';
@@ -153,8 +153,10 @@ export async function main(argvInput = process.argv.slice(2)) {
         if (major < 26) throw new UsageError(`Нужен Node.js 26+; запущен ${process.versions.node}.`);
         const cwd = path.resolve(values.cwd ?? '.');
         if (!(await stat(cwd).then((s) => s.isDirectory()).catch(() => false))) throw new UsageError(`Каталог не найден: ${cwd}`);
+        const runtimeEnv = await refreshRuntimeEnv({ cwd });
+        setLiveEnv(runtimeEnv);
         const config = await loadConfig({
-            configPath: values.config, overrides: overridesFrom(values, { command: commandName }), env: await resolveRuntimeEnv({ cwd }),
+            configPath: values.config, overrides: overridesFrom(values, { command: commandName }), env: runtimeEnv,
         });
         if (NEEDS_API_KEY.has(commandName) && !config.apiKey) {
             throw new UsageError('Не задан OPENAI_API_KEY. Укажите его в .env, в окружении или в ~/.ai-agent/config.json.');

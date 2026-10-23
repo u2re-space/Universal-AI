@@ -15,6 +15,7 @@ import { createClient } from '../openai/client.js';
 import { ApiError, isAbortError } from '../openai/errors.js';
 import { modelMissing, providerDown, providerList } from '../openai/fallback.js';
 import { isReasoningModel, supportsVerbosity } from '../core/config.js';
+import { liveEnv } from '../core/runtime-env.js';
 import { resolveCompletionModel } from './models.js';
 
 const DEFAULT_TTL_MS = 60_000;
@@ -32,7 +33,7 @@ const PROBE_MAX_OUTPUT_TOKENS = 32;
  * @exports
  * @ai.hint pure
  */
-export function completionChannelList(config, env = process.env) {
+export function completionChannelList(config, env = liveEnv()) {
     const out = [];
     const seen = new Set();
     /**
@@ -105,7 +106,7 @@ function channelFailed(error) {
  * @exports
  * @ai.hint io
  */
-export function createCompletionChannels(config, { create = createClient, env = process.env, ttlMs, timeoutMs } = {}) {
+export function createCompletionChannels(config, { create = createClient, env = liveEnv(), ttlMs, timeoutMs } = {}) {
     const endpoints = completionChannelList(config, env);
     const probeEnabled = config?.completion?.channelProbe !== false;
     const ttl = Number.isFinite(ttlMs) ? ttlMs : (config?.completion?.probeTtlMs ?? DEFAULT_TTL_MS);

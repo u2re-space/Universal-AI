@@ -2,13 +2,14 @@
  * @file src/agent/image-alpha.js
  * @module agent/image-alpha
  * @purpose Build a real alpha channel for a generated picture: paint the background with the
- *          subject color, draw a soft matte from that picture, and merge the matte as alpha.
+ *          subject color, draw an anti-aliased matte from the clean source, and merge the matte as alpha.
  * @depends node:path, node:fs/promises, agent/image-magick, openai/images
  * @usedBy commands/image, agent/image-tools
  * @exports ALPHA_MASK_PROMPT, BACKGROUND_PAINT_PROMPT, applyGeneratedAlphaMask
  * @ai.tags images, alpha, imagemagick
  * @ai.hint io
- * @changed 2026-10-23 Paint-then-mask pipeline, soft (feathered) matte, clean RGB source selection.
+ * @changed 2026-10-23 Paint + anti-aliased matte pipeline; the matte is drawn from the clean source,
+ *           never from the painted picture.
  */
 
 import path from 'node:path';
@@ -19,22 +20,23 @@ import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, sniffImage } from '../openai/ima
 /**
  * Prompt for the mask pass. A matte rather than a transparent picture: most vendors cannot emit
  * alpha and paint a checkerboard or a flat plate instead, and a matte converts cleanly into a real
- * alpha channel. The matte must be smooth, not posterized: gray along the edge is what gives the
- * cut a soft transition instead of a stair-stepped silhouette.
+ * alpha channel. The matte must be anti-aliased: a one- or two-pixel gray transition along the
+ * silhouette is what keeps the cut free of stair-stepping, while a wide soft gradient would make
+ * the rim milky and eat into the artwork.
  */
 export const ALPHA_MASK_PROMPT = 'Return an alpha matte of the attached image as a grayscale picture. '
     + 'White marks the subject that must stay visible (the artwork, logo, product, or person); '
     + 'black marks everything that must become transparent, including a checkerboard, grid, or flat '
     + 'plate that only imitates transparency. '
     + 'Keep the exact framing and proportions of the source. '
-    + 'Edges must be smooth: use gray values along the boundary instead of a hard black-and-white step, '
-    + 'and keep the interior of the subject pure white. '
-    + 'Output the matte only: grayscale gradient from black to white, no colors, no text, no border, no shadow.';
+    + 'Edges must be anti-aliased: a one- or two-pixel gray transition exactly on the silhouette, '
+    + 'not a wide soft glow, and the interior of the subject pure white. '
+    + 'Output the matte only: grayscale, no colors, no text, no border, no shadow.';
 
 /**
  * Prompt for the background paint pass. The background becomes the dominant color of the subject,
- * so the semi-transparent pixels a soft matte leaves behind carry the object color instead of white
- * or a checkerboard. That is what removes the halo around a cut-out logo or badge.
+ * so the semi-transparent pixels an anti-aliased matte leaves behind carry the object color instead
+ * of white or a checkerboard. That is what removes the halo around a cut-out logo or badge.
  */
 export const BACKGROUND_PAINT_PROMPT = 'Fill the whole background of the attached image with the dominant color of the subject. '
     + 'Do not change the subject: keep every pixel of it identical, in the same position, with the same '
@@ -113,12 +115,13 @@ const isRaster = (reply) => Boolean(reply?.bytes);
  * Build a real alpha channel for a saved picture.
  *
  * The pipeline, in order:
- * 1. Paint the background with the dominant color of the subject (model pass). A soft matte always
- *    leaves semi-transparent pixels along the edge; over a white or checkerboard plate those pixels
- *    keep the plate color and read as a halo, over the subject color they disappear.
- * 2. Draw the matte from the painted picture (model pass). One flat color to cut away is far easier
- *    to segment than a patterned background, and the matte is asked for as a smooth gradient.
- * 3. Merge the matte into the painted picture as alpha, feathering the edge.
+ * 1. Paint the background with the dominant color of the subject (model pass). An anti-aliased matte
+ *    always leaves semi-transparent pixels along the edge; over a white or checkerboard plate those
+ *    pixels keep the plate color and read as a halo, over the subject color they disappear.
+ * 2. Draw the matte from the same clean source (model pass). The matte is the geometry of the
+ *    subject, so it must come from the source pixels: a painted picture may have shifted or
+ *    repainted the edge, and a matte taken from it would then not match the artwork.
+ * 3. Merge the matte into the painted picture as alpha, keeping the anti-aliased edge.
  * 4. When a pass is unavailable, fall back to the local contour matte, then to the corner flood fill.
  *
  * `alphaSource` names the clean RGB base — the reference, the measurement crop, or the pre-upscale
@@ -177,13 +180,17 @@ export async function applyGeneratedAlphaMask({
     }
     const matteBase = paintedPath || base;
 
-    // 2. The model matte, then the local contour matte, then the corner flood fill.
+    // 2. The model matte from the clean source, then the local contour matte, then the corner fill.
+    // The matte is the geometry of the subject: it is drawn from `base`, never from the painted
+    // picture, whose edge the paint pass may have moved or repainted.
     if (MODEL_MATES.has(alphaMode) && client?.images) {
-        const matte = await askModel({ client, config, file: matteBase, prompt: ALPHA_MASK_PROMPT, signal, model });
+        const matte = await askModel({ client, config, file: base, prompt: ALPHA_MASK_PROMPT, signal, model });
         if (isRaster(matte)) {
             const maskPath = path.join(cwd, `.tmp-alpha-mask-${process.pid}-${Date.now()}.${matte.ext}`);
             await writeFile(maskPath, matte.bytes);
             try {
+                // The alpha is applied to the painted picture, so the anti-aliased rim carries the
+                // subject color instead of the plate color; without a paint pass the source is used.
                 const applied = await magickApplyAlphaMask({ exe, input: matteBase, mask: maskPath, output: abs, cwd, signal, feather });
                 // A fully white matte means the model found nothing to cut: keep the picture as it is
                 // instead of letting the corner fill eat a corner of the subject.

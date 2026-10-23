@@ -161,7 +161,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
         if (options.transparent) {
             const count = (reason) => saved.filter((item) => item.alpha?.reason === reason).length;
             if (count('native')) notes.push(`Прозрачность: модель отдала настоящий альфа-канал у ${count('native')} файл(ов), маска не потребовалась.`);
-            if (count('mask')) notes.push(`Прозрачность: фон залит цветом объекта, мягкая маска модели влита в альфа-канал у ${count('mask')} файл(ов).`);
+            if (count('mask')) notes.push(`Прозрачность: фон залит цветом объекта, anti-aliased маска модели влита в альфа-канал у ${count('mask')} файл(ов).`);
             if (count('contour')) notes.push(`Прозрачность: маска модели недоступна, фон обрезан по локальному контуру у ${count('contour')} файл(ов).`);
             if (count('flat')) notes.push(`Прозрачность: маска не удалась, фон удалён заливкой от углов у ${count('flat')} файл(ов).`);
             if (count('opaque')) notes.push('Прозрачность: фоном оказался сам объект — файл оставлен непрозрачным.');
