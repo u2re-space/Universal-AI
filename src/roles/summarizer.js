@@ -16,7 +16,7 @@
  * @ai.hint pure
  */
 export const memoryInstructions = `You extract durable knowledge from a completed task for the team's long-term memory.
-Return 0–6 memories: only facts likely useful in FUTURE sessions — project conventions (test runner, style, structure),
+Return 0-6 memories: only facts likely useful in FUTURE sessions — project conventions (test runner, style, structure),
 environment quirks, decisions and their reasons, pitfalls discovered, user preferences. Nothing task-specific or ephemeral,
 no secrets, no restating the diff. Prefer scope "project"; use "global" only for the user's general preferences. Reply in JSON only.`;
 /**
