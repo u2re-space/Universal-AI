@@ -283,11 +283,11 @@ export function resolvePace({
         merge: fast, stepCap, reviewRounds, reviewMode, collect, acceptance, guarantees,
         fidelity: Number.isInteger(fidelity) ? { stated: fidelity, effective: effectiveFidelity(fidelity, quality) } : null,
         roles: {
-            classifier: role(0, 'low', false),
-            planner, orchestrator: role(0, 'low', false),
+            classifier: role(1, 'high', false),
+            planner, orchestrator: role(1, 'high', false),
             reviewer: role(reviewerRung(models, modelQuality >= 67 ? adjusted : Math.min(adjusted, 1)), reviewerBase, true),
-            summarizer: role(0, 'low', false),
-            extractor: role(0, 'low', false),
+            summarizer: role(1, 'high', false),
+            extractor: role(0, 'high', false),
         },
         steps: null,
     };
