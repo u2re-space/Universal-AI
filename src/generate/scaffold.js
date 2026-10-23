@@ -401,6 +401,7 @@ export function kindRules(kind, recommendations) {
         lines.push('vite.config.js is already written with the Chrome 157 build targets. Do not plan a step to create or verify it.');
         lines.push('Do not run npm run dev or npm run preview inside a step: they do not exit. Verify with npm run build and read the built files.');
         lines.push('Load fonts and icons from a CDN (Google Fonts, jsDelivr, unpkg). Do not vendor an icon set by hand; use download_font or download_icons only when the task needs local files.');
+        lines.push('For each prominent graphic, compare a suitable Lucide or Phosphor icon available to the project (in dependencies or local files), a lightweight HTML/CSS drawing, and raster or SVG artwork. After npm run build, inspect the rendered page and choose the option that best matches the design and remains crisp at its displayed size; do not add every candidate.');
     } else lines.push('Choose the files the request needs.');
     lines.push('Read .rules/ and .skills/ and follow them. Do not overwrite them.');
     lines.push('Add absent package.json keys only. Keep existing script bodies and versions.');

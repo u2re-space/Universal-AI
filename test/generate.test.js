@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { resolvePlatform, platformInstructions, PLATFORM_SOURCES, ENABLED_IN_157 } from '../src/generate/platform.js';
 import { fidelityContract, effectiveFidelity, DEFAULT_FIDELITY, DEFAULT_CREATIVITY } from '../src/generate/fidelity.js';
 import { buildGenerationBrief, GENERATION_KINDS } from '../src/generate/brief.js';
+import { kindRules } from '../src/generate/scaffold.js';
 import { loadConfig, redactConfig } from '../src/core/config.js';
 import { overridesFrom } from '../src/commands/flags.js';
 import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
@@ -103,6 +104,9 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
     assert.match(brief.instructions, /Experimental flags: off/);
     assert.doesNotMatch(brief.instructions, /No framework, no bundler, no npm/);
     assert.match(brief.instructions, /Vite, SCSS/);
+    assert.match(brief.instructions, /compare a suitable Lucide or Phosphor icon/);
+    assert.match(brief.instructions, /After npm run build, inspect the rendered page/);
+    assert.match(brief.instructions, /raster or SVG artwork/);
     assert.match(brief.instructions, /Do not pass --force/);
     assert.match(brief.instructions, /at most 4 steps/);
     assert.match(brief.instructions, /Leave measured null|Leave measured null|measured null/);

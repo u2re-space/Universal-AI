@@ -85,5 +85,7 @@ export function renderMeasurements(sheet) {
         regions && `Regions to cut out${ready ? ` (${ready} ready crop(s); pass the path as generate_image reference, do not crop again)` : ''}:\n${regions}`,
         rules && `Rules:\n${rules}`,
         sheet.notes && `Notes:\n${sheet.notes}`,
+        'Artwork workflow: for requested transparency, prefer a PNG with a real native alpha channel. If the model cannot provide it, keep an RGB plate filled with the subject’s dominant color and make an anti-aliased matte from the clean source crop, never from the painted plate. For flat marks, prefer a real SVG made with vectorize_image / Recraft.',
+        'Before choosing artwork for the page, check suitable Lucide or Phosphor icons available to the project (in dependencies or local files); also consider a small HTML/CSS drawing and raster or SVG candidates. After the page is built, compare the options in the rendered page and keep the clearest, best-fitting result.',
     ].filter(Boolean).join('\n\n');
 }

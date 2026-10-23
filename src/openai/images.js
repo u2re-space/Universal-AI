@@ -57,6 +57,99 @@ export function normalizeImageSize(size) {
     return height > width ? '1024x1536' : '1536x1024';
 }
 
+const GPT_IMAGE_25 = /^(?:openai\/)?gpt-image-2\.5(?:-|$)/i;
+const MIN_IMAGE_PIXELS = 655_360;
+const MAX_IMAGE_PIXELS = 8_294_400;
+const MAX_IMAGE_EDGE = 3840;
+
+/**
+ * Keep custom dimensions for GPT Image 2.5; other image models use their supported frame presets.
+ * @param {string|null|undefined} size
+ * @param {string|null|undefined} model
+ * @returns {string|null}
+ * @exports
+ * @ai.hint pure
+ */
+export function imageRequestSize(size, model) {
+    const value = String(size ?? '').trim().toLowerCase();
+    if (!value || value === 'auto') return null;
+    if (GPT_IMAGE_25.test(String(model ?? '')) && /^\d+\s*x\s*\d+$/.test(value)) return value.replace(/\s+/g, '');
+    return normalizeImageSize(value);
+}
+
+/**
+ * Custom dimensions are constrained to 16-pixel multiples, 3:1 ratio, a 3840-pixel edge,
+ * and the supported pixel-count range. Return a nearby same-ratio frame when possible.
+ * @param {string|null|undefined} size
+ * @returns {string|null}
+ * @exports
+ * @ai.hint pure
+ */
+export function sameAspectImageSize(size) {
+    const match = /^(\d+)\s*x\s*(\d+)$/i.exec(String(size ?? '').trim());
+    if (!match) return null;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || !width || !height
+        || Math.max(width, height) / Math.min(width, height) > 3) return null;
+    const area = width * height;
+    if (width % 16 === 0 && height % 16 === 0 && area >= MIN_IMAGE_PIXELS && area <= MAX_IMAGE_PIXELS
+        && Math.max(width, height) <= MAX_IMAGE_EDGE) return null;
+
+    const gcd = (a, b) => {
+        while (b) [a, b] = [b, a % b];
+        return a;
+    };
+    let divisor = width;
+    let remainder = height;
+    while (remainder) [divisor, remainder] = [remainder, divisor % remainder];
+    const ratioWidth = width / divisor;
+    const ratioHeight = height / divisor;
+    const widthStep = 16 / gcd(ratioWidth, 16);
+    const heightStep = 16 / gcd(ratioHeight, 16);
+    const multiplierStep = (widthStep * heightStep) / gcd(widthStep, heightStep);
+    const ratioArea = ratioWidth * ratioHeight;
+    const minimum = Math.ceil(Math.sqrt(MIN_IMAGE_PIXELS / ratioArea) / multiplierStep) * multiplierStep;
+    const maximum = Math.floor(Math.min(MAX_IMAGE_EDGE / Math.max(ratioWidth, ratioHeight), Math.sqrt(MAX_IMAGE_PIXELS / ratioArea)) / multiplierStep) * multiplierStep;
+    if (minimum > maximum) return null;
+    const target = Math.max(minimum, Math.min(maximum, Math.round(divisor / multiplierStep) * multiplierStep));
+    const result = `${ratioWidth * target}x${ratioHeight * target}`;
+    return result === `${width}x${height}` ? null : result;
+}
+
+/**
+ * Retry only errors that explicitly identify an invalid or unsupported image size.
+ * @param {Error & { status?: number, param?: string }} error
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function isImageSizeError(error) {
+    if (![400, 413, 422].includes(error?.status)) return false;
+    if (/^(?:size|image_size|dimensions?)$/i.test(String(error?.param ?? ''))) return true;
+    return /\b(size|dimensions?|resolution|aspect ratio|pixel count)\b/i.test(String(error?.message ?? ''));
+}
+
+/**
+ * Ordered image-size attempts: the exact request, a valid same-ratio size, then the nearest preset.
+ * @param {string|null|undefined} size
+ * @param {string|null|undefined} model
+ * @returns {string[]}
+ * @exports
+ * @ai.hint pure
+ */
+export function imageSizeAttempts(size, model) {
+    const initial = imageRequestSize(size, model);
+    if (!initial || !GPT_IMAGE_25.test(String(model ?? '')) || !/^\d+x\d+$/.test(initial)) return initial ? [initial] : [];
+    const attempts = [initial];
+    const sameRatio = sameAspectImageSize(initial);
+    const preset = normalizeImageSize(initial);
+    for (const candidate of [sameRatio, preset]) {
+        if (candidate && !attempts.includes(candidate)) attempts.push(candidate);
+    }
+    return attempts;
+}
+
 /**
  * `images` uses /images/generations and /images/edits. `responses` uses the Responses image_generation tool.
  * A proxyapi.ru host selects `images` unless image.transport is set.
@@ -229,7 +322,7 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
         body[imageFormatField(model)] = 'svg';
         return body;
     }
-    const frame = normalizeImageSize(size);
+    const frame = imageRequestSize(size, model);
     if (frame) body.size = frame;
     const size_pair = (frame || body.size)?.trim?.()?.split?.("x")?.map?.((ns)=>parseInt(ns || "0"));
     if (size_pair?.[0] <= 1024 && size_pair?.[1] <= 1024) body.model = body.model?.replace?.(/\-pro$/, "") || body.model;

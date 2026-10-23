@@ -16,7 +16,7 @@ import { createHttp, readBody } from './http.js';
 import { parseSSE } from './sse.js';
 import { createStreamReducer, outputText } from './stream.js';
 import { envValue } from '../core/runtime-env.js';
-import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imagePayloads, isVectorModel, normalizeImageSize, normalizeVectorRatio, resolveImageFormat } from './images.js';
+import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imagePayloads, imageRequestSize, imageSizeAttempts, isImageSizeError, isVectorModel, normalizeImageSize, normalizeVectorRatio, resolveImageFormat } from './images.js';
 
 export { ApiError };
 
@@ -280,31 +280,51 @@ export function createClient({
     const images = {
         /** POST /images/generations. Returns base64 payloads from data[].b64_json. */
         async generate({ model, prompt, size, quality, n, format, background, signal } = {}) {
-            const result = await call('images/generations', { body: generationBody({ model, prompt, size, quality, n, format, background }), signal });
+            const attempts = imageSizeAttempts(size, model);
+            let result;
+            for (let index = 0; ; index++) {
+                const requestedSize = attempts[index] ?? size;
+                try {
+                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, quality, n, format, background }), signal });
+                    break;
+                } catch (error) {
+                    if (index >= attempts.length - 1 || !isImageSizeError(error)) throw error;
+                }
+            }
             const payloads = imagePayloads(result);
             if (!payloads.length) throw new ApiError('Ответ images/generations не содержит b64_json.', { code: 'INVALID_RESPONSE' });
             return payloads;
         },
         /** POST /images/edits as multipart form data. `files` are { filename, mime, bytes }. */
         async edit({ model, prompt, files, size, format, background, signal } = {}) {
-            const fields = { model, prompt };
-            if (isVectorModel(model)) {
-                const aspect = normalizeVectorRatio(size);
-                if (aspect) fields.aspect_ratio = aspect;
-                fields[imageFormatField(model)] = 'svg';
-            } else {
-                const frame = normalizeImageSize(size);
-                if (frame) fields.size = frame;
-                const fmt = resolveImageFormat({ model, format });
-                if (fmt) fields[imageFormatField(model)] = fmt;
-                const backgroundField = backgroundValue({ model, format: fmt, background });
-                if (backgroundField) fields.background = backgroundField;
+            const attempts = isVectorModel(model) ? [] : imageSizeAttempts(size, model);
+            let result;
+            for (let index = 0; ; index++) {
+                const requestedSize = attempts[index] ?? size;
+                const fields = { model, prompt };
+                if (isVectorModel(model)) {
+                    const aspect = normalizeVectorRatio(requestedSize);
+                    if (aspect) fields.aspect_ratio = aspect;
+                    fields[imageFormatField(model)] = 'svg';
+                } else {
+                    const frame = imageRequestSize(requestedSize, model);
+                    if (frame) fields.size = frame;
+                    const fmt = resolveImageFormat({ model, format });
+                    if (fmt) fields[imageFormatField(model)] = fmt;
+                    const backgroundField = backgroundValue({ model, format: fmt, background });
+                    if (backgroundField) fields.background = backgroundField;
+                }
+                const form = encodeMultipart({
+                    fields,
+                    files: files.map((file) => ({ ...file, field: 'image' })),
+                });
+                try {
+                    result = await call('images/edits', { rawBody: form.body, contentType: form.contentType, signal });
+                    break;
+                } catch (error) {
+                    if (index >= attempts.length - 1 || !isImageSizeError(error)) throw error;
+                }
             }
-            const form = encodeMultipart({
-                fields,
-                files: files.map((file) => ({ ...file, field: 'image' })),
-            });
-            const result = await call('images/edits', { rawBody: form.body, contentType: form.contentType, signal });
             const payloads = imagePayloads(result);
             if (!payloads.length) throw new ApiError('Ответ images/edits не содержит b64_json.', { code: 'INVALID_RESPONSE' });
             return payloads;
