@@ -4,10 +4,10 @@
  * @purpose Detect ImageMagick and provide crop, split, resize, convert operations via CLI.
  * @depends node:path, node:fs/promises, agent/shell
  * @usedBy agent/tools
- * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify, magickIsOpaque, magickColorCount, magickPaletteStats, assessVectorSuitability, magickRemoveFlatBackground, magickApplyAlphaMask, ensureTransparentBackground
+ * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify, magickIsOpaque, magickColorCount, magickPaletteStats, assessVectorSuitability, magickRemoveFlatBackground, magickApplyAlphaMask, ensureTransparentBackground, magickDetectFakeTransparency, magickContourAlphaMask
  * @ai.tags imagemagick, image, crop, split, alpha, vector
  * @ai.hint io
- * @changed 2026-10-22 Added the color count, the vector-suitability check, and the grayscale-mask alpha merge.
+ * @changed 2026-10-23 Added the fake-transparency check (painted checkerboard) and the contour matte.
  */
 
 import path from 'node:path';
@@ -315,6 +315,82 @@ export async function magickApplyAlphaMask({ exe, input, mask, output = input, c
         throw error;
     }
     return { changed: true, reason: 'mask', inverted, width: info.width, height: info.height };
+}
+
+/**
+ * A painted transparency plate: a picture that imitates transparency with a checkerboard or a gray
+ * grid instead of an alpha channel. Image models that cannot emit alpha draw exactly that.
+ * The check reads two corner patches: a fake plate holds a handful of neutral tones (the number of
+ * unique colors does not change when the patch is converted to grayscale), while a real background
+ * is either one flat color or a colored, non-neutral picture.
+ * @param {{ exe: string, input: string, cwd: string, signal?: AbortSignal, patch?: number }} opts
+ * @returns {Promise<{ fake: boolean, reason: string, colors: number|null, mean: number|null }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function magickDetectFakeTransparency({ exe, input, cwd, signal, patch = 16 }) {
+    let info;
+    try {
+        info = await magickIdentify({ exe, input, cwd, signal });
+    } catch {
+        return { fake: false, reason: 'unreadable', colors: null, mean: null };
+    }
+    if (!info.width || !info.height) return { fake: false, reason: 'unreadable', colors: null, mean: null };
+    const side = Math.max(4, Math.min(patch, info.width, info.height));
+    const corners = [[0, 0], [Math.max(0, info.width - side), 0]];
+    const samples = [];
+    for (const [x, y] of corners) {
+        const crop = `${side}x${side}+${x}+${y}`;
+        const colorRes = await magickRun(exe, [input, '-alpha', 'off', '-crop', crop, '+repage', '-format', '%k %[fx:mean]', 'info:'], { cwd, signal }).catch(() => null);
+        const grayRes = await magickRun(exe, [input, '-alpha', 'off', '-crop', crop, '+repage', '-colorspace', 'Gray', '-format', '%k', 'info:'], { cwd, signal }).catch(() => null);
+        const [colors, mean] = String(colorRes?.stdout ?? '').trim().split(/\s+/).map(Number);
+        const grayColors = Number(String(grayRes?.stdout ?? '').trim());
+        if (!Number.isFinite(colors) || !Number.isFinite(mean) || !Number.isFinite(grayColors)) continue;
+        samples.push({ colors, grayColors, mean });
+    }
+    if (!samples.length) return { fake: false, reason: 'unreadable', colors: null, mean: null };
+    const neutral = (item) => item.colors >= 2 && item.colors <= 16 && item.colors === item.grayColors
+        && item.mean >= 0.2 && item.mean <= 0.97;
+    const hits = samples.filter(neutral);
+    const first = samples[0];
+    if (hits.length === samples.length) return { fake: true, reason: 'checkerboard', colors: first.colors, mean: first.mean };
+    return { fake: false, reason: hits.length ? 'partly-neutral' : 'plain', colors: first.colors, mean: first.mean };
+}
+
+/**
+ * Draw a matte from the object contour, locally: edge map, closed with a morphology pass, the outer
+ * area flooded from the border, then inverted so the subject is white and the background black.
+ * The result feeds `magickApplyAlphaMask` like a model-drawn mask, and needs no API request.
+ * @param {{ exe: string, input: string, output: string, cwd: string, signal?: AbortSignal, close?: number, canny?: string }} opts
+ * @returns {Promise<{ changed: boolean, reason: string, width?: number, height?: number }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function magickContourAlphaMask({ exe, input, output, cwd, signal, close = 3, canny = '0x1+10%+30%' }) {
+    const info = await magickIdentify({ exe, input, cwd, signal });
+    if (!info.width || !info.height) return { changed: false, reason: 'unreadable' };
+    const outPath = path.isAbsolute(output) ? output : path.join(cwd, output);
+    await mkdir(path.dirname(outPath), { recursive: true });
+    const args = [input,
+        '-alpha', 'off', '-colorspace', 'Gray', '-canny', canny,
+        '-morphology', 'Close', `Disk:${close}`,
+        '-bordercolor', 'black', '-border', '1x1',
+        '-floodfill', '+0+0', 'white',
+        '-negate', '-shave', '1x1',
+        '-resize', `${info.width}x${info.height}!`,
+        output];
+    try {
+        await magickRun(exe, args, { cwd, signal });
+    } catch (error) {
+        await unlink(outPath).catch(() => {});
+        throw error;
+    }
+    const probe = await magickRun(exe, [output, '-colorspace', 'Gray', '-format', '%[fx:mean]', 'info:'], { cwd, signal }).catch(() => null);
+    const mean = Number(String(probe?.stdout ?? '').trim());
+    if (!Number.isFinite(mean)) return { changed: false, reason: 'unreadable' };
+    if (mean <= 0.005) return { changed: false, reason: 'empty-mask' };
+    if (mean >= 0.995) return { changed: false, reason: 'full-mask' };
+    return { changed: true, reason: 'contour', width: info.width, height: info.height };
 }
 
 /**
