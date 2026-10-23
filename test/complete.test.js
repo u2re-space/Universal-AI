@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { startMockServer } from './helpers/mock-server.js';
+import { ensureLocalEnv } from './helpers/local-env.js';
 import { defaults, loadConfig } from '../src/core/config.js';
 import { createClient } from '../src/openai/client.js';
 import { MAX_LINE_BYTES, buildCompletionContext, formatCompletionTree, readCompletionWindow } from '../src/complete/context.js';
@@ -34,6 +35,7 @@ function client() {
 before(async () => {
     server = await startMockServer({ script: (body, index) => script(body, index) });
     work = await mkdtemp(path.join(os.tmpdir(), 'ai-complete-'));
+    await ensureLocalEnv(work);
     endpoint = await startCompletionServer({
         port: 0,
         token: 'test-token',

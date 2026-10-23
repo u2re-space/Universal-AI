@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readdir, rm, readFile, writeFile, symlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
+import { ensureLocalEnv } from './helpers/local-env.js';
 import { createJobManager } from '../src/jobs/manager.js';
 import { stripDetach } from '../src/cli.js';
 
@@ -19,6 +20,7 @@ before(async () => {
     server = await startMockServer({ script: (body, index) => script(body, index) });
     home = await mkdtemp(path.join(os.tmpdir(), 'ai-agent-home-'));
     work = await mkdtemp(path.join(os.tmpdir(), 'ai-agent-work-'));
+    await ensureLocalEnv(work);
 });
 beforeEach(() => server.reset());
 after(async () => { await server.close(); await rm(home, { recursive: true, force: true }); await rm(work, { recursive: true, force: true }); });
@@ -380,14 +382,15 @@ test('launcher exits non-zero when node is missing from PATH', async () => {
     }
 });
 
-test('launcher forwards a PowerShell pipeline', async () => {
-    if (process.platform !== 'win32') return;
-    const root = fileURLToPath(new URL('..', import.meta.url));
-    const ps1 = path.join(root, 'bin', 'ai.ps1');
-    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-pipe-home-'));
-    const mock = await startMockServer({ script: () => ({ text: 'ok' }) });
-    try {
-        const env = {
+    test('launcher forwards a PowerShell pipeline', async () => {
+        if (process.platform !== 'win32') return;
+        const root = fileURLToPath(new URL('..', import.meta.url));
+        const ps1 = path.join(root, 'bin', 'ai.ps1');
+        const home = await mkdtemp(path.join(os.tmpdir(), 'ai-pipe-home-'));
+        const mock = await startMockServer({ script: () => ({ text: 'ok' }) });
+        try {
+            await writeFile(path.join(home, '.env'), '');
+            const env = {
             ...process.env,
             OPENAI_API_KEY: 'sk-test',
             OPENAI_BASE_URL: mock.baseURL,

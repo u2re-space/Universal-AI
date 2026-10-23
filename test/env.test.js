@@ -73,6 +73,7 @@ test('without .env a split Windows pair uses the system pair', async () => {
             cwd,
             env: { OPENAI_API_KEY: 'user-key', OPENAI_BASE_URL: 'https://api.proxyapi.ru/v1', KEEP: 'yes' },
             platform: 'win32',
+            ignorePackageEnv: true,
             readScope(name) {
                 return {
                     user: name === 'OPENAI_API_KEY' ? 'user-key' : null,

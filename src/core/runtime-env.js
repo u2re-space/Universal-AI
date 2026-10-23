@@ -12,6 +12,7 @@
  *           and refreshRuntimeEnv re-reads the file so an edited .env is not stale.
  */
 import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -148,14 +149,55 @@ export function readWindowsEnvValue(name) {
 }
 
 /**
+ * Search for .env upward from start to root, stopping at the first match.
+ * Returns the absolute path or null when no file is found.
+ * @param {string} start
+ * @returns {Promise<string|null>}
+ * @ai.hint io
+ */
+async function findEnvUp(start) {
+    const root = path.parse(start).root;
+    let dir = path.resolve(start);
+    while (true) {
+        const file = path.join(dir, '.env');
+        try {
+            await stat(file);
+            return file;
+        } catch { /* not found */ }
+        if (dir === root) break;
+        dir = path.dirname(dir);
+    }
+    return null;
+}
+
+/**
+ * Package-level .env near the module itself (src/core/runtime-env.js → ../.. → package root).
+ * Returns the absolute path or null.
+ * @returns {string|null}
+ * @ai.hint pure
+ */
+function packageEnvPath() {
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    return path.join(__dirname, '..', '..', '.env');
+}
+
+/**
  * Environment for one command. On Windows, a split user/machine credential pair is repaired.
- * A .env file in cwd then overrides those values. process.env is not modified.
+ * A .env file found from cwd upward overrides those values. process.env is not modified.
  * @param {{ cwd: string, env?: object, platform?: string, readScope?: (name: string) => Promise<{ user: string|null, machine: string|null }>|({ user: string|null, machine: string|null }) }} options
  * @returns {Promise<object>}
  * @exports
  * @ai.hint io
  */
-export async function resolveRuntimeEnv({ cwd, env = process.env, platform = process.platform, readScope = readWindowsEnvValue } = {}) {
+/**
+ * Environment for one command. On Windows, a split user/machine credential pair is repaired.
+ * A .env file found from cwd upward overrides those values. process.env is not modified.
+ * @param {{ cwd: string, env?: object, platform?: string, readScope?: (name: string) => Promise<{ user: string|null, machine: string|null }>|({ user: string|null, machine: string|null }), ignorePackageEnv?: boolean }} options
+ * @returns {Promise<object>}
+ * @exports
+ * @ai.hint io
+ */
+export async function resolveRuntimeEnv({ cwd, env = process.env, platform = process.platform, readScope = readWindowsEnvValue, ignorePackageEnv = false } = {}) {
     let next = { ...env };
     if (platform === 'win32') {
         const user = {};
@@ -167,13 +209,17 @@ export async function resolveRuntimeEnv({ cwd, env = process.env, platform = pro
         }));
         next = reconcileCredentialScopes({ env: next, user, machine });
     }
-    const file = path.join(cwd, '.env');
-    try {
-        return applyEnvFile(next, await readFile(file, 'utf8'));
-    } catch (error) {
-        if (error.code === 'ENOENT') return next;
-        throw new Error(`Не удалось прочитать ${file}: ${error.message}`);
+    let file = await findEnvUp(cwd);
+    if (!file && !ignorePackageEnv) file = packageEnvPath();
+    if (file) {
+        try {
+            return applyEnvFile(next, await readFile(file, 'utf8'));
+        } catch (error) {
+            if (error.code === 'ENOENT') return next;
+            throw new Error(`Не удалось прочитать ${file}: ${error.message}`);
+        }
     }
+    return next;
 }
 
 /**
@@ -197,7 +243,7 @@ export function setLiveEnv(env) {
  * @ai.hint pure
  */
 export function liveEnv(fallback = process.env) {
-    return live ?? fallback;
+    return live ?? fallback ?? process.env;
 }
 
 /**
@@ -226,9 +272,9 @@ export function envValue(name, fallback = null, env = null) {
  * @ai.hint io
  */
 export async function refreshRuntimeEnv({ cwd = process.cwd(), env = process.env, platform = process.platform, readScope = readWindowsEnvValue, force = false } = {}) {
-    const file = path.join(cwd, '.env');
-    const info = await stat(file).catch(() => null);
-    const signature = info ? `${file}|${info.mtimeMs}|${info.size}` : `${file}|absent`;
+    let file = await findEnvUp(cwd);
+    if (!file) file = packageEnvPath();
+    const signature = file ? `${file}|${(await stat(file)).mtimeMs}|${(await stat(file)).size}` : `${file ?? 'absent'}`;
     const inherited = env === process.env;
     if (!force && inherited && live && signature === liveSignature) return live;
     const next = await resolveRuntimeEnv({ cwd, env, platform, readScope });

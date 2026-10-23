@@ -33,7 +33,7 @@ const PROBE_MAX_OUTPUT_TOKENS = 32;
  * @exports
  * @ai.hint pure
  */
-export function completionChannelList(config, env = liveEnv()) {
+export function completionChannelList(config, env = null) {
     const out = [];
     const seen = new Set();
     /**
@@ -53,6 +53,7 @@ export function completionChannelList(config, env = liveEnv()) {
         seen.add(id);
         out.push({ baseURL: url, apiKey: key, label: normalized, primary });
     };
+    env ??= liveEnv() ?? process.env;
     add(config?.baseURL || 'https://api.openai.com/v1/', config?.apiKey || env.OPENAI_API_KEY, true);
     for (const item of providerList(config, env)) add(item.baseURL, item.apiKey, false);
     return out;

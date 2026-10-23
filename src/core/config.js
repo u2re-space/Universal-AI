@@ -185,7 +185,8 @@ function migrateLegacyRoles(c) {
  * Precedence: defaults < ~/.ai-agent/config.json < --config file < environment < overrides (CLI).
  * The CLI passes environment after reading .env and repairing a split Windows credential pair.
  */
-export async function loadConfig({ configPath = null, overrides = {}, env = process.env, ensureHome = true } = {}) {
+export async function loadConfig({ configPath = null, overrides = {}, env = null, ensureHome = true } = {}) {
+    env ??= liveEnv() ?? process.env;
     const home = defaultHome(env);
     const homeConfig = await readJsonFile(path.join(home, 'config.json'), { optional: true });
     const fileConfig = configPath ? await readJsonFile(path.resolve(configPath)) : {};

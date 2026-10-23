@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { startServe, pidAlive } from '../src/commands/serve.js';
 import { splitServeUrl, assertLoopback, attachPublisher } from '../src/server/publish.js';
 import { startMockServer } from './helpers/mock-server.js';
+import { ensureLocalEnv } from './helpers/local-env.js';
 
 function once(target, event) {
     return new Promise((resolve, reject) => {
@@ -188,6 +189,7 @@ test('the same port serves editor completion next to the bus', async () => {
 test('ai serve CLI accepts --port and a publisher event', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-serve-cli-'));
     const work = await mkdtemp(path.join(os.tmpdir(), 'ai-serve-cli-work-'));
+    await ensureLocalEnv(work);
     const bin = fileURLToPath(new URL('../bin/ai.js', import.meta.url));
     const child = spawn(process.execPath, [bin, 'serve', '--port', '0', '--model', 'mock-model'], {
         cwd: work, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],

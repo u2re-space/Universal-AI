@@ -11,6 +11,7 @@ import { buildGenerationBrief, GENERATION_KINDS } from '../src/generate/brief.js
 import { loadConfig, redactConfig } from '../src/core/config.js';
 import { overridesFrom } from '../src/commands/flags.js';
 import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
+import { ensureLocalEnv } from './helpers/local-env.js';
 
 const landing = fileURLToPath(new URL('../test-gen/landing.png', import.meta.url));
 const bin = fileURLToPath(new URL('../bin/ai.js', import.meta.url));
@@ -233,6 +234,7 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-gen-home-'));
     const work = await mkdtemp(path.join(os.tmpdir(), 'ai-gen-work-'));
     try {
+        await writeFile(path.join(work, '.env'), '');
         const image = await readFile(landing).then(() => landing, async () => {
             const file = path.join(work, 'landing.png');
             await writeFile(file, Buffer.from(TINY_PNG, 'base64'));
@@ -277,6 +279,7 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
 test('ai gen without a kind or a reference exits 2', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-gen-home-'));
     const work = await mkdtemp(path.join(os.tmpdir(), 'ai-gen-work-'));
+    await ensureLocalEnv(work);
     try {
         const run = (args) => new Promise((resolve) => {
             const child = spawn(process.execPath, [bin, ...args], {

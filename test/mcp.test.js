@@ -10,6 +10,7 @@ import { connectMcp } from '../src/mcp/client.js';
 import { mcpToolName, normalizeMcpServer, remoteMcpTools } from '../src/mcp/servers.js';
 import { builtinTools } from '../src/agent/loop.js';
 import { createSession } from '../src/core/session.js';
+import { ensureLocalEnv } from './helpers/local-env.js';
 import { openMcpSources } from '../src/mcp/session.js';
 import { createToolset } from '../src/agent/tools.js';
 import { defaults } from '../src/core/config-defaults.js';
@@ -153,6 +154,7 @@ test('tools.mcp false connects nothing', async () => {
 test('ai mcp add, list, and probe do not need an API key', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-mcp-home-'));
     const work = await mkdtemp(path.join(os.tmpdir(), 'ai-mcp-work-'));
+    await ensureLocalEnv(work);
     const run = (args) => new Promise((resolve) => {
         const child = spawn(process.execPath, [bin, ...args], {
             cwd: work,
