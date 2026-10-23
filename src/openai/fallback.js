@@ -60,7 +60,7 @@ export function modelMissing(error) {
  */
 export function providerDown(error) {
     if (['NETWORK_ERROR', 'TIMEOUT', 'CONNECT_TIMEOUT'].includes(error?.code)) return true;
-    return [401, 403, 408, 425, 429, 500, 502, 503, 504].includes(error?.status);
+    return [401, 402, 403, 408, 425, 429, 500, 502, 503, 504].includes(error?.status);
 }
 
 /**
