@@ -26,4 +26,4 @@ Use the click tool once for the requested target, then read the returned screen.
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'low', model: 'gpt-6.1-sol' };
+export const settings = { effort: 'low', model: 'gpt-6-luna', verbosity: 'low' };

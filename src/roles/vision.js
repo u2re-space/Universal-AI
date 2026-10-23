@@ -40,9 +40,9 @@ export const settings = { effort: null, model: null };
 
 /** Model and effort for a small crop, a medium image, and a screenshot or large image. */
 export const VISION_TIERS = Object.freeze({
-    trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'high' }),
-    normal: Object.freeze({ model: 'gpt-6.1-sol', effort: 'low' }),
-    complex: Object.freeze({ model: 'gpt-6.1-sol', effort: 'medium' }),
+    trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'low' }),
+    normal: Object.freeze({ model: 'gpt-6-luna', effort: 'medium' }),
+    complex: Object.freeze({ model: 'gpt-6-luna', effort: 'high' }),
 });
 
 /**

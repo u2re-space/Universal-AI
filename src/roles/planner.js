@@ -36,4 +36,4 @@ You do not write files. Use an empty fileActions list when no file work is neede
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'high', model: 'gpt-6.1-sol' };
+export const settings = { effort: 'high', model: 'gpt-6-luna' };

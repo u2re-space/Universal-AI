@@ -28,7 +28,7 @@ const client = () => createClient({ apiKey: 'sk-test', baseURL: server.baseURL }
 function setup({ approvalLevel = 'all', prompt = 'do it', cfg = config() } = {}) {
     const session = createSession({ store: false, model: 'mock-model' });
     session.addUserMessage(buildUserMessage({ text: prompt }));
-    const ledger = createLedger({ prices: { 'mock-model': { input: 1, cachedInput: 0.5, output: 10 }, 'gpt-6.1-sol': { input: 1, cachedInput: 0.5, output: 10 } } });
+    const ledger = createLedger({ prices: { 'mock-model': { input: 1, cachedInput: 0.5, output: 10 }, 'gpt-6-luna': { input: 1, cachedInput: 0.5, output: 10 } } });
     const toolset = createToolset({ root, config: cfg, names: enabledToolNames(cfg.tools), approvalLevel, signal: undefined });
     const events = [];
     return { session, ledger, toolset, events, emit: (e) => events.push(e), cfg };
@@ -49,7 +49,7 @@ test('tool loop: write_file → read_file → final answer; history stays replay
         assert.deepEqual(body.include, ['reasoning.encrypted_content']);
         return { text: 'Файл создан и проверен.' };
     };
-    const { session, ledger, toolset, events, emit, cfg } = setup({ cfg: { ...config(), model: 'gpt-6.1-sol' } });
+    const { session, ledger, toolset, events, emit, cfg } = setup({ cfg: { ...config(), model: 'gpt-6-luna' } });
     const result = await runTurn({ client: client(), config: cfg, session, ledger, toolset, emit });
     assert.equal(result.status, 'completed', result.error?.message);
     assert.equal(result.turns, 3);

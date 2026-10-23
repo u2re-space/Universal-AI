@@ -24,12 +24,12 @@ test('vision effort and model follow the long side, and a screenshot stays compl
     assert.equal(imageLongSide(png(400, 120)), 400);
     assert.equal(imageLongSide(png(1920, 1080)), 1920);
     assert.equal(imageLongSide(Buffer.from('nope')), null);
-    assert.deepEqual(visionChoice(400), { model: 'gpt-6-luna', effort: 'high' });
-    assert.deepEqual(visionChoice(512), { model: 'gpt-6-luna', effort: 'high' });
-    assert.deepEqual(visionChoice(800), { model: 'gpt-6.1-sol', effort: 'low' });
-    assert.deepEqual(visionChoice(1280), { model: 'gpt-6.1-sol', effort: 'low' });
-    assert.deepEqual(visionChoice(1281), { model: 'gpt-6.1-sol', effort: 'medium' });
+    assert.deepEqual(visionChoice(400), { model: 'gpt-6-luna', effort: 'low' });
+    assert.deepEqual(visionChoice(512), { model: 'gpt-6-luna', effort: 'low' });
+    assert.deepEqual(visionChoice(800), { model: 'gpt-6-luna', effort: 'medium' });
+    assert.deepEqual(visionChoice(1280), { model: 'gpt-6-luna', effort: 'medium' });
+    assert.deepEqual(visionChoice(1281), { model: 'gpt-6-luna', effort: 'high' });
     assert.deepEqual(visionChoice(null), visionChoice(800));
-    assert.deepEqual(visionChoice(80, {}, { screen: true }), { model: 'gpt-6.1-sol', effort: 'medium' });
+    assert.deepEqual(visionChoice(80, {}, { screen: true }), { model: 'gpt-6-luna', effort: 'high' });
     assert.deepEqual(visionChoice(1920, { model: 'gpt-6-luna', effort: 'low' }), { model: 'gpt-6-luna', effort: 'low' });
 });

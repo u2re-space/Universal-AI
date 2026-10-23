@@ -23,8 +23,8 @@ export const IMAGE_DETAILS = ['auto', 'low', 'high', 'original'];
  * AI_MODEL, AI_AGENT_HOME) and finally CLI flags.
  */
 export const defaults = Object.freeze({
-    model: 'gpt-6.1-sol',
-    imageModel: null,                 // null → gpt-image-2.5 (flare for generation, sunburst for edits) on the images API
+    model: 'gpt-6-luna',
+    imageModel: 'gpt-image-2.5-sunburst',                 // null → gpt-image-2.5 (flare for generation, sunburst for edits) on the images API
     baseURL: "https://api.proxyapi.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
     apiKey: null,                     // prefer the OPENAI_API_KEY environment variable
     organization: null,

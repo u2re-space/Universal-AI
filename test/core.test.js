@@ -55,8 +55,8 @@ test('session: save and load round trip', async () => {
 
 test('ledger: price matching, cost and budgets', () => {
     const prices = { 'gpt-6.1-sol': { input: 1.25, cachedInput: 0.125, output: 10 }, 'gpt-6*': { input: 2, output: 20 } };
-    assert.equal(priceFor(prices, 'gpt-6.1-sol').input, 1.25);
     assert.equal(priceFor(prices, 'gpt-6-luna').input, 2);
+    assert.equal(priceFor(prices, 'gpt-6.1-sol').input, 1.25);
     assert.equal(priceFor(prices, 'o3'), null);
     const usage = normalizeUsage({ input_tokens: 1_000_000, input_tokens_details: { cached_tokens: 200_000 }, output_tokens: 100_000, output_tokens_details: { reasoning_tokens: 50_000 }, total_tokens: 1_100_000 });
     assert.equal(costOf(prices['gpt-6.1-sol'], usage), 800_000 * 1.25 / 1e6 + 200_000 * 0.125 / 1e6 + 100_000 * 10 / 1e6);
