@@ -267,6 +267,11 @@ function validateConfig(c) {
     if (c.image.maskModel != null && (typeof c.image.maskModel !== 'string' || !c.image.maskModel.trim())) fail('image.maskModel: непустая строка или null');
     if (c.image.vectorModel != null && (typeof c.image.vectorModel !== 'string' || !c.image.vectorModel.trim())) fail('image.vectorModel: непустая строка или null');
     if (!Number.isSafeInteger(c.image.vectorMaxColors) || c.image.vectorMaxColors < 2 || c.image.vectorMaxColors > 65536) fail('image.vectorMaxColors: 2..65536');
+    if (!['auto', 'mask', 'contour', 'flat', 'off'].includes(c.image.alphaMode)) fail('image.alphaMode: auto | mask | contour | flat | off');
+    if (typeof c.image.paintBackground !== 'boolean') fail('image.paintBackground: true | false');
+    if (typeof c.image.autoVectorize !== 'boolean') fail('image.autoVectorize: true | false');
+    if (typeof c.image.alphaFeather !== 'number' || c.image.alphaFeather < 0 || c.image.alphaFeather > 8) fail('image.alphaFeather: 0..8');
+    if (!Number.isSafeInteger(c.image.pngMaxBytes) || c.image.pngMaxBytes < 64 * KiB || c.image.pngMaxBytes > 64 * 1024 * KiB) fail('image.pngMaxBytes: 64 KiB..64 MiB');
     if (c.webSearch.contextSize != null && !['low', 'medium', 'high'].includes(c.webSearch.contextSize)) fail('webSearch.contextSize: null | low | medium | high');
     if (!isRecord(c.documentation)) fail('documentation должен быть объектом');
     for (const key of Object.keys(c.documentation)) if (!['sources', 'roles'].includes(key)) fail(`неизвестный параметр documentation.${key}`);

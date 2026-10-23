@@ -4,7 +4,7 @@
  * @purpose Detect ImageMagick and provide crop, split, resize, convert operations via CLI.
  * @depends node:path, node:fs/promises, agent/shell
  * @usedBy agent/tools
- * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify, magickIsOpaque, magickColorCount, magickPaletteStats, assessVectorSuitability, magickRemoveFlatBackground, magickApplyAlphaMask, ensureTransparentBackground, magickDetectFakeTransparency, magickContourAlphaMask
+ * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify, magickIsOpaque, magickColorCount, magickPaletteStats, assessVectorSuitability, magickRemoveFlatBackground, magickApplyAlphaMask, ensureTransparentBackground, magickDetectFakeTransparency, magickContourAlphaMask, magickSaturationAlphaMask
  * @ai.tags imagemagick, image, crop, split, alpha, vector
  * @ai.hint io
  * @changed 2026-10-23 Added the fake-transparency check (painted checkerboard) and the contour matte.
@@ -282,16 +282,20 @@ export async function assessVectorSuitability({ exe, input, cwd, signal, maxColo
 }
 
 /**
- * Use a grayscale mask as the alpha channel of the image: white stays visible, black becomes
- * transparent, gray gives a soft edge. The mask is resized to the image frame, so a mask drawn
- * on a coarser grid still fits. A mask whose corners are white is inverted first: the background
+ * Use a grayscale matte as the alpha channel of the image: white stays visible, black becomes
+ * transparent, gray gives a soft edge. The matte is resized to the image frame, so a matte drawn
+ * on a coarser grid still fits. A matte whose corners are white is inverted first: the background
  * is expected to be black, and a model occasionally returns the polarity the other way round.
- * @param {{ exe: string, input: string, mask: string, output?: string, cwd: string, signal?: AbortSignal }} opts
- * @returns {Promise<{ changed: boolean, reason: string, inverted?: boolean, width?: number, height?: number }>}
+ *
+ * The matte is smoothed before it is applied (`feather` pixels of blur) and its extremes are
+ * stretched to full black and full white. A model-drawn matte is rarely a clean gradient — it comes
+ * back posterized or washed out — and without this the cut has stair-stepped edges and a halo.
+ * @param {{ exe: string, input: string, mask: string, output?: string, cwd: string, signal?: AbortSignal, feather?: number }} opts
+ * @returns {Promise<{ changed: boolean, reason: string, inverted?: boolean, feathered?: number, width?: number, height?: number }>}
  * @exports
  * @ai.hint io
  */
-export async function magickApplyAlphaMask({ exe, input, mask, output = input, cwd, signal }) {
+export async function magickApplyAlphaMask({ exe, input, mask, output = input, cwd, signal, feather = 1 }) {
     const info = await magickIdentify({ exe, input, cwd, signal });
     if (!info.width || !info.height) return { changed: false, reason: 'unreadable' };
     const probe = await magickRun(exe, [mask, '-colorspace', 'Gray', '-format',
@@ -301,11 +305,16 @@ export async function magickApplyAlphaMask({ exe, input, mask, output = input, c
     if (mean <= 0.005) return { changed: false, reason: 'empty-mask' };
     if (mean >= 0.995) return { changed: false, reason: 'full-mask' };
     const inverted = corner > 0.5;
+    const blur = Number.isFinite(feather) ? Math.max(0, Math.min(8, feather)) : 1;
     const outPath = path.isAbsolute(output) ? output : path.join(cwd, output);
     const suffix = path.extname(outPath) || '.png';
     const tmpPath = path.join(path.dirname(outPath), `.tmp-mask-${process.pid}-${Date.now()}${suffix}`);
     const args = [input, '(', mask, '-colorspace', 'Gray'];
     if (inverted) args.push('-negate');
+    // Normalize first, then blur: stretching the matte keeps the interior solid while the blur
+    // softens only the transition band.
+    args.push('-auto-level');
+    if (blur > 0) args.push('-gaussian-blur', `0x${blur}`);
     args.push('-resize', `${info.width}x${info.height}!`, ')', '-alpha', 'off', '-compose', 'CopyOpacity', '-composite', tmpPath);
     try {
         await magickRun(exe, args, { cwd, signal });
@@ -314,7 +323,7 @@ export async function magickApplyAlphaMask({ exe, input, mask, output = input, c
         await unlink(tmpPath).catch(() => {});
         throw error;
     }
-    return { changed: true, reason: 'mask', inverted, width: info.width, height: info.height };
+    return { changed: true, reason: 'mask', inverted, feathered: blur, width: info.width, height: info.height };
 }
 
 /**
@@ -358,39 +367,84 @@ export async function magickDetectFakeTransparency({ exe, input, cwd, signal, pa
 }
 
 /**
- * Draw a matte from the object contour, locally: edge map, closed with a morphology pass, the outer
- * area flooded from the border, then inverted so the subject is white and the background black.
- * The result feeds `magickApplyAlphaMask` like a model-drawn mask, and needs no API request.
- * @param {{ exe: string, input: string, output: string, cwd: string, signal?: AbortSignal, close?: number, canny?: string }} opts
+ * Draw a matte from the object contour without any API request: the canny edges of the picture are
+ * thickened into a closed barrier, painted over the source, and the background is flooded away from
+ * all four corners. What stays opaque is the subject, and `-alpha extract` turns it into a grayscale
+ * matte for `magickApplyAlphaMask`, so the RGB pixels of the source are never touched.
+ * @param {{ exe: string, input: string, output: string, cwd: string, signal?: AbortSignal, close?: number, canny?: string, fuzz?: number, barrier?: string }} opts
  * @returns {Promise<{ changed: boolean, reason: string, width?: number, height?: number }>}
  * @exports
  * @ai.hint io
  */
-export async function magickContourAlphaMask({ exe, input, output, cwd, signal, close = 3, canny = '0x1+10%+30%' }) {
+export async function magickContourAlphaMask({ exe, input, output, cwd, signal, close = 3, canny = '0x1+10%+30%', fuzz = 10, barrier = 'magenta' }) {
     const info = await magickIdentify({ exe, input, cwd, signal });
     if (!info.width || !info.height) return { changed: false, reason: 'unreadable' };
+    const colorRes = await magickRun(exe, [input, '-format', '%[pixel:p{0,0}]', 'info:'], { cwd, signal }).catch(() => null);
+    const color = String(colorRes?.stdout ?? '').trim();
+    if (!color || /\bnone\b/i.test(color)) return { changed: false, reason: 'already' };
     const outPath = path.isAbsolute(output) ? output : path.join(cwd, output);
     await mkdir(path.dirname(outPath), { recursive: true });
-    const args = [input,
-        '-alpha', 'off', '-colorspace', 'Gray', '-canny', canny,
-        '-morphology', 'Close', `Disk:${close}`,
-        '-bordercolor', 'black', '-border', '1x1',
-        '-floodfill', '+0+0', 'white',
-        '-negate', '-shave', '1x1',
-        '-resize', `${info.width}x${info.height}!`,
-        output];
+    const corners = [
+        [0, 0],
+        [Math.max(0, info.width - 1), 0],
+        [0, Math.max(0, info.height - 1)],
+        [Math.max(0, info.width - 1), Math.max(0, info.height - 1)],
+    ];
+    const args = [input, '-alpha', 'set',
+        '(', '-clone', '0', '-colorspace', 'Gray', '-canny', canny, '-morphology', 'Close', `Disk:${close}`,
+        '-fuzz', `${fuzz}%`, '-transparent', 'black', '-fill', barrier, '-opaque', 'white', ')',
+        '-compose', 'Over', '-composite',
+        '-channel', 'RGBA', '-fuzz', `${fuzz}%`, '-fill', 'none'];
+    for (const [x, y] of corners) args.push('-floodfill', `+${x}+${y}`, color);
+    args.push('+channel', '-alpha', 'extract', output);
     try {
         await magickRun(exe, args, { cwd, signal });
     } catch (error) {
         await unlink(outPath).catch(() => {});
         throw error;
     }
+    return await probeMatte({ exe, output, cwd, signal, width: info.width, height: info.height, reason: 'contour' });
+}
+
+/**
+ * Draw a matte from color: an image model that cannot emit alpha paints a neutral checkerboard or a
+ * gray plate behind the artwork, and saturation separates them — colored pixels are the subject,
+ * neutral pixels become transparent. Only useful for that neutral-plate case; a black-and-white logo
+ * has no saturation and is reported as an empty matte.
+ * @param {{ exe: string, input: string, output: string, cwd: string, signal?: AbortSignal, threshold?: number }} opts
+ * @returns {Promise<{ changed: boolean, reason: string, width?: number, height?: number }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function magickSaturationAlphaMask({ exe, input, output, cwd, signal, threshold = 15 }) {
+    const info = await magickIdentify({ exe, input, cwd, signal });
+    if (!info.width || !info.height) return { changed: false, reason: 'unreadable' };
+    const outPath = path.isAbsolute(output) ? output : path.join(cwd, output);
+    await mkdir(path.dirname(outPath), { recursive: true });
+    try {
+        await magickRun(exe, [input, '-alpha', 'off', '-colorspace', 'HSL', '-channel', 'G', '-separate', '+channel',
+            '-threshold', `${threshold}%`, output], { cwd, signal });
+    } catch (error) {
+        await unlink(outPath).catch(() => {});
+        throw error;
+    }
+    return await probeMatte({ exe, output, cwd, signal, width: info.width, height: info.height, reason: 'saturation' });
+}
+
+/**
+ * Reject a matte that covers nothing or everything: either the barrier leaked or there is no
+ * background to cut, and such a mask would eat the picture.
+ * @param {{ exe: string, output: string, cwd: string, signal?: AbortSignal, width: number, height: number, reason: string }} opts
+ * @returns {Promise<{ changed: boolean, reason: string, width?: number, height?: number }>}
+ * @ai.hint io
+ */
+async function probeMatte({ exe, output, cwd, signal, width, height, reason }) {
     const probe = await magickRun(exe, [output, '-colorspace', 'Gray', '-format', '%[fx:mean]', 'info:'], { cwd, signal }).catch(() => null);
     const mean = Number(String(probe?.stdout ?? '').trim());
     if (!Number.isFinite(mean)) return { changed: false, reason: 'unreadable' };
     if (mean <= 0.005) return { changed: false, reason: 'empty-mask' };
     if (mean >= 0.995) return { changed: false, reason: 'full-mask' };
-    return { changed: true, reason: 'contour', width: info.width, height: info.height };
+    return { changed: true, reason, width, height };
 }
 
 /**

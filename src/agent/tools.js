@@ -232,8 +232,8 @@ export function createToolset({
             case 'moderate_text': return `Модерация (${args.preset}): ${truncate(args.text ?? '', 300)}`;
             case 'channel_reply': return `Черновик ${args.purpose}: ${truncate(args.text ?? '', 300)}`;
             case 'telegram_call': return `Telegram ${args.method}`;
-            case 'generate_image': return `Нарисовать: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}${args.reference ? `\nРеференс: ${args.reference}` : ''}`;
-            case 'edit_image': return `Изменить ${args.image}: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}${args.extra_images ? `\nДоп. референсы: ${args.extra_images}` : ''}`;
+            case 'generate_image': return `Нарисовать: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}${args.reference ? `\nРеференс: ${args.reference}` : ''}${args.background ? `\nФон: ${args.background}` : ''}${args.to_svg ? '\nЗатем: SVG' : ''}`;
+            case 'edit_image': return `Изменить ${args.image}: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}${args.extra_images ? `\nДоп. референсы: ${args.extra_images}` : ''}${args.background ? `\nФон: ${args.background}` : ''}${args.to_svg ? '\nЗатем: SVG' : ''}`;
             case 'click': return `Клик: ${truncate(clickTarget(args), 400)}`;
             case 'type': return `Ввод: ${truncate(args.text ?? '', 400)}`;
             case 'run_ahk': return `Скрипт: ${truncate(args.script ?? '', 400)}`;

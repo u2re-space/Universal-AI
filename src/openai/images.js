@@ -5,7 +5,7 @@
  * @depends node:crypto
  * @usedBy openai/client, agent/loop, agent/tools, commands/image, commands/run
  * @exports PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, IMAGE_SIZES, VECTOR_RATIOS,
- *   imageTransport, imageModelFor, normalizeImageSize, normalizeImageFormat, normalizeVectorRatio,
+ *   imageTransport, imageModelFor, normalizeImageSize, normalizeImageFormat, resolveImageFormat, normalizeVectorRatio,
  *   isVectorModel, supportsTransparentBackground, backgroundValue, imageFormatField, generationBody, encodeMultipart,
  *   imagePayloads, pngHasAlphaChannel, sniffImage
  * @ai.tags images, proxyapi
@@ -148,6 +148,23 @@ export function normalizeImageFormat(format) {
 }
 
 /**
+ * Format field for a request: the requested one, or PNG for the models that read `output_format`.
+ * gpt-image-* answers in its own default when the field is left out, and every intermediate file
+ * (mask, painted plate, crop under .tmp) must be PNG, so the field is sent explicitly instead of
+ * being omitted. Vendor models that only take `image_format` keep the field out when it is not asked
+ * for, so a Recraft request is not changed by this.
+ * @param {{ model: string, format?: string | null }} request
+ * @returns {string | null}
+ * @exports
+ * @ai.hint pure
+ */
+export function resolveImageFormat({ model, format = null }) {
+    const fmt = normalizeImageFormat(format);
+    if (fmt) return fmt;
+    return imageFormatField(model) === 'output_format' ? 'png' : null;
+}
+
+/**
  * OpenAI image models accept `output_format`; Recraft and most other vendors accept only
  * `image_format`.
  * @param {string | null | undefined} model
@@ -218,7 +235,7 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
     if (size_pair?.[0] <= 1024 && size_pair?.[1] <= 1024) body.model = body.model?.replace?.(/\-pro$/, "") || body.model;
     if (quality && quality !== 'auto') body.quality = quality;
     if (Number.isInteger(n) && n > 1) body.n = n;
-    const fmt = normalizeImageFormat(format);
+    const fmt = resolveImageFormat({ model, format });
     if (fmt) body[imageFormatField(model)] = fmt;
     const backgroundField = backgroundValue({ model, format: fmt, background });
     if (backgroundField) body.background = backgroundField;

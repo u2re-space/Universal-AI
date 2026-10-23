@@ -129,7 +129,7 @@ test('images client vectorize posts the source as a multipart edit and the tool 
             const form = raw.toString('latin1');
             assert.match(form, /name="model"\r\n\r\nrecraft\/recraft-v4\.1-pro-vector\r\n/);
             assert.match(form, /name="image_format"\r\n\r\nsvg\r\n/);
-            assert.match(form, /name="image"; filename="source\.png"/);
+            assert.match(form, /name="image"; filename="logo\.png"/);
             assert.doesNotMatch(form, /name="size"/);
             assert.doesNotMatch(form, /name="aspect_ratio"/);
             res.end(JSON.stringify({ data: [{ b64_json: svgB64 }] }));

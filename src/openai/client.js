@@ -15,7 +15,7 @@ import { ApiError } from './errors.js';
 import { createHttp, readBody } from './http.js';
 import { parseSSE } from './sse.js';
 import { createStreamReducer, outputText } from './stream.js';
-import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imagePayloads, isVectorModel, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio } from './images.js';
+import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imagePayloads, isVectorModel, normalizeImageSize, normalizeVectorRatio, resolveImageFormat } from './images.js';
 
 export { ApiError };
 
@@ -294,7 +294,7 @@ export function createClient({
             } else {
                 const frame = normalizeImageSize(size);
                 if (frame) fields.size = frame;
-                const fmt = normalizeImageFormat(format);
+                const fmt = resolveImageFormat({ model, format });
                 if (fmt) fields[imageFormatField(model)] = fmt;
                 const backgroundField = backgroundValue({ model, format: fmt, background });
                 if (backgroundField) fields.background = backgroundField;
@@ -312,14 +312,14 @@ export function createClient({
          * Vectorize one raster into SVG with a vector model. The source goes through the edit
          * route as a multipart `image` field: the generation route ignores an image reference
          * for these models, while the edit route conditions on the pixels and keeps the source frame.
-         * @param {{ model: string, prompt: string, image: { mime: string, bytes: Buffer }, signal?: AbortSignal }} options
+         * @param {{ model: string, prompt: string, image: { mime: string, bytes: Buffer, filename?: string }, signal?: AbortSignal }} options
          * @returns {Promise<string[]>} base64 SVG payloads
          */
         async vectorize({ model, prompt, image, signal } = {}) {
             if (!image?.bytes?.length) throw new ApiError('vectorize: нужен исходный растр.', { code: 'INVALID_REQUEST' });
             return images.edit({
                 model, prompt, format: 'svg', signal,
-                files: [{ filename: 'source.png', mime: image.mime, bytes: image.bytes }],
+                files: [{ filename: image.filename || 'source.png', mime: image.mime, bytes: image.bytes }],
             });
         },
     };

@@ -46,8 +46,7 @@ export async function image(ctx) {
     for (let i = 0; i < count; i++) {
         if (count > 1) renderer.line('info', `Изображение ${i + 1} из ${count}`);
         const exit = await runOnce({ ...ctx, values: { ...values, session: null, out: null } }, {
-            prompt: parts.length ? `${prompt}\n(Use the attached image(s) as the reference / source to edit. Never paint a checkerboard or a fake transparency pattern; keep the background flat and even.)` : prompt,
-            parts, instructions, builtin, toolChoice: { type: 'image_generation' }, imageTarget: target, maxTurns: 1,
+            prompt: parts.length ? `${prompt}\n(Use the attached image(s) as the reference / source to edit. Never paint a checkerboard or a fake transparency pattern; keep the background flat and even.)` : prompt,            parts, instructions, builtin, toolChoice: { type: 'image_generation' }, imageTarget: target, maxTurns: 1,
             summaryTitle: count > 1 ? `изображение ${i + 1}/${count}` : 'итог',
             extraRows: (result) => { produced.push(...result.images); return []; },
         });
@@ -96,11 +95,15 @@ async function runImagesEndpoint(ctx, prompt, count) {
             await writeFile(dest, buffer);
             saved.push(path.relative(ctx.cwd, dest));
             if (wantsTransparent) {
-                const alpha = await applyGeneratedAlphaMask({ client, config, file: dest, signal });
-                if (alpha.changed) {
-                    const how = alpha.reason === 'mask' ? `по маске ${alpha.model}` : 'заливкой от углов';
+                const alpha = await applyGeneratedAlphaMask({ client, config, file: dest, signal, alphaSource: sources[0] });
+                if (alpha.reason === 'already') {
+                    renderer.line('info', `Альфа-канал настоящий: модель отдала прозрачный фон, маска не потребовалась (${saved.at(-1)})`, { dim: true });
+                } else if (alpha.changed) {
+                    const how = alpha.reason === 'mask'
+                        ? `по мягкой маске ${alpha.model}${alpha.painted ? ' после заливки фона цветом объекта' : ''}`
+                        : alpha.reason === 'contour' ? 'по локальному контуру' : 'заливкой от углов';
                     renderer.line('info', `Альфа-канал собран ${how}: ${saved.at(-1)}`, { dim: true });
-                } else if (alpha.reason === 'opaque') renderer.line('info', `Прозрачность ${saved.at(-1)}: маска пустая, фон не найден.`, { dim: true });
+                } else if (alpha.reason === 'opaque') renderer.line('info', `Прозрачность ${saved.at(-1)}: фоном оказался сам объект, файл оставлен непрозрачным.`, { dim: true });
                 else if (alpha.reason === 'no-magick') renderer.line('warn', `Прозрачность ${saved.at(-1)}: ImageMagick не найден.`);
                 else if (alpha.reason === 'format') renderer.line('warn', `Прозрачность ${saved.at(-1)}: JPEG не хранит альфа-канал, нужен PNG.`);
             }

@@ -111,8 +111,13 @@ export const defaults = Object.freeze({
     image: {
         size: 'auto', quality: 'auto', format: 'png', background: 'auto', partialImages: 2, outputDir: '.', transport: null,
         maskModel: null,             // null → the edit model draws the alpha matte (openai/gpt-image-2.5-sunburst)
+        alphaMode: 'auto',           // auto: native alpha, then paint→mask, then contour, then corner fill; mask | contour | flat | off
+        paintBackground: true,       // fill the background with the subject color before the matte is drawn (kills the halo)
+        alphaFeather: 1,             // px of blur on the matte edge; 0 keeps the hard cut
         vectorModel: null,           // null → recraft/recraft-v4.1-pro-vector through the images API
         vectorMaxColors: 256,        // raw unique-color ceiling for vectorize_image; above it the top-two coverage decides
+        autoVectorize: false,        // after a cut-out mark, ask for the SVG in the same tool answer
+        pngMaxBytes: 4 * MiB,        // PNG stays the default raster; a heavier file is re-encoded as WebP
     },
     webSearch: { contextSize: null },       // null → { type: "web_search" }. low | medium | high adds search_context_size
     compaction: { auto: false, afterInputTokens: 200_000 },
