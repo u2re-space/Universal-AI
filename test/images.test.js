@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createClient } from '../src/openai/client.js';
 import { TINY_PNG } from './helpers/mock-server.js';
+import { detectMagick, magickIdentify, magickIsOpaque, magickPadImageBytes } from '../src/agent/image-magick.js';
+import { runProgram } from '../src/agent/shell.js';
 import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFor, imagePayloads, imageRequestSize, imageSizeAttempts, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL, VECTOR_RATIOS } from '../src/openai/images.js';
 import { builtinTools } from '../src/agent/loop.js';
 import { enabledToolNames } from '../src/agent/tool-specs.js';
@@ -238,12 +240,85 @@ test('GPT Image 2.5 retries invalid dimensions in order and does not retry other
             model: 'openai/gpt-image-2.5-sunburst', prompt: 'edit', size: '100x100',
             files: [{ filename: 'shot.png', mime: 'image/png', bytes: png }],
         });
-        assert.deepEqual(editSizes, ['100x100', '816x816', '1024x1024']);
+        assert.deepEqual(editSizes, ['16x16', '816x816', '1024x1024']);
         await assert.rejects(() => client.images.generate({ model: 'openai/gpt-image-2.5-flare', prompt: 'auth', size: '100x100' }), { status: 401 });
         assert.equal(authAttempts, 1);
     } finally {
         client.close();
         await new Promise((resolve) => server.close(resolve));
+    }
+});
+
+test('GPT Image 2.5 pads non-multiple input edges without scaling and removes returned padding', async (t) => {
+    const exe = await detectMagick();
+    if (!exe) return t.skip('ImageMagick is not installed');
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-image-pad-'));
+    const source = path.join(root, 'source.png');
+    const paddedReply = path.join(root, 'reply.png');
+    const generatePng = async (file, width, height) => {
+        const result = await runProgram({ file: exe, args: ['-size', `${width}x${height}`, 'xc:none', '-fill', '#cc2222', '-draw', `rectangle 16,16 ${width - 16},${height - 16}`, file], cwd: root, timeoutMs: 10000, maxOutputBytes: 4096 });
+        assert.equal(result.exitCode, 0, result.stderr);
+    };
+    const pixelAt = async (file, x, y) => {
+        const result = await runProgram({
+            file: exe, args: [file, '-format', `%[fx:round(255*p{${x},${y}}.r)],%[fx:round(255*p{${x},${y}}.g)],%[fx:round(255*p{${x},${y}}.b)],%[fx:round(255*p{${x},${y}}.a)]`, 'info:'],
+            cwd: root, timeoutMs: 10000, maxOutputBytes: 4096,
+        });
+        assert.equal(result.exitCode, 0, result.stderr);
+        return result.stdout.trim().split(',').map(Number);
+    };
+    try {
+        await generatePng(source, 1000, 600);
+        await generatePng(paddedReply, 1008, 608);
+        const sourceBytes = await readFile(source);
+        const seen = [];
+        const server = http.createServer(async (req, res) => {
+            const chunks = [];
+            for await (const chunk of req) chunks.push(chunk);
+            const raw = Buffer.concat(chunks).toString('latin1');
+            const header = /name="size"\r\n\r\n([^\r]+)/.exec(raw);
+            const imagePart = /name="image"; filename="source\.png"\r\nContent-Type: image\/png\r\n\r\n([\s\S]*?)\r\n--/.exec(raw);
+            seen.push({ size: header?.[1], file: Boolean(imagePart), image: imagePart?.[1] });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ data: [{ b64_json: (await readFile(paddedReply)).toString('base64') }] }));
+        });
+        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+        const { port } = server.address();
+        const client = createClient({ apiKey: 'sk-test', baseURL: `http://127.0.0.1:${port}/v1/`, retries: 0 });
+        try {
+            const payloads = await client.images.edit({
+                model: 'openai/gpt-image-2.5-sunburst', prompt: 'preserve', format: 'png',
+                files: [{ filename: 'source.png', mime: 'image/png', bytes: sourceBytes }],
+            });
+            const { width, height } = await magickIdentify({ exe, input: source, cwd: root });
+            const original = await magickPadImageBytes({ exe, bytes: sourceBytes });
+            assert.deepEqual(seen.map(({ size, file }) => ({ size, file })), [{ size: '1008x608', file: true }]);
+            assert.equal(original.width, 1008);
+            assert.equal(original.height, 608);
+            assert.equal(original.originalWidth, width);
+            assert.equal(original.originalHeight, height);
+            assert.equal(original.padded, true);
+            const sentPath = path.join(root, 'sent.png');
+            await writeFile(sentPath, Buffer.from(seen[0].image, 'latin1'));
+            const sentInfo = await magickIdentify({ exe, input: sentPath, cwd: root });
+            assert.equal(sentInfo.width, 1008);
+            assert.equal(sentInfo.height, 608);
+            assert.deepEqual(await pixelAt(sentPath, 20, 20), await pixelAt(source, 20, 20));
+            assert.deepEqual(await pixelAt(sentPath, 1004, 604), [0, 0, 0, 0]);
+            const resultPath = path.join(root, 'result.png');
+            await writeFile(resultPath, Buffer.from(payloads[0], 'base64'));
+            const info = await magickIdentify({ exe, input: resultPath, cwd: root });
+            assert.equal(info.width, 1000);
+            assert.equal(info.height, 600);
+            assert.equal(await magickIsOpaque({ exe, input: resultPath, cwd: root }), false);
+            assert.deepEqual(await pixelAt(resultPath, 16, 16), [204, 34, 34, 255]);
+            assert.deepEqual(await pixelAt(resultPath, 20, 20), [204, 34, 34, 255]);
+        } finally {
+            client.close();
+            await new Promise((resolve) => server.close(resolve));
+        }
+    } finally {
+        await rm(root, { recursive: true, force: true });
     }
 });
 

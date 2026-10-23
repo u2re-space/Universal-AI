@@ -99,7 +99,7 @@ test('end-to-end: native alpha, paint + matte, RGBA composition, and SVG', async
     try {
         const config = {
             baseURL: 'http://127.0.0.1/v1/', imageModel: 'openai/gpt-image-2.5-flare',
-            image: { size: 'auto', quality: 'auto', format: 'png', background: 'auto', paintBackground: true, alphaFeather: 1 },
+            image: { size: 'auto', quality: 'auto', format: 'png', background: 'auto', pngMaxBytes: 1, paintBackground: true, alphaFeather: 1 },
             limits: {},
         };
         const toolset = createToolset({ root: dir, client, config, names: ['generate_image', 'vectorize_image'], approvalLevel: 'all' });
@@ -122,6 +122,21 @@ test('end-to-end: native alpha, paint + matte, RGBA composition, and SVG', async
         assert.equal(first.model, 'openai/gpt-image-2.5-flare');
         assert.match(first.raw, /name="output_format"\r\n\r\npng\r\n/);
         assert.match(first.raw, /name="background"\r\n\r\ntransparent\r\n/);
+
+        // A pre-existing native-alpha PNG stays intact even when the size threshold would normally prefer WebP.
+        const alphaToolset = createToolset({
+            root: dir,
+            client: { images: { async generate() { return [nativeB64]; } } },
+            config: { ...config, imageModel: 'openai/gpt-image-1', image: { ...config.image, pngMaxBytes: 1 } },
+            names: ['generate_image'], approvalLevel: 'all',
+        });
+        const nativeSaved = await alphaToolset.execute({
+            name: 'generate_image',
+            arguments: JSON.stringify({ prompt: 'keep alpha', path: 'assets/native-alpha.png', background: 'auto' }),
+        });
+        assert.equal(nativeSaved.ok, true, nativeSaved.output);
+        assert.deepEqual(await readFile(path.join(dir, 'assets', 'native-alpha.png')), Buffer.from(nativeB64, 'base64'));
+        assert.equal(await stat(path.join(dir, 'assets', 'native-alpha.webp')).catch(() => null), null);
 
         // --- Stages 2 and 3: paint the background, draw a soft matte, merge it as alpha.
         // The input is an opaque reply (the model ignored background=transparent), so the pipeline runs.

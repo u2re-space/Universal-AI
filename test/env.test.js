@@ -9,6 +9,7 @@ import {
     envValue, liveEnv, parseEnvFile, reconcileCredentialScopes, refreshRuntimeEnv, resetLiveEnv, resolveRuntimeEnv, setLiveEnv,
 } from '../src/core/runtime-env.js';
 import { providerList } from '../src/openai/fallback.js';
+import { TINY_PNG } from './helpers/mock-server.js';
 
 test('parseEnvFile skips comments and strips quotes', () => {
     const parsed = parseEnvFile('# comment\r\n\r\nexport OPENAI_API_KEY="sk-quoted"\nOPENAI_BASE_URL=\'https://example.test/v1\'\n');
@@ -168,7 +169,7 @@ test('images edit and vectorize move to the fallback host when the primary rejec
         limits: {},
     });
     try {
-        const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6300010000050001', 'hex');
+        const png = Buffer.from(TINY_PNG, 'base64');
         const edited = await client.images.edit({
             model: 'openai/gpt-image-2.5-sunburst', prompt: 'paint', format: 'png',
             files: [{ filename: 'src.png', mime: 'image/png', bytes: png }],

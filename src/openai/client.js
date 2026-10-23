@@ -10,13 +10,15 @@
  * @changed 2026-10-22 Vector models use aspect_ratio and svg on the edit route.
  */
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { ApiError } from './errors.js';
 import { createHttp, readBody } from './http.js';
 import { parseSSE } from './sse.js';
 import { createStreamReducer, outputText } from './stream.js';
 import { envValue } from '../core/runtime-env.js';
-import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imagePayloads, imageRequestSize, imageSizeAttempts, isImageSizeError, isVectorModel, normalizeImageSize, normalizeVectorRatio, resolveImageFormat } from './images.js';
+import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
+import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imagePayloads, imageRequestSize, imageSizeAttempts, isImageSizeError, isVectorModel, normalizeVectorRatio, resolveImageFormat } from './images.js';
 
 export { ApiError };
 
@@ -297,17 +299,36 @@ export function createClient({
         },
         /** POST /images/edits as multipart form data. `files` are { filename, mime, bytes }. */
         async edit({ model, prompt, files, size, format, background, signal } = {}) {
-            const attempts = isVectorModel(model) ? [] : imageSizeAttempts(size, model);
+            const vector = isVectorModel(model);
+            let requestFiles = files;
+            let padding = null;
+            let requestedFrame = size;
+            if (!vector && /^(?:openai\/)?gpt-image-2\.5(?:-|$)/i.test(String(model ?? '')) && files?.length) {
+                const exe = await detectMagick();
+                if (!exe) throw new ApiError('Для добавления прозрачного padding к входному изображению GPT Image 2.5 требуется ImageMagick.', { code: 'IMAGE_PADDING_UNAVAILABLE' });
+                const prepared = [];
+                for (const file of files) {
+                    const frame = await magickPadImageBytes({ exe, bytes: file.bytes, signal });
+                    prepared.push({
+                        file: frame.padded ? { ...file, filename: `${path.parse(file.filename || 'image.png').name}.png`, mime: 'image/png', bytes: frame.bytes } : file,
+                        frame,
+                    });
+                }
+                requestFiles = prepared.map((item) => item.file);
+                padding = { exe, ...prepared[0].frame };
+                requestedFrame = `${padding.width}x${padding.height}`;
+            }
+            const attempts = vector ? [] : imageSizeAttempts(requestedFrame, model);
             let result;
             for (let index = 0; ; index++) {
-                const requestedSize = attempts[index] ?? size;
+                const attemptSize = attempts[index] ?? requestedFrame;
                 const fields = { model, prompt };
                 if (isVectorModel(model)) {
-                    const aspect = normalizeVectorRatio(requestedSize);
+                    const aspect = normalizeVectorRatio(attemptSize);
                     if (aspect) fields.aspect_ratio = aspect;
                     fields[imageFormatField(model)] = 'svg';
                 } else {
-                    const frame = imageRequestSize(requestedSize, model);
+                    const frame = imageRequestSize(attemptSize, model);
                     if (frame) fields.size = frame;
                     const fmt = resolveImageFormat({ model, format });
                     if (fmt) fields[imageFormatField(model)] = fmt;
@@ -316,7 +337,7 @@ export function createClient({
                 }
                 const form = encodeMultipart({
                     fields,
-                    files: files.map((file) => ({ ...file, field: 'image' })),
+                    files: requestFiles.map((file) => ({ ...file, field: 'image' })),
                 });
                 try {
                     result = await call('images/edits', { rawBody: form.body, contentType: form.contentType, signal });
@@ -327,7 +348,11 @@ export function createClient({
             }
             const payloads = imagePayloads(result);
             if (!payloads.length) throw new ApiError('Ответ images/edits не содержит b64_json.', { code: 'INVALID_RESPONSE' });
-            return payloads;
+            if (!padding) return payloads;
+            return Promise.all(payloads.map(async (payload) => {
+                const bytes = await magickRemoveImagePadding({ ...padding, bytes: Buffer.from(payload, 'base64'), signal });
+                return bytes.toString('base64');
+            }));
         },
         /**
          * Vectorize one raster into SVG with a vector model. The source goes through the edit

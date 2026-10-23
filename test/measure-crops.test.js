@@ -49,10 +49,14 @@ test('measurement crops are cut once and rendered as ready generate_image refere
         const text = renderMeasurements(sheet);
         assert.match(text, /2 ready crop\(s\)/);
         assert.match(text, /crop: \.tmp\/work-1\/crops\/01-hero-image\.png/);
-        assert.match(text, /real native alpha channel/);
-        assert.match(text, /anti-aliased matte from the clean source crop/);
+        assert.match(text, /PNG with a real alpha channel/);
+        assert.match(text, /convert it locally and keep the PNG/);
         assert.match(text, /vectorize_image \/ Recraft/);
         assert.match(text, /Lucide or Phosphor icons available to the project/);
+        assert.match(text, /do not call generate_image, edit_image, or image_generation/);
+        assert.match(text, /common aspect-ratio frame/);
+        assert.match(text, /never stretch an image/);
+        assert.match(text, /convert it locally and keep the PNG/);
         assert.match(text, /After the page is built, compare the options/);
     } finally {
         await rm(dir, { recursive: true, force: true });

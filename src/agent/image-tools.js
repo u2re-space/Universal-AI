@@ -82,7 +82,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
 
         // PNG is the default raster: lossless, and it carries the alpha the transparency passes add.
         // WebP is used only when a PNG is too heavy to keep, and never for a file that needs alpha.
-        if (!transparent && kind.ext === 'png' && buffer.length > pngMaxBytes && !/\.(jpe?g|webp|gif)$/i.test(rel)) {
+        if (!transparent && kind.ext === 'png' && !pngHasAlphaChannel(buffer) && buffer.length > pngMaxBytes && !/\.(jpe?g|webp|gif)$/i.test(rel)) {
             const swapped = await toWebp(abs, buffer, safe);
             if (swapped) {
                 buffer = swapped.buffer;

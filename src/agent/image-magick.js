@@ -11,7 +11,8 @@
  */
 
 import path from 'node:path';
-import { stat, mkdir, rename, unlink } from 'node:fs/promises';
+import os from 'node:os';
+import { stat, mkdir, rename, unlink, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { runProgram } from './shell.js';
 
 /** Cached detection result. null = not checked, false = not available, string = executable path. */
@@ -156,6 +157,42 @@ export async function magickIdentify({ exe, input, cwd, signal }) {
     const res = await magickRun(exe, [input, '-format', '%w %h %m %B', 'info:'], { cwd, signal });
     const parts = res.stdout.trim().split(/\s+/);
     return { width: Number(parts[0]) || 0, height: Number(parts[1]) || 0, format: parts[2] ?? '', bytes: Number(parts[3]) || 0 };
+}
+
+/** Add transparent pixels to the right and bottom without resizing the source pixels. */
+export async function magickPadImageBytes({ exe, bytes, signal }) {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-image-pad-'));
+    const input = path.join(dir, 'input');
+    const output = path.join(dir, 'padded.png');
+    try {
+        await writeFile(input, bytes);
+        const info = await magickIdentify({ exe, input, cwd: dir, signal });
+        if (!info.width || !info.height) throw new Error('Не удалось определить размеры входного изображения.');
+        const width = Math.ceil(info.width / 16) * 16;
+        const height = Math.ceil(info.height / 16) * 16;
+        if (width === info.width && height === info.height) return { bytes, width, height, originalWidth: width, originalHeight: height, padded: false };
+        await magickRun(exe, [input, '-background', 'none', '-gravity', 'northwest', '-extent', `${width}x${height}`, output], { cwd: dir, signal });
+        return { bytes: await readFile(output), width, height, originalWidth: info.width, originalHeight: info.height, padded: true };
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+}
+
+/** Remove only a matching right/bottom padding border; never resize generated pixels. */
+export async function magickRemoveImagePadding({ exe, bytes, width, height, originalWidth, originalHeight, signal }) {
+    if (width === originalWidth && height === originalHeight) return bytes;
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-image-unpad-'));
+    const input = path.join(dir, 'input');
+    try {
+        await writeFile(input, bytes);
+        const info = await magickIdentify({ exe, input, cwd: dir, signal });
+        if (info.width !== width || info.height !== height || originalWidth > width || originalHeight > height) return bytes;
+        const output = path.join(dir, `unpadded.${info.format.toLowerCase() || 'png'}`);
+        await magickRun(exe, [input, '-crop', `${originalWidth}x${originalHeight}+0+0`, '+repage', output], { cwd: dir, signal });
+        return await readFile(output);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
 }
 
 /**
