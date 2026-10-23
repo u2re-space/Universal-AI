@@ -115,7 +115,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   transparent: gpt-image-* (кроме gpt-image-2) получают нативную альфу; у recraft и подобных моделей
   модель рисует чёрно-белую маску, и ImageMagick вливает её в RGB+A (заливка от углов — запасной путь).
   Инструмент vectorize_image конвертирует плоские PNG/WebP (логотипы, бейджи, иконки) в SVG через
-  recraft/recraft-v4.1-vector: удаляет фон, проверяет палитру, сохраняет .svg вместо .png.
+  recraft/recraft-v4.1-pro-vector: удаляет фон, проверяет палитру, сохраняет .svg вместо .png.
 
 Дополнение кода (complete):
   JSON: content и/или prefix+suffix, cursor или selection (line/character с нуля, как в LSP), либо символ | в тексте.

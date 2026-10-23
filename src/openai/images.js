@@ -24,8 +24,8 @@ export const PROXY_IMAGE_MODEL = 'openai/gpt-image-2.5-flare';
  */
 export const PROXY_IMAGE_EDIT_MODEL = 'openai/gpt-image-2.5-sunburst';
 
-/** Default ProxyAPI vector (SVG) model. See https://proxyapi.ru/models/recraft/recraft-v4.1-vector */
-export const PROXY_VECTOR_MODEL = 'recraft/recraft-v4.1-vector';
+/** Default ProxyAPI vector (SVG) model. See https://proxyapi.ru/models/recraft/recraft-v4.1-pro-vector */
+export const PROXY_VECTOR_MODEL = 'recraft/recraft-v4.1-pro-vector';
 
 /** Sizes accepted by POST /images/generations and /images/edits. */
 export const IMAGE_SIZES = Object.freeze(['1024x1024', '1024x1536', '1536x1024']);
@@ -91,7 +91,7 @@ export function imageModelFor(config, { hasImage = false } = {}) {
 }
 
 /**
- * True when the model id names a vector (SVG) variant such as recraft/recraft-v4.1-vector.
+ * True when the model id names a vector (SVG) variant such as recraft/recraft-v4.1-pro-vector.
  * @param {string | null | undefined} model
  * @returns {boolean}
  * @exports

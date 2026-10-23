@@ -79,7 +79,7 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
 });
 
 test('vector model uses aspect_ratio and svg output', () => {
-    assert.equal(PROXY_VECTOR_MODEL, 'recraft/recraft-v4.1-vector');
+    assert.equal(PROXY_VECTOR_MODEL, 'recraft/recraft-v4.1-pro-vector');
     assert.equal(isVectorModel('recraft/recraft-v4.1-vector'), true);
     assert.equal(isVectorModel('recraft/recraft-v4-styles-pro-vector'), true);
     assert.equal(isVectorModel('recraft/recraft-v4.1-utility'), false);
@@ -98,9 +98,9 @@ test('vector model uses aspect_ratio and svg output', () => {
     assert.equal(normalizeVectorRatio('1080x1920'), '9:16');
     assert.equal(normalizeVectorRatio('garbage'), null);
     const vectorBody = generationBody({
-        model: 'recraft/recraft-v4.1-vector', prompt: 'логотип', size: '1024x1024', format: 'png', quality: 'high', background: 'transparent',
+        model: 'recraft/recraft-v4.1-pro-vector', prompt: 'логотип', size: '1024x1024', format: 'png', quality: 'high', background: 'transparent',
     });
-    assert.deepEqual(vectorBody, { model: 'recraft/recraft-v4.1-vector', prompt: 'логотип', aspect_ratio: '1:1', image_format: 'svg' });
+    assert.deepEqual(vectorBody, { model: 'recraft/recraft-v4.1-pro-vector', prompt: 'логотип', aspect_ratio: '1:1', image_format: 'svg' });
     assert.equal('size' in vectorBody, false);
     assert.equal('quality' in vectorBody, false);
     assert.equal('background' in vectorBody, false);
@@ -127,7 +127,7 @@ test('images client vectorize posts the source as a multipart edit and the tool 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         if (req.url === '/v1/images/edits') {
             const form = raw.toString('latin1');
-            assert.match(form, /name="model"\r\n\r\nrecraft\/recraft-v4\.1-vector\r\n/);
+            assert.match(form, /name="model"\r\n\r\nrecraft\/recraft-v4\.1-pro-vector\r\n/);
             assert.match(form, /name="image_format"\r\n\r\nsvg\r\n/);
             assert.match(form, /name="image"; filename="source\.png"/);
             assert.doesNotMatch(form, /name="size"/);
