@@ -419,6 +419,18 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   "tools": { "fs": true, "shell": true, "fetch": true, "web": true, "images": false, "askUser": true, "desktop": false, "mcp": true, "channels": false },
   "desktop": { "ahkPath": null },
   "limits": { "maxTurns": 60, "extendTurns": 10, "budgetUsd": null, "budgetTokens": null, "commandTimeoutMs": 180000 },
+  "documentation": {
+    "sources": {
+      "mdnCss": "https://developer.mozilla.org/en-US/docs/Web/CSS",
+      "teamGuide": "https://example.com/frontend-guide"
+    },
+    "roles": {
+      "planner": ["mdnCss"],
+      "orchestrator": ["mdnCss", "teamGuide"],
+      "worker": ["mdnCss", "teamGuide"],
+      "coder": ["mdnCss", "teamGuide"]
+    }
+  },
   "roles": {
     "planner":    { "model": "gpt-6.1-sol", "effort": "high" },
     "reviewer":   { "model": "gpt-6.1-sol", "effort": "medium" },
@@ -445,6 +457,11 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
 
 Поля роли: `model`, `effort`, `summary`, `verbosity`, `maxOutputTokens`, `temperature`, `instructions`
 (дополнительные инструкции только для этой роли); `null` — наследовать от `roles.default`, затем от общих настроек.
+`documentation.sources` задаёт именованный каталог HTTP(S)-ссылок (по умолчанию доступны MDN CSS/JavaScript,
+ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles` выбирает имена источников для
+`planner`, `orchestrator`, `worker` и `coder`. Передача пустого массива отключает ссылки для выбранной роли.
+Встроенные веб-правила используют ES2025 как базу, требуют сверять поддержку ES2026 и новых CSS-возможностей
+с целевым runtime и конфигурацией проекта, а также ориентируют роли на уже настроенные линтеры, форматтеры и проверки.
 Цены в примере условные — проверьте актуальные.
 
 Переменные окружения: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID`,

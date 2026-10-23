@@ -268,6 +268,24 @@ function validateConfig(c) {
     if (c.image.vectorModel != null && (typeof c.image.vectorModel !== 'string' || !c.image.vectorModel.trim())) fail('image.vectorModel: непустая строка или null');
     if (!Number.isSafeInteger(c.image.vectorMaxColors) || c.image.vectorMaxColors < 2 || c.image.vectorMaxColors > 65536) fail('image.vectorMaxColors: 2..65536');
     if (c.webSearch.contextSize != null && !['low', 'medium', 'high'].includes(c.webSearch.contextSize)) fail('webSearch.contextSize: null | low | medium | high');
+    if (!isRecord(c.documentation)) fail('documentation должен быть объектом');
+    for (const key of Object.keys(c.documentation)) if (!['sources', 'roles'].includes(key)) fail(`неизвестный параметр documentation.${key}`);
+    if (!isRecord(c.documentation.sources)) fail('documentation.sources должен быть объектом');
+    for (const [name, url] of Object.entries(c.documentation.sources)) {
+        if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(name)) fail(`documentation.sources.${name}: некорректное имя`);
+        if (typeof url !== 'string' || !url.trim()) fail(`documentation.sources.${name}: URL должен быть непустой строкой`);
+        try {
+            const parsed = new URL(url);
+            if (!['http:', 'https:'].includes(parsed.protocol)) fail(`documentation.sources.${name}: разрешены только HTTP(S) URL`);
+        } catch { fail(`documentation.sources.${name}: некорректный HTTP(S) URL`); }
+    }
+    if (!isRecord(c.documentation.roles)) fail('documentation.roles должен быть объектом');
+    for (const [name, sources] of Object.entries(c.documentation.roles)) {
+        if (!['planner', 'orchestrator', 'worker', 'coder'].includes(name)) fail(`documentation.roles.${name}: разрешены planner, orchestrator, worker, coder`);
+        if (!Array.isArray(sources) || sources.some((source) => typeof source !== 'string' || !Object.hasOwn(c.documentation.sources, source))) {
+            fail(`documentation.roles.${name}: список имён из documentation.sources`);
+        }
+    }
     if (typeof c.compaction.auto !== 'boolean' || !Number.isSafeInteger(c.compaction.afterInputTokens) || c.compaction.afterInputTokens < 1000) {
         fail('compaction: { auto: boolean, afterInputTokens ≥ 1000 }');
     }

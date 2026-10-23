@@ -272,6 +272,36 @@ test('web search, turn extension, and magickPath defaults; reviewer model is val
     }
 });
 
+test('documentation sources can be overridden and are validated', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-docs-cfg-'));
+    const env = { AI_AGENT_HOME: home };
+    try {
+        const defaults = await loadConfig({ env, ensureHome: false });
+        assert.equal(defaults.documentation.sources.mdnCss, 'https://developer.mozilla.org/en-US/docs/Web/CSS');
+        assert.ok(defaults.documentation.roles.coder.includes('stylelint'));
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({
+            documentation: {
+                sources: { mdnCss: 'https://developer.mozilla.org/custom', teamGuide: 'https://example.com/guide' },
+                roles: { coder: ['mdnCss', 'teamGuide'], worker: [] },
+            },
+        }));
+        const configured = await loadConfig({ env, ensureHome: false });
+        assert.equal(configured.documentation.sources.mdnCss, 'https://developer.mozilla.org/custom');
+        assert.equal(configured.documentation.roles.coder.at(-1), 'teamGuide');
+        assert.deepEqual(configured.documentation.roles.worker, []);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({
+            documentation: { sources: { bad: 'javascript:alert(1)' } },
+        }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /HTTP\(S\) URL/);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({
+            documentation: { roles: { coder: ['missing'] } },
+        }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /список имён из documentation\.sources/);
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
 test('agent.encode accepts encoder or mcp and rejects anything else', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-encode-cfg-'));
     const env = { AI_AGENT_HOME: home };

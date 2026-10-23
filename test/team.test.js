@@ -299,6 +299,26 @@ test('team run stops on budget and reports the stage', async () => {
     assert.match(result.error.message, /лимит токенов/i);
 });
 
+test('role runner adds web conventions and configured documentation to coding roles', async () => {
+    script = (body) => {
+        assert.match(body.instructions, /ECMAScript 2025/);
+        assert.match(body.instructions, /@container/);
+        assert.match(body.instructions, /calc-size\(\)/);
+        assert.match(body.instructions, /stylelint/);
+        assert.match(body.instructions, /teamCss: https:\/\/example\.com\/css/);
+        assert.match(body.instructions, /mdnCss: https:\/\/example\.com\/mdn/);
+        assert.doesNotMatch(body.instructions, /developer\.mozilla\.org\/en-US\/docs\/Web\/CSS/);
+        return { text: 'done' };
+    };
+    const config = baseConfig();
+    config.documentation.sources.mdnCss = 'https://example.com/mdn';
+    config.documentation.sources.teamCss = 'https://example.com/css';
+    config.documentation.roles.coder.push('teamCss');
+    const roles = createRoleRunner({ client: client(), config, ledger: createLedger() });
+    const result = await roles.run('coder', { text: 'update styles' });
+    assert.equal(result.status, 'completed', result.error?.message);
+});
+
 test('role runner: vision delegation and file summaries with cache', async () => {
     await writeFile(path.join(root, 'pic.png'), Buffer.from(TINY_PNG, 'base64'));
     await writeFile(path.join(root, 'big.js'), 'export function a() {}\n'.repeat(50));

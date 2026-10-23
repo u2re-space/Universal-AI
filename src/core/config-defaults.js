@@ -30,6 +30,36 @@ export const defaults = Object.freeze({
     organization: null,
     project: null,
     instructions: null,               // extra system instructions appended to the built-in ones
+    documentation: {
+        sources: {
+            mdnCss: 'https://developer.mozilla.org/en-US/docs/Web/CSS',
+            mdnJavaScript: 'https://developer.mozilla.org/en-US/docs/Web/JavaScript',
+            ecma262: 'https://tc39.es/ecma262/',
+            typescript: 'https://www.typescriptlang.org/docs/',
+            sass: 'https://sass-lang.com/documentation/',
+            eslint: 'https://eslint.org/docs/latest/',
+            stylelint: 'https://stylelint.io/user-guide/',
+            prettier: 'https://prettier.io/docs/',
+            canIUse: 'https://caniuse.com/',
+            cssTricks: 'https://css-tricks.com/',
+            chromeStatus: 'https://chromestatus.com/',
+            cssLogical: 'https://drafts.csswg.org/css-logical/',
+            cssProperty: 'https://drafts.css-houdini.org/css-properties-values-api/',
+            cssLayer: 'https://drafts.csswg.org/css-cascade-5/',
+            cssConditional: 'https://drafts.csswg.org/css-conditional-5/',
+            cssAnchor: 'https://drafts.csswg.org/css-anchor-position-2/',
+            cssUnits: 'https://drafts.csswg.org/css-values-5/',
+            cssAnimation: 'https://drafts.csswg.org/css-animations-2/',
+            cssShapes: 'https://drafts.csswg.org/css-shapes-2/',
+            cssMotion: 'https://drafts.csswg.org/motion/'
+        },
+        roles: {
+            planner:      ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'eslint', 'stylelint', 'prettier', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion'],
+            orchestrator: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'eslint', 'stylelint', 'prettier', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion'],
+            worker:       ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'eslint', 'stylelint', 'prettier', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion'],
+            coder:        ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'eslint', 'stylelint', 'prettier', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion'],
+        },
+    },
     reasoning: { effort: "low", summary: 'auto' },
     verbosity: null,                  // low | medium | high (GPT-5 family)
     temperature: null,
