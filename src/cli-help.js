@@ -110,7 +110,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --size WxH|auto  --quality low|medium|high|xhigh|max|auto  --format png|webp|jpeg
   Целое --quality задаёт качество работы, слово low|medium|high|xhigh|max|auto — качество картинки.
   --image-background transparent|opaque|auto  --partials 0..3  --image-model <id>  --count, -n <n>
-  Для api.proxyapi.ru картинки идут через /images/generations и /images/edits (openai/gpt-image-2.5-flare для генерации по тексту,
+  Для api.proxyapi.ru картинки идут через /images/generations и /images/edits (openai/gpt-image-2.5-sunburst для генерации по тексту,
   openai/gpt-image-2.5-sunburst для правки и генерации по картинке, если не задана --image-model).
   transparent: gpt-image-* (кроме gpt-image-2) получают нативную альфу; у recraft и подобных моделей
   модель рисует чёрно-белую маску, и ImageMagick вливает её в RGB+A (заливка от углов — запасной путь).

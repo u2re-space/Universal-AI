@@ -98,7 +98,7 @@ test('end-to-end: native alpha, paint + matte, RGBA composition, and SVG', async
 
     try {
         const config = {
-            baseURL: 'http://127.0.0.1/v1/', imageModel: 'openai/gpt-image-2.5-flare',
+            baseURL: 'http://127.0.0.1/v1/', imageModel: 'openai/gpt-image-2.5-sunburst',
             image: { size: 'auto', quality: 'auto', format: 'png', background: 'auto', pngMaxBytes: 1, paintBackground: true, alphaFeather: 1 },
             limits: {},
         };
@@ -119,7 +119,7 @@ test('end-to-end: native alpha, paint + matte, RGBA composition, and SVG', async
         assert.deepEqual(await pixel(exe, dir, 'assets/mark.png', 80, 60), [204, 34, 34, 255]);
 
         const first = seen.at(-1);
-        assert.equal(first.model, 'openai/gpt-image-2.5-flare');
+        assert.equal(first.model, 'openai/gpt-image-2.5-sunburst');
         assert.match(first.raw, /name="output_format"\r\n\r\npng\r\n/);
         assert.match(first.raw, /name="background"\r\n\r\ntransparent\r\n/);
 
@@ -161,8 +161,8 @@ test('end-to-end: native alpha, paint + matte, RGBA composition, and SVG', async
         assert.equal(paintedCalls[0].prompt, BACKGROUND_PAINT_PROMPT);
         assert.equal(paintedCalls[1].prompt, ALPHA_MASK_PROMPT);
         // Technical passes stay on the raster model the caller uses, not on a separate default.
-        assert.equal(paintedCalls[0].model, 'openai/gpt-image-2.5-flare');
-        assert.equal(paintedCalls[1].model, 'openai/gpt-image-2.5-flare');
+        assert.equal(paintedCalls[0].model, 'openai/gpt-image-2.5-sunburst');
+        assert.equal(paintedCalls[1].model, 'openai/gpt-image-2.5-sunburst');
         // The paint pass receives the clean source; the matte pass also receives the clean source,
         // because the matte is the geometry of the subject and must not follow a repainted edge.
         assert.equal(Buffer.compare(paintedCalls[0].files[0].bytes, await readFile(path.join(dir, 'src.png'))), 0);

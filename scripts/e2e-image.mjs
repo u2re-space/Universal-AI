@@ -2,7 +2,7 @@
  * Real-API probe of the four image stages. Credentials come from the environment or the project
  * `.env`; nothing is hardcoded. Run it when a key is available:
  *
- *   node scripts/e2e-image.mjs [source.png] [--model openai/gpt-image-2.5-flare] [--keep]
+ *   node scripts/e2e-image.mjs [source.png] [--model openai/gpt-image-2.5-sunburst] [--keep]
  *
  * Stages:
  *   1. source → image-to-image with `background: transparent` (native alpha when the model honors it)
@@ -101,7 +101,7 @@ async function main() {
         throw new Error('Нет ключа: задайте OPENAI_API_KEY или AI_FALLBACK_API_KEY в .env либо в окружении.');
     }
     const config = await loadConfig({ env, ensureHome: false });
-    const model = values.model || config.imageModel || 'openai/gpt-image-2.5-flare';
+    const model = values.model || config.imageModel || 'openai/gpt-image-2.5-sunburst';
     const vectorModel = values.vector || config.image.vectorModel || PROXY_VECTOR_MODEL;
     const client = createFallbackClient(config);
     await mkdir(dir, { recursive: true });

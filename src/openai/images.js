@@ -16,7 +16,7 @@
 import { randomBytes } from 'node:crypto';
 
 /** Default ProxyAPI text-to-image model when imageModel is unset. See https://proxyapi.ru/models/browse/image */
-export const PROXY_IMAGE_MODEL = 'openai/gpt-image-2.5-flare';
+export const PROXY_IMAGE_MODEL = 'openai/gpt-image-2.5-sunburst';
 
 /**
  * Default ProxyAPI model for edits and image-conditioned generation. Same gpt-image-2.5 family as
@@ -169,7 +169,7 @@ export function imageTransport(config) {
 }
 
 /**
- * Model id for an images API call. ProxyAPI needs an explicit id such as openai/gpt-image-2.5-flare.
+ * Model id for an images API call. ProxyAPI needs an explicit id such as openai/gpt-image-2.5-sunburst.
  * Requests with a source image use the edit default.
  * @param {{ imageModel?: string | null, baseURL?: string, image?: { transport?: string | null } }} config
  * @param {{ hasImage?: boolean }} [request]
