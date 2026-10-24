@@ -14,7 +14,7 @@
 import path from 'node:path';
 import { mkdir, readFile, writeFile, stat, unlink, readdir } from 'node:fs/promises';
 import { resolveInside } from './paths.js';
-import { detectMagick, magickConvert, magickIsOpaque, magickRemoveFlatBackground, assessVectorSuitability } from './image-magick.js';
+import { detectMagick, magickConvert, magickIsOpaque, magickRemoveFlatBackground, assessVectorSuitability, magickTrimImage } from './image-magick.js';
 import { applyGeneratedAlphaMask } from './image-alpha.js';
 import { imageModelFor, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL } from '../openai/images.js';
 import { formatBytes } from '../util/text.js';
@@ -66,11 +66,11 @@ export function createImageHandlers({ root, client, config, signal, describeImag
      * @param {string} requested
      * @param {number} index
      * @param {number} total
-     * @param {{ transparent?: boolean, alphaSource?: string|null, model?: string|null }} [options]
+     * @param {{ transparent?: boolean, alphaSource?: string|null, model?: string|null, frame?: boolean }} [options]
      * @returns {Promise<{ rel: string, bytes: number, alpha: object|null }>}
      * @ai.hint io
      */
-    async function save(b64, requested, index, total, { transparent = false, alphaSource = null, model = null } = {}) {
+    async function save(b64, requested, index, total, { transparent = false, alphaSource = null, model = null, frame = false } = {}) {
         let buffer = Buffer.from(b64, 'base64');
         const kind = sniffImage(buffer);
         let rel = String(requested ?? '').trim();
@@ -97,6 +97,22 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             alpha = await hasRealAlpha(abs)
                 ? { changed: false, reason: 'native' }
                 : await applyGeneratedAlphaMask({ client, config, file: abs, signal, alphaSource, model });
+        }
+
+        // Cut out transparent padding around the subject only when the model returned its
+        // default frame (no explicit size requested).  When the caller asked for a specific
+        // frame the layout is intentional — preserve it.
+        if (alpha && CUT_OUT.has(alpha.reason) && !frame) {
+            try {
+                const exe = await detectMagick({ magickPath: config.magickPath ?? null });
+                if (exe) {
+                    const trimmed = await magickTrimImage({ exe, input: safe, cwd: root, signal });
+                    if (trimmed.changed) {
+                        alpha.trimmed = trimmed;
+                        buffer = await readFile(abs);
+                    }
+                }
+            } catch { /* trim failure is non-fatal */ }
         }
         return { rel: safe, bytes: buffer.length, alpha };
     }
@@ -167,6 +183,10 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             if (count('opaque')) notes.push('Прозрачность: фоном оказался сам объект — файл оставлен непрозрачным.');
             if (count('no-magick')) notes.push('Прозрачность: ImageMagick не найден, альфа-канал не гарантирован.');
             if (count('format')) notes.push('Прозрачность: JPEG не хранит альфа-канал, сохраните результат в PNG.');
+            for (const item of saved) {
+                const cut = item.alpha?.trimmed;
+                if (cut?.changed) notes.push(`${item.rel}: прозрачный padding обрезан — ${cut.before.width}×${cut.before.height} → ${cut.after.width}×${cut.after.height}.`);
+            }
         }
         const vectors = await toVectors(saved, options);
         return {
@@ -456,7 +476,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                     format, background: effectiveBackground(model, requested), signal,
                     files,
                 });
-                return saveAll(payloads, args.path, { transparent, alphaSource: ref, model, toSvg });
+                return saveAll(payloads, args.path, { transparent, alphaSource: ref, model, toSvg, frame: Boolean(String(args.size ?? '').trim()) });
             }
 
             if (String(args.extra_images ?? '').trim()) throw new Error('generate_image: extra_images требует reference.');
@@ -467,7 +487,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                 model, prompt: args.prompt, size: args.size || null, quality: args.quality || null,
                 format, background: effectiveBackground(model, requested), signal,
             });
-            return saveAll(payloads, args.path, { transparent, model, toSvg });
+            return saveAll(payloads, args.path, { transparent, model, toSvg, frame: Boolean(args.size?.trim()) });
         },
         /**
          * POST /images/edits with one required source image and optional extra references.
@@ -486,7 +506,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                 format, background: effectiveBackground(model, requested), signal,
                 files,
             });
-            return saveAll(payloads, args.path, { transparent, alphaSource: args.image, model, toSvg });
+            return saveAll(payloads, args.path, { transparent, alphaSource: args.image, model, toSvg, frame: Boolean(String(args.size ?? '').trim()) });
         },
         /**
          * Vectorize a flat raster (logo, badge, icon) into an SVG document with the vector model.

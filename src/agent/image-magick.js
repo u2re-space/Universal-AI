@@ -4,9 +4,8 @@
  * @purpose Detect ImageMagick and provide crop, split, resize, convert operations via CLI.
  * @depends node:path, node:fs/promises, agent/shell
  * @usedBy agent/tools
- * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify, magickIsOpaque, magickColorCount, magickPaletteStats, assessVectorSuitability, magickRemoveFlatBackground, magickApplyAlphaMask, ensureTransparentBackground, magickDetectFakeTransparency, magickContourAlphaMask, magickSaturationAlphaMask
+ * @exports detectMagick, magickCrop, magickSplit, magickResize, magickConvert, magickIdentify, magickIsOpaque, magickColorCount, magickPaletteStats, assessVectorSuitability, magickRemoveFlatBackground, magickApplyAlphaMask, ensureTransparentBackground, magickDetectFakeTransparency, magickContourAlphaMask, magickSaturationAlphaMask, magickTrimImage
  * @ai.tags imagemagick, image, crop, split, alpha, vector
- * @ai.hint io
  * @changed 2026-10-23 Added the fake-transparency check (painted checkerboard) and the contour matte.
  */
 
@@ -484,6 +483,42 @@ async function probeMatte({ exe, output, cwd, signal, width, height, reason }) {
     if (mean <= 0.005) return { changed: false, reason: 'empty-mask' };
     if (mean >= 0.995) return { changed: false, reason: 'full-mask' };
     return { changed: true, reason, width, height };
+}
+
+/**
+ * Trim uniform-color padding from the edges of an image in place.
+ * Adds a 1-pixel border of the opposite color before trimming so that ImageMagick
+ * recognizes the outer area as trimmable even when the subject touches the edge.
+ * Only trims when the result is at least 10 % of the original in both dimensions.
+ * @param {{ exe: string, input: string, output?: string, cwd: string, signal?: AbortSignal }} opts
+ * @returns {Promise<{ changed: boolean, reason: string, before?: {width:number,height:number}, after?: {width:number,height:number} }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function magickTrimImage({ exe, input, output = input, cwd, signal }) {
+    const before = await magickIdentify({ exe, input, cwd, signal });
+    if (!before.width || !before.height) return { changed: false, reason: 'unreadable' };
+    const outPath = path.isAbsolute(output) ? output : path.join(cwd, output);
+    const suffix = path.extname(outPath) || '.png';
+    const tmpPath = path.join(path.dirname(outPath), `.tmp-trim-${process.pid}-${Date.now()}${suffix}`);
+    try {
+        await magickRun(exe, [input, '-bordercolor', 'none', '-border', '1', '-trim', '+repage', tmpPath], { cwd, signal });
+        const after = await magickIdentify({ exe, input: tmpPath, cwd, signal });
+        if (!after.width || !after.height) { await unlink(tmpPath).catch(() => {}); return { changed: false, reason: 'unreadable' }; }
+        if (after.width < before.width * 0.1 || after.height < before.height * 0.1) {
+            await unlink(tmpPath).catch(() => {});
+            return { changed: false, reason: 'too-small', before, after };
+        }
+        if (after.width === before.width && after.height === before.height) {
+            await unlink(tmpPath).catch(() => {});
+            return { changed: false, reason: 'no-padding', before, after };
+        }
+        await rename(tmpPath, outPath);
+        return { changed: true, reason: 'trimmed', before, after };
+    } catch (error) {
+        await unlink(tmpPath).catch(() => {});
+        return { changed: false, reason: 'failed', error };
+    }
 }
 
 /**
