@@ -74,7 +74,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 Команда (run и gen):
   --role <роль=модель[:effort]>  модель для роли: planner, orchestrator, worker, coder, writer, reviewer, vision,
                          summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, default, all
-                         (например: --role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
+                         (например: --role planner=gpt-6-luna:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
                          --role collector=... и --role coordinator=... принимают orchestrator (объединённая роль)
     --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
     --orchestrator         оркестратор после этапов: сбор контекста, свежий взгляд на план, правки плана и указания следующему шагу

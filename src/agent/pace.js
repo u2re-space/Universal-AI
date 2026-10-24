@@ -284,7 +284,7 @@ export function resolvePace({
         fidelity: Number.isInteger(fidelity) ? { stated: fidelity, effective: effectiveFidelity(fidelity, quality) } : null,
         roles: {
             classifier: role(1, 'high', false),
-            planner, orchestrator: role(1, 'high', false),
+            planner, orchestrator: role(0, 'high', false),
             reviewer: role(reviewerRung(models, modelQuality >= 67 ? adjusted : Math.min(adjusted, 1)), reviewerBase, true),
             summarizer: role(1, 'high', false),
             extractor: role(0, 'high', false),
