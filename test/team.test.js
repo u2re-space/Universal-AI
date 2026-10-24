@@ -1286,7 +1286,7 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
         }
         if (role === 'measurer') {
             assert.equal(body.model, 'gpt-6.1-sol');
-            assert.equal(body.reasoning?.effort, 'medium');
+            assert.equal(body.reasoning?.effort, 'high');
             return { text: JSON.stringify({
                 summary: 'Карточка в двухколоночной сетке', source: 'mockup.png', unit: 'px',
                 canvas: { x: 0, y: 0, width: 400, height: 300 },
