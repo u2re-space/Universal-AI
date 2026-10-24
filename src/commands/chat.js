@@ -16,6 +16,7 @@ import { createToolset, enabledToolNames } from '../agent/tools.js';
 import { REASONING_EFFORTS, APPROVAL_LEVELS } from '../core/config.js';
 import { formatNumber } from '../util/text.js';
 import { ASSISTANT_BASE } from './instructions.js';
+import { discoverAgents } from '../core/agents-md.js';
 import { startEncodeHost } from '../encode/host.js';
 import { UsageError, createClientFor, createLedgerFor, openSession, loadAttachments, composeInstructions, resolveTextArg,
     approvalLevel, backupDirFor, writeOutput, usageRow, STATUS_LABELS, openMemoryFor, resolveRole, turnExtender } from './shared.js';
@@ -56,6 +57,11 @@ export async function chat(ctx) {
     const client = createClientFor(config);
     const ledger = createLedgerFor(config);
     const extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
+    const agentsText = config.agents.enabled
+        ? (await discoverAgents({ cwd: ctx.cwd, home: config.home, config: config.agents }).catch(() => null))?.text ?? null
+        : null;
+    const baseInstructions = agentsText ? `${agentsText}\n\n${ASSISTANT_BASE}` : ASSISTANT_BASE;
+    const instructionsFor = (system) => composeInstructions(baseInstructions, config, system);
     let systemExtra = extra ?? null;
     const { session, file: sessionFile, resumed } = await openSession({ config, name: values.session ?? null });
     let model = config.model;
@@ -165,7 +171,7 @@ export async function chat(ctx) {
                 if (!input.length) { renderer.line('info', 'История пуста.'); return true; }
                 renderer.setStatus('считает токены…');
                 try {
-                    const counted = await client.responses.inputTokens({ model, input, instructions: composeInstructions(ASSISTANT_BASE, config, systemExtra) }, { signal });
+                    const counted = await client.responses.inputTokens({ model, input, instructions: instructionsFor(systemExtra) }, { signal });
                     renderer.idle();
                     renderer.line('info', `Входных токенов в текущем контексте: ${formatNumber(counted.input_tokens ?? NaN)} (${session.size} элементов)`);
                 } catch (error) { renderer.idle(); renderer.line('fail', error.message); }
@@ -175,7 +181,7 @@ export async function chat(ctx) {
                 if (session.store) { renderer.line('warn', 'В режиме --store контекст хранится на сервере; компактизация не требуется.'); return true; }
                 renderer.setStatus('сжимает контекст…');
                 try {
-                    const done = await compactSession({ client, session, model, instructions: composeInstructions(ASSISTANT_BASE, config, systemExtra), signal });
+                    const done = await compactSession({ client, session, model, instructions: instructionsFor(systemExtra), signal });
                     renderer.idle();
                     renderer.line('ok', `Контекст сжат: ${done.before} → ${done.after} элементов.`);
                 } catch (error) { renderer.idle(); renderer.line('fail', error.message); }
@@ -216,7 +222,7 @@ export async function chat(ctx) {
             renderer.ledger = ledger.snapshot();
             const result = await runTurn({
                 client, config, session, ledger, toolset, builtin: builtinTools(config, tools), model,
-                instructions: composeInstructions(ASSISTANT_BASE, config, systemExtra), imageTarget: config.image.outputDir,
+                instructions: instructionsFor(systemExtra), imageTarget: config.image.outputDir,
                 maxTurns: toolset ? config.limits.maxTurns : 1, signal: turnSignal, emit,
                 onMaxTurns: turnExtender(renderer, config, turnSignal),
             });

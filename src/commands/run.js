@@ -33,6 +33,7 @@ import { preparedScaffoldFiles, writePreparedScaffold, ensureDependencies } from
 import { resolvePlatform } from '../generate/platform.js';
 import { stdinFence } from '../core/attachments.js';
 import { startEncodeHost } from '../encode/host.js';
+import { discoverAgents } from '../core/agents-md.js';
 
 const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло результат', incomplete: 'шаги выполнены не полностью' };
 
@@ -132,11 +133,16 @@ export async function run(ctx) {
         ctx.encodeHost = encodeHost;
         ctx.processTool = encodeHost.processTool;
     }
+    // Discover AGENTS.md files for system prompt injection.
+    let agentsText = null;
+    if (config.agents.enabled) {
+        agentsText = (await discoverAgents({ cwd: ctx.cwd, home: config.home, config: config.agents }).catch(() => null))?.text ?? null;
+    }
     try {
         const ensured = await ensureProjectMap(ctx.cwd);
         if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
-        if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra, seedFiles: prepared.seedFiles, generation: prepared.wantsProfile, referencePaths: stagedRefs.map((item) => item.rel) });
-        return await runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra });
+        if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra, seedFiles: prepared.seedFiles, generation: prepared.wantsProfile, referencePaths: stagedRefs.map((item) => item.rel), agentsText });
+        return await runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra, agentsText });
     } finally {
         await encodeHost?.close();
         store?.memory.close();
@@ -146,11 +152,11 @@ export async function run(ctx) {
 /**
  * One model and one tool loop. runOnce prints the summary and returns the exit code.
  * @param {object} ctx Command context. client and ledger are attached before runOnce.
- * @param {{ task: string, parts: object[], level: string, interactive: boolean, store: object|null, names: string[], extra: string|null }} options Task text, attachments, approval level, and tool names.
+ * @param {{ task: string, parts: object[], level: string, interactive: boolean, store: object|null, names: string[], extra: string|null, agentsText: string|null }} options Task text, attachments, approval level, and tool names.
  * @returns {Promise<number>}
  * @ai.hint io
  */
-async function runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra }) {
+async function runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra, agentsText = null }) {
     const { config, renderer, signal, emit } = ctx;
     const role = resolveRole(config, 'default');
     const client = createClientFor(config);
@@ -166,7 +172,8 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
             scaffoldTask: task, processTool: ctx.processTool,
         });
         const mcpNote = mcp.describe() ? `\n\nMCP sources:\n${mcp.describe()}` : '';
-        const instructions = composeInstructions(agentBase({ root: ctx.cwd, approvalLevel: level, toolNames: toolset.names(), interactive, shell: config.shell ?? null }), config, extra) + mcpNote;
+        const baseInstructions = composeInstructions(agentBase({ root: ctx.cwd, approvalLevel: level, toolNames: toolset.names(), interactive, shell: config.shell ?? null }), config, extra) + mcpNote;
+        const instructions = agentsText ? `${agentsText}\n\n${baseInstructions}` : baseInstructions;
         let prompt = task;
         try {
             const card = await scanWorkspace(ctx.cwd, { task });
@@ -193,11 +200,11 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
 /**
  * Planner, architect, orchestrator, worker, and reviewer. Prints the summary and writes --out.
  * @param {object} ctx Command context.
- * @param {{ task: string, parts: object[], level: string, interactive: boolean, store: object|null, extra: string|null }} options Task text, attachments, approval level, and extra instructions.
+ * @param {{ task: string, parts: object[], level: string, interactive: boolean, store: object|null, extra: string|null, agentsText: string|null }} options Task text, attachments, approval level, and extra instructions.
  * @returns {Promise<number>}
  * @ai.hint io
  */
-async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, referencePaths = [] }) {
+async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, referencePaths = [], agentsText = null }) {
     const { config, renderer, values, signal, emit } = ctx;
     const client = createClientFor(config);
     const ledger = createLedgerFor(config);
@@ -211,6 +218,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles, generation, revision, fromStep, resumeId,
         processTool: ctx.processTool, encodeHost: ctx.encodeHost ?? null, referencePaths,
         onMaxTurns: turnExtender(renderer, config, signal),
+        agentsText,
     });
     renderer.idle();
     renderer.ensureNewline();
@@ -312,6 +320,11 @@ export async function resumeLocal(ctx, { revision = '', stepToken = null } = {})
     renderer.line('info', note
         ? `Доработка .tmp/${found.id}, ${where}: ${note}`
         : `Продолжение .tmp/${found.id} с места остановки (${where}).`, { dim: true });
+    // Discover AGENTS.md files for system prompt injection.
+    let agentsText = null;
+    if (config.agents.enabled) {
+        agentsText = (await discoverAgents({ cwd: ctx.cwd, home: config.home, config: config.agents }).catch(() => null))?.text ?? null;
+    }
     try {
         if (generation) {
             const deps = await ensureDependencies({
@@ -326,7 +339,7 @@ export async function resumeLocal(ctx, { revision = '', stepToken = null } = {})
         if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
         return await runTeamFlow(ctx, {
             task, parts: [], level, interactive, store, names, extra, generation, revision: note, fromStep, resumeId: found.id,
-            referencePaths: resumeRefs.map((item) => item.rel),
+            referencePaths: resumeRefs.map((item) => item.rel), agentsText,
         });
     } finally {
         store?.memory.close();

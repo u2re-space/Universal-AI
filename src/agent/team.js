@@ -15,6 +15,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createSession, loadSession } from '../core/session.js';
 import { createSharedContext } from '../core/context.js';
 import { renderMemories } from '../core/memory.js';
+import { discoverAgents } from '../core/agents-md.js';
 import { isAbortError, CancelledError, BudgetError } from '../openai/errors.js';
 import { clipMiddle, errorMessage } from '../util/text.js';
 import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
@@ -94,11 +95,14 @@ export async function runTeam({
     client, config, ledger, task, parts = [], root, approvalLevel = 'read', interactive = false, approve, askUser = null,
     memory = null, projectKey = null, projectName = null, backupDir = null, extraInstructions = null, emit = () => {}, signal,
     seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, processTool = null, encodeHost = null,
-    onMaxTurns = null, referencePaths = [],
+    onMaxTurns = null, referencePaths = [], agentsText = null,
 }) {
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
     const roles = createRoleRunner({ client, config, ledger, emit, signal });
     const ctx = createSharedContext({ task, root });
+    let effectiveAgentsText = agentsText;
+    /** Prepend AGENTS.md to role instructions when present. */
+    const withAgents = (instructions) => (effectiveAgentsText && instructions) ? `${effectiveAgentsText}\n\n${instructions}` : instructions;
     const maxBytes = config.agent.maxContextBytes;
     let stepLimit = planLimit({ maxSteps: config.agent.maxSteps, generation });
     let encodeRoute = false;
@@ -166,7 +170,7 @@ export async function runTeam({
             model = clampModel(model ?? roles.resolve(role).model, paceSettings.models, paced.ceilingIndex, Boolean(pins[role]?.model));
         }
         const result = await roles.run(role, {
-            text: task, instructions: ROLE_INSTRUCTIONS[role], toolset, maxTurns: role === 'measurer' ? (config.agent.measurerMaxTurns ?? spec.turns) : spec.turns,
+            text: task, instructions: withAgents(ROLE_INSTRUCTIONS[role]), toolset, maxTurns: role === 'measurer' ? (config.agent.measurerMaxTurns ?? spec.turns) : spec.turns,
             silent: true,
             ...(spec.schema === 'batch' ? { schema: BATCH_SCHEMA, schemaName: 'batch' } : {}),
             ...(spec.schema === 'measure' ? { schema: MEASURER_SCHEMA, schemaName: 'measure' } : {}),
@@ -234,7 +238,18 @@ export async function runTeam({
                 notify({ type: 'memory.recalled', count: result.recalled.length, items: result.recalled });
             }
         }
-        if (config.memory.notesFile) {
+        if (config.agents.enabled && !effectiveAgentsText) {
+            const agents = await discoverAgents({ cwd: root, home: config.home, config: config.agents }).catch(() => null);
+            if (agents?.text) {
+                effectiveAgentsText = agents.text;
+                notify({ type: 'agents.loaded', files: agents.files.length, source: agents.source });
+            }
+        }
+        if (effectiveAgentsText) {
+            ctx.set('agents', 'Project instructions (AGENTS.md)', effectiveAgentsText, { priority: 8 });
+        }
+        if (!config.agents.enabled && config.memory.notesFile) {
+            // Legacy: read notesFile as a single shared-context section only.
             const notes = await readFile(path.join(root, config.memory.notesFile), 'utf8').catch(() => null);
             if (notes?.trim()) ctx.set('notes', `Project notes (${config.memory.notesFile})`, clipMiddle(notes, 16 * 1024), { priority: 8 });
         }
@@ -309,7 +324,7 @@ export async function runTeam({
             const workspaceText = ctx.get('workspace');
             const encoded = await roles.run('encoder', {
                 text: `${handoff.text}\n\n# Directory tree\n${directoryTree}${workspaceText ? `\n\n# Workspace scan\n${workspaceText}` : ''}\n\n# Artifacts\n${index}`,
-                instructions: fileInstructions, instructionsOnly: true, schema: FILE_COMMANDS_SCHEMA, schemaName: 'file_commands',
+                instructions: withAgents(fileInstructions), instructionsOnly: true, schema: FILE_COMMANDS_SCHEMA, schemaName: 'file_commands',
             });
             if (encoded.status !== 'completed' || !encoded.data) return { ok: false, done: stop(encoded, 'encoder') };
             const applied = await applyCommands(encoded.data.commands ?? []);
@@ -397,7 +412,7 @@ export async function runTeam({
             ].filter(Boolean).join('\n\n');
             notify({ type: 'stage.start', stage: 'orchestrate', role: 'orchestrator', model: role.model });
             const reply = await roles.run('orchestrator', {
-                text: request, instructions: ROLE_INSTRUCTIONS.orchestrator, toolset: orchestratorTools,
+                text: request, instructions: withAgents(ROLE_INSTRUCTIONS.orchestrator), toolset: orchestratorTools,
                 schema: COORDINATION_SCHEMA, schemaName: 'coordination',
                 maxTurns: orchestratorSettings.maxTurns ?? 6, model: role.model, effort: role.effort,
             });
@@ -472,7 +487,7 @@ export async function runTeam({
             const header = contextSent ? `# Context updates\n${ctx.get('progress') ? clipMiddle(ctx.get('progress'), 12 * 1024) : '(none)'}` : ctx.render({ maxBytes, exclude: ['tree'] });
             contextSent = true;
             const outcome = await roles.run(author, {
-                text: `${header}\n\n# ${title}\n${body}`, instructions: ROLE_INSTRUCTIONS[author], toolset: workerTools, builtin,
+                text: `${header}\n\n# ${title}\n${body}`, instructions: withAgents(ROLE_INSTRUCTIONS[author]), toolset: workerTools, builtin,
                 maxTurns, session: workerSession, imageTarget: config.image.outputDir,
                 model, effort, onMaxTurns,
             });
@@ -604,9 +619,9 @@ export async function runTeam({
             notify({ type: 'stage.start', stage: 'answer', role: 'default', model: roles.resolve('default').model });
             const answered = await roles.run('default', {
                 text: `${ctx.render({ maxBytes })}\n\n# Task\n${task}${handoff.text ? `\n\n# Attached files\n${handoff.text}` : ''}`,
-                parts, instructions: generation
+                parts, instructions: withAgents(generation
                     ? `${ANSWER_INSTRUCTIONS}\nThis is a generation brief. The planner writes the plan and the worker writes the files. Describe the reference and the requested result; do not repeat the plan, the file tree, or file bodies.`
-                    : ANSWER_INSTRUCTIONS,
+                    : ANSWER_INSTRUCTIONS),
                 instructionsOnly: true,
                 builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
             });
@@ -649,7 +664,7 @@ export async function runTeam({
                 const extracted = await extractHandoff({
                     root, state: handoff, maxBytes: EXTRACT_MAX_BYTES, maxFiles: EXTRACT_MAX_FILES,
                     run: (text) => roles.run('extractor', {
-                        text, instructions: ROLE_INSTRUCTIONS.extractor, instructionsOnly: true,
+                        text, instructions: withAgents(ROLE_INSTRUCTIONS.extractor), instructionsOnly: true,
                         schema: EXTRACT_SCHEMA, schemaName: 'extraction',
                         silent: true, model: extractor.model, effort: extractor.effort,
                     }),
@@ -722,7 +737,7 @@ export async function runTeam({
         if (!resumedWork && !encodeRoute) {
             adopt({ label: null });
             const classified = await roles.run('classifier', {
-                text: task, instructions: ROLE_INSTRUCTIONS.classifier, schema: CLASSIFIER_SCHEMA, schemaName: 'task_label',
+                text: task, instructions: withAgents(ROLE_INSTRUCTIONS.classifier), schema: CLASSIFIER_SCHEMA, schemaName: 'task_label',
                 maxTurns: 1, model: paced.roles.classifier.model, effort: paced.roles.classifier.effort,
             });
             if (classified.status === 'cancelled' || classified.status === 'budget') return stop(classified, 'классификация');
@@ -751,7 +766,7 @@ export async function runTeam({
         notify({ type: 'stage.start', stage: 'plan', role: 'planner', model: paced.roles.planner.model });
         const planned = await roles.run('planner', {
             text: `${ctx.render({ maxBytes })}\n\n# Directory tree\n${directoryTree}\n\n${draft}\n\n# Task\n${task}`, parts: handoff ? [] : parts,
-            instructions: `${ROLE_INSTRUCTIONS.planner.replace('{maxSteps}', String(stepLimit))}\n\n${[acceptanceParagraph(paced.acceptance), guaranteesParagraph(paced.guarantees)].filter(Boolean).join('\n\n')}`,
+             instructions: withAgents(`${ROLE_INSTRUCTIONS.planner.replace('{maxSteps}', String(stepLimit))}\n\n${[acceptanceParagraph(paced.acceptance), guaranteesParagraph(paced.guarantees)].filter(Boolean).join('\n\n')}`),
             schema: PLAN_SCHEMA, schemaName: 'plan',
             model: paced.roles.planner.model, effort: paced.roles.planner.effort,
             builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
@@ -828,7 +843,7 @@ export async function runTeam({
             const measureSession = createSession({ store: false, model });
             let measured = await roles.run('measurer', {
                 text: measureText,
-                parts: referenceParts, instructions: ROLE_INSTRUCTIONS.measurer, toolset: measureTools,
+                parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.measurer), toolset: measureTools,
                 schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns: config.agent.measurerMaxTurns ?? 12,
                 model, effort: choice.effort, onMaxTurns, session: measureSession,
             });
@@ -839,7 +854,7 @@ export async function runTeam({
                 const report = await roles.run('measurer', {
                     text: 'Turn budget is spent and no more tools are available. Reply with the measurement sheet for everything you already looked at. ' +
                         'Use null for a number you did not read and name the unchecked parts in notes. JSON only.',
-                    instructions: ROLE_INSTRUCTIONS.measurer, schema: MEASURER_SCHEMA, schemaName: 'measure',
+                    instructions: withAgents(ROLE_INSTRUCTIONS.measurer), schema: MEASURER_SCHEMA, schemaName: 'measure',
                     maxTurns: 1, model, effort: choice.effort, session: measureSession,
                 });
                 if (report.data) measured = report;
@@ -875,7 +890,7 @@ export async function runTeam({
             const architectureText = `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Plan steps to design for\n${stepsBrief}${references}`;
             notify({ type: 'stage.start', stage: 'architect', role: 'architect', model });
             let architected = await roles.run('architect', {
-                text: architectureText, parts: referenceParts, instructions: ROLE_INSTRUCTIONS.architect,
+                text: architectureText, parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.architect),
                 toolset: architectTools, schema: ARCHITECT_SCHEMA, schemaName: 'architecture',
                 maxTurns: config.agent.architectMaxTurns ?? 8, model, effort, onMaxTurns,
             });
@@ -886,7 +901,7 @@ export async function runTeam({
                 const report = await roles.run('architect', {
                     text: 'Turn budget is spent and no more tools are available. Reply with the architecture JSON for everything you already saw. ' +
                         'Name the unchecked parts in risks. JSON only.',
-                    instructions: ROLE_INSTRUCTIONS.architect, schema: ARCHITECT_SCHEMA, schemaName: 'architecture',
+                    instructions: withAgents(ROLE_INSTRUCTIONS.architect), schema: ARCHITECT_SCHEMA, schemaName: 'architecture',
                     maxTurns: 1, model, effort,
                 });
                 if (report.data) architected = report;
@@ -924,7 +939,7 @@ export async function runTeam({
                 architectureBrief(),
             ].filter(Boolean).join('\n\n');
             const collected = await roles.run('orchestrator', {
-                text: `${ctx.render({ maxBytes })}\n\n${brief}`, instructions: ROLE_INSTRUCTIONS.orchestrator, toolset: orchestratorTools,
+                text: `${ctx.render({ maxBytes })}\n\n${brief}`, instructions: withAgents(ROLE_INSTRUCTIONS.orchestrator), toolset: orchestratorTools,
                 schema: COLLECTOR_SCHEMA, schemaName: 'context_report', maxTurns: config.agent.orchestratorMaxTurns,
                 model: paced.roles.orchestrator.model, effort: paced.roles.orchestrator.effort,
             });
@@ -958,7 +973,7 @@ export async function runTeam({
                 const imageParts = parts.filter((part) => part?.type === 'input_image');
                 const processed = await roles.run('image-processor', {
                     text: `${ctx.render({ maxBytes })}\n\n# Image preparation tasks\n${tasks}\n\n# Reference image paths\n${refs}`,
-                    parts: imageParts, instructions: ROLE_INSTRUCTIONS['image-processor'],
+                    parts: imageParts, instructions: withAgents(ROLE_INSTRUCTIONS['image-processor']),
                     toolset: imageProcessorTools, builtin: imageProcessorBuiltin,
                     schema: IMAGE_PROCESSOR_SCHEMA, schemaName: 'image_assets',
                     maxTurns: config.agent.workerMaxTurnsPerStep, imageTarget: path.join(root, 'assets'),
@@ -1228,7 +1243,7 @@ export async function runTeam({
             const commands = workerTools.stats().commands.map((c) => `- ${c.command} → exit ${c.exitCode ?? '?'}`).join('\n') || '- (none)';
             const reviewed = await roles.run('reviewer', {
                 text: `${ctx.render({ maxBytes })}\n\n# Review request (round ${round})\nAcceptance criteria:\n${bullets(plan.acceptanceCriteria)}\nCommands run by the worker:\n${commands}`,
-                instructions: `${ROLE_INSTRUCTIONS.reviewer}\n\n${[acceptanceParagraph(paced.acceptance), guaranteesParagraph(paced.guarantees)].filter(Boolean).join('\n\n')}`, toolset: reviewerTools, schema: REVIEW_SCHEMA, schemaName: 'review', maxTurns: config.agent.reviewerMaxTurns,
+                instructions: `${withAgents(ROLE_INSTRUCTIONS.reviewer)}\n\n${[acceptanceParagraph(paced.acceptance), guaranteesParagraph(paced.guarantees)].filter(Boolean).join('\n\n')}`, toolset: reviewerTools, schema: REVIEW_SCHEMA, schemaName: 'review', maxTurns: config.agent.reviewerMaxTurns,
                 model: safeReviewerModel(paced.roles.reviewer.model), effort: paced.roles.reviewer.effort, onMaxTurns,
             });
             if (HARD_STOP.has(reviewed.status)) return stop(reviewed, 'ревью');
@@ -1278,7 +1293,7 @@ export async function runTeam({
                 const extracted = await roles.run('summarizer', {
                     text: `# Task\n${task}\n\n# Plan summary\n${plan.summary}\n\n# Worker reports\n${clipMiddle(ctx.get('progress'), 24 * 1024)}\n\n# Review\n${review ? `${review.verdict}: ${review.summary}` : 'not performed'}` +
                         `\n\n# Existing memories (do not repeat)\n${renderMemories(result.recalled) || '(none)'}`,
-                    instructions: ROLE_INSTRUCTIONS.summarizerMemory, schema: MEMORY_SCHEMA, schemaName: 'memory_update',
+                    instructions: withAgents(ROLE_INSTRUCTIONS.summarizerMemory), schema: MEMORY_SCHEMA, schemaName: 'memory_update',
                     model: paced?.roles.summarizer.model ?? null, effort: paced?.roles.summarizer.effort ?? null,
                 });
                 if (extracted.status === 'completed' && extracted.data) {

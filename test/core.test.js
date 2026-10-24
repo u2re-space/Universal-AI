@@ -5,6 +5,7 @@ import os from 'node:os';
 import { mkdtemp, writeFile, rm, symlink, mkdir } from 'node:fs/promises';
 import { createSession, loadSession } from '../src/core/session.js';
 import { loadConfig } from '../src/core/config.js';
+import { discoverAgents } from '../src/core/agents-md.js';
 import { createLedger, priceFor, costOf } from '../src/core/usage.js';
 import { loadImageAttachment, loadFileAttachment, buildUserMessage, detectImageMime, detectBinary, stdinFence } from '../src/core/attachments.js';
 import { resolveInside } from '../src/agent/paths.js';
@@ -297,6 +298,74 @@ test('documentation sources can be overridden and are validated', async () => {
             documentation: { roles: { coder: ['missing'] } },
         }));
         await assert.rejects(loadConfig({ env, ensureHome: false }), /список имён из documentation\.sources/);
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
+test('AGENTS discovery combines ancestor, nested, and global files once', async () => {
+    const workspace = await mkdtemp(path.join(os.tmpdir(), 'ai-agents-workspace-'));
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-agents-home-'));
+    try {
+        const project = path.join(workspace, 'project');
+        const nested = path.join(project, 'src');
+        await mkdir(nested, { recursive: true });
+        await writeFile(path.join(project, 'AGENTS.md'), 'Project instructions');
+        await writeFile(path.join(nested, 'agents.md'), 'Nested instructions');
+        await writeFile(path.join(home, 'AGENTS.md'), 'Global instructions');
+        const discovered = await discoverAgents({ cwd: nested, home, config: { maxBytes: 16 * 1024, maxTotalBytes: 16 * 1024 } });
+        assert.equal(discovered.found, 3);
+        assert.match(discovered.text, /Global instructions/);
+        assert.match(discovered.text, /Project instructions/);
+        assert.match(discovered.text, /Nested instructions/);
+        assert.equal(discovered.files.length, 3);
+        assert.match(discovered.source, /AGENTS\.md/);
+        const sameFile = await discoverAgents({ cwd: project, home: project, config: { nested: false } });
+        assert.equal(sameFile.found, 1);
+        assert.equal(sameFile.files.length, 1);
+    } finally {
+        await rm(workspace, { recursive: true, force: true });
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
+test('AGENTS discovery honors filename list, byte limits, explicit global file, and disabled mode', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-agents-limits-'));
+    const global = await mkdtemp(path.join(os.tmpdir(), 'ai-agents-global-'));
+    try {
+        await writeFile(path.join(root, 'TEAM.md'), 'custom instructions');
+        await writeFile(path.join(root, 'AGENTS.md'), 'x'.repeat(1200));
+        await writeFile(path.join(global, 'shared.md'), 'explicit global instructions');
+        const discovered = await discoverAgents({
+            cwd: root, home: global,
+            config: { filenames: ['TEAM.md'], globalFile: path.join(global, 'shared.md'), maxBytes: 1024, maxTotalBytes: 4096, nested: false },
+        });
+        assert.equal(discovered.found, 2);
+        assert.match(discovered.text, /custom instructions/);
+        assert.match(discovered.text, /explicit global instructions/);
+        const disabled = await discoverAgents({ cwd: root, home: global, config: { enabled: false } });
+        assert.deepEqual(disabled, { files: [], text: '', source: '', found: 0 });
+    } finally {
+        await rm(root, { recursive: true, force: true });
+        await rm(global, { recursive: true, force: true });
+    }
+});
+
+test('agents config validates filenames and byte limits', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-agents-cfg-'));
+    const env = { AI_AGENT_HOME: home };
+    try {
+        const defaults = await loadConfig({ env, ensureHome: false });
+        assert.equal(defaults.agents.enabled, true);
+        assert.deepEqual(defaults.agents.filenames, ['AGENTS.md', 'agents.md']);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ agents: { filenames: ['TEAM.md'], maxBytes: 2048, maxTotalBytes: 8192 } }));
+        const configured = await loadConfig({ env, ensureHome: false });
+        assert.deepEqual(configured.agents.filenames, ['TEAM.md']);
+        assert.equal(configured.agents.maxBytes, 2048);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ agents: { filenames: ['  '] } }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /agents\.filenames/);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ agents: { maxTotalBytes: 1024 } }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /agents\.maxTotalBytes/);
     } finally {
         await rm(home, { recursive: true, force: true });
     }

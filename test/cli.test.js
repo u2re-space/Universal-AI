@@ -57,6 +57,54 @@ test('ask: prints the answer, logs usage, exits 0', async () => {
     assert.match(stderr, /статус: завершено/);
 });
 
+test('ask injects AGENTS.md, supports --no-agents and an explicit --agents-file', async () => {
+    const projectFile = path.join(work, 'AGENTS.md');
+    const explicitFile = path.join(work, 'custom-instructions.md');
+    await writeFile(projectFile, 'Project-only rule.');
+    await writeFile(explicitFile, 'Explicit-only rule.');
+    try {
+        script = (body) => {
+            assert.match(body.instructions, /Project-only rule/);
+            return { text: 'ok' };
+        };
+        assert.equal((await runCli(['ask', 'hello'])).code, 0);
+        script = (body) => {
+            assert.doesNotMatch(body.instructions, /Project-only rule|Explicit-only rule/);
+            return { text: 'ok' };
+        };
+        const disabled = await runCli(['ask', 'hello', '--no-agents']);
+        assert.equal(disabled.code, 0, disabled.stderr);
+        script = (body) => {
+            assert.match(body.instructions, /Explicit-only rule/);
+            assert.match(body.instructions, /Project-only rule/);
+            return { text: 'ok' };
+        };
+        assert.equal((await runCli(['ask', 'hello', '--agents-file', explicitFile])).code, 0);
+    } finally {
+        await rm(projectFile, { force: true });
+        await rm(explicitFile, { force: true });
+    }
+});
+
+test('ai agents show reports discovered files and init creates a template', async () => {
+    const file = path.join(work, 'AGENTS.md');
+    try {
+        await writeFile(file, 'CLI project instruction.');
+        const shown = await runCli(['agents', 'show', '--json']);
+        assert.equal(shown.code, 0);
+        const result = jsonLines(shown.stdout).find((row) => row.type === 'agents');
+        assert.match(result.text, /CLI project instruction/);
+        assert.equal(result.files.length, 1);
+        await rm(file, { force: true });
+        const initialized = await runCli(['agents', 'init']);
+        assert.equal(initialized.code, 0);
+        assert.match(await readFile(file, 'utf8'), /# Project Instructions/);
+        assert.equal((await runCli(['agents', 'init'])).code, 2);
+    } finally {
+        await rm(file, { force: true });
+    }
+});
+
 test('ask with --json emits events and a final result object', async () => {
     script = (body) => {
         assert.equal(body.input.at(-1).content[0].text, 'json please');

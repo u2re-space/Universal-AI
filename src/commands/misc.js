@@ -18,6 +18,7 @@ import { formatDuration, formatNumber } from '../util/text.js';
 import { UsageError, createClientFor, createLedgerFor, usageRow } from './shared.js';
 import { parseResumeRequest } from './resume-args.js';
 import { resumeLocal } from './run.js';
+import { agentsMdTemplate, discoverAgents } from '../core/agents-md.js';
 
 /**
  * `ai resume` continues the newest unfinished step, applies a revision, or reattaches to resp_….
@@ -144,6 +145,7 @@ export async function configCommand(ctx) {
             },
             agent: { mode: 'team', maxReviewRounds: 2, resume: true, extract: 'auto', architect: 'auto', orchestrator: { enabled: false } },
             memory: { enabled: true, autoSave: true, maxRecall: 8, notesFile: 'AGENTS.md' },
+            agents: { enabled: true, filenames: ['AGENTS.md', 'agents.md'], globalFile: null, maxBytes: 16384, maxTotalBytes: 65536, discoverUpward: true, nested: true },
             generate: { fidelity: defaults.generate.fidelity, creativity: defaults.generate.creativity, platform: defaults.generate.platform },
             pace: { speed: 10, quality: 40, mode: 'auto', models: ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'] },
             mcp: { servers: [] },
@@ -165,6 +167,34 @@ export async function configCommand(ctx) {
     if (renderer.mode === 'json') { renderer.json({ type: 'config', config: shown, files: config.configFiles }); return 0; }
     renderer.write(`${JSON.stringify(shown, null, 2)}\n`);
     renderer.line('info', `файлы конфигурации: ${config.configFiles.join(', ')} · ключ: ${config.apiKey ? 'задан' : 'НЕ задан (OPENAI_API_KEY)'}`, { dim: true });
+    return 0;
+}
+
+/**
+ * `ai agents [show|init]` — inspect discovered AGENTS.md files or create a project template.
+ * @param {object} ctx Command context from cli.main.
+ * @returns {Promise<number>}
+ * @exports
+ * @ai.hint io
+ */
+export async function agentsCommand(ctx) {
+    const { config, renderer, positionals } = ctx;
+    const sub = positionals[0] ?? 'show';
+    const target = path.join(ctx.cwd, 'AGENTS.md');
+    if (sub === 'init') {
+        if (await stat(target).then(() => true).catch(() => false)) throw new UsageError(`Файл уже существует: ${target}`);
+        await writeFile(target, agentsMdTemplate(), { flag: 'wx' });
+        renderer.write(`Создан ${target}\n`);
+        return 0;
+    }
+    if (sub !== 'show') throw new UsageError('Доступно: ai agents show | init');
+    const discovered = await discoverAgents({ cwd: ctx.cwd, home: config.home, config: config.agents });
+    if (renderer.mode === 'json') {
+        renderer.json({ type: 'agents', enabled: config.agents.enabled, files: discovered.files, source: discovered.source, text: discovered.text });
+    } else {
+        renderer.write(discovered.text || '(файлы AGENTS.md не найдены)\n');
+        renderer.line('info', discovered.source ? `источники:\n${discovered.source}` : 'источники не найдены', { dim: true });
+    }
     return 0;
 }
 

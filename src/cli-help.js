@@ -23,10 +23,11 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai cancel <resp_id>               отменить фоновый ответ API
   ai jobs [list|status|log|result|wait|cancel|rm] [id]   локальные фоновые задачи
   ai memory [list|search|add|forget|clear|tasks|stats|path] …   долговременная память (SQLite)
+  ai agents [show|init]             показать найденные AGENTS.md или создать шаблон
   ai models [фильтр]                список доступных моделей
   ai config [show|init|path]        конфигурация (~/.ai-agent/config.json)
   ai map [path]                     карта проекта .ai/map.json (файлы и символы). Черновик read/edit/scan подтверждает planner; запись вне edit выполняется и помечается
-  ai complete                       вставка в месте курсора (JSON из stdin). Модель gpt-6-luna, effort none
+  ai complete                       вставка в месте курсора (JSON из stdin), учитывает AGENTS.md. Модель gpt-6-luna, effort none
   ai complete --listen [--port n]   HTTP POST и WebSocket /v1/complete на 127.0.0.1 (для редактора)
   ai mcp [list|add|remove|probe]    пользовательские MCP-серверы (stdio)
   ai decide [набор] "текст"         вероятности Decisions API (community, support, smm, guard, route)
@@ -41,6 +42,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --file, -f <путь>      приложить файл: PDF, текст (можно несколько)
   stdin                  текст из канала добавляется как контекст (или становится запросом)
   --instructions, -i <текст|@файл>   дополнительные инструкции модели
+  --agents-file <путь>   использовать указанный файл инструкций проекта
+  --no-agents            отключить автоматическую загрузку AGENTS.md
   --schema <файл.json>   структурированный вывод по JSON-схеме (ask)
 
 Модель и вывод:

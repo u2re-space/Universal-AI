@@ -13,6 +13,7 @@
 
 import { readFile, stat } from 'node:fs/promises';
 import { supportsVerbosity, REASONING_EFFORTS } from '../core/config.js';
+import { discoverAgents } from '../core/agents-md.js';
 import { fallbackModel, modelMissing } from '../openai/fallback.js';
 import { resolveCompletionModel, COMPLETION_MODEL_CHOICES } from './models.js';
 import { resolveInside } from '../agent/paths.js';
@@ -306,15 +307,15 @@ async function prepareCompletionRequest(request, { cwd, config }) {
 /**
  * Responses API body for one completion. No tools, no stored reasoning transcript.
  * `reasoning` is sent only when `effort` is set.
- * @param {{ model: string, effort: string | null, prompt: string, maxOutputTokens: number, config: object }} options
+ * @param {{ model: string, effort: string | null, prompt: string, maxOutputTokens: number, config: object, agentsText?: string }} options
  * @returns {object}
  * @exports
  * @ai.hint pure
  */
-export function buildCompletionBody({ model, effort, prompt, maxOutputTokens, config }) {
+export function buildCompletionBody({ model, effort, prompt, maxOutputTokens, config, agentsText = '' }) {
     const body = {
         model,
-        instructions: COMPLETION_INSTRUCTIONS,
+        instructions: agentsText ? `${COMPLETION_INSTRUCTIONS}\n\nProject instructions (AGENTS.md):\n${agentsText}` : COMPLETION_INSTRUCTIONS,
         input: prompt,
         stream: false,
         store: false,
@@ -358,6 +359,7 @@ function fallbackCompletionBody({ model, prompt, prepared, config }) {
         prompt,
         maxOutputTokens: row?.maxOutputTokens ?? prepared.maxOutputTokens,
         config,
+        agentsText: prepared.agentsText,
     });
 }
 
@@ -402,6 +404,9 @@ export async function completeCode({ client, channels = null, config, request, c
     if (!channels && !client) throw new CompletionError('Нужен client или channels.', { status: 500, code: 'NO_CLIENT' });
     const transport = { client, channels };
     const prepared = await prepareCompletionRequest(request, { cwd, config });
+    prepared.agentsText = config.agents?.enabled === false
+        ? ''
+        : (await discoverAgents({ cwd, home: config.home, config: config.agents ?? {} }).catch(() => null))?.text ?? '';
     const built = buildCompletionContext(prepared);
     const body = buildCompletionBody({
         model: prepared.model,
@@ -409,6 +414,7 @@ export async function completeCode({ client, channels = null, config, request, c
         prompt: built.prompt,
         maxOutputTokens: prepared.maxOutputTokens,
         config,
+        agentsText: prepared.agentsText,
     });
     const response = await sendCompletion(transport, body, {
         signal, prompt: built.prompt, prepared, config,
@@ -425,6 +431,7 @@ export async function completeCode({ client, channels = null, config, request, c
             prompt: narrowerContext.prompt,
             maxOutputTokens: narrower.maxOutputTokens,
             config,
+            agentsText: narrower.agentsText,
         });
         return sendCompletion(transport, retry, {
             signal, prompt: narrowerContext.prompt, prepared: narrower, config,

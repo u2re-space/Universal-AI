@@ -167,6 +167,11 @@ export function overridesFrom(values, { command = null } = {}) {
         catch (error) { throw new UsageError(error.message); }
     }
     if (values.memory === false) o.memory = { enabled: false };
+    if (values.agents === false) o.agents = { enabled: false };
+    if (values['agents-file']) {
+        if (values.agents === false) throw new UsageError('--agents-file нельзя сочетать с --no-agents.');
+        o.agents = { enabled: true, globalFile: values['agents-file'] };
+    }
     if (values.web) o.tools.web = true;
     if (values['no-web']) o.tools.web = false;
     if (values.images) o.tools.images = true;

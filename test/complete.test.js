@@ -300,6 +300,24 @@ test('masked client frames decode and unmasked frames are rejected', () => {
     assert.throws(() => readClientFrames(Buffer.from([0x81, 0x01, 0x41]), 1000), /UNMASKED/);
 });
 
+test('completion includes project AGENTS.md in system instructions, not the insertion prompt', async () => {
+    await writeFile(path.join(work, 'AGENTS.md'), 'Use the project import aliases.');
+    script = (body) => {
+        assert.match(body.instructions, /Project instructions \(AGENTS\.md\)/);
+        assert.match(body.instructions, /Use the project import aliases/);
+        assert.equal(body.input.includes('Use the project import aliases'), false);
+        return { text: 'next' };
+    };
+    const http = client();
+    try {
+        const result = await completeCode({ client: http, config: config(), request: { content: 'const value = |' }, cwd: work });
+        assert.equal(result.text, 'next');
+    } finally {
+        http.close();
+        await rm(path.join(work, 'AGENTS.md'), { force: true });
+    }
+});
+
 test('completeCode calls the fast model at low effort and returns the insertion', async () => {
     script = (body) => {
         assert.equal(body.model, 'gpt-6-luna');
@@ -574,17 +592,31 @@ function runCli(args, { input = null, env = {} } = {}) {
 }
 
 test('ai complete --json prints the insertion from stdin', async () => {
-    script = (body) => {
-        assert.equal(body.model, 'gpt-6-luna');
-        assert.equal(body.reasoning.effort, 'none');
-        assert.match(body.input, /alpha \|/);
-        return { text: 'beta' };
-    };
-    const { code, stdout } = await runCli(['complete', '--json'], { input: JSON.stringify({ content: 'alpha |' }) });
-    assert.equal(code, 0);
-    const result = stdout.trim().split('\n').map((line) => JSON.parse(line)).find((line) => line.type === 'completion');
-    assert.equal(result.text, 'beta');
-    assert.equal(result.model, 'gpt-6-luna');
+    const cliServer = await startMockServer({
+        script: (body) => {
+            assert.equal(body.model, 'gpt-6-luna');
+            assert.equal(body.reasoning.effort, 'none');
+            assert.match(body.input, /alpha \|/);
+            return { text: 'beta' };
+        },
+    });
+    try {
+        const { code, stdout } = await runCli(['complete', '--json'], {
+            input: JSON.stringify({ content: 'alpha |' }),
+            env: {
+                OPENAI_BASE_URL: cliServer.baseURL,
+                AI_FALLBACK_BASE_URL: '',
+                AI_FALLBACK_API_KEY: '',
+                SPRUTDOCK_API_KEY: '',
+            },
+        });
+        assert.equal(code, 0);
+        const result = stdout.trim().split('\n').map((line) => JSON.parse(line)).find((line) => line.type === 'completion');
+        assert.equal(result.text.trimEnd(), 'beta');
+        assert.equal(result.model, 'gpt-6-luna');
+    } finally {
+        await cliServer.close();
+    }
 });
 
 test('ai complete --listen serves health on 127.0.0.1 and then stops', async () => {

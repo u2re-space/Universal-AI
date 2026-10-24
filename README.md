@@ -52,6 +52,7 @@ ai resume <resp_id>          подключиться к фоновому отв
 ai cancel <resp_id>          отменить фоновый ответ API
 ai jobs list|status|log|result|wait|cancel|rm [id]    локальные фоновые задачи
 ai memory list|search|add|forget|clear|tasks|stats|path   долговременная память
+ai agents show|init          показать найденные AGENTS.md / создать шаблон
 ai models [фильтр]           список моделей
 ai config show|init|path     конфигурация
 ai map [path]                индекс файлов и символов (.ai/map.json)
@@ -407,8 +408,13 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
 * **База** — `~/.ai-agent/memory.db` (SQLite, `node:sqlite`, полнотекстовый поиск FTS5): записи видов
   `fact | convention | decision | preference | pitfall | note`, с областью `project` (привязка к рабочему
   каталогу) или `global`; кеш сводок файлов; история задач (`ai memory tasks`).
-* **Файлы** — заметки проекта `AGENTS.md` (`memory.notesFile`) попадают в общий контекст; резервные копии
-  изменённых файлов — `~/.ai-agent/backups/`.
+* **AGENTS.md** — файлы проекта автоматически обнаруживаются вверх от рабочего каталога и во вложенных
+  каталогах (до двух уровней); также читается `~/.ai-agent/AGENTS.md`. Инструкции добавляются к system prompt
+  команд `ask`, `chat`, `run`/`resume` и inline completion; команда team также помещает их в общий контекст.
+  `ai agents show` показывает найденные файлы, `ai agents init` создаёт шаблон в текущем каталоге.
+  Флаги `--no-agents` отключают интеграцию, `--agents-file <путь>` задаёт явный глобальный файл.
+* **Совместимость** — `memory.notesFile` используется как прежняя запись общего контекста только при
+  `agents.enabled: false`; резервные копии изменённых файлов находятся в `~/.ai-agent/backups/`.
 * **Как наполняется** — после задачи роль `summarizer` извлекает 0–6 устойчивых фактов (`memory.autoSave`);
   агент может сам вызывать `remember`/`recall`; пользователь — `ai memory add/forget/clear`.
 * **Как используется** — перед планированием ищутся релевантные записи (`memory.maxRecall`), в чате и `ask`
@@ -477,6 +483,8 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
              "architect": "auto", "architectMaxTurns": 8,
              "orchestrator": { "enabled": false, "after": ["plan", "work", "review", "fix"], "maxContextBytes": 4194304, "applyPlan": true } },
   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
+  "agents": { "enabled": true, "filenames": ["AGENTS.md", "agents.md"], "globalFile": null,
+              "maxBytes": 16384, "maxTotalBytes": 65536, "discoverUpward": true, "nested": true },
   "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": ".", "image_format": "png" },
   "completion": { "model": "gpt-6-luna", "effort": "none", "maxLineBytes": 524288, "maxContextBytes": 24576,
                   "channelProbe": true, "probeTtlMs": 60000, "probeTimeoutMs": 1500 },

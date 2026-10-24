@@ -224,6 +224,20 @@ export const defaults = Object.freeze({
         dbFile: null,                   // null → <home>/memory.db
     },
     /**
+     * AGENTS.md discovery and injection. Finds project-level and global AGENTS.md files,
+     * merges them, and injects into system prompts and shared contexts.
+     * Set `enabled: false` to disable discovery and injection; team retains legacy `memory.notesFile`.
+     */
+    agents: {
+        enabled: true,                  // discover and inject AGENTS.md files
+        filenames: ['AGENTS.md', 'agents.md'],  // filenames to search (first match per directory wins)
+        globalFile: null,               // override global file path (null → <home>/AGENTS.md)
+        maxBytes: 16 * 1024,            // per-file size cap (bytes)
+        maxTotalBytes: 64 * 1024,       // merged total cap (bytes)
+        discoverUpward: true,           // walk up from cwd looking for AGENTS.md
+        nested: true,                   // also collect nested AGENTS.md from subdirectories
+    },
+    /**
      * Project generation (`ai gen`). Fidelity is a target, not a measured score.
      * platform selects the frozen web-platform profile (Chrome 157 Beta, flags off).
      */

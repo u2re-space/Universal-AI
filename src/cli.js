@@ -26,7 +26,7 @@ import { run } from './commands/run.js';
 import { image } from './commands/image.js';
 import { jobs } from './commands/jobs.js';
 import { memoryCommand } from './commands/memory.js';
-import { resume, cancel, models, configCommand } from './commands/misc.js';
+import { resume, cancel, models, configCommand, agentsCommand } from './commands/misc.js';
 import { mapCommand } from './commands/map.js';
 import { complete } from './commands/complete.js';
 import { gen } from './commands/gen.js';
@@ -46,7 +46,7 @@ const OPTIONS = {
     image: { type: 'string', multiple: true }, file: { type: 'string', short: 'f', multiple: true }, detail: { type: 'string' },
     out: { type: 'string', short: 'o' }, session: { type: 'string', short: 's' }, store: { type: 'boolean', default: false },
     web: { type: 'boolean', default: false }, 'no-web': { type: 'boolean', default: false }, images: { type: 'boolean', default: false }, desktop: { type: 'boolean', default: false }, 'unsafe-screenshot': { type: 'boolean', default: false }, tools: { type: 'string' },
-    'no-tools': { type: 'boolean', default: false }, approve: { type: 'string' }, yes: { type: 'boolean', short: 'y', default: false },
+    'no-tools': { type: 'boolean', default: false }, agents: { type: 'boolean' }, 'agents-file': { type: 'string' }, approve: { type: 'string' }, yes: { type: 'boolean', short: 'y', default: false },
     cwd: { type: 'string', short: 'C' }, 'max-turns': { type: 'string' }, 'budget-usd': { type: 'string' }, 'budget-tokens': { type: 'string' },
     'max-output-tokens': { type: 'string' }, temperature: { type: 'string' }, verbosity: { type: 'string' }, shell: { type: 'string' },
     background: { type: 'boolean', short: 'b', default: false }, detach: { type: 'boolean', short: 'd', default: false }, job: { type: 'string' },
@@ -71,7 +71,7 @@ const OPTIONS = {
     'mcp-url': { type: 'string' }, 'mcp-description': { type: 'string' }, 'mcp-approval': { type: 'string' },
 };
 
-const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand, map: mapCommand, complete, gen, mcp: mcpCommand, decide, moderate, channels, telegram, serve };
+const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand, agents: agentsCommand, map: mapCommand, complete, gen, mcp: mcpCommand, decide, moderate, channels, telegram, serve };
 const NEEDS_API_KEY = new Set(['ask', 'chat', 'run', 'image', 'resume', 'cancel', 'models', 'gen', 'decide', 'moderate', 'channels']);
 const DETACHABLE = new Set(['ask', 'run', 'image', 'gen']);
 

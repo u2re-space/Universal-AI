@@ -346,6 +346,19 @@ function validateConfig(c) {
     if (!Number.isSafeInteger(c.memory.maxRecall) || c.memory.maxRecall < 0 || c.memory.maxRecall > 50) fail('memory.maxRecall: 0..50');
     if (c.memory.notesFile !== null && (typeof c.memory.notesFile !== 'string' || !c.memory.notesFile.trim())) fail('memory.notesFile: имя файла или null');
     if (c.memory.dbFile !== null && (typeof c.memory.dbFile !== 'string' || !c.memory.dbFile.trim())) fail('memory.dbFile: путь или null');
+    if (!isRecord(c.agents)) fail('agents должен быть объектом');
+    for (const key of Object.keys(c.agents)) {
+        if (!(key in defaults.agents)) fail(`неизвестный параметр agents.${key}`);
+    }
+    if (typeof c.agents.enabled !== 'boolean') fail('agents.enabled: true | false');
+    if (!Array.isArray(c.agents.filenames) || c.agents.filenames.length < 1) fail('agents.filenames: массив от 1 строки');
+    c.agents.filenames = c.agents.filenames.map((f) => typeof f === 'string' ? f.trim() : '').filter(Boolean);
+    if (!c.agents.filenames.length) fail('agents.filenames: хотя бы одно непустое имя файла');
+    if (!Number.isSafeInteger(c.agents.maxBytes) || c.agents.maxBytes < 1 * KiB || c.agents.maxBytes > 64 * KiB) fail('agents.maxBytes: 1 KiB..64 KiB');
+    if (!Number.isSafeInteger(c.agents.maxTotalBytes) || c.agents.maxTotalBytes < 4 * KiB || c.agents.maxTotalBytes > 256 * KiB) fail('agents.maxTotalBytes: 4 KiB..256 KiB');
+    if (typeof c.agents.discoverUpward !== 'boolean') fail('agents.discoverUpward: true | false');
+    if (typeof c.agents.nested !== 'boolean') fail('agents.nested: true | false');
+    if (c.agents.globalFile !== null && (typeof c.agents.globalFile !== 'string' || !c.agents.globalFile.trim())) fail('agents.globalFile: путь или null');
     if (!isRecord(c.prices)) fail('prices должен быть объектом');
     for (const [model, price] of Object.entries(c.prices)) {
         if (!isRecord(price)) fail(`prices.${model} должен быть объектом`);

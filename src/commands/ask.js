@@ -15,6 +15,7 @@ import { ASSISTANT_BASE } from './instructions.js';
 import { runOnce, loadTextFormat } from './flow.js';
 import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstructions, approvalLevel, backupDirFor, openMemoryFor } from './shared.js';
 import { stdinFence } from '../core/attachments.js';
+import { discoverAgents } from '../core/agents-md.js';
 
 /**
  * `ai ask [prompt…]` — one prompt, one answer (plus optional attachments, stdin context,
@@ -38,7 +39,11 @@ export async function ask(ctx) {
     if (!prompt) prompt = 'Опиши вложения.';
 
     const extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
-    const instructions = composeInstructions(ASSISTANT_BASE, config, extra);
+    const agentsText = config.agents.enabled
+        ? (await discoverAgents({ cwd: ctx.cwd, home: config.home, config: config.agents }).catch(() => null))?.text ?? null
+        : null;
+    const base = agentsText ? `${agentsText}\n\n${ASSISTANT_BASE}` : ASSISTANT_BASE;
+    const instructions = composeInstructions(base, config, extra);
     const textFormat = await loadTextFormat(values.schema, ctx.cwd);
 
     // Local tools are opt-in for `ask` (--tools fs,shell,…); web search follows tools.web (on by default),
