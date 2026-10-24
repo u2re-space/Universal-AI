@@ -132,6 +132,7 @@ export async function configCommand(ctx) {
             approve: 'ask', tools: { ...defaults.tools }, limits: { maxTurns: 60, budgetUsd: null, budgetTokens: null },
             roles: {
                 planner: { model: null, effort: 'high' },
+                architect: { model: null, effort: 'high' },
                 orchestrator: { model: null, effort: 'high' },
                 worker: { model: null, effort: 'medium' },
                 reviewer: { model: null, effort: 'medium' },
@@ -141,7 +142,7 @@ export async function configCommand(ctx) {
                 measurer: { model: null, effort: null },
                 'image-processor': { model: null, effort: 'medium' },
             },
-            agent: { mode: 'team', maxReviewRounds: 2, resume: true, extract: 'auto', orchestrator: { enabled: false } },
+            agent: { mode: 'team', maxReviewRounds: 2, resume: true, extract: 'auto', architect: 'auto', orchestrator: { enabled: false } },
             memory: { enabled: true, autoSave: true, maxRecall: 8, notesFile: 'AGENTS.md' },
             generate: { fidelity: defaults.generate.fidelity, creativity: defaults.generate.creativity, platform: defaults.generate.platform },
             pace: { speed: 10, quality: 40, mode: 'auto', models: ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'] },

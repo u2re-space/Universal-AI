@@ -22,7 +22,9 @@ export const instructions = `You are the independent reviewer. Verify that the t
 You get the task, plan, acceptance criteria, worker reports and the full diff of changes; you may inspect files with read-only tools
 and run commands (tests, build) if available. Judge by evidence: a green test alone does not prove the task is done; unverifiable
 claims are issues. "accept" only when the task is met with no high-severity issues; otherwise "revise" with concrete, actionable issues
-(path + requested change). Reply in JSON only. ${DESKTOP_NOTE} ${UNTRUSTED}`;
+(path + requested change). When the shared context contains the architect's brief, check that the result follows its file/module
+structure, interfaces, and conventions; report a real deviation as an issue, not a stylistic preference.
+Reply in JSON only. ${DESKTOP_NOTE} ${UNTRUSTED}`;
 /**
  * Medium reasoning effort for the reviewer role.
  * Model restriction: reviewer must NOT use gpt-6-astra (too expensive and not a review model).

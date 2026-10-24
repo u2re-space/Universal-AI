@@ -3,10 +3,10 @@
  * @module agent/schemas
  * @purpose Strict JSON schemas for structured role outputs (Responses API text.format = json_schema).
  * @usedBy agent/team, agent/roles
- * @exports PLAN_SCHEMA, IMAGE_PROCESSOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA
+ * @exports PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA
  * @ai.tags schema, roles
  * @ai.hint pure
- * @changed 2026-10-22 Added the measurer sheet.
+ * @changed 2026-10-24 Added the architect structure and design brief.
  */
 
 const string = { type: 'string' };
@@ -92,6 +92,41 @@ export const PLAN_SCHEMA = object({
             reason: { ...string, description: 'Why this file has this role.' },
         }),
     },
+});
+
+export const ARCHITECT_SCHEMA = object({
+    summary: { ...string, description: 'How the solution is organized and why; the shortest useful architecture overview.' },
+    structure: {
+        type: 'array',
+        description: 'Every file, module, component, style sheet, asset, test, or document the implementation will create or change, in build order.',
+        items: object({
+            path: { ...string, description: 'Project-relative path such as src/app.js or styles/main.scss.' },
+            kind: { type: 'string', enum: ['code', 'style', 'markup', 'asset', 'document', 'config', 'test', 'other'], description: 'What kind of file this is.' },
+            purpose: { ...string, description: 'What this file is for.' },
+            responsibilities: { ...string, description: 'What belongs in this file and what does not.' },
+            dependsOn: { ...strings, description: 'Project-relative paths this file imports or builds on; empty when none.' },
+            notes: { ...string, description: 'Interfaces, exports, naming, or implementation constraints; empty when none.' },
+        }),
+    },
+    design: object({
+        layout: { ...string, description: 'Page, section, and component layout plus responsive behavior; empty when the task is not visual.' },
+        typography: { ...string, description: 'Type scale, fonts, and text treatment; empty when not applicable.' },
+        color: { ...string, description: 'Palette, design tokens, and contrast rules; empty when not applicable.' },
+        motion: { ...string, description: 'Transitions, animation, and interaction states; empty when not applicable.' },
+        assets: { ...string, description: 'How measured crops, generated images, icons, and fonts are used; empty when none.' },
+    }),
+    stepGuidance: {
+        type: 'array',
+        description: 'Implementation brief for every remaining plan step, keyed by the step id.',
+        items: object({
+            stepId: { ...string, description: 'Plan step id such as s01.' },
+            files: { ...strings, description: 'Project-relative files this step owns; empty when the step owns none.' },
+            guidance: { ...string, description: 'What to implement and how: interfaces, order, data flow, styling, pitfalls.' },
+        }),
+    },
+    questionsForOrchestrator: { ...strings, description: 'Facts the orchestrator must confirm from the project before implementation; empty when none.' },
+    conventions: { ...strings, description: 'Cross-file conventions and rules every role must follow.' },
+    risks: { ...strings, description: 'Structural or design risks that remain; empty when none.' },
 });
 
 export const COLLECTOR_SCHEMA = object({

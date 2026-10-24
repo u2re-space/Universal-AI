@@ -72,7 +72,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 
 Команда (run и gen):
-  --role <роль=модель[:effort]>  модель для роли: planner, orchestrator, worker, coder, writer, reviewer, vision,
+  --role <роль=модель[:effort]>  модель для роли: planner, architect, orchestrator, worker, coder, writer, reviewer, vision,
                          summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, image-processor, default, all
                          (например: --role planner=gpt-6-luna:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
                          --role collector=... и --role coordinator=... принимают orchestrator (объединённая роль)
@@ -84,6 +84,10 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
                           Планировщик может назначить imageTasks; image-processor готовит их до worker.
                           auto — только при приложенных картинках и нетривиальном плане (по умолчанию), always — всегда, --no-measure выключает.
                           Лист замеров уходит в общий контекст и в .tmp/<id>/measurements.json
+   --architect off|auto|always  architect после плана и замеров строит файловую/модульную структуру, дизайн-решения
+                          и пошаговый бриф для остальных ролей; его вопросы получает orchestrator.
+                          auto — только для нетривиального плана (по умолчанию), always — всегда, --no-architect выключает.
+                          Структура уходит в общий контекст и в .tmp/<id>/architecture.json
   --no-resume            не продолжать незавершённый шаг, фазу и ход из .tmp (по умолчанию тот же текст задачи продолжается с места остановки)
   --route encoder|planner|decisions  куда отдать первый ответ. decisions спрашивает модель решений. Без флага решает метка ответа
   В каталоге Node.js или фронтенда сканер (до ответа, encoder и planner) кладёт в контекст package.json, tsconfig.json или jsconfig.json, import map и найденные по ним файлы. Корневой index.html целиком — если он до 8 КиБ или задача про страницу.

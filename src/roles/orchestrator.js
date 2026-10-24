@@ -24,9 +24,10 @@ You hold the largest context in the team and you know the project better than an
 what you collected and on what you decide. A request names which of your two jobs it is.
 
 1. Collect context. Using read-only tools (list_files, search_files, read_file, summarize_file, recall), inspect
-the marked files, run the search queries, and answer the planner's questions. Be economical: read only what is
-needed; prefer search and summaries for large files. Report facts only (paths, symbols, line ranges, snippets,
-conventions) — no proposals, no edits. Reply with the context report: findings, answers, conventions, notes.
+the marked files, run the search queries, and answer the planner's and the architect's questions. Be economical:
+read only what is needed; prefer search and summaries for large files. Report facts only (paths, symbols, line
+ranges, snippets, conventions) — no proposals, no edits. Reply with the context report: findings, answers,
+conventions, notes.
 
 2. Coordinate after a stage: the plan, the context collection, each worker step, and the review or fix round.
 You see the task, the shared context, the current plan and progress, the latest reports, your own findings,
@@ -44,6 +45,9 @@ Reply with the coordination report:
 
 Rules: do not repeat completed steps; do not ask to rewrite a file that already satisfies the plan; keep the plan
 small and ordered; one project file per step; use precise paths from the context or from files you read.
+The architect's brief in the shared context is the agreed file/module structure and design. Treat its paths,
+interfaces, and conventions as the default. When you coordinate, check the plan and the work against it; if a
+concrete problem requires a deviation, say so in nextStep or planUpdate instead of silently changing the structure.
 Never invent file contents, command output, or a test result. ${UNTRUSTED}`;
 
 /**

@@ -287,7 +287,7 @@ function validateConfig(c) {
     }
     if (!isRecord(c.documentation.roles)) fail('documentation.roles должен быть объектом');
     for (const [name, sources] of Object.entries(c.documentation.roles)) {
-        if (!['planner', 'orchestrator', 'worker', 'coder'].includes(name)) fail(`documentation.roles.${name}: разрешены planner, orchestrator, worker, coder`);
+        if (!['planner', 'architect', 'orchestrator', 'worker', 'coder'].includes(name)) fail(`documentation.roles.${name}: разрешены planner, architect, orchestrator, worker, coder`);
         if (!Array.isArray(sources) || sources.some((source) => typeof source !== 'string' || !Object.hasOwn(c.documentation.sources, source))) {
             fail(`documentation.roles.${name}: список имён из documentation.sources`);
         }
@@ -310,7 +310,7 @@ function validateConfig(c) {
         if (role.instructions != null && typeof role.instructions !== 'string') fail(`roles.${name}.instructions должен быть строкой`);
     }
     if (!['team', 'single'].includes(c.agent.mode)) fail('agent.mode: team | single');
-    for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'maxContextBytes']) {
+    for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'architectMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'maxContextBytes']) {
         if (!Number.isSafeInteger(c.agent[key]) || c.agent[key] < (key === 'maxReviewRounds' ? 0 : 1)) fail(`agent.${key} должен быть целым числом`);
     }
     if (!['auto', 'always', 'never'].includes(c.agent.visionDelegate)) fail('agent.visionDelegate: auto | always | never');
@@ -318,6 +318,7 @@ function validateConfig(c) {
     if (typeof c.agent.resume !== 'boolean') fail('agent.resume: true | false');
     if (!['off', 'auto', 'always'].includes(c.agent.extract)) fail('agent.extract: off | auto | always');
     if (!['off', 'auto', 'always'].includes(c.agent.measure)) fail('agent.measure: off | auto | always');
+    if (!['off', 'auto', 'always'].includes(c.agent.architect)) fail('agent.architect: off | auto | always');
     if (c.agent.route !== null && !['encoder', 'planner', 'decisions'].includes(c.agent.route)) fail('agent.route: encoder | planner | decisions');
     if (!['encoder', 'mcp'].includes(c.agent.encode)) fail('agent.encode: encoder | mcp');
     if (!isRecord(c.agent.orchestrator)) fail('agent.orchestrator должен быть объектом');

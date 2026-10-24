@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { instructions } from '../src/roles/classifier.js';
 import { instructions as plannerInstructions } from '../src/roles/planner.js';
-import { CLASSIFIER_SCHEMA, IMAGE_PROCESSOR_SCHEMA, MEASURER_SCHEMA, PLAN_SCHEMA } from '../src/agent/schemas.js';
+import { ARCHITECT_SCHEMA, CLASSIFIER_SCHEMA, IMAGE_PROCESSOR_SCHEMA, MEASURER_SCHEMA, PLAN_SCHEMA } from '../src/agent/schemas.js';
 import { ROLE_INSTRUCTIONS } from '../src/roles/index.js';
-import { renderMeasurements } from '../src/agent/team-text.js';
+import { renderArchitecture, renderMeasurements } from '../src/agent/team-text.js';
 
 test('classifier schema is one label and the plan step carries complexity', () => {
     assert.equal(CLASSIFIER_SCHEMA.additionalProperties, false);
@@ -42,4 +42,24 @@ test('classifier schema is one label and the plan step carries complexity', () =
     assert.match(ROLE_INSTRUCTIONS.coder, /canvas-relative percentages/);
     assert.match(ROLE_INSTRUCTIONS.coder, /responsive/);
     assert.match(ROLE_INSTRUCTIONS.worker, /numeric boxes relative to the stated canvas/);
+});
+
+test('architect schema carries structure, design, and a per-step brief', () => {
+    assert.deepEqual(ARCHITECT_SCHEMA.required, ['summary', 'structure', 'design', 'stepGuidance', 'questionsForOrchestrator', 'conventions', 'risks']);
+    assert.deepEqual(ARCHITECT_SCHEMA.properties.structure.items.required, ['path', 'kind', 'purpose', 'responsibilities', 'dependsOn', 'notes']);
+    assert.deepEqual(ARCHITECT_SCHEMA.properties.design.required, ['layout', 'typography', 'color', 'motion', 'assets']);
+    assert.deepEqual(ARCHITECT_SCHEMA.properties.stepGuidance.items.required, ['stepId', 'files', 'guidance']);
+    const rendered = renderArchitecture({
+        summary: 'one module',
+        structure: [{ path: 'src/app.js', kind: 'code', purpose: 'entry', responsibilities: 'boot', dependsOn: [], notes: '' }],
+        design: { layout: 'single column', typography: '', color: '', motion: '', assets: '' },
+        stepGuidance: [{ stepId: 's01', files: ['src/app.js'], guidance: 'Export start().' }],
+        questionsForOrchestrator: ['Where is the entry point?'],
+        conventions: ['ES modules'],
+        risks: [],
+    });
+    assert.match(rendered, /src\/app\.js \(code\): entry/);
+    assert.match(rendered, /layout: single column/);
+    assert.match(rendered, /s01 · files: src\/app\.js: Export start\(\)\./);
+    assert.match(rendered, /Where is the entry point\?/);
 });

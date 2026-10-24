@@ -2,7 +2,7 @@
  * @file src/roles/untrusted.js
  * @module roles/untrusted
  * @purpose Shared prompt lines about untrusted tool text and desktop tools.
- * @usedBy roles/clicker, roles/coder, roles/encoder, roles/extractor, roles/measurer, roles/orchestrator, roles/planner, roles/reviewer, roles/solver, roles/tester, roles/typer, roles/vision, roles/worker, roles/writer
+ * @usedBy roles/architect, roles/clicker, roles/coder, roles/encoder, roles/extractor, roles/measurer, roles/orchestrator, roles/planner, roles/reviewer, roles/solver, roles/tester, roles/typer, roles/vision, roles/worker, roles/writer
  * @exports UNTRUSTED, DESKTOP_NOTE
  * @ai.tags roles, safety, desktop
  * @ai.hint pure

@@ -55,6 +55,7 @@ export const defaults = Object.freeze({
         },
         roles: {
             planner:      ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'eslint', 'stylelint', 'prettier', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion'],
+            architect:    ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'eslint', 'stylelint', 'prettier', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion'],
             orchestrator: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'eslint', 'stylelint', 'prettier', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion'],
             worker:       ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'eslint', 'stylelint', 'prettier', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion'],
             coder:        ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'eslint', 'stylelint', 'prettier', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion'],
@@ -126,6 +127,8 @@ export const defaults = Object.freeze({
      * top-level settings (model, reasoning.effort, …). Roles:
      *   default    — ask / chat / single-agent run
      *   planner    — understands the task, writes the plan (senior model)
+     *   architect  — turns the plan and the measurements into a file/module structure, design decisions,
+     *                and a per-step brief for the orchestrator and the authors (senior model)
      *   orchestrator — knows the project best: collects context from files, then reads the plan, progress,
      *                  findings, and recent diff after every stage and decides what to do next
      *   worker     — executes plan steps that are not code generation
@@ -147,6 +150,7 @@ export const defaults = Object.freeze({
     roles: {
         default: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         planner: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+        architect: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         orchestrator: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         worker: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         coder: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
@@ -166,7 +170,7 @@ export const defaults = Object.freeze({
     },
     /** Multi-role orchestration used by `ai run`. */
     agent: {
-        mode: 'team',                   // team (planner → orchestrator → worker → reviewer) | single (one model, one loop)
+        mode: 'team',                   // team (planner → architect → orchestrator → worker → reviewer) | single (one model, one loop)
         maxSteps: 12,                   // plan steps accepted from the planner
         maxReviewRounds: 2,             // reviewer → worker fix cycles
         orchestratorMaxTurns: 12,       // tool turns the orchestrator may spend collecting context
@@ -177,6 +181,14 @@ export const defaults = Object.freeze({
         chain: true,                    // first answer, then encoder or planner
         route: null,                    // null | encoder | planner; null lets the answer and the heuristic choose
         extract: 'auto',                // off | auto (encode route) | always (encode and plan); clean fenced code into .tmp/<id>/extracted
+        /**
+         * The architect works after the plan and the measurements and before context collection.
+         * auto = only for non-trivial plans; always = also for trivial plans; off = never.
+         * It returns a file/module structure, design decisions, a per-step brief, and questions for
+         * the orchestrator. The brief goes to the shared context and to `.tmp/<id>/architecture.json`.
+         */
+        architect: 'auto',              // off | auto | always
+        architectMaxTurns: 8,           // read-only tool turns the architect may spend inspecting the project
         /**
          * Reference measurements taken by the `measurer` role right after the plan and before the worker
          * writes styles or artwork. auto = only when reference images are attached and the plan is not

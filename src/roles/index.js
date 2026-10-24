@@ -2,16 +2,17 @@
  * @file src/roles/index.js
  * @module roles/index
  * @purpose Collect role prompts, settings, and desktop specialist limits.
- * @depends roles/default, roles/planner, roles/orchestrator, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer, roles/image-processor
+ * @depends roles/default, roles/planner, roles/architect, roles/orchestrator, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer, roles/image-processor
  * @usedBy commands/instructions, agent/team
  * @exports ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS
  * @ai.tags roles, prompts, desktop
  * @ai.hint pure
- * @changed 2026-10-22 collector and coordinator became one orchestrator role.
+ * @changed 2026-10-24 Added the architect and designer role.
  */
 
 import * as roleDefault from './default.js';
 import * as planner from './planner.js';
+import * as architect from './architect.js';
 import * as orchestrator from './orchestrator.js';
 import * as worker from './worker.js';
 import * as coder from './coder.js';
@@ -38,6 +39,7 @@ import * as imageProcessor from './image-processor.js';
 export const ROLE_MODULES = {
     default: { instructions: roleDefault.instructions, settings: roleDefault.settings },
     planner: { instructions: planner.instructions, settings: planner.settings },
+    architect: { instructions: architect.instructions, settings: architect.settings },
     orchestrator: { instructions: orchestrator.instructions, settings: orchestrator.settings },
     worker: { instructions: worker.instructions, settings: worker.settings },
     coder: { instructions: coder.instructions, settings: coder.settings },

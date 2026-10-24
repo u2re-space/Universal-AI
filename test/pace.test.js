@@ -38,6 +38,8 @@ test('default pace keeps a complex author on luna and the planner on sol', () =>
     assert.equal(pace.ceilingModel, 'gpt-6.1-sol');
     assert.equal(pace.roles.planner.model, 'gpt-6.1-sol');
     assert.equal(pace.roles.planner.effort, 'high');
+    assert.equal(pace.roles.architect.model, 'gpt-6.1-sol');
+    assert.equal(pace.roles.architect.effort, 'high');
     assert.equal(pace.steps[0].model, 'gpt-6-luna');
     assert.equal(pace.steps[0].effort, 'high');
     assert.equal(pace.roles.classifier.model, 'gpt-6.1-sol');

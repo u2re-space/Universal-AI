@@ -38,7 +38,7 @@ const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло 
 
 /**
  * `ai run <task>` — autonomous agent in the working directory.
- *   team   (default): planner → measurer / context collection → image processor → worker steps → reviewer (+fix rounds) → summarizer/memory,
+ *   team   (default): planner → measurer → architect / context collection → image processor → worker steps → reviewer (+fix rounds) → summarizer/memory,
  *                     each role with its own model (config.roles / --role).
  *   single (--single): one model, one tool loop (plus memory tools).
  * @param {object} ctx Command context from cli.main.
@@ -191,7 +191,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
 }
 
 /**
- * Planner, orchestrator, worker, and reviewer. Prints the summary and writes --out.
+ * Planner, architect, orchestrator, worker, and reviewer. Prints the summary and writes --out.
  * @param {object} ctx Command context.
  * @param {{ task: string, parts: object[], level: string, interactive: boolean, store: object|null, extra: string|null }} options Task text, attachments, approval level, and extra instructions.
  * @returns {Promise<number>}
@@ -230,10 +230,11 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         rows: [
             ['статус', TEAM_STATUS[result.status] ?? result.status],
             ...(result.plan ? [['план', `${result.plan.complexity} · ${truncate(result.plan.summary, 200)}`]] : []),
+            ...(result.architecture ? [['архитектура', `${result.architecture.structure.length} файл(ов) · ${truncate(result.architecture.summary, 200)}`]] : []),
             ...(result.workId ? [['план на диске', `.tmp/${result.workId}/`]] : []),
             ['шагов', result.steps.length ? `${result.steps.length} (${result.steps.map((s) => `${s.index}: ${s.status}`).join(', ')})` : '0'],
             ...(result.review ? [['ревью', `${result.review.verdict === 'accept' ? 'принято' : 'правки'} после ${result.reviewRounds} раунд(а/ов) · ${truncate(result.review.summary, 200)}`]] : []),
-            ['вызовов инструментов', toolCalls ? `${toolCalls} (worker ${worker.calls}, orchestrator ${result.stats.orchestrator.calls}, image-processor ${result.stats['image-processor'].calls}, reviewer ${result.stats.reviewer.calls})${worker.denied || result.stats['image-processor'].denied ? `, отклонено ${worker.denied + result.stats['image-processor'].denied}` : ''}` : '0'],
+            ['вызовов инструментов', toolCalls ? `${toolCalls} (worker ${worker.calls}, architect ${result.stats.architect.calls}, orchestrator ${result.stats.orchestrator.calls}, image-processor ${result.stats['image-processor'].calls}, reviewer ${result.stats.reviewer.calls})${worker.denied || result.stats['image-processor'].denied ? `, отклонено ${worker.denied + result.stats['image-processor'].denied}` : ''}` : '0'],
             ...backupSummaryRows(result.changes, ctx.backupDir),
             ...(worker?.commands?.length ? [['команды', worker.commands.map((c) => `${c.command} → ${c.exitCode ?? '?'}`).join('; ')]] : []),
             ...(result.images.length ? [['изображения', result.images.join(', ')]] : []),
@@ -243,7 +244,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         ],
     });
     const summary = {
-        type: 'result', status: result.status, text: result.text, plan: result.plan, review: result.review, steps: result.steps,
+        type: 'result', status: result.status, text: result.text, plan: result.plan, architecture: result.architecture, review: result.review, steps: result.steps,
         workId: result.workId ?? null,
         images: result.images, changes: result.changes, memoriesSaved: result.memoriesSaved.map((m) => ({ id: m.id, scope: m.scope, kind: m.kind, content: m.content })),
         outFile, usage: ledger.snapshot(), tools: result.stats, error: result.error ? { message: result.error.message, code: result.error.code ?? null } : null,

@@ -45,6 +45,7 @@ after(async () => { await server.close(); await rm(root, { recursive: true, forc
 const baseConfig = () => structuredClone({
     ...defaults, model: 'gpt-6.1-sol', home: root, baseURL: server.baseURL,
     pace: { ...defaults.pace, quality: 20 },
+    agent: { ...defaults.agent, architect: 'off' },
     roles: { ...defaults.roles, worker: { ...defaults.roles.worker, model: 'gpt-6-luna' }, orchestrator: { ...defaults.roles.orchestrator, model: 'gpt-6-luna' },
         vision: { ...defaults.roles.vision, model: 'gpt-6-luna-vision' }, summarizer: { ...defaults.roles.summarizer, model: 'gpt-6-luna-nano' } },
     memory: { ...defaults.memory, dbFile: ':memory:' },
@@ -55,6 +56,7 @@ const client = () => createClient({ apiKey: 'sk-test', baseURL: server.baseURL }
 function roleOf(body) {
     const format = body.text?.format?.name;
     if (format === 'plan') return 'planner';
+    if (format === 'architecture') return 'architect';
     if (format === 'file_commands') return 'encoder';
     if (format === 'context_report') return 'collector';
     if (format === 'review') return 'reviewer';
@@ -96,7 +98,7 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.deepEqual(overrides.memory, { enabled: false });
     assert.throws(() => overridesFrom({ role: ['nobody=x'] }), /неизвестная роль/);
     assert.deepEqual(overridesFrom({ role: ['image-processor=gpt-6-luna:medium'] }).roles, { 'image-processor': { model: 'gpt-6-luna', effort: 'medium' } });
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 18);
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 19);
     assert.equal(overridesFrom({ extract: 'always' }).agent.extract, 'always');
     assert.equal(overridesFrom({ 'no-extract': true }).agent.extract, 'off');
     assert.throws(() => overridesFrom({ extract: 'nope' }), /--extract/);
@@ -1069,7 +1071,7 @@ test('orchestrator revises the plan after a step and guides the next worker turn
     };
     const config = baseConfig();
     config.agent = {
-        ...defaults.agent, chain: false, resume: false,
+        ...defaults.agent, chain: false, resume: false, architect: 'off',
         orchestrator: { ...defaults.agent.orchestrator, enabled: true, after: ['plan', 'work'], maxContextBytes: 2 * 1024 * 1024 },
     };
     config.memory = { ...defaults.memory, enabled: false };
@@ -1334,6 +1336,89 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
     assert.ok(coderBodies.length > 0, 'the SCSS step is assigned to coder');
     const savedSheet = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.json'), 'utf8'));
     assert.equal(savedSheet.elements[0].box.width, 200);
+    await rm(dir, { recursive: true, force: true });
+});
+
+test('architect runs after the measurements and gives the structure to the orchestrator and the author', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-architect-'));
+    const events = [];
+    const seen = [];
+    let architectBody = null;
+    let collectBody = null;
+    let coderBody = null;
+    detectCoder = true;
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'classifier') return { text: JSON.stringify({ label: 'normal' }) };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'приложение с точкой входа', complexity: 'normal',
+                steps: [{ goal: 'Создать src/app.js', details: 'Экспортировать start()', verify: 'прочитать src/app.js', complexity: 'normal' }],
+                filesOfInterest: ['src/app.js'], searchQueries: [], questionsForCollector: [],
+                acceptanceCriteria: ['start() экспортирован'], needsReview: false, imageNotes: null, risks: [],
+                imageTasks: [], fileActions: [], taskMap: [],
+            }) };
+        }
+        if (role === 'measurer') {
+            return { text: JSON.stringify({
+                summary: 'Макет с одной карточкой', source: 'mockup.png', unit: 'px',
+                canvas: { x: 0, y: 0, width: 400, height: 300 }, elements: [], regions: [], rules: [], notes: '',
+            }) };
+        }
+        if (role === 'architect') {
+            architectBody = body;
+            const prompt = JSON.stringify(body.input);
+            assert.match(prompt, /s01/);
+            assert.match(prompt, /Reference measurements/);
+            return { text: JSON.stringify({
+                summary: 'Один модуль src/app.js и стили рядом',
+                structure: [{
+                    path: 'src/app.js', kind: 'code', purpose: 'точка входа', responsibilities: 'запуск приложения',
+                    dependsOn: [], notes: 'экспортировать start()',
+                }],
+                design: { layout: '', typography: '', color: '', motion: '', assets: '' },
+                stepGuidance: [{ stepId: 's01', files: ['src/app.js'], guidance: 'Создать src/app.js и экспортировать start().' }],
+                questionsForOrchestrator: ['Где находится точка входа?'],
+                conventions: ['ES-модули'], risks: [],
+            }) };
+        }
+        if (role === 'collector') {
+            collectBody = body;
+            return { text: JSON.stringify({
+                findings: [], answers: [{ question: 'Где находится точка входа?', answer: 'src/app.js' }],
+                conventions: [], notes: '',
+            }) };
+        }
+        if (role === 'coder') {
+            coderBody = body;
+            return { text: 'src/app.js готов' };
+        }
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.agent = { ...config.agent, architect: 'always', chain: false, resume: false };
+    const result = await runTeam({
+        client: client(), config, ledger: createLedger(), task: 'создай приложение', root: dir, approvalLevel: 'read',
+        parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+        emit: (event) => events.push(event),
+    });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.ok(architectBody, 'architect ran');
+    const stages = events.filter((event) => event.type === 'stage.start').map((event) => event.stage);
+    assert.ok(stages.indexOf('architect') > stages.indexOf('plan'), stages.join(', '));
+    assert.ok(stages.indexOf('measure') < stages.indexOf('architect'), stages.join(', '));
+    assert.ok(stages.indexOf('architect') < stages.indexOf('collect'), stages.join(', '));
+    assert.match(JSON.stringify(collectBody.input), /Questions from the architect/);
+    assert.match(JSON.stringify(collectBody.input), /Где находится точка входа\?/);
+    assert.match(JSON.stringify(coderBody.input), /Architect guidance for this step/);
+    assert.match(JSON.stringify(coderBody.input), /Создать src\/app\.js и экспортировать start\(\)\./);
+    assert.equal(result.architecture.structure[0].path, 'src/app.js');
+    const saved = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'architecture.json'), 'utf8'));
+    assert.equal(saved.stepGuidance[0].stepId, 's01');
+    assert.ok(seen.includes('architect'));
     await rm(dir, { recursive: true, force: true });
 });
 

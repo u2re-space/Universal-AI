@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS } from '../src/roles/index.js';
 import { defaults } from '../src/core/config.js';
 
-const NAMES = ['default', 'planner', 'orchestrator', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer', 'image-processor'];
+const NAMES = ['default', 'planner', 'architect', 'orchestrator', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer', 'image-processor'];
 
 test('role modules match config role names', () => {
     assert.deepEqual(Object.keys(ROLE_MODULES).sort(), NAMES.slice().sort());
@@ -17,6 +17,8 @@ test('role modules match config role names', () => {
 test('existing role instructions keep their job', () => {
     assert.match(ROLE_INSTRUCTIONS.planner, /senior planner/);
     assert.match(ROLE_INSTRUCTIONS.planner, /\{maxSteps\}/);
+    assert.match(ROLE_INSTRUCTIONS.architect, /architect and designer/);
+    assert.match(ROLE_INSTRUCTIONS.architect, /stepGuidance/);
     assert.match(ROLE_INSTRUCTIONS.orchestrator, /orchestrator of a team/);
     assert.match(ROLE_INSTRUCTIONS.orchestrator, /Collect context/);
     assert.match(ROLE_INSTRUCTIONS.orchestrator, /Coordinate after a stage/);

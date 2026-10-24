@@ -1,13 +1,13 @@
 /**
  * @file src/agent/team.js
  * @module agent/team
- * @purpose Run planner, measurer, image processor, orchestrator, worker, reviewer, and summarizer over one shared context.
+ * @purpose Run planner, architect, measurer, image processor, orchestrator, worker, reviewer, and summarizer over one shared context.
  * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, agent/work-plan, agent/handoff, agent/quality, mcp/session, channels/decide, channels/questions, channels/verdict
  * @usedBy commands/run, index.js
  * @exports toolNamesForRole, runTeam
  * @ai.tags team, roles
  * @ai.hint keep
- * @changed 2026-10-22 The turn budget can be extended and the reviewer model is sanitized.
+ * @changed 2026-10-24 The architect turns the plan and measurements into a structure and per-step brief.
  */
 
 import path from 'node:path';
@@ -31,7 +31,7 @@ import { createRoleRunner } from './roles.js';
 import { builtinTools } from './loop.js';
 import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
-import { PLAN_SCHEMA, IMAGE_PROCESSOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
+import { PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
 import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace } from './pace.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
@@ -64,15 +64,15 @@ import { questionsFor } from '../channels/questions.js';
 import { routeFlag } from '../channels/verdict.js';
 import { safeReviewerModel } from '../roles/reviewer.js';
 
-import { bullets, renderFindings, renderMeasurements } from './team-text.js';
+import { bullets, renderArchitecture, renderFindings, renderMeasurements } from './team-text.js';
 const HARD_STOP = new Set(['cancelled', 'budget', 'failed']);
 
 
 
 
-/** The orchestrator stays read-only. Reviewer may run commands and use the desktop. Worker keeps every enabled name. */
+/** The orchestrator and architect stay read-only. Reviewer may run commands and use the desktop. Worker keeps every enabled name. */
 export function toolNamesForRole(allNames, role) {
-    if (role === 'orchestrator' || role === 'collector' || role === 'coordinator') return allNames.filter((name) => READ_ONLY_TOOLS.includes(name));
+    if (role === 'orchestrator' || role === 'architect' || role === 'collector' || role === 'coordinator') return allNames.filter((name) => READ_ONLY_TOOLS.includes(name));
     if (role === 'reviewer') {
         return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name));
     }
@@ -133,7 +133,7 @@ export async function runTeam({
         })), config.roles ?? {}, pins);
         return one.steps?.[0] ?? { model: null, effort: null };
     };
-    const result = { status: 'failed', text: '', plan: null, review: null, steps: [], images: [], changes: [], stats: null,
+    const result = { status: 'failed', text: '', plan: null, architecture: null, review: null, steps: [], images: [], changes: [], stats: null,
         recalled: [], memoriesSaved: [], reviewRounds: 0, error: null };
 
     const toolBase = { root, config, client, ledger, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile, scaffoldTask: task, processTool };
@@ -181,6 +181,7 @@ export async function runTeam({
         describeScreen: roles.describeScreen, delegate, extras: mcp.extras,
     });
     const orchestratorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('orchestrator'), extras: mcpRead });
+    const architectTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('architect'), extras: mcpRead });
     const reviewerTools = createToolset({
         ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer'),
         describeScreen: roles.describeScreen, delegate, extras: mcpRead,
@@ -196,8 +197,8 @@ export async function runTeam({
     const finish = () => {
         result.changes = [...fileChanges, ...workerTools.stats().changes];
         result.stats = {
-            worker: workerTools.stats(), orchestrator: orchestratorTools.stats(), reviewer: reviewerTools.stats(),
-            'image-processor': imageProcessorTools.stats(),
+            worker: workerTools.stats(), architect: architectTools.stats(), orchestrator: orchestratorTools.stats(),
+            reviewer: reviewerTools.stats(), 'image-processor': imageProcessorTools.stats(),
         };
         return result;
     };
@@ -323,6 +324,7 @@ export async function runTeam({
 
         let plan = null;
         let progress = null;
+        let architecture = null;
         const resumedWork = resumeId
             ? await loadWork(root, resumeId).catch(() => null)
             : (config.agent.resume !== false ? await findResumable(root, task) : null);
@@ -518,6 +520,35 @@ export async function runTeam({
             }
             return source;
         };
+        /** Fill lists and the design object the architect schema always sends, so a resumed file cannot crash the authors. */
+        const architectureLists = (source) => {
+            const out = source && typeof source === 'object' ? source : {};
+            out.summary = typeof out.summary === 'string' ? out.summary : '';
+            for (const key of ['structure', 'stepGuidance', 'questionsForOrchestrator', 'conventions', 'risks']) {
+                if (!Array.isArray(out[key])) out[key] = [];
+            }
+            out.structure = out.structure.filter((item) => item && typeof item.path === 'string' && item.path.trim())
+                .map((item) => ({ ...item, dependsOn: Array.isArray(item.dependsOn) ? item.dependsOn : [] }));
+            out.stepGuidance = out.stepGuidance.filter((item) => item && typeof item.stepId === 'string' && typeof item.guidance === 'string');
+            out.design = out.design && typeof out.design === 'object' ? out.design : {};
+            for (const key of ['layout', 'typography', 'color', 'motion', 'assets']) {
+                if (typeof out.design[key] !== 'string') out.design[key] = '';
+            }
+            return out;
+        };
+        /** Per-step implementation brief from the architect. */
+        const architectureAdvice = (step) => {
+            const guide = architecture?.stepGuidance?.find((item) => item.stepId === step?.id);
+            if (!guide) return '';
+            const files = guide.files?.length ? `\nOwn files: ${guide.files.join(', ')}` : '';
+            return `\n\nArchitect guidance for this step:\n${guide.guidance}${files}`;
+        };
+        /** Compact architect brief for the orchestrator's context collection. */
+        const architectureBrief = () => {
+            if (!architecture) return '';
+            const files = (architecture.structure ?? []).map((item) => `- ${item.path} — ${item.purpose}`).join('\n') || '- (none)';
+            return `# Architect brief\n${architecture.summary}\nFiles:\n${files}\nQuestions from the architect:\n${bullets(architecture.questionsForOrchestrator ?? [])}`;
+        };
 
         if (resumedWork) {
             handoff = await loadHandoff(root, resumedWork.id);
@@ -535,6 +566,14 @@ export async function runTeam({
             }
             const imageReport = await readFile(path.join(root, '.tmp', work.id, 'image-assets.json'), 'utf8').catch(() => '');
             if (imageReport.trim()) ctx.set('imageAssets', 'Prepared images and visual assets', imageReport, { priority: 9 });
+            const architectureFile = await readFile(path.join(root, '.tmp', work.id, 'architecture.json'), 'utf8').catch(() => null);
+            if (architectureFile) {
+                try {
+                    architecture = architectureLists(JSON.parse(architectureFile));
+                    result.architecture = architecture;
+                    ctx.set('architecture', 'Architecture (by the architect)', renderArchitecture(architecture), { priority: 8 });
+                } catch { /* a damaged brief is skipped; the architect stage can rebuild it */ }
+            }
             pendingSession = await loadSession(path.join(root, '.tmp', work.id, 'worker-session.json')).catch(() => null);
             if (pendingSession) neutralSession(pendingSession);
             if (Number.isInteger(fromStep)) progress = applyFromStep(progress, fromStep);
@@ -821,6 +860,54 @@ export async function runTeam({
             notify({ type: 'stage.done', stage: 'measure', status: measured.status });
         }
 
+        // 2b. Architect and designer: the file/module structure and the per-step brief for the remaining roles.
+        // It runs after the measurements (numbers are the source of truth) and before context collection,
+        // so the orchestrator can answer its questions and every author sees the same structure.
+        const architectureMode = config.agent.architect ?? 'auto';
+        const architectureEarly = !resumedWork || ['plan', 'image-processing'].includes(progress?.stage);
+        if (architectureMode !== 'off' && !architecture && architectureEarly
+            && (architectureMode === 'always' || plan.complexity !== 'trivial')) {
+            const role = roles.resolve('architect');
+            const model = paced?.roles.architect?.model ?? role.model;
+            const effort = paced?.roles.architect?.effort ?? role.effort;
+            const stepsBrief = plan.steps.map((step) => `${step.id ?? '(no id)'}: ${step.goal}\n  details: ${step.details || '(none)'}\n  files: ${(step.files ?? []).join(', ') || '(none)'}`).join('\n\n');
+            const references = referencePaths.length ? `\n\n# Reference image paths\n${referencePaths.map((item) => `- ${item}`).join('\n')}` : '';
+            const architectureText = `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Plan steps to design for\n${stepsBrief}${references}`;
+            notify({ type: 'stage.start', stage: 'architect', role: 'architect', model });
+            let architected = await roles.run('architect', {
+                text: architectureText, parts: referenceParts, instructions: ROLE_INSTRUCTIONS.architect,
+                toolset: architectTools, schema: ARCHITECT_SCHEMA, schemaName: 'architecture',
+                maxTurns: config.agent.architectMaxTurns ?? 8, model, effort, onMaxTurns,
+            });
+            if (HARD_STOP.has(architected.status)) return stop(architected, 'архитектура');
+            // A spent turn budget must not lose the brief: one tool-less pass writes it from what the role already saw.
+            if (!architected.data && ['max_turns', 'incomplete'].includes(architected.status)) {
+                notify({ type: 'warning', message: 'Лимит ходов архитектора исчерпан; роль отдаёт структуру по уже просмотренному.' });
+                const report = await roles.run('architect', {
+                    text: 'Turn budget is spent and no more tools are available. Reply with the architecture JSON for everything you already saw. ' +
+                        'Name the unchecked parts in risks. JSON only.',
+                    instructions: ROLE_INSTRUCTIONS.architect, schema: ARCHITECT_SCHEMA, schemaName: 'architecture',
+                    maxTurns: 1, model, effort,
+                });
+                if (report.data) architected = report;
+            }
+            if (architected.data) {
+                architecture = architectureLists(architected.data);
+                result.architecture = architecture;
+                ctx.set('architecture', 'Architecture (by the architect)', renderArchitecture(architecture), { priority: 8 });
+                progress.notes ??= [];
+                progress.notes.push({ kind: 'architect', status: 'completed', report: architecture.summary });
+                work.progress = progress;
+                await writeFile(path.join(root, '.tmp', work.id, 'architecture.json'), `${JSON.stringify(architecture, null, 2)}\n`, 'utf8').catch((error) => {
+                    notify({ type: 'warning', message: `Структура не сохранена: ${errorMessage(error)}` });
+                });
+                notify({ type: 'stage.done', stage: 'architect', status: 'completed', files: architecture.structure.map((item) => item.path), steps: architecture.stepGuidance.length });
+            } else {
+                notify({ type: 'warning', message: `Архитектор не ответил (${architected.status}${architected.error ? `: ${errorMessage(architected.error)}` : ''}); продолжаем по плану.` });
+                notify({ type: 'stage.done', stage: 'architect', status: architected.status });
+            }
+        }
+
         // 2. Context collection by the orchestrator (read-only). Skipped when this run already moved past it.
         const wantsContext = plan.complexity !== 'trivial' && (
             plan.filesOfInterest.length || plan.searchQueries.length || plan.questionsForCollector.length
@@ -832,7 +919,10 @@ export async function runTeam({
         if (!pastCollect && paced?.collect !== 'off' && wantsContext && readNames.length) {
             notify({ type: 'stage.start', stage: 'collect', role: 'orchestrator', model: paced.roles.orchestrator.model });
             const focus = marks.filter((item) => item.role === 'read' || item.role === 'edit').map((item) => `${item.role} ${item.path} — ${item.reason}`);
-            const brief = `# Orchestrator brief (collect context)\nTask map (read/edit):\n${bullets(focus)}\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`;
+            const brief = [
+                `# Orchestrator brief (collect context)\nTask map (read/edit):\n${bullets(focus)}\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`,
+                architectureBrief(),
+            ].filter(Boolean).join('\n\n');
             const collected = await roles.run('orchestrator', {
                 text: `${ctx.render({ maxBytes })}\n\n${brief}`, instructions: ROLE_INSTRUCTIONS.orchestrator, toolset: orchestratorTools,
                 schema: COLLECTOR_SCHEMA, schemaName: 'context_report', maxTurns: config.agent.orchestratorMaxTurns,
@@ -936,12 +1026,12 @@ export async function runTeam({
             const extra = index === revisionAt ? revisionClause(revision) : '';
             if (extra) revisionUsed = true;
             const advice = orchestratorGuidance ? `\n\nOrchestrator guidance (from the previous stage):\n${orchestratorGuidance}` : '';
-            const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}${extra}${advice}${paced?.guarantees === 'broken' ? `\n\n${guaranteesParagraph('broken')}` : ''}`;
+            const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}${extra}${advice}${architectureAdvice(step)}${paced?.guarantees === 'broken' ? `\n\n${guaranteesParagraph('broken')}` : ''}`;
             const passes = [];
             if (interrupted) {
                 const phase = prior.phase === 'surface' ? 'surface' : 'body';
                 passes.push({
-                    body: continuationText(step, prior, { resumeSession, revision: index === revisionAt ? revision : '' }),
+                    body: `${continuationText(step, prior, { resumeSession, revision: index === revisionAt ? revision : '' })}${architectureAdvice(step)}`,
                     maxTurns: phase === 'surface' ? allowance.surfaceTurns : (allowance.maxTurns ?? allowance.bodyTurns),
                     phase, resume: resumeSession,
                 });

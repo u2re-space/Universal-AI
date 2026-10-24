@@ -138,6 +138,11 @@ export function overridesFrom(values, { command = null } = {}) {
         if (!['off', 'auto', 'always'].includes(values.measure)) throw new UsageError('--measure: off | auto | always');
         (o.agent ??= {}).measure = values.measure;
     }
+    if (values['no-architect']) (o.agent ??= {}).architect = 'off';
+    if (values.architect) {
+        if (!['off', 'auto', 'always'].includes(values.architect)) throw new UsageError('--architect: off | auto | always');
+        (o.agent ??= {}).architect = values.architect;
+    }
     if (values.orchestrator !== undefined) (o.agent ??= {}).orchestrator = { enabled: values.orchestrator };
     // --coordinator is the retired name of --orchestrator; both enable the unified role.
     if (values.coordinator !== undefined && values.orchestrator === undefined) (o.agent ??= {}).orchestrator = { enabled: values.coordinator };

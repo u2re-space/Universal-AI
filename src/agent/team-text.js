@@ -1,12 +1,12 @@
 /**
  * @file src/agent/team-text.js
  * @module agent/team-text
- * @purpose Render planner, orchestrator, and measurer JSON as text the worker and reviewer can read.
+ * @purpose Render planner, architect, orchestrator, and measurer JSON as text the worker and reviewer can read.
  * @usedBy agent/team
- * @exports renderPlan, renderFindings, renderMeasurements, bullets
+ * @exports renderPlan, renderFindings, renderMeasurements, renderArchitecture, bullets
  * @ai.tags team
  * @ai.hint pure
- * @changed 2026-10-22 Added the measurer sheet.
+ * @changed 2026-10-24 Added the architect structure and design brief.
  */
 
 /**
@@ -106,5 +106,43 @@ export function renderMeasurements(sheet) {
         sheet.notes && `Notes:\n${sheet.notes}`,
         'Artwork workflow: reuse existing image candidates. If any stage already produced a PNG with a real alpha channel, keep it; do not regenerate, repaint, or flatten it. An optional SVG conversion may be tried on a copy. If a WebP copy is useful, convert it locally and keep the PNG; never use image generation or editing just to change the format. For flat marks without a suitable existing alpha image, prefer a real SVG made with vectorize_image / Recraft.',
         'For artwork comparison and atlas packing, do not call generate_image, edit_image, or image_generation: use local image operations on existing files. Compare candidates in a common aspect-ratio frame, fitting proportionally with transparent/neutral padding or a deliberate crop; never stretch an image. Keep originals unchanged. Check suitable Lucide or Phosphor icons available to the project (in dependencies or local files), lightweight HTML/CSS drawings, and existing raster or SVG candidates. After the page is built, compare the options in the rendered page and keep the clearest, best-fitting result.',
+    ].filter(Boolean).join('\n\n');
+}
+
+/**
+ * Render the architect's structure and design brief as the text stored on the shared context.
+ * `runTeam` calls this when the architect completes and when a saved run resumes.
+ * @param {object} architecture
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function renderArchitecture(architecture) {
+    const structure = (architecture.structure ?? []).map((item) => {
+        const lines = [`- ${item.path} (${item.kind || 'file'}): ${item.purpose}`];
+        if (item.responsibilities) lines.push(`  responsibilities: ${item.responsibilities}`);
+        if (item.dependsOn?.length) lines.push(`  depends on: ${item.dependsOn.join(', ')}`);
+        if (item.notes) lines.push(`  notes: ${item.notes}`);
+        return lines.join('\n');
+    }).join('\n');
+    const design = [
+        ['layout', architecture.design?.layout],
+        ['typography', architecture.design?.typography],
+        ['color', architecture.design?.color],
+        ['motion', architecture.design?.motion],
+        ['assets', architecture.design?.assets],
+    ].filter(([, value]) => value).map(([name, value]) => `- ${name}: ${value}`).join('\n');
+    const guidance = (architecture.stepGuidance ?? []).map((item) => {
+        const files = item.files?.length ? ` · files: ${item.files.join(', ')}` : '';
+        return `- ${item.stepId}${files}: ${item.guidance}`;
+    }).join('\n');
+    return [
+        architecture.summary ?? '',
+        structure && `Structure (build order):\n${structure}`,
+        design && `Design:\n${design}`,
+        architecture.conventions?.length ? `Conventions:\n${bullets(architecture.conventions)}` : '',
+        guidance && `Step guidance:\n${guidance}`,
+        architecture.questionsForOrchestrator?.length ? `Questions for the orchestrator:\n${bullets(architecture.questionsForOrchestrator)}` : '',
+        architecture.risks?.length ? `Risks:\n${bullets(architecture.risks)}` : '',
     ].filter(Boolean).join('\n\n');
 }

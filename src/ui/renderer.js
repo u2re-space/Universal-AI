@@ -47,7 +47,7 @@ export function createRenderer({
         active: false, frame: 0, textStreaming: false, lastChar: '\n', statusVisible: false, reasoningBuffer: '',
         askOpen: false, model: null, roles: [],
     };
-    const STAGES = { scan: 'сканер', answer: 'ответ', extract: 'извлечение', encode: 'запись', plan: 'план', collect: 'сбор контекста', 'image-processing': 'подготовка изображений', work: 'выполнение', verify: 'проверка', review: 'ревью', fix: 'исправления', coordinate: 'координация', memory: 'память' };
+    const STAGES = { scan: 'сканер', answer: 'ответ', extract: 'извлечение', encode: 'запись', plan: 'план', architect: 'архитектура', collect: 'сбор контекста', 'image-processing': 'подготовка изображений', work: 'выполнение', verify: 'проверка', review: 'ревью', fix: 'исправления', coordinate: 'координация', memory: 'память' };
     let timer = null;
     let rl = null;
 
