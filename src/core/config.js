@@ -287,7 +287,7 @@ function validateConfig(c) {
     }
     if (!isRecord(c.documentation.roles)) fail('documentation.roles должен быть объектом');
     for (const [name, sources] of Object.entries(c.documentation.roles)) {
-        if (!['planner', 'architect', 'orchestrator', 'worker', 'coder'].includes(name)) fail(`documentation.roles.${name}: разрешены planner, architect, orchestrator, worker, coder`);
+        if (!['planner', 'architect', 'orchestrator', 'worker', 'coder', 'measurer'].includes(name)) fail(`documentation.roles.${name}: разрешены planner, architect, orchestrator, worker, coder`);
         if (!Array.isArray(sources) || sources.some((source) => typeof source !== 'string' || !Object.hasOwn(c.documentation.sources, source))) {
             fail(`documentation.roles.${name}: список имён из documentation.sources`);
         }
