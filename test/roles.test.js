@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS } from '../src/roles/index.js';
 import { defaults } from '../src/core/config.js';
 
-const NAMES = ['default', 'planner', 'orchestrator', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer'];
+const NAMES = ['default', 'planner', 'orchestrator', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer', 'image-processor'];
 
 test('role modules match config role names', () => {
     assert.deepEqual(Object.keys(ROLE_MODULES).sort(), NAMES.slice().sort());
@@ -33,6 +33,8 @@ test('existing role instructions keep their job', () => {
     assert.match(ROLE_INSTRUCTIONS.visionScreen, /elements/);
     assert.match(ROLE_INSTRUCTIONS.extractor, /extractor/);
     assert.match(ROLE_INSTRUCTIONS.extractor, /removeLines/);
+    assert.match(ROLE_INSTRUCTIONS['image-processor'], /before implementation begins/);
+    assert.match(ROLE_INSTRUCTIONS['image-processor'], /Do not edit application code/);
 });
 
 test('specialists do not delegate or run batches', () => {

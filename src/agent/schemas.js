@@ -3,7 +3,7 @@
  * @module agent/schemas
  * @purpose Strict JSON schemas for structured role outputs (Responses API text.format = json_schema).
  * @usedBy agent/team, agent/roles
- * @exports PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA
+ * @exports PLAN_SCHEMA, IMAGE_PROCESSOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA
  * @ai.tags schema, roles
  * @ai.hint pure
  * @changed 2026-10-22 Added the measurer sheet.
@@ -27,6 +27,19 @@ export const CLASSIFIER_SCHEMA = object({
     label: { type: 'string', enum: ['trivial', 'normal', 'complex'], description: 'How large the task is.' },
 });
 
+export const IMAGE_PROCESSOR_SCHEMA = object({
+    summary: { ...string, description: 'What image and asset tasks were completed or could not be completed.' },
+    assets: {
+        type: 'array',
+        items: object({
+            path: { ...string, description: 'Project-relative path to a created or reused image or visual asset.' },
+            format: { ...string, description: 'File format such as png, webp, svg, woff2, or a named icon set.' },
+            use: { ...string, description: 'How the implementation should use this asset.' },
+        }),
+    },
+    notes: { ...strings, description: 'Unavailable tools, failed operations, or important limitations.' },
+});
+
 export const PLAN_SCHEMA = object({
     summary: { ...string, description: 'One paragraph: what will be done and why.' },
     complexity: { type: 'string', enum: ['trivial', 'normal', 'complex'] },
@@ -45,6 +58,14 @@ export const PLAN_SCHEMA = object({
     acceptanceCriteria: strings,
     needsReview: { type: 'boolean', description: 'Whether an independent review of the result is worth its cost.' },
     imageNotes: { ...nullableString, description: 'What the attached images show that matters for the task (null if none).' },
+    imageTasks: {
+        type: 'array',
+        description: 'Image generation/editing and visual asset tasks to complete before implementation. Empty when no assets are needed.',
+        items: object({
+            goal: { ...string, description: 'Concrete image, fragment, or asset to prepare.' },
+            details: { ...string, description: 'Visual direction, source references, intended format, and output path when known.' },
+        }),
+    },
     risks: strings,
     fileActions: {
         type: 'array',

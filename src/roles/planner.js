@@ -25,6 +25,7 @@ Produce a JSON plan: a short summary, complexity, 1–${'{maxSteps}'} concrete s
 verifiable, with precise file paths and commands). Each step includes its own complexity: trivial, normal, or complex. Put at most one project file in each step. A step that names several files is split,
 and a compatibility step is added so imports, exports, and names can be reconciled. Files the orchestrator should read first, literal search queries,
 questions the orchestrator must answer, acceptance criteria, risks, and whether an independent review is worth it.
+Also return imageTasks: concrete images, fragments, or visual assets the image-processor must prepare before implementation, each with goal and details. Keep it empty when none are needed; do not put image-generation work in worker steps.
 Mark trivial tasks (one obvious small edit, a question answered from a single file) as "trivial" with a single step and needsReview=false.
 Do not perform the task yourself. Reply in JSON only.
 fileActions may ask the encoder to turn artifacts into fs:write commands, read a file or a line range, copy one artifact to a path, or list a directory.

@@ -2,7 +2,7 @@
  * @file src/roles/index.js
  * @module roles/index
  * @purpose Collect role prompts, settings, and desktop specialist limits.
- * @depends roles/default, roles/planner, roles/orchestrator, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer
+ * @depends roles/default, roles/planner, roles/orchestrator, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer, roles/image-processor
  * @usedBy commands/instructions, agent/team
  * @exports ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS
  * @ai.tags roles, prompts, desktop
@@ -27,6 +27,7 @@ import * as tester from './tester.js';
 import * as classifier from './classifier.js';
 import * as extractor from './extractor.js';
 import * as measurer from './measurer.js';
+import * as imageProcessor from './image-processor.js';
 
 /**
  * Instructions and settings for every named role.
@@ -52,6 +53,7 @@ export const ROLE_MODULES = {
     classifier: { instructions: classifier.instructions, settings: classifier.settings },
     extractor: { instructions: extractor.instructions, settings: extractor.settings },
     measurer: { instructions: measurer.instructions, settings: measurer.settings },
+    'image-processor': { instructions: imageProcessor.instructions, settings: imageProcessor.settings },
 };
 
 /**

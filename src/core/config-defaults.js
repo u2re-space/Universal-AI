@@ -142,6 +142,7 @@ export const defaults = Object.freeze({
      *   classifier — labels a task as trivial, normal, or complex
      *   extractor  — cleans a verbose answer and writes clean file bodies to .tmp
      *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
+     *   image-processor — generates, edits, and prepares requested images and visual assets before implementation
      */
     roles: {
         default: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
@@ -161,6 +162,7 @@ export const defaults = Object.freeze({
         classifier: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         extractor: { model: null, effort: 'high', summary: null, verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
         measurer: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+        'image-processor': { model: null, effort: 'medium', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
     },
     /** Multi-role orchestration used by `ai run`. */
     agent: {

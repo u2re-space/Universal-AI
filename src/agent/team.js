@@ -1,7 +1,7 @@
 /**
  * @file src/agent/team.js
  * @module agent/team
- * @purpose Run planner, measurer, orchestrator, worker, reviewer, and summarizer over one shared context.
+ * @purpose Run planner, measurer, image processor, orchestrator, worker, reviewer, and summarizer over one shared context.
  * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, agent/work-plan, agent/handoff, agent/quality, mcp/session, channels/decide, channels/questions, channels/verdict
  * @usedBy commands/run, index.js
  * @exports toolNamesForRole, runTeam
@@ -31,7 +31,7 @@ import { createRoleRunner } from './roles.js';
 import { builtinTools } from './loop.js';
 import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
-import { PLAN_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
+import { PLAN_SCHEMA, IMAGE_PROCESSOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
 import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace } from './pace.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
@@ -75,6 +75,10 @@ export function toolNamesForRole(allNames, role) {
     if (role === 'orchestrator' || role === 'collector' || role === 'coordinator') return allNames.filter((name) => READ_ONLY_TOOLS.includes(name));
     if (role === 'reviewer') {
         return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name));
+    }
+    if (role === 'image-processor') {
+        const allowed = new Set(['view_image', 'crop_image', 'split_image', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons']);
+        return allNames.filter((name) => allowed.has(name));
     }
     return allNames;
 }
@@ -181,7 +185,11 @@ export async function runTeam({
         ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer'),
         describeScreen: roles.describeScreen, delegate, extras: mcpRead,
     });
+    const imageProcessorNames = toolNamesForRole(enabled, 'image-processor');
+    const imageProcessorTools = createToolset({ ...toolBase, names: imageProcessorNames, approvalLevel });
     const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi });
+    const imageProcessorBuiltin = builtinTools(config, { images: config.tools.images && !imageApi })
+        .filter((tool) => tool.type === 'image_generation');
     /** Copy tool stats onto the team result and return it. */
     const fileChanges = [];
     let work = null;
@@ -189,6 +197,7 @@ export async function runTeam({
         result.changes = [...fileChanges, ...workerTools.stats().changes];
         result.stats = {
             worker: workerTools.stats(), orchestrator: orchestratorTools.stats(), reviewer: reviewerTools.stats(),
+            'image-processor': imageProcessorTools.stats(),
         };
         return result;
     };
@@ -500,6 +509,7 @@ export async function runTeam({
             }
             if (!Array.isArray(source.fileActions)) source.fileActions = [];
             if (!Array.isArray(source.taskMap)) source.taskMap = [];
+            if (!Array.isArray(source.imageTasks)) source.imageTasks = [];
             const planComplexity = source.complexity === 'trivial' || source.complexity === 'complex' || source.complexity === 'normal' ? source.complexity : 'normal';
             if (Array.isArray(source.steps)) {
                 for (const step of source.steps) {
@@ -523,6 +533,8 @@ export async function runTeam({
                 try { ctx.set('metrics', 'Reference measurements (by the measurer)', renderMeasurements(JSON.parse(sheet)), { priority: 8 }); }
                 catch { /* a damaged sheet is skipped, the run continues on the plan */ }
             }
+            const imageReport = await readFile(path.join(root, '.tmp', work.id, 'image-assets.json'), 'utf8').catch(() => '');
+            if (imageReport.trim()) ctx.set('imageAssets', 'Prepared images and visual assets', imageReport, { priority: 9 });
             pendingSession = await loadSession(path.join(root, '.tmp', work.id, 'worker-session.json')).catch(() => null);
             if (pendingSession) neutralSession(pendingSession);
             if (Number.isInteger(fromStep)) progress = applyFromStep(progress, fromStep);
@@ -815,7 +827,7 @@ export async function runTeam({
             || marks.some((item) => item.role === 'read' || item.role === 'edit')
         );
         const pastCollect = Boolean(resumedWork) && (
-            progress.cursor > 0 || Boolean(ctx.get('findings')) || ['work', 'review', 'fix', 'done'].includes(progress.stage)
+            progress.cursor > 0 || Boolean(ctx.get('findings')) || ['image-processing', 'work', 'review', 'fix', 'done'].includes(progress.stage)
         );
         if (!pastCollect && paced?.collect !== 'off' && wantsContext && readNames.length) {
             notify({ type: 'stage.start', stage: 'collect', role: 'orchestrator', model: paced.roles.orchestrator.model });
@@ -837,7 +849,62 @@ export async function runTeam({
 
         await orchestrate('collect');
 
-        // 3. Worker: one conversation, one step at a time, starting at the saved cursor.
+        // 3. Prepare requested visual assets once, before implementation starts.
+        const imageTasks = plan.imageTasks.filter((item) => item && typeof item.goal === 'string' && item.goal.trim());
+        if (imageTasks.length) {
+            const previous = progress.imageProcessing;
+            if (previous?.status === 'completed' && previous.report) {
+                ctx.set('imageAssets', 'Prepared images and visual assets', previous.report, { priority: 9 });
+                for (const image of previous.images ?? []) result.images.push(path.resolve(root, image));
+            } else {
+                const model = roles.resolve('image-processor').model;
+                progress.stage = 'image-processing';
+                progress.imageProcessing = { status: 'running', report: '', images: [] };
+                work.progress = progress;
+                await persist('running');
+                notify({ type: 'stage.start', stage: 'image-processing', role: 'image-processor', model });
+                const tasks = imageTasks.map((item, index) => `${index + 1}. ${item.goal}\n   ${item.details}`).join('\n');
+                const refs = referencePaths.length ? referencePaths.map((item) => `- ${item}`).join('\n') : '(none)';
+                const imageParts = parts.filter((part) => part?.type === 'input_image');
+                const processed = await roles.run('image-processor', {
+                    text: `${ctx.render({ maxBytes })}\n\n# Image preparation tasks\n${tasks}\n\n# Reference image paths\n${refs}`,
+                    parts: imageParts, instructions: ROLE_INSTRUCTIONS['image-processor'],
+                    toolset: imageProcessorTools, builtin: imageProcessorBuiltin,
+                    schema: IMAGE_PROCESSOR_SCHEMA, schemaName: 'image_assets',
+                    maxTurns: config.agent.workerMaxTurnsPerStep, imageTarget: path.join(root, 'assets'),
+                });
+                if (processed.status !== 'completed' || !processed.data) {
+                    notify({ type: 'stage.done', stage: 'image-processing', status: processed.status });
+                    return stop(processed, 'подготовка изображений');
+                }
+                const assets = Array.isArray(processed.data.assets)
+                    ? processed.data.assets.filter((asset) => asset && typeof asset.path === 'string' && asset.path.trim())
+                    : [];
+                const generated = (processed.images ?? []).map((file) => path.relative(root, file).split(path.sep).join('/'));
+                for (const rel of generated) {
+                    if (!assets.some((asset) => asset.path === rel)) {
+                        assets.push({ path: rel, format: path.extname(rel).slice(1).toLowerCase() || 'image', use: 'Generated for the implementation from the image preparation plan.' });
+                    }
+                    result.images.push(path.resolve(root, rel));
+                }
+                const report = [
+                    `Summary: ${String(processed.data.summary ?? '').trim() || '(none)'}`,
+                    `Assets:\n${assets.length ? assets.map((asset) => `- ${asset.path} (${asset.format || 'unknown'}): ${asset.use || 'Prepared for implementation.'}`).join('\n') : '- (none)'}`,
+                    ...(Array.isArray(processed.data.notes) && processed.data.notes.length ? [`Notes:\n${processed.data.notes.map((note) => `- ${note}`).join('\n')}`] : []),
+                ].join('\n\n');
+                progress.imageProcessing = { status: 'completed', report, assets, images: generated };
+                ctx.set('imageAssets', 'Prepared images and visual assets', report, { priority: 9 });
+                await writeFile(path.join(root, '.tmp', work.id, 'image-assets.json'), `${report}\n`, 'utf8').catch((error) => {
+                    notify({ type: 'warning', message: `Отчёт об изображениях не сохранён: ${errorMessage(error)}` });
+                });
+                work.progress = progress;
+                publish();
+                await persist('running');
+                notify({ type: 'stage.done', stage: 'image-processing', status: 'completed', assets: assets.map((asset) => asset.path) });
+            }
+        }
+
+        // 4. Worker: one conversation, one step at a time, starting at the saved cursor.
         notify({ type: 'stage.start', stage: 'work', role: 'worker', model: roles.resolve('worker').model });
         progress.stage = 'work';
         let workIncomplete = false;

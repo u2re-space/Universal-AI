@@ -9,7 +9,8 @@ import { defaults, resolveRole } from '../src/core/config.js';
 import { openMemory, projectKey } from '../src/core/memory.js';
 import { createSharedContext } from '../src/core/context.js';
 import { createRoleRunner } from '../src/agent/roles.js';
-import { runTeam } from '../src/agent/team.js';
+import { runTeam, toolNamesForRole } from '../src/agent/team.js';
+import { enabledToolNames } from '../src/agent/tool-specs.js';
 import { diffHunk, describeChangeSet } from '../src/agent/diff.js';
 import { overridesFrom } from '../src/commands/shared.js';
 import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
@@ -61,11 +62,23 @@ function roleOf(body) {
     if (format === 'task_label') return 'classifier';
     if (format === 'extraction') return 'extractor';
     if (format === 'measure') return 'measurer';
+    if (format === 'image_assets') return 'image-processor';
     if (typeof body.instructions === 'string' && body.instructions.includes('route: encode')) return 'answer';
     if (body.input.some((i) => i.type === 'message' && i.content?.some?.((c) => c.type === 'input_image'))) return 'vision';
     if (body.model === 'gpt-6-luna-nano') return 'summarizer-file';
     return 'worker';
 }
+
+test('image processor only sees enabled image and asset tools', () => {
+    const enabled = ['list_files', 'write_file', 'run_command', 'fetch_url', 'view_image', 'crop_image', 'split_image', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons', 'image_generation'];
+    assert.deepEqual(toolNamesForRole(enabled, 'image-processor'), ['view_image', 'crop_image', 'split_image', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons']);
+    const api = enabledToolNames({ ...defaults.tools, images: true, fetch: true }, { imageApi: true });
+    assert.deepEqual(toolNamesForRole(api, 'image-processor'), ['view_image', 'generate_image', 'edit_image', 'vectorize_image', 'split_image', 'crop_image', 'generate_svg', 'download_font', 'download_icons']);
+    const noFetch = enabledToolNames({ ...defaults.tools, images: true, fetch: false }, { imageApi: false });
+    assert.deepEqual(toolNamesForRole(noFetch, 'image-processor'), ['view_image', 'split_image', 'crop_image', 'generate_svg']);
+    const noImages = enabledToolNames({ ...defaults.tools, images: false, fetch: false }, { imageApi: false });
+    assert.deepEqual(toolNamesForRole(noImages, 'image-processor'), ['view_image']);
+});
 
 test('resolveRole merges role, default role and top-level settings; --role flags parse', () => {
     const cfg = { ...baseConfig(), reasoning: { effort: 'medium', summary: 'auto' } };
@@ -80,7 +93,8 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.deepEqual(overrides.agent, { mode: 'single' });
     assert.deepEqual(overrides.memory, { enabled: false });
     assert.throws(() => overridesFrom({ role: ['nobody=x'] }), /неизвестная роль/);
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 17);
+    assert.deepEqual(overridesFrom({ role: ['image-processor=gpt-6-luna:medium'] }).roles, { 'image-processor': { model: 'gpt-6-luna', effort: 'medium' } });
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 18);
     assert.equal(overridesFrom({ extract: 'always' }).agent.extract, 'always');
     assert.equal(overridesFrom({ 'no-extract': true }).agent.extract, 'off');
     assert.throws(() => overridesFrom({ extract: 'nope' }), /--extract/);
@@ -1072,6 +1086,186 @@ test('orchestrator revises the plan after a step and guides the next worker turn
     assert.ok(events.some((event) => event.type === 'orchestrator.done' && event.risks.includes('b.js отсутствует')));
     const progress = JSON.parse(await readFile(path.join(root, '.tmp', result.workId, 'progress.json'), 'utf8'));
     assert.equal(progress.notes.filter((note) => note.kind === 'orchestrator').length, 3);
+});
+
+test('image processing runs before implementation and passes prepared assets in shared context', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-image-processor-'));
+    const events = [];
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push({ role, body });
+        if (role === 'answer') return { text: 'Подготовь иллюстрацию и страницу.\nroute: plan' };
+        if (role === 'planner') return { text: JSON.stringify({
+            summary: 'страница с иллюстрацией', complexity: 'normal',
+            steps: [{ goal: 'Создать страницу', details: 'Подключить assets/cover.png', verify: 'прочитать src/index.html' }],
+            filesOfInterest: ['src/index.html'], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+            needsReview: false, imageNotes: null, imageTasks: [{ goal: 'Нарисовать обложку', details: 'Пастельная геометрическая иллюстрация, PNG, assets/cover.png' }], risks: [],
+        }) };
+        if (role === 'image-processor') return { text: JSON.stringify({
+            summary: 'Обложка создана.',
+            assets: [{ path: 'assets/cover.png', format: 'png', use: 'Hero background image.' }],
+            notes: [],
+        }) };
+        if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        return { text: 'worker done' };
+    };
+    const config = baseConfig();
+    config.agent = { ...config.agent, chain: false, resume: false };
+    config.tools.images = true;
+    config.image.transport = 'images';
+    config.memory = { ...defaults.memory, enabled: false };
+    const result = await runTeam({
+        client: client(), config, ledger: createLedger(), task: 'страница и изображение', root: dir,
+        approvalLevel: 'read', emit: (event) => events.push(event),
+    });
+    try {
+        assert.equal(result.status, 'completed', result.error?.message);
+        const roles = seen.map((item) => item.role);
+        assert.ok(roles.indexOf('collector') < roles.indexOf('image-processor'));
+        assert.ok(roles.indexOf('image-processor') < roles.lastIndexOf('worker'));
+        const processor = seen.find((item) => item.role === 'image-processor').body;
+        const toolNames = processor.tools.map((tool) => tool.name);
+        assert.deepEqual(toolNames, ['view_image', 'generate_image', 'edit_image', 'vectorize_image', 'split_image', 'crop_image', 'generate_svg', 'download_font', 'download_icons']);
+        assert.equal(toolNames.some((name) => ['write_file', 'replace_text', 'run_command', 'fetch_url'].includes(name)), false);
+        const worker = seen.find((item) => item.role === 'worker').body;
+        assert.match(worker.input[0].content[0].text, /Prepared images and visual assets/);
+        assert.match(worker.input[0].content[0].text, /assets\/cover\.png/);
+        assert.ok(events.some((event) => event.type === 'stage.start' && event.stage === 'image-processing' && event.role === 'image-processor'));
+        assert.ok(events.some((event) => event.type === 'stage.done' && event.stage === 'image-processing' && event.status === 'completed'));
+        assert.equal(result.stats['image-processor'].calls, 0);
+        const saved = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'progress.json'), 'utf8'));
+        assert.equal(saved.imageProcessing.status, 'completed');
+        assert.match(saved.imageProcessing.report, /assets\/cover\.png/);
+        assert.match(await readFile(path.join(dir, '.tmp', result.workId, 'image-assets.json'), 'utf8'), /assets\/cover\.png/);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('image processing stage is skipped when the plan has no image tasks', async () => {
+    const seen = [];
+    const events = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'planner') return { text: JSON.stringify({
+            summary: 'текстовая правка', complexity: 'trivial',
+            steps: [{ goal: 'Обновить note.txt', details: '', verify: 'прочитать файл' }],
+            filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+            needsReview: false, imageNotes: null, imageTasks: [], risks: [],
+        }) };
+        return { text: 'готово' };
+    };
+    const config = baseConfig();
+    config.agent = { ...config.agent, chain: false, resume: false };
+    config.memory = { ...defaults.memory, enabled: false };
+    const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'обновить заметку', root, emit: (event) => events.push(event) });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(seen.includes('image-processor'), false);
+    assert.equal(events.some((event) => event.stage === 'image-processing'), false);
+});
+
+test('a completed image stage is not repeated when the run resumes', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-image-resume-'));
+    const seen = [];
+    const workerBodies = [];
+    let interruptWorker = true;
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'answer') return { text: 'Страница с обложкой.\nroute: plan' };
+        if (role === 'planner') return { text: JSON.stringify({
+            summary: 'страница с обложкой', complexity: 'normal',
+            steps: [{ goal: 'Создать страницу', details: 'Подключить assets/cover.png', verify: 'прочитать src/index.html' }],
+            filesOfInterest: ['src/index.html'], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+            needsReview: false, imageNotes: null, imageTasks: [{ goal: 'Нарисовать обложку', details: 'PNG, assets/cover.png' }], risks: [],
+        }) };
+        if (role === 'image-processor') return { text: JSON.stringify({
+            summary: 'Обложка создана.', assets: [{ path: 'assets/cover.png', format: 'png', use: 'Hero background image.' }], notes: [],
+        }) };
+        if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        workerBodies.push(body);
+        const workerText = [...body.input].reverse().find((item) => item.type === 'message' && item.role === 'user')?.content?.[0]?.text ?? '';
+        if (interruptWorker && /Your step 1/.test(workerText)) {
+            interruptWorker = false;
+            return { status: 'incomplete', text: 'обрыв шага', reason: 'max_output_tokens' };
+        }
+        return { text: 'страница готова' };
+    };
+    const config = baseConfig();
+    config.agent = { ...config.agent, chain: false, resume: false };
+    config.memory = { ...defaults.memory, enabled: false };
+    try {
+        const first = await runTeam({ client: client(), config, ledger: createLedger(), task: 'страница и обложка', root: dir, approvalLevel: 'read', emit() {} });
+        assert.equal(first.status, 'incomplete', JSON.stringify(first));
+        assert.equal(seen.filter((role) => role === 'image-processor').length, 1);
+        const events = [];
+        seen.length = 0;
+        workerBodies.length = 0;
+        const second = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'страница и обложка', root: dir,
+            approvalLevel: 'read', resumeId: first.workId, emit: (event) => events.push(event),
+        });
+        assert.equal(second.status, 'completed', second.error?.message);
+        assert.equal(seen.includes('image-processor'), false, 'prepared assets are reused on resume');
+        assert.equal(seen.includes('planner'), false, 'resume keeps the saved plan');
+        assert.equal(events.some((event) => event.stage === 'image-processing'), false);
+        assert.match(JSON.stringify(workerBodies[0]), /Prepared images and visual assets/);
+        assert.match(JSON.stringify(workerBodies[0]), /assets\/cover\.png/);
+        assert.match(second.text, /страница готова/);
+        const saved = JSON.parse(await readFile(path.join(dir, '.tmp', second.workId, 'progress.json'), 'utf8'));
+        assert.equal(saved.imageProcessing.status, 'completed');
+        assert.deepEqual(saved.imageProcessing.assets.map((asset) => asset.path), ['assets/cover.png']);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('an interrupted image stage resumes before implementation', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-image-interrupt-'));
+    const seen = [];
+    let interruptImageStage = true;
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'planner') return { text: JSON.stringify({
+            summary: 'страница с обложкой', complexity: 'normal',
+            steps: [{ goal: 'Создать страницу', details: 'Подключить assets/cover.png', verify: 'прочитать страницу' }],
+            filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+            needsReview: false, imageNotes: null, imageTasks: [{ goal: 'Нарисовать обложку', details: 'PNG, assets/cover.png' }], risks: [],
+        }) };
+        if (role === 'image-processor' && interruptImageStage) {
+            interruptImageStage = false;
+            return { status: 'incomplete', text: '', reason: 'max_output_tokens' };
+        }
+        if (role === 'image-processor') return { text: JSON.stringify({
+            summary: 'Обложка создана.', assets: [{ path: 'assets/cover.png', format: 'png', use: 'Hero background image.' }], notes: [],
+        }) };
+        return { text: 'страница готова' };
+    };
+    const config = baseConfig();
+    config.agent = { ...config.agent, chain: false, resume: false };
+    config.memory = { ...defaults.memory, enabled: false };
+    try {
+        const first = await runTeam({ client: client(), config, ledger: createLedger(), task: 'страница и обложка', root: dir, emit() {} });
+        assert.equal(first.status, 'incomplete');
+        assert.equal(seen.filter((role) => role === 'image-processor').length, 1);
+        seen.length = 0;
+        const second = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'страница и обложка', root: dir,
+            resumeId: first.workId, emit() {},
+        });
+        assert.equal(second.status, 'completed', second.error?.message);
+        assert.equal(seen.includes('planner'), false);
+        assert.equal(seen.filter((role) => role === 'image-processor').length, 1, 'the unfinished stage is retried');
+        assert.ok(seen.indexOf('image-processor') < seen.lastIndexOf('worker'));
+        assert.match(second.text, /страница готова/);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
 });
 
 test('measurer stage runs before collector when image parts are present', async () => {

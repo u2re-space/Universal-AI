@@ -476,6 +476,7 @@ export function briefProgress(progress) {
         .map((step) => `### Step ${step.index}: ${step.goal}\nStatus: ${step.status}\n${clipMiddle(step.report, 1500)}`);
     const notes = (progress.notes ?? []).slice(-2)
         .map((note) => `### ${note.kind}${note.round ? ` ${note.round}` : ''}\n${note.status ? `Status: ${note.status}\n` : ''}${clipMiddle(note.report || note.note || '', 1500)}`);
+    if (progress.imageProcessing?.report) notes.push(`### Image processing\nStatus: ${progress.imageProcessing.status}\n${clipMiddle(progress.imageProcessing.report, 3000)}`);
     const files = (progress.files ?? []).map((file) => file.path).join(', ');
     const body = [...recent, ...notes].filter(Boolean).join('\n\n');
     if (!body && !files) return '';

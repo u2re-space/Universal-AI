@@ -44,6 +44,13 @@ export function neutralPlan(plan) {
             verify: neutralWording(step?.verify),
         }));
     }
+    if (Array.isArray(next.imageTasks)) {
+        next.imageTasks = next.imageTasks.map((item) => ({
+            ...item,
+            goal: neutralWording(item?.goal),
+            details: neutralWording(item?.details),
+        }));
+    }
     if (Array.isArray(next.taskMap)) {
         next.taskMap = next.taskMap.map((item) => item && typeof item === 'object'
             ? { ...item, reason: typeof item.reason === 'string' ? neutralWording(item.reason) : item.reason }
@@ -68,6 +75,16 @@ export function neutralProgress(progress) {
             goal: neutralWording(step?.goal),
             report: neutralWording(step?.report),
         })),
+        imageProcessing: progress.imageProcessing && typeof progress.imageProcessing === 'object'
+            ? {
+                ...progress.imageProcessing,
+                report: typeof progress.imageProcessing.report === 'string' ? neutralWording(progress.imageProcessing.report) : progress.imageProcessing.report,
+                assets: Array.isArray(progress.imageProcessing.assets) ? progress.imageProcessing.assets.map((asset) => ({
+                    ...asset,
+                    use: typeof asset?.use === 'string' ? neutralWording(asset.use) : asset?.use,
+                })) : progress.imageProcessing.assets,
+            }
+            : progress.imageProcessing,
     };
 }
 

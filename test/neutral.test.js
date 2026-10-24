@@ -13,8 +13,10 @@ test('country and language labels become the customer language', () => {
         steps: [{ goal: 'Russian document metadata', details: '', verify: '' }],
         acceptanceCriteria: ['Russian display'],
         taskMap: [{ path: 'index.html', reason: 'Russian document metadata' }],
+        imageTasks: [{ goal: 'Russian logo', details: 'Use Russian colors' }],
     });
     assert.equal(/\bRussian\b/i.test(JSON.stringify(plan)), false);
+    assert.equal(/\bRussian\b/i.test(JSON.stringify(plan.imageTasks)), false);
     const session = { items: [{ type: 'message', content: [{ type: 'input_text', text: source }] }] };
     neutralSession(session);
     assert.equal(/\bRussian\b/i.test(session.items[0].content[0].text), false);

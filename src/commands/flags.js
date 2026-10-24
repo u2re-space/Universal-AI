@@ -112,7 +112,7 @@ export function overridesFrom(values, { command = null } = {}) {
     if (values.role?.length) {
         o.roles = {};
         for (const spec of values.role) {
-            const match = /^([\w*]+)=([^:]+?)(?::([a-z]+))?$/.exec(spec.trim());
+            const match = /^([\w*-]+)=([^:]+?)(?::([a-z]+))?$/.exec(spec.trim());
             if (!match) throw new UsageError(`--role: ожидается имя=модель[:effort], получено "${spec}"`);
             const [, rawName, model, effort] = match;
             const name = canonicalRole(rawName);

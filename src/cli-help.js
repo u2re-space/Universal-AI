@@ -73,7 +73,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 
 Команда (run и gen):
   --role <роль=модель[:effort]>  модель для роли: planner, orchestrator, worker, coder, writer, reviewer, vision,
-                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, default, all
+                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, image-processor, default, all
                          (например: --role planner=gpt-6-luna:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
                          --role collector=... и --role coordinator=... принимают orchestrator (объединённая роль)
     --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
@@ -81,6 +81,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
    --extract off|auto|always  extractor чистит ответ и кладёт готовые файлы в .tmp/<id>/extracted.
                          auto — только для маршрута encoder, always — и для planner. --no-extract выключает
    --measure off|auto|always  measurer снимает метрики с референсов после плана: блоки, углы, границы, деление, отступы, расстановку.
+                          Планировщик может назначить imageTasks; image-processor готовит их до worker.
                           auto — только при приложенных картинках и нетривиальном плане (по умолчанию), always — всегда, --no-measure выключает.
                           Лист замеров уходит в общий контекст и в .tmp/<id>/measurements.json
   --no-resume            не продолжать незавершённый шаг, фазу и ход из .tmp (по умолчанию тот же текст задачи продолжается с места остановки)
