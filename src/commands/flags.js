@@ -67,7 +67,7 @@ function canonicalRole(name) {
 }
 
 export function overridesFrom(values, { command = null } = {}) {
-    const o = { limits: {}, reasoning: {}, image: {}, tools: {} };
+    const o = { limits: {}, reasoning: {}, image: {}, tools: {}, verbosity: "low" };
     if (values.model) o.model = values.model;
     if (values['image-model']) o.imageModel = values['image-model'];
     if (values['base-url']) o.baseURL = values['base-url'];
@@ -79,7 +79,7 @@ export function overridesFrom(values, { command = null } = {}) {
         if (!REASONING_SUMMARIES.includes(values.summary)) throw new UsageError(`--summary: ${REASONING_SUMMARIES.join(' | ')}`);
         o.reasoning.summary = values.summary;
     }
-    if (values.verbosity) o.verbosity = values.verbosity;
+    if (values.verbosity) o.verbosity = values.verbosity || "low";
     if (values.temperature !== undefined) o.temperature = number(values.temperature, 'temperature');
     if (values['max-output-tokens'] !== undefined) o.maxOutputTokens = number(values['max-output-tokens'], 'max-output-tokens', { integer: true, min: 16 });
     if (values.store) o.store = true;

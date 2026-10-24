@@ -63,7 +63,7 @@ export function buildRequestBody({
     }
     const text = {};
     if (textFormat) text.format = textFormat;
-    if (config.verbosity && supportsVerbosity(model)) text.verbosity = config.verbosity;
+    if (supportsVerbosity(model)) text.verbosity = config.verbosity || "low";
     if (Object.keys(text).length) body.text = text;
     if (config.truncation) body.truncation = config.truncation;
     if (maxOutputTokens) body.max_output_tokens = maxOutputTokens;

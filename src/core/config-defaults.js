@@ -61,7 +61,7 @@ export const defaults = Object.freeze({
         },
     },
     reasoning: { effort: "low", summary: 'auto' },
-    verbosity: null,                  // low | medium | high (GPT-5 family)
+    verbosity: "low",                  // low | medium | high (GPT-5 family)
     temperature: null,
     maxOutputTokens: null,
     store: false,                     // false → stateless history with encrypted reasoning; true → previous_response_id
