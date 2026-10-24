@@ -63,9 +63,14 @@ test('measurement crops are cut once and rendered as ready generate_image refere
     }
 });
 
-test('the measurer schema can record a crop path', () => {
+test('the measurer schema can record numeric spacing and a crop path', () => {
     assert.ok(MEASURER_SCHEMA.properties.regions.items.properties.crop);
-    assert.ok(MEASURER_SCHEMA.properties.elements.items.properties.crop);
+    const element = MEASURER_SCHEMA.properties.elements.items.properties;
+    assert.ok(element.crop);
+    assert.deepEqual(element.padding.properties.top.type, ['number', 'null']);
+    assert.deepEqual(element.margin.properties.left.type, ['number', 'null']);
+    assert.deepEqual(element.gap.type, ['number', 'null']);
+    assert.deepEqual(MEASURER_SCHEMA.properties.rules.items.properties.value.type, ['number', 'null']);
 });
 
 test('local alpha fallback removes a flat background and keeps the subject', async (t) => {

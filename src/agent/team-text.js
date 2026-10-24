@@ -59,15 +59,31 @@ export const bullets = (items, empty = '- (none)') => (items.length ? items.map(
  * @ai.hint pure
  */
 export function renderMeasurements(sheet) {
+    const unit = sheet.unit || 'px';
     const side = (value) => (Number.isFinite(value) ? `${value}` : '?');
-    const rect = (value) => `x ${side(value?.x)} y ${side(value?.y)} · ${side(value?.width)}×${side(value?.height)}`;
+    const rect = (value) => `x ${side(value?.x)} y ${side(value?.y)} · ${side(value?.width)}×${side(value?.height)} ${unit}`;
+    const percent = (value, dimension) => Number.isFinite(value) && Number.isFinite(dimension) && dimension > 0
+        ? `${Number((value / dimension * 100).toFixed(2))}%`
+        : null;
+    const cssRect = (value) => {
+        const left = percent(value?.x, sheet.canvas?.width);
+        const top = percent(value?.y, sheet.canvas?.height);
+        const width = percent(value?.width, sheet.canvas?.width);
+        const height = percent(value?.height, sheet.canvas?.height);
+        return [left && `left ${left}`, top && `top ${top}`, width && `width ${width}`, height && `height ${height}`].filter(Boolean).join('; ');
+    };
+    const insets = (value) => value && ['top', 'right', 'bottom', 'left']
+        .filter((key) => Number.isFinite(value[key]))
+        .map((key) => `${key} ${value[key]} ${unit}`).join(', ');
     const elements = (sheet.elements ?? []).map((item) => {
         const bits = [rect(item.box)];
+        const relative = cssRect(item.box);
+        if (relative) bits.push(`canvas-relative: ${relative}`);
         if (Number.isFinite(item.rotation)) bits.push(`rotated ${item.rotation}°`);
-        if (Number.isFinite(item.radius)) bits.push(`radius ${item.radius}`);
+        if (Number.isFinite(item.radius)) bits.push(`radius ${item.radius} ${unit}`);
         const crop = item.crop ? ` · crop: ${item.crop}` : '';
         const lines = [`- ${item.name}: ${bits.join(' · ')}${crop}`];
-        for (const [label, value] of [['borders', item.borders], ['spacing', item.spacing], ['placement', item.placement]]) {
+        for (const [label, value] of [['padding', insets(item.padding)], ['margin', insets(item.margin)], ['gap', Number.isFinite(item.gap) ? `${item.gap} ${unit}` : ''], ['borders', item.borders], ['spacing', item.spacing], ['placement', item.placement]]) {
             if (value) lines.push(`  ${label}: ${value}`);
         }
         return lines.join('\n');
@@ -77,10 +93,13 @@ export function renderMeasurements(sheet) {
         return `- ${item.name}: ${rect(item.box)} — ${item.how}${crop}`;
     }).join('\n');
     const ready = (sheet.regions ?? []).filter((item) => item.crop).length;
-    const rules = (sheet.rules ?? []).map((item) => `- ${item.name}: ${item.value}${item.from ? ` (measured ${item.from})` : ''}`).join('\n');
+    const rules = (sheet.rules ?? []).map((item) => `- ${item.name}: ${Number.isFinite(item.value) ? `${item.value} ${item.unit || unit}` : '(not measured)'}${item.from ? ` (measured ${item.from})` : ''}`).join('\n');
+    const canvasRatio = Number.isFinite(sheet.canvas?.width) && Number.isFinite(sheet.canvas?.height) && sheet.canvas.height > 0
+        ? `${Number((sheet.canvas.width / sheet.canvas.height).toFixed(3))} / 1`
+        : null;
     return [
         sheet.summary ?? '',
-        `Source: ${sheet.source || '(not named)'} · unit: ${sheet.unit || 'px'} · canvas ${rect(sheet.canvas)}`,
+        `Source: ${sheet.source || '(not named)'} · unit: ${sheet.unit || 'px'} · canvas ${rect(sheet.canvas)}${canvasRatio ? ` · aspect-ratio ${canvasRatio}` : ''}`,
         elements && `Elements:\n${elements}`,
         regions && `Regions to cut out${ready ? ` (${ready} ready crop(s); pass the path as generate_image reference, do not crop again)` : ''}:\n${regions}`,
         rules && `Rules:\n${rules}`,

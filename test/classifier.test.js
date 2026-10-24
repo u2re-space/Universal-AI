@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { instructions } from '../src/roles/classifier.js';
 import { instructions as plannerInstructions } from '../src/roles/planner.js';
-import { CLASSIFIER_SCHEMA, IMAGE_PROCESSOR_SCHEMA, PLAN_SCHEMA } from '../src/agent/schemas.js';
+import { CLASSIFIER_SCHEMA, IMAGE_PROCESSOR_SCHEMA, MEASURER_SCHEMA, PLAN_SCHEMA } from '../src/agent/schemas.js';
+import { ROLE_INSTRUCTIONS } from '../src/roles/index.js';
+import { renderMeasurements } from '../src/agent/team-text.js';
 
 test('classifier schema is one label and the plan step carries complexity', () => {
     assert.equal(CLASSIFIER_SCHEMA.additionalProperties, false);
@@ -16,4 +18,28 @@ test('classifier schema is one label and the plan step carries complexity', () =
     assert.match(plannerInstructions, /imageTasks/);
     assert.match(plannerInstructions, /Reply in JSON only/);
     assert.match(instructions, /Reply in JSON only/);
+    const elementSchema = MEASURER_SCHEMA.properties.elements.items.properties;
+    for (const field of ['padding', 'margin']) assert.ok(elementSchema[field].properties.top);
+    assert.deepEqual(elementSchema.gap.type, ['number', 'null']);
+    assert.deepEqual(MEASURER_SCHEMA.properties.rules.items.properties.value.type, ['number', 'null']);
+    const sheet = {
+        source: 'mockup.png', unit: 'px', canvas: { x: 0, y: 0, width: 400, height: 300 },
+        elements: [{
+            name: 'Hero card', box: { x: 40, y: 30, width: 200, height: 120 }, radius: 12,
+            padding: { top: 16, right: 20, bottom: null, left: 20 },
+            margin: { top: null, right: null, bottom: 24, left: null }, gap: 8,
+            placement: 'two-column grid, aligned to canvas center',
+        }],
+        regions: [], rules: [{ name: 'spacing step', value: 8, unit: 'px', from: 'card items' }], notes: '',
+    };
+    const rendered = renderMeasurements(sheet);
+    assert.match(rendered, /left 10%; top 10%; width 50%; height 40%/);
+    assert.match(rendered, /aspect-ratio 1\.333 \/ 1/);
+    assert.match(rendered, /padding: top 16 px, right 20 px/);
+    assert.match(rendered, /margin: bottom 24 px/);
+    assert.match(rendered, /gap: 8 px/);
+    assert.match(rendered, /spacing step: 8 px/);
+    assert.match(ROLE_INSTRUCTIONS.coder, /canvas-relative percentages/);
+    assert.match(ROLE_INSTRUCTIONS.coder, /responsive/);
+    assert.match(ROLE_INSTRUCTIONS.worker, /numeric boxes relative to the stated canvas/);
 });

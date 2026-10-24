@@ -232,6 +232,12 @@ const box = object({
     width: { ...nullableNumber, description: 'Width in source pixels.' },
     height: { ...nullableNumber, description: 'Height in source pixels.' },
 });
+const insets = object({
+    top: { ...nullableNumber, description: 'Measured top side in source pixels.' },
+    right: { ...nullableNumber, description: 'Measured right side in source pixels.' },
+    bottom: { ...nullableNumber, description: 'Measured bottom side in source pixels.' },
+    left: { ...nullableNumber, description: 'Measured left side in source pixels.' },
+});
 
 export const MEASURER_SCHEMA = object({
     summary: { ...string, description: 'What the reference shows and how it was measured.' },
@@ -247,7 +253,10 @@ export const MEASURER_SCHEMA = object({
             rotation: { ...nullableNumber, description: 'Turn clockwise from upright, in degrees. Null when straight or unreadable.' },
             borders: { ...string, description: 'Where the borders and edges fall and how thick they are; empty when none.' },
             radius: { ...nullableNumber, description: 'Corner radius in source pixels. Null when square or unknown.' },
-            spacing: { ...string, description: 'Padding, margin, and gap around the element; empty when unknown.' },
+            padding: { ...insets, description: 'Numeric inner spacing by side in source pixels; use null for sides that cannot be measured.' },
+            margin: { ...insets, description: 'Numeric outer spacing by side in source pixels; use null for sides that cannot be measured.' },
+            gap: { ...nullableNumber, description: 'Numeric gap to adjacent items in source pixels, or null when unknown.' },
+            spacing: { ...string, description: 'Additional spacing notes; prefer numeric padding, margin, and gap fields when measurable.' },
             placement: { ...string, description: 'How to place it: grid or flex track, absolute anchor, stacking order; empty when unknown.' },
             crop: { ...nullableString, description: 'Project-relative path to an existing crop of this element, or null.' },
         }),
@@ -267,7 +276,8 @@ export const MEASURER_SCHEMA = object({
         description: 'Repeated measures: spacing scale, ratios, column width, baseline step.',
         items: object({
             name: { ...string, description: 'What this rule covers.' },
-            value: { ...string, description: 'The measured value with its unit, for example "8 px step" or "1:1.6".' },
+            value: { ...nullableNumber, description: 'Numeric measured value, in the sheet unit.' },
+            unit: { ...string, description: 'Unit for this value, usually px.' },
             from: { ...string, description: 'What it was measured between; empty for a global rule.' },
         }),
     },

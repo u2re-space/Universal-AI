@@ -21,6 +21,7 @@ let script = () => ({ text: 'ok' });
 let extractScript = null;
 let extractModel = null;
 let decision = null;
+let detectCoder = false;
 let root;
 before(async () => {
     server = await startMockServer({
@@ -38,7 +39,7 @@ before(async () => {
     });
     root = await mkdtemp(path.join(os.tmpdir(), 'ai-agent-team-'));
 });
-beforeEach(() => { server.reset(); decision = null; extractScript = null; extractModel = null; });
+beforeEach(() => { server.reset(); decision = null; extractScript = null; extractModel = null; detectCoder = false; });
 after(async () => { await server.close(); await rm(root, { recursive: true, force: true }); });
 
 const baseConfig = () => structuredClone({
@@ -63,6 +64,7 @@ function roleOf(body) {
     if (format === 'extraction') return 'extractor';
     if (format === 'measure') return 'measurer';
     if (format === 'image_assets') return 'image-processor';
+    if (detectCoder && typeof body.instructions === 'string' && body.instructions.includes('You are the coder.')) return 'coder';
     if (typeof body.instructions === 'string' && body.instructions.includes('route: encode')) return 'answer';
     if (body.input.some((i) => i.type === 'message' && i.content?.some?.((c) => c.type === 'input_image'))) return 'vision';
     if (body.model === 'gpt-6-luna-nano') return 'summarizer-file';
@@ -1268,24 +1270,49 @@ test('an interrupted image stage resumes before implementation', async () => {
     }
 });
 
-test('measurer stage runs before collector when image parts are present', async () => {
+test('measurer stage runs before collector and gives CSS-ready values to the coder', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-'));
     const events = [];
     const seen = [];
+    const coderBodies = [];
+    detectCoder = true;
     script = (body) => {
         const role = roleOf(body);
         seen.push(role);
         if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
         if (role === 'classifier') return { text: JSON.stringify({ label: 'normal' }) };
         if (role === 'planner') {
-            return { text: JSON.stringify({ summary: 'стили по референсу', complexity: 'normal', steps: [{ goal: 'Создать стили', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: ['Какой стиль?'], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+            return { text: JSON.stringify({ summary: 'стили по референсу', complexity: 'normal', steps: [{ goal: 'Создать styles.scss', details: 'Собрать grid по измеренному макету', verify: 'прочитать styles.scss' }], filesOfInterest: [], searchQueries: [], questionsForCollector: ['Какой стиль?'], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
         }
         if (role === 'measurer') {
             assert.equal(body.model, 'gpt-6.1-sol');
             assert.equal(body.reasoning?.effort, 'medium');
-            return { text: JSON.stringify({ summary: 'Кнопка 120×40, угол 0, радиус 8', source: 'mockup.png', unit: 'px', canvas: { width: 400, height: 300 }, elements: [{ box: { x: 50, y: 100, w: 120, h: 40 }, rotation: 0, radius: 8, padding: null, margin: null, gap: null, placement: 'center' }], regions: [], rules: [{ name: 'spacing', value: 8, scale: null }], notes: '' }) };
+            return { text: JSON.stringify({
+                summary: 'Карточка в двухколоночной сетке', source: 'mockup.png', unit: 'px',
+                canvas: { x: 0, y: 0, width: 400, height: 300 },
+                elements: [{
+                    name: 'Hero card', box: { x: 50, y: 60, width: 200, height: 160 }, rotation: 0,
+                    borders: '1 px solid', radius: 8,
+                    padding: { top: 16, right: 20, bottom: 16, left: 20 },
+                    margin: { top: null, right: null, bottom: 24, left: null }, gap: 8,
+                    spacing: '', placement: 'two-column grid, centered in the canvas', crop: null,
+                }],
+                regions: [], rules: [{ name: 'spacing', value: 8, unit: 'px', from: 'card items' }], notes: '',
+            }) };
         }
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [{ question: 'Какой стиль?', answer: 'минимализм' }], conventions: [], notes: '' }) };
+        if (role === 'coder') {
+            coderBodies.push(body);
+            const prompt = JSON.stringify(body.input);
+            assert.match(prompt, /Reference measurements/);
+            assert.match(prompt, /left 12\.5%; top 20%; width 50%; height 53\.33%/);
+            assert.match(prompt, /padding: top 16 px, right 20 px, bottom 16 px, left 20 px/);
+            assert.match(prompt, /margin: bottom 24 px/);
+            assert.match(prompt, /gap: 8 px/);
+            assert.match(prompt, /spacing: 8 px/);
+            assert.match(body.instructions, /canvas-relative percentages/);
+            return { text: 'styles.scss построен по sheet' };
+        }
         if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
         return { text: 'ok' };
     };
@@ -1304,6 +1331,9 @@ test('measurer stage runs before collector when image parts are present', async 
     const collectIdx = stages.indexOf('collect');
     assert.ok(measureIdx >= 0 && collectIdx > measureIdx, `measure(${measureIdx}) should run before collect(${collectIdx}), stages: ${stages.join(', ')}`);
     assert.ok(events.some((e) => e.type === 'stage.start' && e.stage === 'measure' && e.role === 'measurer'));
+    assert.ok(coderBodies.length > 0, 'the SCSS step is assigned to coder');
+    const savedSheet = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.json'), 'utf8'));
+    assert.equal(savedSheet.elements[0].box.width, 200);
     await rm(dir, { recursive: true, force: true });
 });
 
