@@ -140,7 +140,7 @@ export async function configCommand(ctx) {
                 summarizer: { model: null, effort: 'low' },
                 extractor: { model: null, effort: 'low' },
                 measurer: { model: null, effort: null },
-                'image-processor': { model: null, effort: 'medium' },
+                'image-processor': { model: null, effort: 'high' },
             },
             agent: { mode: 'team', maxReviewRounds: 2, resume: true, extract: 'auto', architect: 'auto', orchestrator: { enabled: false } },
             memory: { enabled: true, autoSave: true, maxRecall: 8, notesFile: 'AGENTS.md' },
