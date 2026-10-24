@@ -59,9 +59,9 @@ export const settings = { effort: null, model: null };
  * trivial: only divide the picture. normal: build styles from the sheet. complex: styles, SVG, and geometry.
  */
 export const MEASURER_TIERS = Object.freeze({
-    trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'medium' }),
-    normal: Object.freeze({ model: 'gpt-6-luna', effort: 'high' }),
-    complex: Object.freeze({ model: 'gpt-6.1-sol', effort: 'high' }),
+    trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'high', verbosity: "low" }),
+    normal: Object.freeze({ model: 'gpt-6.1-sol', effort: 'medium', verbosity: "low" }),
+    complex: Object.freeze({ model: 'gpt-6.1-sol', effort: 'high', verbosity: "low" }),
 });
 
 /**
