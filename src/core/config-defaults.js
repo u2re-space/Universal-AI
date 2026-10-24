@@ -214,7 +214,7 @@ export const defaults = Object.freeze({
      * platform selects the frozen web-platform profile (Chrome 157 Beta, flags off).
      */
     generate: {
-        fidelity: 87,
+        fidelity: 80,
         creativity: 20,
         platform: 'chrome-157-beta',
     },

@@ -10,7 +10,7 @@
  */
 
 /** How closely the result should follow attached references. */
-export const DEFAULT_FIDELITY = 87;
+export const DEFAULT_FIDELITY = 80;
 /** How much may be added that is not in the references. */
 export const DEFAULT_CREATIVITY = 20;
 

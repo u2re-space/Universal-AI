@@ -166,7 +166,7 @@ test('pins replace pace and clamp only an unpinned ladder model', () => {
 
 test('generation fidelity is attached only when a stated value is passed', () => {
     assert.equal(resolvePace({ ...base, label: 'normal' }).fidelity, null);
-    assert.deepEqual(resolvePace({ ...base, label: 'normal', fidelity: 87 }).fidelity, { stated: 87, effective: 66 });
+    assert.deepEqual(resolvePace({ ...base, label: 'normal', fidelity: 80 }).fidelity, { stated: 80, effective: 61 });
 });
 
 test('a shared budget of 200 splits stable, strained, and broken pace', () => {
@@ -186,7 +186,7 @@ test('a shared budget of 200 splits stable, strained, and broken pace', () => {
     assert.equal(qualityMax.stepCap, 16);
     assert.equal(qualityMax.reviewMode, 'plan');
     assert.equal(qualityMax.reviewRounds, 2);
-    assert.deepEqual(resolvePace({ ...base, speed: 0, quality: 200, label: 'normal', fidelity: 87 }).fidelity, { stated: 87, effective: 100 });
+    assert.deepEqual(resolvePace({ ...base, speed: 0, quality: 200, label: 'normal', fidelity: 80 }).fidelity, { stated: 80, effective: 100 });
     const qualityAuthor = resolvePace({
         ...base, speed: 0, quality: 200, label: 'normal',
         steps: [{ complexity: 'complex', author: 'coder', files: ['a.js'], goal: 'write', details: '', verify: '' }],

@@ -41,10 +41,10 @@ test('platform instructions list the snapshot and withhold css-random', () => {
     assert.match(text, /css-random/);
 });
 
-test('fidelity defaults to 87 and is not measured', () => {
+test('fidelity defaults to 80 and is not measured', () => {
     const contract = fidelityContract();
     assert.equal(contract.fidelity, DEFAULT_FIDELITY);
-    assert.equal(DEFAULT_FIDELITY, 87);
+    assert.equal(DEFAULT_FIDELITY, 80);
     assert.equal(contract.creativity, DEFAULT_CREATIVITY);
     assert.equal(DEFAULT_CREATIVITY, 20);
     assert.equal(contract.measured, null);
@@ -68,13 +68,13 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
     const brief = buildGenerationBrief({
         kind: 'landing',
         prompt: 'Повтори макет Tilda Publishing',
-        fidelity: 87,
+        fidelity: 80,
         creativity: 20,
         platform: resolvePlatform('chrome-157-beta'),
         references: { images: [landing], files: [], templates: ['templates/base'], examples: ['https://css-tricks.com/'] },
     });
-    assert.equal(brief.manifest.fidelity, 87);
-    assert.equal(brief.manifest.effectiveFidelity, 66);
+    assert.equal(brief.manifest.fidelity, 80);
+    assert.equal(brief.manifest.effectiveFidelity, 61);
     assert.equal(brief.manifest.creativity, 20);
     assert.equal(brief.manifest.measured, null);
     assert.equal(brief.manifest.method, 'unmeasured');
@@ -84,9 +84,9 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
         'package.json', 'vite.config.js', 'index.html', 'src/main.js', 'src/styles.scss', 'scripts/generate.js',
         '.rules/stack.md', '.rules/files.md', '.skills/scaffold/SKILL.md',
     ]);
-    assert.match(brief.task, /87%/);
-    assert.match(brief.task, /Requested fidelity 87% at quality 40 works as 66%/);
-    assert.match(brief.instructions, /66%/);
+    assert.match(brief.task, /80%/);
+    assert.match(brief.task, /Requested fidelity 80% at quality 40 works as 61%/);
+    assert.match(brief.instructions, /61%/);
     assert.match(brief.task, /landing\.png/);
     assert.match(brief.task, /templates\/base/);
     assert.match(brief.task, /https:\/\/css-tricks\.com\//);
@@ -131,7 +131,7 @@ test('config defaults and flag bounds', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-gen-home-'));
     try {
         const config = await loadConfig({ env: { AI_AGENT_HOME: home, AI_MODEL: 'mock-model', OPENAI_API_KEY: 'sk-test' }, ensureHome: false });
-        assert.equal(config.generate.fidelity, 87);
+        assert.equal(config.generate.fidelity, 80);
         assert.equal(config.generate.creativity, 20);
         assert.equal(config.generate.platform, 'chrome-157-beta');
         assert.equal(config.tools.mcp, true);
@@ -262,7 +262,7 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
         child.stderr.on('data', (chunk) => { stderr += chunk; });
         const code = await new Promise((resolve) => child.once('close', resolve));
         assert.equal(code, 0, stderr);
-        assert.match(planner, /87%/);
+        assert.match(planner, /80%/);
         assert.match(planner, /Plan the work before changing files/);
         assert.match(planner, /Customer task:/);
         assert.match(planner, /chrome-157-beta/);
@@ -272,8 +272,8 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
         assert.match(stdout, /готово/);
         const manifest = JSON.parse(await readFile(path.join(work, '.ai', 'generation.json'), 'utf8'));
         assert.equal(manifest.kind, 'landing');
-        assert.equal(manifest.fidelity, 87);
-        assert.equal(manifest.effectiveFidelity, 66);
+        assert.equal(manifest.fidelity, 80);
+        assert.equal(manifest.effectiveFidelity, 61);
         assert.equal(manifest.creativity, 20);
         assert.equal(manifest.measured, null);
         assert.equal(manifest.method, 'unmeasured');
