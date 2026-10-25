@@ -7,7 +7,7 @@
  * @exports TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory, createToolset, relativeToRoot
  * @ai.tags tools, approval
  * @ai.hint hot
- * @changed 2026-10-21 A noisy path is searched directly, and a timeout explains dev servers.
+ * @changed 2026-10-25 Measurement crops may run at read access, confined to .tmp/.
  */
 
 import path from 'node:path';
@@ -151,6 +151,7 @@ const CHANGE_OPS = new Set(['create', 'overwrite', 'edit', 'delete']);
  * Create the executable toolset for one agent run.
  *
  * approvalLevel: 'ask' | 'read' | 'write' | 'all'.
+ * allowWrite — measurement crop tools (`crop_image`, `split_image`) that may run at read access, confined to `.tmp/`.
  * approve({ name, category, args, preview }) → 'yes' | 'no' | 'always' | 'abort' (used for 'ask').
  * askUser(question) → string | null (optional; enables the ask_user tool).
  * memory / projectKey / projectName — long-term memory store (enables recall / remember).
@@ -164,7 +165,7 @@ const CHANGE_OPS = new Set(['create', 'overwrite', 'edit', 'delete']);
  * processTool(name, args, signal) → null | { output, summary, changes? } — remote handler for a processable tool. null runs the local handler.
  */
 export function createToolset({
-    root = process.cwd(), config, names, approvalLevel = 'read', approve = async () => 'no', askUser = null,
+    root = process.cwd(), config, names, approvalLevel = 'read', allowWrite = [], approve = async () => 'no', askUser = null,
     backupDir = null, signal, emit = () => {}, memory = null, projectKey = null, projectName = null,
     describeImage = null, summarizeFile = null, editPaths = () => null,
     describeScreen = null, performDesktop = null, delegate = null, subagent = null, extras = [], client = null, ledger = null,
@@ -172,6 +173,7 @@ export function createToolset({
 }) {
     const limits = config.limits;
     const allowed = new Set(names);
+    const autoWrite = new Set(allowWrite.filter((name) => name === 'crop_image' || name === 'split_image'));
     const extraByName = new Map();
     for (const extra of extras) {
         if (!extra?.name || TOOL_SPECS[extra.name] || extraByName.has(extra.name)) throw new Error(`Имя инструмента занято: ${extra.name}`);
@@ -224,6 +226,9 @@ export function createToolset({
         if (category === 'read' || category === 'user' || category === 'memory') return true;
         if (approvalLevel === 'all') return true;
         if (approvalLevel === 'write' && category === 'write') return true;
+        // Measurement crops are temporary artifacts: allow them at read access, but the handler
+        // below confines their output to `.tmp/`.
+        if (approvalLevel === 'read' && category === 'write' && autoWrite.has(name)) return true;
         if (approvalLevel !== 'ask') return false;
         if (alwaysAllowed.has(name)) return true;
         notify({ type: 'approval.request', name, category, preview });
@@ -281,6 +286,18 @@ export function createToolset({
         const allowed = typeof editPaths === 'function' ? editPaths() : editPaths;
         if (allowed && !allowed.has(rel)) return `Не в карте правок (${rel}): ${output}`;
         return output;
+    }
+
+    /** Auto-approved measurement writes at read access must stay inside `.tmp/`. */
+    function guardTemporaryOutput(name, requested) {
+        if (approvalLevel !== 'read' || !autoWrite.has(name)) return;
+        const value = String(requested ?? '').trim();
+        if (!value) return;
+        const abs = path.isAbsolute(value) ? path.resolve(value) : path.resolve(root, value);
+        const tmp = path.resolve(root, '.tmp');
+        if (abs !== tmp && !abs.startsWith(tmp + path.sep)) {
+            throw new Error(`${name}: при read-доступе писать можно только в .tmp/ (получено: ${value}).`);
+        }
     }
 
     const handlers = {
@@ -555,6 +572,7 @@ export function createToolset({
             const cols = Math.max(1, Math.min(20, args.cols ?? 1));
             if (rows === 1 && cols === 1) throw new Error('Укажите rows > 1 или cols > 1 для разбивки.');
             const requested = String(args.output ?? '').trim() || `.tmp/split-${Date.now()}`;
+            guardTemporaryOutput('split_image', requested);
             const outputDir = (await resolveInside(root, requested, { forWrite: true, allowRoot: false })).rel;
             const exe = await detectMagick({ magickPath: config.magickPath ?? null });
             if (exe) {
@@ -582,6 +600,7 @@ export function createToolset({
             const height = args.height ?? 0;
             if (!trim && (!width || !height)) throw new Error('Укажите width и height для обрезки — или trim=true, чтобы снять padding по краям.');
             const requested = String(args.output ?? '').trim() || `.tmp/${trim ? 'trim' : 'crop'}-${Date.now()}.png`;
+            guardTemporaryOutput('crop_image', requested);
             const output = (await resolveInside(root, requested, { forWrite: true, allowRoot: false })).rel;
             const exe = await detectMagick({ magickPath: config.magickPath ?? null });
             if (exe) {

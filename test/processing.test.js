@@ -5,9 +5,11 @@ import os from 'node:os';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createToolset } from '../src/agent/tools.js';
 import { buildProjectMap, loadProjectMap } from '../src/agent/map.js';
+import { detectMagick } from '../src/agent/image-magick.js';
 import { defaults } from '../src/core/config.js';
 import { CancelledError } from '../src/openai/errors.js';
 import { backupSummaryRows } from '../src/commands/shared.js';
+import { TINY_PNG } from './helpers/mock-server.js';
 
 async function rootFor(name) {
     return mkdtemp(path.join(os.tmpdir(), `ai-proc-${name}-`));
@@ -175,6 +177,38 @@ test('processing: denial, cancellation, shell stats, and make_dir stay local', a
         assert.equal(made.ok, true);
         assert.equal(calls, 0);
         assert.equal((await stat(path.join(root, 'sub'))).isDirectory(), true);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('processing: read access auto-approves measurement crops only under .tmp', async (t) => {
+    const exe = await detectMagick();
+    if (!exe) return t.skip('ImageMagick is not installed');
+    const root = await rootFor('crop');
+    try {
+        await writeFile(path.join(root, 'mockup.png'), Buffer.from(TINY_PNG, 'base64'));
+        const toolset = createToolset({
+            root, config: defaults, names: ['crop_image'], approvalLevel: 'read', allowWrite: ['crop_image'],
+        });
+        const allowed = await toolset.execute({
+            name: 'crop_image', call_id: 'c1',
+            arguments: JSON.stringify({
+                path: 'mockup.png', x: 0, y: 0, width: 1, height: 1, trim: false,
+                output: '.tmp/measure/crop.png', reason: 'measure the edge',
+            }),
+        });
+        assert.equal(allowed.ok, true, allowed.output);
+        assert.ok((await stat(path.join(root, '.tmp/measure/crop.png'))).size > 0);
+        const denied = await toolset.execute({
+            name: 'crop_image', call_id: 'c2',
+            arguments: JSON.stringify({
+                path: 'mockup.png', x: 0, y: 0, width: 1, height: 1, trim: false,
+                output: 'mockup.png', reason: 'must not overwrite the reference',
+            }),
+        });
+        assert.equal(denied.ok, false);
+        assert.match(denied.output, /\.tmp/);
     } finally {
         await rm(root, { recursive: true, force: true });
     }

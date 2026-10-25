@@ -288,16 +288,33 @@ const insets = object({
     left: { ...nullableNumber, description: 'Measured left side in source pixels.' },
 });
 
+/** How a measured element or region may be reused by another role. */
+const measuredKind = {
+    type: 'string',
+    enum: ['text', 'image', 'icon', 'logo', 'control', 'card', 'background', 'ornament', 'layer', 'other'],
+    description: 'What the item is, so another role can decide whether to reuse its crop.',
+};
+
 export const MEASURER_SCHEMA = object({
     summary: { ...string, description: 'What the reference shows and how it was measured.' },
     source: { ...string, description: 'The reference file or image this sheet measures.' },
-    unit: { ...string, description: 'Unit of every number here, usually px of the source image.' },
+    unit: { ...string, description: 'Source unit of every raw number, usually px; CSS units belong in units and css.' },
+    units: object({
+        source: { ...string, description: 'Source unit such as px, pt, cm, or unknown.' },
+        rootFontSize: { ...nullableNumber, description: 'Source pixels per 1rem when a root size can be supported; null when it is only a guess.' },
+        scale: { ...nullableNumber, description: 'CSS pixels per source unit when the reference is scaled; null when unknown.' },
+        preferred: { ...strings, description: 'CSS units suitable for the target, such as rem, em, %, vw, vh, ch.' },
+        notes: { ...string, description: 'How the units were chosen and which conversions are assumptions.' },
+    }),
+    confidence: { type: 'string', enum: ['high', 'medium', 'low', 'unknown'], description: 'Overall confidence in this sheet; low when key values are inferred.' },
+    assumptions: { ...strings, description: 'Every inferred value or interpretation that is not directly measured.' },
     canvas: { ...box, description: 'The whole reference size.' },
     elements: {
         type: 'array',
         description: 'Every element that carries a number: text block, control, icon, image, ornament.',
         items: object({
             name: { ...string, description: 'Short element name the author can reuse.' },
+            kind: measuredKind,
             box,
             rotation: { ...nullableNumber, description: 'Turn clockwise from upright, in degrees. Null when straight or unreadable.' },
             borders: { ...string, description: 'Where the borders and edges fall and how thick they are; empty when none.' },
@@ -307,6 +324,7 @@ export const MEASURER_SCHEMA = object({
             gap: { ...nullableNumber, description: 'Numeric gap to adjacent items in source pixels, or null when unknown.' },
             spacing: { ...string, description: 'Additional spacing notes; prefer numeric padding, margin, and gap fields when measurable.' },
             placement: { ...string, description: 'How to place it: grid or flex track, absolute anchor, stacking order; empty when unknown.' },
+            css: { ...string, description: 'Ready CSS declarations with explicit units for this element, such as width: 12.5rem; padding: 1rem 1.25rem; font-size: 1.75rem; line-height: 1.2. Empty when no reliable conversion exists.' },
             typography: {
                 ...object({
                     role: { ...string, description: 'Text role such as heading, body, label, or button.' },
@@ -321,16 +339,21 @@ export const MEASURER_SCHEMA = object({
                 type: ['object', 'null'],
                 description: 'Typography measurements for text elements; null for non-text elements.',
             },
+            confidence: { type: 'string', enum: ['high', 'medium', 'low', 'unknown'], description: 'Confidence in this element: high only when its numbers were actually read.' },
+            notes: { ...string, description: 'What is inferred, ambiguous, or hidden; empty when the element is fully measured.' },
+            use: { ...string, description: 'How another role should reuse this element or its crop; empty when it is only a measurement target.' },
             crop: { ...nullableString, description: 'Project-relative path to an existing crop of this element, or null.' },
         }),
     },
     regions: {
         type: 'array',
-        description: 'How the picture divides into crops, artwork regions, and layers.',
+        description: 'How the picture divides into crops, artwork regions, and layers. Prefer many small, reusable fragments over a few large ones.',
         items: object({
             name: { ...string, description: 'Region name the author can reuse.' },
+            kind: measuredKind,
             box,
             how: { ...string, description: 'What the crop contains and how to cut it out (crop_image or split_image with these numbers).' },
+            use: { ...string, description: 'Which role reuses this fragment and for what, such as artwork reference, icon source, or background layer.' },
             crop: { ...nullableString, description: 'Project-relative path to an existing crop of this region, or null. The worker reuses it as a generate_image reference.' },
         }),
     },
@@ -341,6 +364,7 @@ export const MEASURER_SCHEMA = object({
             name: { ...string, description: 'What this rule covers.' },
             value: { ...nullableNumber, description: 'Numeric measured value, in the sheet unit.' },
             unit: { ...string, description: 'Unit for this value, usually px.' },
+            css: { ...string, description: 'CSS form of this rule with an explicit unit, such as --space-2: 0.5rem or 1.5rem.' },
             from: { ...string, description: 'What it was measured between; empty for a global rule.' },
         }),
     },

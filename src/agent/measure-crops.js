@@ -1,14 +1,14 @@
 /**
  * @file src/agent/measure-crops.js
  * @module agent/measure-crops
- * @purpose Cut ready reference crops for the regions in a measurement sheet so the worker can
- *          pass them straight to generate_image instead of cropping the same mockup again.
+ * @purpose Cut ready reference crops for regions and reusable elements in a measurement sheet,
+ *          and build the compact TOON index and deterministic conclusion.
  * @depends node:path, node:fs/promises, agent/paths, agent/image-magick
  * @usedBy agent/team
- * @exports stageMeasurementCrops
+ * @exports stageMeasurementCrops, measurementIndex, measurementConclusion
  * @ai.tags images, measurement, crop
  * @ai.hint io
- * @changed 2026-10-22 Created: reuse measure crops as image-generation references.
+ * @changed 2026-10-25 Two-pass measurement, element crops, deduplication, and JSON/TOON conclusions.
  */
 
 import path from 'node:path';
@@ -17,7 +17,7 @@ import { resolveInside } from './paths.js';
 import { detectMagick, magickCrop, magickIdentify } from './image-magick.js';
 
 /** Upper bound on automatic crops for one measurement sheet. */
-const MAX_CROPS = 24;
+const MAX_CROPS = 48;
 
 /**
  * A filesystem-safe short name for a crop file.
@@ -80,16 +80,18 @@ async function resolveSource({ root, sheet, referencePaths }) {
 }
 
 /**
- * Cut every region in `sheet` that has a usable box and no existing crop. The crop path is
- * written back to `region.crop`, so `renderMeasurements` and `measurements.json` carry it.
- * @param {{ root: string, workId: string, sheet: object, referencePaths?: string[], config?: object, signal?: AbortSignal }} options
- * @returns {Promise<{ crops: Array<{ name: string, crop: string, bytes?: number }>, warnings: string[] }>}
+ * Cut every region and reusable element in `sheet` that has a usable box and no existing crop.
+ * The crop path is written back to the item, so `renderMeasurements`, `measurements.json`, and
+ * the conclusion carry it. Identical boxes share one file.
+ * @param {{ root: string, workId: string, sheet: object, referencePaths?: string[], config?: object, signal?: AbortSignal, reuse?: Array<{ crop?: string, box?: object }> }} options
+ * @returns {Promise<{ crops: Array<{ kind: string, name: string, crop: string, bytes?: number, box?: object }>, warnings: string[] }>}
  * @exports
  * @ai.hint io
  */
-export async function stageMeasurementCrops({ root, workId, sheet, referencePaths = [], config = {}, signal }) {
+export async function stageMeasurementCrops({ root, workId, sheet, referencePaths = [], config = {}, signal, reuse = [] }) {
     const regions = Array.isArray(sheet?.regions) ? sheet.regions : [];
-    if (!regions.length) return { crops: [], warnings: [] };
+    const elements = Array.isArray(sheet?.elements) ? sheet.elements : [];
+    if (!regions.length && !elements.length) return { crops: [], warnings: [] };
     const exe = await detectMagick({ magickPath: config.magickPath ?? null }).catch(() => null);
     if (!exe) return { crops: [], warnings: ['ImageMagick не найден: готовые кропы из замеров не созданы.'] };
     const source = await resolveSource({ root, sheet, referencePaths });
@@ -105,44 +107,202 @@ export async function stageMeasurementCrops({ root, workId, sheet, referencePath
 
     const crops = [];
     const warnings = [];
-    let created = 0;
-    for (const [index, region] of regions.entries()) {
-        if (!region || typeof region !== 'object') continue;
-        const box = region.box ?? {};
+    const seen = new Map();
+    const manifest = new Set();
+    const reserved = new Set();
+    const cropPrefix = `.tmp/${workId}/crops/`;
+    const isCropPath = (rel) => path.normalize(rel).startsWith(path.normalize(cropPrefix));
+    let capped = false;
+
+    // Reuse fragments cut after the overview pass when their box survived the second pass.
+    for (const item of reuse) {
+        if (!item?.crop || !item.box) continue;
+        const existing = await insideFile(root, item.crop);
+        if (!existing || !isCropPath(existing)) continue;
+        reserved.add(existing);
+        const key = [Math.round(item.box.x), Math.round(item.box.y), Math.round(item.box.width), Math.round(item.box.height)].join(':');
+        if (!seen.has(key)) seen.set(key, existing);
+    }
+
+    /** Cut one item and attach the resulting project-relative path to it. */
+    const stage = async (item, kind, index, fallback) => {
+        if (!item || typeof item !== 'object') return;
+        const box = item.box ?? {};
         const x = Number(box.x);
         const y = Number(box.y);
         const width = Number(box.width);
         const height = Number(box.height);
-        if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) continue;
+        if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return;
+        const name = String(item.name ?? `${fallback} ${index + 1}`);
 
-        if (typeof region.crop === 'string' && region.crop.trim()) {
-            const existing = await insideFile(root, region.crop);
-            if (existing) {
-                region.crop = existing;
-                crops.push({ name: String(region.name ?? ''), crop: existing });
-                continue;
+        if (typeof item.crop === 'string' && item.crop.trim()) {
+            const existing = await insideFile(root, item.crop);
+            if (existing && isCropPath(existing)) {
+                item.crop = existing;
+                reserved.add(existing);
+                seen.set([Math.round(x), Math.round(y), Math.round(width), Math.round(height)].join(':'), existing);
+                if (!manifest.has(existing)) {
+                    manifest.add(existing);
+                    crops.push({ kind, name, crop: existing, box: { x, y, width, height } });
+                }
+                return;
             }
         }
-        if (created >= MAX_CROPS) {
-            warnings.push(`Кропы ограничены ${MAX_CROPS} областями.`);
-            break;
+
+        const key = [Math.round(x), Math.round(y), Math.round(width), Math.round(height)].join(':');
+        const shared = seen.get(key);
+        if (shared) {
+            item.crop = shared;
+            if (!manifest.has(shared)) {
+                manifest.add(shared);
+                crops.push({ kind, name, crop: shared, box: { x, y, width, height } });
+            }
+            return;
+        }
+        if (reserved.size >= MAX_CROPS) {
+            if (!capped) warnings.push(`Кропы ограничены ${MAX_CROPS} фрагментами.`);
+            capped = true;
+            return;
         }
 
         const left = Math.max(0, Math.min(Math.round(x), size.width - 1));
         const top = Math.max(0, Math.min(Math.round(y), size.height - 1));
         const w = Math.min(Math.round(width), size.width - left);
         const h = Math.min(Math.round(height), size.height - top);
-        if (w <= 0 || h <= 0) continue;
+        if (w <= 0 || h <= 0) return;
 
-        const rel = `.tmp/${workId}/crops/${String(index + 1).padStart(2, '0')}-${slug(region.name, 'region')}.png`;
+        let serial = reserved.size + 1;
+        let rel = `.tmp/${workId}/crops/${String(serial).padStart(2, '0')}-${kind}-${slug(name, fallback)}.png`;
+        while (reserved.has(rel) || await insideFile(root, rel)) {
+            serial += 1;
+            rel = `.tmp/${workId}/crops/${String(serial).padStart(2, '0')}-${kind}-${slug(name, fallback)}.png`;
+        }
         try {
             const result = await magickCrop({ exe, input: source, output: rel, x: left, y: top, width: w, height: h, cwd: root, signal });
-            region.crop = result.rel;
-            crops.push({ name: String(region.name ?? ''), crop: result.rel, bytes: result.bytes });
-            created++;
+            item.crop = result.rel;
+            seen.set(key, result.rel);
+            manifest.add(result.rel);
+            reserved.add(result.rel);
+            crops.push({ kind, name, crop: result.rel, bytes: result.bytes, box: { x: left, y: top, width: w, height: h } });
         } catch (error) {
-            warnings.push(`Кроп «${region.name || index + 1}» не создан: ${error.message}`);
+            warnings.push(`Кроп «${name}» не создан: ${error.message}`);
         }
-    }
+    };
+
+    for (const [index, region] of regions.entries()) await stage(region, 'region', index, 'region');
+    for (const [index, element] of elements.entries()) await stage(element, 'element', index, 'element');
     return { crops, warnings };
+}
+
+/**
+ * A TOON-friendly index of the sheet. The full nested sheet stays in JSON; this projection
+ * keeps the canvas, units, counts, assumptions, and one flat row per element, region, rule,
+ * and crop so another role can scan it without parsing the full document.
+ * @param {object} sheet
+ * @param {Array<{ kind?: string, name?: string, crop?: string, bytes?: number, box?: object }>} [crops]
+ * @returns {object}
+ * @exports
+ * @ai.hint pure
+ */
+export function measurementIndex(sheet, crops = []) {
+    const box = (value) => {
+        if (!value) return '';
+        const number = (item) => Number.isFinite(item) ? item : '?';
+        return `${number(value.x)},${number(value.y)} ${number(value.width)}x${number(value.height)}`;
+    };
+    const elements = Array.isArray(sheet?.elements) ? sheet.elements : [];
+    const regions = Array.isArray(sheet?.regions) ? sheet.regions : [];
+    const rules = Array.isArray(sheet?.rules) ? sheet.rules : [];
+    return {
+        note: 'Compact index; the full nested sheet is in measurements.json.',
+        summary: String(sheet?.summary ?? ''),
+        source: String(sheet?.source ?? ''),
+        unit: String(sheet?.unit ?? 'px'),
+        confidence: String(sheet?.confidence ?? 'unknown'),
+        canvas: sheet?.canvas ?? null,
+        units: sheet?.units ?? null,
+        counts: {
+            elements: elements.length,
+            regions: regions.length,
+            rules: rules.length,
+            crops: crops.length,
+        },
+        assumptions: Array.isArray(sheet?.assumptions) ? sheet.assumptions.map(String) : [],
+        notes: String(sheet?.notes ?? ''),
+        elements: elements.map((item) => ({
+            name: String(item?.name ?? ''),
+            kind: String(item?.kind ?? ''),
+            box: box(item?.box),
+            crop: String(item?.crop ?? ''),
+            confidence: String(item?.confidence ?? 'unknown'),
+            use: String(item?.use ?? ''),
+            css: String(item?.css ?? ''),
+        })),
+        regions: regions.map((item) => ({
+            name: String(item?.name ?? ''),
+            kind: String(item?.kind ?? ''),
+            box: box(item?.box),
+            how: String(item?.how ?? ''),
+            crop: String(item?.crop ?? ''),
+            use: String(item?.use ?? ''),
+        })),
+        rules: rules.map((item) => ({
+            name: String(item?.name ?? ''),
+            value: Number.isFinite(item?.value) ? item.value : null,
+            unit: String(item?.unit ?? ''),
+            css: String(item?.css ?? ''),
+            from: String(item?.from ?? ''),
+        })),
+        crops: crops.map((item) => ({
+            kind: String(item?.kind ?? ''),
+            name: String(item?.name ?? ''),
+            crop: String(item?.crop ?? ''),
+        })),
+    };
+}
+
+/**
+ * Build the compact conclusion written next to the full measurement sheet. It is deterministic:
+ * it counts what was measured, keeps the unit strategy and assumptions, and lists the shared crops.
+ * @param {object} sheet
+ * @param {Array<{ kind?: string, name?: string, crop?: string, bytes?: number }>} [crops]
+ * @returns {object}
+ * @exports
+ * @ai.hint pure
+ */
+export function measurementConclusion(sheet, crops = []) {
+    const elements = Array.isArray(sheet?.elements) ? sheet.elements : [];
+    const regions = Array.isArray(sheet?.regions) ? sheet.regions : [];
+    const rules = Array.isArray(sheet?.rules) ? sheet.rules : [];
+    const lowConfidence = elements.filter((item) => ['low', 'unknown'].includes(item?.confidence)).length;
+    return {
+        summary: String(sheet?.summary ?? ''),
+        source: String(sheet?.source ?? ''),
+        unit: String(sheet?.unit ?? 'px'),
+        canvas: sheet?.canvas ?? null,
+        units: sheet?.units ?? null,
+        confidence: String(sheet?.confidence ?? 'unknown'),
+        counts: {
+            elements: elements.length,
+            textElements: elements.filter((item) => item?.typography).length,
+            regions: regions.length,
+            rules: rules.length,
+            crops: crops.length,
+            lowConfidence,
+        },
+        assumptions: Array.isArray(sheet?.assumptions) ? sheet.assumptions : [],
+        notes: String(sheet?.notes ?? ''),
+        crops: crops.map((item) => ({
+            kind: String(item?.kind ?? ''),
+            name: String(item?.name ?? ''),
+            crop: String(item?.crop ?? ''),
+            bytes: Number.isFinite(item?.bytes) ? item.bytes : null,
+        })),
+        files: {
+            sheetJson: 'measurements.json',
+            sheetToon: 'measurements.toon',
+            conclusionJson: 'measurements.conclusion.json',
+            conclusionToon: 'measurements.conclusion.toon',
+        },
+    };
 }

@@ -7,7 +7,7 @@
  * @exports toolNamesForRole, runTeam
  * @ai.tags team, roles
  * @ai.hint keep
- * @changed 2026-10-24 The architect turns the plan and measurements into a structure and per-step brief.
+ * @changed 2026-10-25 The measurer studies the whole reference first, then the staged fragments, and saves JSON/TOON conclusions.
  */
 
 import path from 'node:path';
@@ -46,7 +46,8 @@ import { neutralPlan, neutralProgress, neutralSession } from './neutral.js';
 import { CommandBatchError, executeFileCommands, FILE_COMMANDS_SCHEMA } from './file-commands.js';
 import { EXTRACT_MAX_BYTES, EXTRACT_MAX_FILES, extractHandoff, hasExtractableArtifacts } from './extract.js';
 import { assessQuality, assessmentImages } from './quality.js';
-import { stageMeasurementCrops } from './measure-crops.js';
+import { stageMeasurementCrops, measurementConclusion, measurementIndex } from './measure-crops.js';
+import { encodeToon } from '../util/toon.js';
 
 /**
  * Coder for source files, writer for documents, worker for everything else.
@@ -68,6 +69,27 @@ import { safeReviewerModel } from '../roles/reviewer.js';
 
 import { bullets, renderArchitecture, renderFindings, renderMeasurements } from './team-text.js';
 const HARD_STOP = new Set(['cancelled', 'budget', 'failed']);
+
+/**
+ * Render the measurement sheet, its deterministic conclusion, and the saved file paths.
+ * `runTeam` uses this both after measuring and when a saved run resumes.
+ * @param {object} sheet
+ * @param {object|null} conclusion
+ * @param {string} dir Project-relative work directory such as `.tmp/<id>`.
+ * @returns {string}
+ * @ai.hint pure
+ */
+function measurementReport(sheet, conclusion, dir) {
+    const counts = conclusion?.counts ?? {};
+    const line = conclusion
+        ? `Conclusion: ${counts.elements ?? 0} element(s), ${counts.regions ?? 0} region(s), ` +
+            `${counts.rules ?? 0} rule(s), ${counts.crops ?? 0} crop(s); overall confidence ${conclusion.confidence ?? 'unknown'}; ` +
+            `${counts.lowConfidence ?? 0} low/unknown element(s).`
+        : '';
+    const files = `Measurement files: ${dir}/measurements.json (full sheet), ${dir}/measurements.toon, ` +
+        `${dir}/measurements.conclusion.json, ${dir}/measurements.conclusion.toon.`;
+    return [renderMeasurements(sheet), line, files].filter(Boolean).join('\n\n');
+}
 
 
 
@@ -163,9 +185,15 @@ export async function runTeam({
     async function delegate(role, task) {
         if (!Object.hasOwn(SPECIALISTS, role)) throw new Error(`delegate_role: неизвестная роль «${role}».`);
         const spec = SPECIALISTS[role];
-        const names = spec.tools.filter((name) => allNames.includes(name));
+        // Measurement crops are local artifacts, not image generation: keep them available to the measurer.
+        const names = spec.tools.filter((name) => allNames.includes(name)
+            || (role === 'measurer' && ['crop_image', 'split_image'].includes(name)));
         if (role === 'measurer' && allNames.includes('fetch_url')) names.push('fetch_url');
-        const toolset = createToolset({ ...toolBase, names, approvalLevel, describeScreen: roles.describeScreen });
+        const toolset = createToolset({
+            ...toolBase, names, approvalLevel,
+            allowWrite: role === 'measurer' ? ['crop_image', 'split_image'] : [],
+            describeScreen: roles.describeScreen,
+        });
         const builtin = role === 'measurer' && config.tools.web
             ? builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search')
             : [];
@@ -589,9 +617,18 @@ export async function runTeam({
             const findings = await readFile(path.join(root, '.tmp', work.id, 'findings.md'), 'utf8').catch(() => '');
             if (findings.trim()) ctx.set('findings', 'Collected context (by the orchestrator)', findings, { priority: 6 });
             const sheet = await readFile(path.join(root, '.tmp', work.id, 'measurements.json'), 'utf8').catch(() => null);
+            const sheetConclusion = await readFile(path.join(root, '.tmp', work.id, 'measurements.conclusion.json'), 'utf8').catch(() => null);
             if (sheet) {
-                try { ctx.set('metrics', 'Reference measurements (by the measurer)', renderMeasurements(JSON.parse(sheet)), { priority: 8 }); }
-                catch { /* a damaged sheet is skipped, the run continues on the plan */ }
+                try {
+                    const parsedSheet = JSON.parse(sheet);
+                    let parsedConclusion = null;
+                    if (sheetConclusion) {
+                        try { parsedConclusion = JSON.parse(sheetConclusion); }
+                        catch { /* a damaged conclusion is skipped, the full sheet is still useful */ }
+                    }
+                    ctx.set('metrics', 'Reference measurements (by the measurer)',
+                        measurementReport(parsedSheet, parsedConclusion, `.tmp/${work.id}`), { priority: 8 });
+                } catch { /* a damaged sheet is skipped, the run continues on the plan */ }
             }
             const imageReport = await readFile(path.join(root, '.tmp', work.id, 'image-assets.json'), 'utf8').catch(() => '');
             if (imageReport.trim()) ctx.set('imageAssets', 'Prepared images and visual assets', imageReport, { priority: 9 });
@@ -845,47 +882,132 @@ export async function runTeam({
             const model = encodeRoute || !paced?.ready
                 ? choice.model
                 : clampModel(choice.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.measurer?.model));
-            const measureNames = ['view_image', 'crop_image', 'split_image', 'fetch_url'].filter((name) => enabled.includes(name));
-            const measureTools = measureNames.length
-                ? createToolset({ ...toolBase, names: measureNames, approvalLevel, describeScreen: roles.describeScreen })
-                : null;
+            const measurePasses = Math.max(1, Math.min(2, config.agent.measurerPasses ?? 2));
+            const measureTurns = Math.max(1, config.agent.measurerMaxTurns ?? 16);
+            const overviewTurns = Math.max(1, Math.ceil(measureTurns / 3));
+            const fragmentTurns = Math.max(1, measureTurns - overviewTurns);
+            const measureMaxBytes = Math.min(
+                config.agent.measurerMaxContextBytes ?? 8 * 1024 * 1024,
+                config.limits.maxRequestBytes,
+            );
+            const measureToolsFor = (pass) => {
+                const names = (pass === 1
+                    ? ['view_image', 'fetch_url']
+                    : ['view_image', 'crop_image', 'split_image', 'fetch_url'])
+                    // Local measurement crops are part of the measurer's job even when image generation is off.
+                    .filter((name) => enabled.includes(name) || name === 'crop_image' || name === 'split_image');
+                return names.length
+                    ? createToolset({
+                        ...toolBase, names, approvalLevel, allowWrite: ['crop_image', 'split_image'],
+                        describeScreen: roles.describeScreen,
+                    })
+                    : null;
+            };
             const measureBuiltin = config.tools.web
                 ? builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search')
                 : [];
+            const measureContext = ctx.render({ maxBytes: measureMaxBytes, exclude: ['tree'] });
+            const measurePlan = `Plan: ${plan.summary}\nSteps:\n${bullets(plan.steps.map((step) => step.goal))}`;
+            /** One measurement pass, with a tool-less report when the turn budget is spent. */
+            const measureRun = async ({ pass, text, maxTurns, session }) => {
+                const result = await roles.run('measurer', {
+                    text, parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.measurer),
+                    toolset: measureToolsFor(pass), builtin: measureBuiltin,
+                    schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns,
+                    model, effort: choice.effort, onMaxTurns, session,
+                });
+                if (HARD_STOP.has(result.status)) return result;
+                if (!result.data && ['max_turns', 'incomplete'].includes(result.status)) {
+                    notify({ type: 'warning', message: `Лимит ходов замера (проход ${pass}) исчерпан; роль отдаёт лист по уже просмотренному.` });
+                    const report = await roles.run('measurer', {
+                        text: 'Turn budget is spent and no more tools are available. Reply with the complete measurement sheet for everything you already looked at. ' +
+                            'Use CSS units in units/css, null for a number you did not read, confidence for every element, and name the unchecked parts in assumptions and notes. JSON only.',
+                        instructions: withAgents(ROLE_INSTRUCTIONS.measurer), schema: MEASURER_SCHEMA, schemaName: 'measure',
+                        maxTurns: 1, model, effort: choice.effort, session,
+                    });
+                    if (report.data) return report;
+                }
+                return result;
+            };
             notify({ type: 'stage.start', stage: 'measure', role: 'measurer', model });
-            const measureText = `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Measurement brief\n` +
-                `Plan: ${plan.summary}\nSteps:\n${bullets(plan.steps.map((step) => step.goal))}\n` +
-                'Measure the attached references: element boxes, rotation angles, where the borders pass, how the picture divides into regions, ' +
-                'the spacing rules, and where each element is placed.';
-            const measureSession = createSession({ store: false, model });
-            let measured = await roles.run('measurer', {
-                text: measureText,
-                parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.measurer), toolset: measureTools, builtin: measureBuiltin,
-                schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns: config.agent.measurerMaxTurns ?? 12,
-                model, effort: choice.effort, onMaxTurns, session: measureSession,
+            notify({ type: 'measure.pass', pass: 1, phase: 'overview' });
+            let measured = await measureRun({
+                pass: 1,
+                text: `${measureContext}\n\n# Measurement pass 1 — whole reference\n${measurePlan}\n\n` +
+                    'Study the whole reference first: the canvas, the global layout, every element, every reusable region, and the spacing rules. ' +
+                    'Do not start from a fragment. Return the complete overview sheet with CSS units, per-item confidence, and explicit assumptions. ' +
+                    'The harness cuts fragments from your boxes after this pass.',
+                maxTurns: overviewTurns,
+                session: createSession({ store: false, model }),
             });
             if (HARD_STOP.has(measured.status)) return stop(measured, 'замеры');
-            // A spent turn budget must not throw the crops away: one tool-less pass writes the sheet from what it already looked at.
-            if (!measured.data && ['max_turns', 'incomplete'].includes(measured.status)) {
-                notify({ type: 'warning', message: 'Лимит ходов замеров исчерпан; роли отдаёт лист по уже просмотренному.' });
-                const report = await roles.run('measurer', {
-                    text: 'Turn budget is spent and no more tools are available. Reply with the measurement sheet for everything you already looked at. ' +
-                        'Use null for a number you did not read and name the unchecked parts in notes. JSON only.',
-                    instructions: withAgents(ROLE_INSTRUCTIONS.measurer), schema: MEASURER_SCHEMA, schemaName: 'measure',
-                    maxTurns: 1, model, effort: choice.effort, session: measureSession,
+            let sheet = measured.data ?? null;
+            let stagedCrops = { crops: [], warnings: [] };
+            if (sheet && measurePasses > 1) {
+                // Cut the overview regions and reusable elements first, then let the measurer inspect
+                // the actual fragments instead of guessing from the full-size picture.
+                const preliminary = await stageMeasurementCrops({
+                    root, workId: work.id, sheet, referencePaths, config, signal,
                 });
-                if (report.data) measured = report;
+                const fragmentList = preliminary.crops.length
+                    ? preliminary.crops.map((crop) => {
+                        const box = crop.box ?? {};
+                        return `- ${crop.kind}: ${crop.name} — ${crop.crop} (${box.width ?? '?'}×${box.height ?? '?'} at ${box.x ?? '?'},${box.y ?? '?'})`;
+                    }).join('\n')
+                    : '(no usable boxes yet; add regions or elements with boxes so the harness can cut fragments)';
+                notify({ type: 'measure.pass', pass: 2, phase: 'fragments' });
+                const detailed = await measureRun({
+                    pass: 2,
+                    text: `${measureContext}\n\n# Measurement pass 2 — fragments\n${measurePlan}\n\n` +
+                        'The overview sheet and the fragments cut from it are below. Study the whole sheet first, then inspect the fragments. ' +
+                        'Cut more small, reusable fragments with crop_image or split_image where a detail is too small to read. ' +
+                        'Return the complete final sheet, not a delta: keep every region and element, keep its crop path when the box is unchanged, ' +
+                        'and add new fragments for the worker, architect, and image-processor. Use CSS units with explicit conversions, mark every ' +
+                        'inferred value in assumptions, and set confidence per element. Do not replace the global layout with a single fragment.\n\n' +
+                        `# Overview sheet (JSON)\n${JSON.stringify(sheet)}\n\n# Staged fragments\n${fragmentList}`,
+                    maxTurns: fragmentTurns,
+                    session: createSession({ store: false, model }),
+                });
+                // A failed fragment pass must not throw away the overview sheet; cancellation and
+                // budget exhaustion still stop the run.
+                if (HARD_STOP.has(detailed.status) && detailed.status !== 'failed') return stop(detailed, 'замеры');
+                if (detailed.data) {
+                    sheet = detailed.data;
+                    measured = detailed;
+                } else if (detailed.status !== 'completed') {
+                    notify({ type: 'warning', message: `Второй проход замеров не завершён (${detailed.status}); остаётся лист обзорного прохода.` });
+                }
+                stagedCrops = await stageMeasurementCrops({
+                    root, workId: work.id, sheet, referencePaths, config, signal, reuse: preliminary.crops,
+                });
+            } else if (sheet) {
+                stagedCrops = await stageMeasurementCrops({
+                    root, workId: work.id, sheet, referencePaths, config, signal,
+                });
             }
-            if (measured.data) {
-                // Cut the regions once here, so the worker can pass a ready crop to generate_image
-                // instead of spending another tool turn on the same mockup fragment.
-                const stagedCrops = await stageMeasurementCrops({
-                    root, workId: work.id, sheet: measured.data, referencePaths, config, signal,
-                });
+            if (sheet) {
                 for (const warning of stagedCrops.warnings) notify({ type: 'warning', message: warning });
                 if (stagedCrops.crops.length) notify({ type: 'measure.crops', count: stagedCrops.crops.length, crops: stagedCrops.crops });
-                ctx.set('metrics', 'Reference measurements (by the measurer)', renderMeasurements(measured.data), { priority: 8 });
-                await writeFile(path.join(root, '.tmp', work.id, 'measurements.json'), `${JSON.stringify(measured.data, null, 2)}\n`, 'utf8').catch(() => {});
+                const conclusion = measurementConclusion(sheet, stagedCrops.crops);
+                const dir = `.tmp/${work.id}`;
+                const toon = (value) => {
+                    try { return `${encodeToon(value)}\n`; }
+                    catch (error) {
+                        notify({ type: 'warning', message: `TOON замеров не закодирован: ${errorMessage(error)}` });
+                        return null;
+                    }
+                };
+                const files = [
+                    ['measurements.json', `${JSON.stringify(sheet, null, 2)}\n`],
+                    ['measurements.toon', toon(measurementIndex(sheet, stagedCrops.crops))],
+                    ['measurements.conclusion.json', `${JSON.stringify(conclusion, null, 2)}\n`],
+                    ['measurements.conclusion.toon', toon(conclusion)],
+                ].filter(([, text]) => typeof text === 'string');
+                await Promise.all(files.map(([name, text]) => writeFile(path.join(root, dir, name), text, 'utf8').catch((error) => {
+                    notify({ type: 'warning', message: `Файл замеров ${name} не сохранён: ${errorMessage(error)}` });
+                })));
+                ctx.set('metrics', 'Reference measurements (by the measurer)', measurementReport(sheet, conclusion, dir), { priority: 8 });
+                notify({ type: 'measure.conclusion', ...conclusion.counts, confidence: conclusion.confidence });
             } else if (measured.status !== 'completed') {
                 notify({ type: 'warning', message: `Замеры референсов не завершены (${measured.status}${measured.error ? `: ${errorMessage(measured.error)}` : ''}); продолжаем без них.` });
             }

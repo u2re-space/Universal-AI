@@ -60,6 +60,7 @@ export const bullets = (items, empty = '- (none)') => (items.length ? items.map(
  */
 export function renderMeasurements(sheet) {
     const unit = sheet.unit || 'px';
+    const units = sheet.units ?? {};
     const side = (value) => (Number.isFinite(value) ? `${value}` : '?');
     const rect = (value) => `x ${side(value?.x)} y ${side(value?.y)} · ${side(value?.width)}×${side(value?.height)} ${unit}`;
     const percent = (value, dimension) => Number.isFinite(value) && Number.isFinite(dimension) && dimension > 0
@@ -75,6 +76,7 @@ export function renderMeasurements(sheet) {
     const insets = (value) => value && ['top', 'right', 'bottom', 'left']
         .filter((key) => Number.isFinite(value[key]))
         .map((key) => `${key} ${value[key]} ${unit}`).join(', ');
+    const confidence = (value) => value && value !== 'high' ? ` [${value} confidence]` : '';
     const elements = (sheet.elements ?? []).map((item) => {
         const bits = [rect(item.box)];
         const relative = cssRect(item.box);
@@ -82,7 +84,8 @@ export function renderMeasurements(sheet) {
         if (Number.isFinite(item.rotation)) bits.push(`rotated ${item.rotation}°`);
         if (Number.isFinite(item.radius)) bits.push(`radius ${item.radius} ${unit}`);
         const crop = item.crop ? ` · crop: ${item.crop}` : '';
-        const lines = [`- ${item.name}: ${bits.join(' · ')}${crop}`];
+        const lines = [`- ${item.name}${item.kind ? ` (${item.kind})` : ''}: ${bits.join(' · ')}${crop}${confidence(item.confidence)}`];
+        if (item.css) lines.push(`  css: ${item.css}`);
         const typography = item.typography;
         if (typography && (typography.role || typography.family || typography.fontSize != null || typography.weight != null || typography.lineHeight != null || typography.letterSpacing != null || typography.style)) {
             lines.push(`  typography: ${[typography.role, typography.family && `${typography.family} (${typography.familyConfidence || 'unknown'} confidence)`, Number.isFinite(typography.fontSize) && `size ${typography.fontSize} ${unit}`, Number.isFinite(typography.weight) && `weight ${typography.weight}`, Number.isFinite(typography.lineHeight) && `line-height ${typography.lineHeight} ${unit}`, Number.isFinite(typography.letterSpacing) && `letter-spacing ${typography.letterSpacing} ${unit}`, typography.style].filter(Boolean).join(', ')}`);
@@ -90,24 +93,46 @@ export function renderMeasurements(sheet) {
         for (const [label, value] of [['padding', insets(item.padding)], ['margin', insets(item.margin)], ['gap', Number.isFinite(item.gap) ? `${item.gap} ${unit}` : ''], ['borders', item.borders], ['spacing', item.spacing], ['placement', item.placement]]) {
             if (value) lines.push(`  ${label}: ${value}`);
         }
+        if (item.use) lines.push(`  use: ${item.use}`);
+        if (item.notes) lines.push(`  notes: ${item.notes}`);
         return lines.join('\n');
     }).join('\n');
     const regions = (sheet.regions ?? []).map((item) => {
         const crop = item.crop ? ` · crop: ${item.crop}` : '';
-        return `- ${item.name}: ${rect(item.box)} — ${item.how}${crop}`;
+        return `- ${item.name}${item.kind ? ` (${item.kind})` : ''}: ${rect(item.box)} — ${item.how}${item.use ? ` · use: ${item.use}` : ''}${crop}`;
     }).join('\n');
-    const ready = (sheet.regions ?? []).filter((item) => item.crop).length;
-    const rules = (sheet.rules ?? []).map((item) => `- ${item.name}: ${Number.isFinite(item.value) ? `${item.value} ${item.unit || unit}` : '(not measured)'}${item.from ? ` (measured ${item.from})` : ''}`).join('\n');
+    const readyElements = (sheet.elements ?? []).filter((item) => item.crop).length;
+    const readyRegions = (sheet.regions ?? []).filter((item) => item.crop).length;
+    const ready = new Set([...(sheet.elements ?? []), ...(sheet.regions ?? [])]
+        .map((item) => item.crop)
+        .filter(Boolean)).size;
+    const rules = (sheet.rules ?? []).map((item) => {
+        const value = Number.isFinite(item.value) ? `${item.value} ${item.unit || unit}` : '(not measured)';
+        return `- ${item.name}: ${value}${item.css ? ` → ${item.css}` : ''}${item.from ? ` (measured ${item.from})` : ''}`;
+    }).join('\n');
     const canvasRatio = Number.isFinite(sheet.canvas?.width) && Number.isFinite(sheet.canvas?.height) && sheet.canvas.height > 0
         ? `${Number((sheet.canvas.width / sheet.canvas.height).toFixed(3))} / 1`
         : null;
+    const unitBits = [
+        `source ${units.source || unit}`,
+        Number.isFinite(units.rootFontSize) && `1rem = ${units.rootFontSize} ${units.source || unit}`,
+        Number.isFinite(units.scale) && `scale ${units.scale} CSS px per source unit`,
+        Array.isArray(units.preferred) && units.preferred.length && `preferred CSS units: ${units.preferred.join(', ')}`,
+        units.notes,
+    ].filter(Boolean).join(' · ');
+    const assumptions = Array.isArray(sheet.assumptions) ? sheet.assumptions.filter(Boolean) : [];
     return [
         sheet.summary ?? '',
-        `Source: ${sheet.source || '(not named)'} · unit: ${sheet.unit || 'px'} · canvas ${rect(sheet.canvas)}${canvasRatio ? ` · aspect-ratio ${canvasRatio}` : ''}`,
+        `Source: ${sheet.source || '(not named)'} · unit: ${unit} · canvas ${rect(sheet.canvas)}${canvasRatio ? ` · aspect-ratio ${canvasRatio}` : ''}`,
+        unitBits && `Units: ${unitBits}`,
+        sheet.confidence && `Overall confidence: ${sheet.confidence}.`,
         elements && `Elements:\n${elements}`,
-        regions && `Regions to cut out${ready ? ` (${ready} ready crop(s); pass the path as generate_image reference, do not crop again)` : ''}:\n${regions}`,
+        regions && `Regions and reusable fragments${ready ? ` (${ready} ready crop file(s); ${readyElements} element(s) and ${readyRegions} region(s) reference them; pass the path as a reference, do not crop again)` : ''}:\n${regions}`,
         rules && `Rules:\n${rules}`,
+        assumptions.length && `Assumptions (verify these, do not treat them as measurements):\n${assumptions.map((item) => `- ${item}`).join('\n')}`,
         sheet.notes && `Notes:\n${sheet.notes}`,
+        'Measurement discipline: measured numbers are evidence, not a design spec. Use the css values with their explicit units; low-confidence or inferred values are hypotheses and must be verified in the rendered result. Do not copy source pixels as viewport offsets.',
+        'Crop workflow: the sheet is measured before fragments are used. Read the whole sheet first, then use a crop only for the element or region it names. Crops are shared evidence for the worker, architect, and image-processor; do not replace the global layout with a single fragment.',
         'Typography workflow: use measured font size, weight, line-height, and letter-spacing as the visual source of truth. Family confidence is only a visual estimate; do not treat an uncertain family as identified. Search for a matching candidate only when needed and report it separately from measurements.',
         'Artwork workflow: reuse existing image candidates. If any stage already produced a PNG with a real alpha channel, keep it; do not regenerate, repaint, or flatten it. An optional SVG conversion may be tried on a copy. If a WebP copy is useful, convert it locally and keep the PNG; never use image generation or editing just to change the format. For flat marks without a suitable existing alpha image, prefer a real SVG made with vectorize_image / Recraft.',
         'For artwork comparison and atlas packing, do not call generate_image, edit_image, or image_generation: use local image operations on existing files. Compare candidates in a common aspect-ratio frame, fitting proportionally with transparent/neutral padding or a deliberate crop; never stretch an image. Keep originals unchanged. Check suitable Lucide or Phosphor icons available to the project (in dependencies or local files), lightweight HTML/CSS drawings, and existing raster or SVG candidates. After the page is built, compare the options in the rendered page and keep the clearest, best-fitting result.',

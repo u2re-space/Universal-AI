@@ -211,7 +211,9 @@ export const defaults = Object.freeze({
          * context and to `.tmp/<id>/measurements.json`.
          */
         measure: 'auto',                // off | auto | always
-        measurerMaxTurns: 12,           // tool turns the measurer may spend on crops and close looks
+        measurerPasses: 2,              // 1 = one sheet; 2 = whole reference, then staged fragments
+        measurerMaxTurns: 16,           // total tool turns for the measurement passes, split between them
+        measurerMaxContextBytes: 8 * MiB, // measurement context budget; keep it within limits.maxRequestBytes
         encode: 'encoder',              // encoder (file-command model) | mcp (this process hosts the encode server)
         resume: true,                   // continue the newest unfinished step and its saved turn
         /**

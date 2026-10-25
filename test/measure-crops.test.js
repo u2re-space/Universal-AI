@@ -5,9 +5,10 @@ import path from 'node:path';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { runProgram } from '../src/agent/shell.js';
 import { detectMagick, ensureTransparentBackground, magickIsOpaque, assessVectorSuitability, magickColorCount, magickPaletteStats } from '../src/agent/image-magick.js';
-import { stageMeasurementCrops } from '../src/agent/measure-crops.js';
+import { stageMeasurementCrops, measurementConclusion, measurementIndex } from '../src/agent/measure-crops.js';
 import { renderMeasurements } from '../src/agent/team-text.js';
 import { MEASURER_SCHEMA } from '../src/agent/schemas.js';
+import { encodeToon, decodeDocument } from '../src/util/toon.js';
 import { TINY_PNG } from './helpers/mock-server.js';
 
 /** Create a flat PNG with a red square on white using ImageMagick. */
@@ -26,29 +27,83 @@ test('measurement crops are cut once and rendered as ready generate_image refere
     try {
         await makeFlatImage({ exe, dir });
         const sheet = {
+            summary: 'Two blocks on a flat background',
             source: 'mockup.png',
-            regions: [
-                { name: 'Hero image', box: { x: 10, y: 10, width: 50, height: 50 }, how: 'left square' },
-                { name: 'CTA', box: { x: 100, y: 20, width: 80, height: 60 }, how: 'right block' },
-                { name: 'Unmeasured', box: { x: null, y: null, width: null, height: null }, how: 'unknown' },
+            unit: 'px',
+            units: {
+                source: 'px', rootFontSize: 16, scale: null, preferred: ['rem', '%'],
+                notes: '1rem = 16 source pixels; conversions are inferred from the canvas.',
+            },
+            confidence: 'medium',
+            assumptions: ['The mockup is shown at 1x; the 16px root size is assumed.'],
+            canvas: { x: 0, y: 0, width: 200, height: 100 },
+            elements: [
+                {
+                    name: 'Hero image', kind: 'image', box: { x: 10, y: 10, width: 50, height: 50 },
+                    rotation: 0, borders: '', radius: null,
+                    padding: { top: null, right: null, bottom: null, left: null },
+                    margin: { top: null, right: null, bottom: null, left: null }, gap: null,
+                    spacing: '', placement: 'left', css: 'width: 3.125rem; height: 3.125rem;',
+                    typography: null, confidence: 'high', notes: '', use: 'artwork reference', crop: null,
+                },
+                {
+                    name: 'Badge', kind: 'icon', box: { x: 120, y: 30, width: 20, height: 20 },
+                    rotation: 0, borders: '', radius: 4,
+                    padding: { top: null, right: null, bottom: null, left: null },
+                    margin: { top: null, right: null, bottom: null, left: null }, gap: null,
+                    spacing: '', placement: 'inside the right block', css: 'width: 1.25rem; height: 1.25rem; border-radius: 0.25rem;',
+                    typography: null, confidence: 'low', notes: 'Shape is inferred from a small crop.', use: 'icon source', crop: null,
+                },
             ],
+            regions: [
+                {
+                    name: 'Hero image', kind: 'image', box: { x: 10, y: 10, width: 50, height: 50 },
+                    how: 'left square', use: 'artwork reference', crop: null,
+                },
+                {
+                    name: 'CTA', kind: 'card', box: { x: 100, y: 20, width: 80, height: 60 },
+                    how: 'right block', use: 'card reference', crop: null,
+                },
+                { name: 'Unmeasured', kind: 'other', box: { x: null, y: null, width: null, height: null }, how: 'unknown', use: '', crop: null },
+            ],
+            rules: [{ name: 'space', value: 8, unit: 'px', css: '--space-1: 0.5rem', from: 'gaps' }],
+            notes: '',
         };
+        // A model-provided path to the full reference is not a crop and must be replaced.
+        sheet.elements[0].crop = 'mockup.png';
         const first = await stageMeasurementCrops({ root: dir, workId: 'work-1', sheet, referencePaths: ['mockup.png'] });
         assert.equal(first.warnings.length, 0);
-        assert.equal(first.crops.length, 2);
-        assert.equal(sheet.regions[0].crop, '.tmp/work-1/crops/01-hero-image.png');
-        assert.equal(sheet.regions[1].crop, '.tmp/work-1/crops/02-cta.png');
-        assert.equal(sheet.regions[2].crop, undefined);
+        assert.equal(first.crops.length, 3, 'the shared hero box is cut once');
+        assert.equal(sheet.regions[0].crop, '.tmp/work-1/crops/01-region-hero-image.png');
+        assert.equal(sheet.regions[1].crop, '.tmp/work-1/crops/02-region-cta.png');
+        assert.equal(sheet.regions[2].crop, null);
+        assert.equal(sheet.elements[0].crop, sheet.regions[0].crop, 'an element with the same box reuses the region crop');
+        assert.equal(sheet.elements[1].crop, '.tmp/work-1/crops/03-element-badge.png');
         assert.ok((await stat(path.join(dir, sheet.regions[0].crop))).size > 0);
         assert.ok((await stat(path.join(dir, sheet.regions[1].crop))).size > 0);
+        assert.ok((await stat(path.join(dir, sheet.elements[1].crop))).size > 0);
 
         const second = await stageMeasurementCrops({ root: dir, workId: 'work-1', sheet, referencePaths: ['mockup.png'] });
-        assert.equal(second.crops.length, 2);
+        assert.equal(second.crops.length, 3);
         assert.equal(second.warnings.length, 0);
 
         const text = renderMeasurements(sheet);
-        assert.match(text, /2 ready crop\(s\)/);
-        assert.match(text, /crop: \.tmp\/work-1\/crops\/01-hero-image\.png/);
+        assert.match(text, /3 ready crop file\(s\); 2 element\(s\) and 2 region\(s\) reference them/);
+        assert.match(text, /crop: \.tmp\/work-1\/crops\/01-region-hero-image\.png/);
+        assert.match(text, /width: 3\.125rem/);
+        assert.match(text, /low confidence/);
+        assert.match(text, /The mockup is shown at 1x/);
+
+        const conclusion = measurementConclusion(sheet, first.crops);
+        assert.deepEqual(conclusion.counts, { elements: 2, textElements: 0, regions: 3, rules: 1, crops: 3, lowConfidence: 1 });
+        assert.equal(conclusion.units.rootFontSize, 16);
+        assert.equal(conclusion.files.conclusionToon, 'measurements.conclusion.toon');
+        assert.deepEqual(decodeDocument(encodeToon(conclusion)), conclusion);
+        const index = measurementIndex(sheet, first.crops);
+        assert.deepEqual(index.counts, { elements: 2, regions: 3, rules: 1, crops: 3 });
+        assert.equal(index.elements[0].box, '10,10 50x50');
+        assert.equal(index.elements[0].crop, '.tmp/work-1/crops/01-region-hero-image.png');
+        assert.deepEqual(decodeDocument(encodeToon(index)), index);
         assert.match(text, /PNG with a real alpha channel/);
         assert.match(text, /convert it locally and keep the PNG/);
         assert.match(text, /vectorize_image \/ Recraft/);
@@ -63,10 +118,17 @@ test('measurement crops are cut once and rendered as ready generate_image refere
     }
 });
 
-test('the measurer schema can record numeric spacing and a crop path', () => {
+test('the measurer schema can record units, confidence, and a crop path', () => {
     assert.ok(MEASURER_SCHEMA.properties.regions.items.properties.crop);
+    assert.ok(MEASURER_SCHEMA.properties.units);
+    assert.deepEqual(MEASURER_SCHEMA.properties.confidence.enum, ['high', 'medium', 'low', 'unknown']);
+    assert.deepEqual(MEASURER_SCHEMA.properties.assumptions.type, 'array');
     const element = MEASURER_SCHEMA.properties.elements.items.properties;
     assert.ok(element.crop);
+    assert.ok(element.css);
+    assert.ok(element.use);
+    assert.ok(element.kind);
+    assert.deepEqual(element.confidence.enum, ['high', 'medium', 'low', 'unknown']);
     assert.deepEqual(element.typography.type, ['object', 'null']);
     assert.deepEqual(element.typography.properties.familyConfidence.enum, ['high', 'medium', 'low', 'unknown']);
     assert.deepEqual(element.typography.properties.fontSize.type, ['number', 'null']);

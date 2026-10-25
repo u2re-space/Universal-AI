@@ -84,5 +84,5 @@ export const SPECIALISTS = {
     typer: { tools: ['type', 'screenshot'], turns: 4, schema: null },
     encoder: { tools: ['screenshot'], turns: 3, schema: 'batch' },
     tester: { tools: ['screenshot'], turns: 4, schema: null },
-    measurer: { tools: ['view_image', 'crop_image', 'split_image'], turns: 12, schema: 'measure' },
+    measurer: { tools: ['view_image', 'crop_image', 'split_image'], turns: 16, schema: 'measure' },
 };

@@ -310,9 +310,14 @@ function validateConfig(c) {
         if (role.instructions != null && typeof role.instructions !== 'string') fail(`roles.${name}.instructions должен быть строкой`);
     }
     if (!['team', 'single'].includes(c.agent.mode)) fail('agent.mode: team | single');
-    for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'architectMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'maxContextBytes']) {
+    for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'architectMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'measurerPasses', 'maxContextBytes']) {
         if (!Number.isSafeInteger(c.agent[key]) || c.agent[key] < (key === 'maxReviewRounds' ? 0 : 1)) fail(`agent.${key} должен быть целым числом`);
     }
+    if (c.agent.measurerPasses > 2) fail('agent.measurerPasses: 1..2');
+    if (!Number.isSafeInteger(c.agent.measurerMaxContextBytes) || c.agent.measurerMaxContextBytes < 1024) {
+        fail('agent.measurerMaxContextBytes ≥ 1024');
+    }
+    if (c.agent.measurerMaxContextBytes > c.limits.maxRequestBytes) fail('agent.measurerMaxContextBytes не больше limits.maxRequestBytes');
     if (!['auto', 'always', 'never'].includes(c.agent.visionDelegate)) fail('agent.visionDelegate: auto | always | never');
     if (typeof c.agent.chain !== 'boolean') fail('agent.chain: true | false');
     if (typeof c.agent.resume !== 'boolean') fail('agent.resume: true | false');

@@ -34,10 +34,14 @@ project's current layout over inventing a new one.
    (exports, props, routes, tokens, class names) that other files will rely on. Keep the structure as flat and direct
    as the project allows; do not add layers, abstractions, or files the plan does not need.
 2. Design. When the task has a visual result, act as the designer too. The measurement sheet is the numeric source of
-   truth for boxes, spacing, borders, radii, angles, and crops. Decide the layout and responsive behavior, the type
-   scale and fonts, the palette and design tokens, interaction and motion, and how measured crops, generated images,
-   icons, and fonts are used. Do not invent measurements: use the sheet, derive only what follows from it, and keep
-   unknown values adaptive. For a non-visual task leave the design fields empty.
+   truth for boxes, spacing, borders, radii, angles, and crops. Use its CSS units and conversions as written; do not
+   reinterpret source pixels as viewport offsets. Treat measured values, low-confidence values, and assumptions
+   differently: build on measured values, verify low-confidence ones in the rendered result, and keep assumptions
+   explicit in the design brief. Decide the layout and responsive behavior, the type scale and fonts, the palette and
+   design tokens, interaction and motion, and how measured crops, generated images, icons, and fonts are used. Prefer
+   the small reusable fragments from the sheet over recutting a section, and assign each fragment to the role that
+   should reuse it. Do not invent measurements: use the sheet, derive only what follows from it, and keep unknown
+   values adaptive. For a non-visual task leave the design fields empty.
 3. Step brief. Write one stepGuidance entry for every plan step id, saying what to implement and how: which files the
    step owns, the interfaces to expose and import, the order of work, data flow, styling rules, and pitfalls. The
    authors follow this brief; the orchestrator uses it to collect context and to judge the plan.

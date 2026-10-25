@@ -36,23 +36,33 @@ test('classifier schema is one label and the plan step carries complexity', () =
     assert.deepEqual(elementSchema.gap.type, ['number', 'null']);
     assert.deepEqual(MEASURER_SCHEMA.properties.rules.items.properties.value.type, ['number', 'null']);
     const sheet = {
-        source: 'mockup.png', unit: 'px', canvas: { x: 0, y: 0, width: 400, height: 300 },
+        summary: 'A card on a flat background',
+        source: 'mockup.png', unit: 'px',
+        units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem', '%'], notes: '1rem = 16 source pixels.' },
+        confidence: 'medium', assumptions: ['The mockup is shown at 1x.'],
+        canvas: { x: 0, y: 0, width: 400, height: 300 },
         elements: [{
-            name: 'Hero card', box: { x: 40, y: 30, width: 200, height: 120 }, radius: 12,
+            name: 'Hero card', kind: 'card', box: { x: 40, y: 30, width: 200, height: 120 }, radius: 12,
             padding: { top: 16, right: 20, bottom: null, left: 20 },
             margin: { top: null, right: null, bottom: 24, left: null }, gap: 8,
             placement: 'two-column grid, aligned to canvas center',
+            css: 'width: 12.5rem; padding: 1rem 1.25rem;', use: 'card reference',
             typography: { role: 'heading', family: '', familyConfidence: 'unknown', fontSize: 28, weight: 600, lineHeight: 34, letterSpacing: 0, style: '' },
+            confidence: 'high', notes: '', crop: null,
         }],
-        regions: [], rules: [{ name: 'spacing step', value: 8, unit: 'px', from: 'card items' }], notes: '',
+        regions: [], rules: [{ name: 'spacing step', value: 8, unit: 'px', css: '--space-1: 0.5rem', from: 'card items' }], notes: '',
     };
     const rendered = renderMeasurements(sheet);
     assert.match(rendered, /left 10%; top 10%; width 50%; height 40%/);
     assert.match(rendered, /aspect-ratio 1\.333 \/ 1/);
+    assert.match(rendered, /Units: source px · 1rem = 16 px · preferred CSS units: rem, %/);
+    assert.match(rendered, /Overall confidence: medium/);
+    assert.match(rendered, /Assumptions \(verify these, do not treat them as measurements\):\n- The mockup is shown at 1x\./);
+    assert.match(rendered, /css: width: 12\.5rem; padding: 1rem 1\.25rem;/);
     assert.match(rendered, /padding: top 16 px, right 20 px/);
     assert.match(rendered, /margin: bottom 24 px/);
     assert.match(rendered, /gap: 8 px/);
-    assert.match(rendered, /spacing step: 8 px/);
+    assert.match(rendered, /spacing step: 8 px → --space-1: 0\.5rem/);
     assert.match(rendered, /typography: heading, size 28 px, weight 600, line-height 34 px, letter-spacing 0 px/);
     assert.match(rendered, /Typography workflow/);
     assert.match(ROLE_INSTRUCTIONS.coder, /canvas-relative percentages/);

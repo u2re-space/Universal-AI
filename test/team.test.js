@@ -638,6 +638,7 @@ test('delegated measurer gets web search only when tools.web is enabled', async 
             if (role === 'measurer') {
                 assert.equal(body.tools.some((tool) => tool.type === 'web_search'), web);
                 assert.ok(body.tools.some((tool) => tool.name === 'fetch_url'));
+                assert.ok(body.tools.some((tool) => tool.name === 'crop_image'), 'the measurer can crop even when image generation is off');
                 return { text: JSON.stringify({
                     summary: 'замеров нет', source: 'text-only task', unit: 'px',
                     canvas: { x: 0, y: 0, width: 1, height: 1 }, elements: [], regions: [], rules: [], notes: '',
@@ -1427,6 +1428,7 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-'));
     const events = [];
     const seen = [];
+    const measureBodies = [];
     const coderBodies = [];
     detectCoder = true;
     script = (body) => {
@@ -1438,22 +1440,27 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
             return { text: JSON.stringify({ summary: 'стили по референсу', complexity: 'normal', steps: [{ goal: 'Создать styles.scss', details: 'Собрать grid по измеренному макету', verify: 'прочитать styles.scss' }], filesOfInterest: [], searchQueries: [], questionsForCollector: ['Какой стиль?'], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
         }
         if (role === 'measurer') {
+            measureBodies.push(body);
             assert.equal(body.model, 'gpt-6.1-sol');
             assert.equal(body.reasoning?.effort, 'high');
             assert.ok((body.tools ?? []).some((tool) => tool.name === 'fetch_url'), 'the measurer can open its documentation links');
             assert.equal((body.tools ?? []).some((tool) => tool.type === 'web_search'), config.tools.web);
             return { text: JSON.stringify({
                 summary: 'Карточка в двухколоночной сетке', source: 'mockup.png', unit: 'px',
+                units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '1rem = 16px.' },
+                confidence: 'high', assumptions: [],
                 canvas: { x: 0, y: 0, width: 400, height: 300 },
                 elements: [{
-                    name: 'Hero card', box: { x: 50, y: 60, width: 200, height: 160 }, rotation: 0,
+                    name: 'Hero card', kind: 'card', box: { x: 50, y: 60, width: 200, height: 160 }, rotation: 0,
                     borders: '1 px solid', radius: 8,
                     padding: { top: 16, right: 20, bottom: 16, left: 20 },
                     margin: { top: null, right: null, bottom: 24, left: null }, gap: 8,
                     spacing: '', placement: 'two-column grid, centered in the canvas',
-                    typography: { role: 'heading', family: '', familyConfidence: 'unknown', fontSize: 28, weight: 600, lineHeight: 34, letterSpacing: 0, style: '' }, crop: null,
+                    css: 'width: 12.5rem; padding: 1rem 1.25rem;', use: 'card reference',
+                    typography: { role: 'heading', family: '', familyConfidence: 'unknown', fontSize: 28, weight: 600, lineHeight: 34, letterSpacing: 0, style: '' },
+                    confidence: 'high', notes: '', crop: null,
                 }],
-                regions: [], rules: [{ name: 'spacing', value: 8, unit: 'px', from: 'card items' }], notes: '',
+                regions: [], rules: [{ name: 'spacing', value: 8, unit: 'px', css: '--space-1: 0.5rem', from: 'card items' }], notes: '',
             }) };
         }
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [{ question: 'Какой стиль?', answer: 'минимализм' }], conventions: [], notes: '' }) };
@@ -1489,10 +1496,91 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
     const collectIdx = stages.indexOf('collect');
     assert.ok(measureIdx >= 0 && collectIdx > measureIdx, `measure(${measureIdx}) should run before collect(${collectIdx}), stages: ${stages.join(', ')}`);
     assert.ok(events.some((e) => e.type === 'stage.start' && e.stage === 'measure' && e.role === 'measurer'));
+    assert.equal(measureBodies.length, 2, 'the whole reference is measured before fragments');
+    assert.equal((measureBodies[0].tools ?? []).some((tool) => tool.name === 'crop_image'), false, 'the overview pass does not start from a crop');
+    assert.equal((measureBodies[1].tools ?? []).some((tool) => tool.name === 'crop_image'), true, 'the fragment pass may cut more crops');
+    assert.match(JSON.stringify(measureBodies[1].input), /Measurement pass 2/);
+    assert.match(JSON.stringify(measureBodies[1].input), /Overview sheet \(JSON\)/);
+    assert.ok(events.some((e) => e.type === 'measure.pass' && e.pass === 1 && e.phase === 'overview'));
+    assert.ok(events.some((e) => e.type === 'measure.pass' && e.pass === 2 && e.phase === 'fragments'));
+    assert.ok(events.some((e) => e.type === 'measure.conclusion' && e.elements === 1));
     assert.ok(coderBodies.length > 0, 'the SCSS step is assigned to coder');
     const savedSheet = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.json'), 'utf8'));
     assert.equal(savedSheet.elements[0].box.width, 200);
+    assert.equal(savedSheet.units.rootFontSize, 16);
+    const savedConclusion = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.conclusion.json'), 'utf8'));
+    assert.equal(savedConclusion.counts.elements, 1);
+    assert.match(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.toon'), 'utf8'), /elements\[1\]/);
+    assert.match(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.conclusion.toon'), 'utf8'), /counts/);
     await rm(dir, { recursive: true, force: true });
+});
+
+test('the fragment pass replaces the overview sheet and reuses its crops', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-passes-'));
+    const events = [];
+    const measureBodies = [];
+    let measureCalls = 0;
+    await writeFile(path.join(dir, 'mockup.png'), Buffer.from(TINY_PNG, 'base64'));
+    const sheet = (summary, elements, regions) => ({
+        summary, source: 'mockup.png', unit: 'px',
+        units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '1rem = 16px.' },
+        confidence: summary === 'overview' ? 'low' : 'high', assumptions: [],
+        canvas: { x: 0, y: 0, width: 1, height: 1 },
+        elements, regions, rules: [], notes: '',
+    });
+    const element = (name) => ({
+        name, kind: 'card', box: { x: 0, y: 0, width: 1, height: 1 }, rotation: 0,
+        borders: '', radius: null, padding: { top: null, right: null, bottom: null, left: null },
+        margin: { top: null, right: null, bottom: null, left: null }, gap: null,
+        spacing: '', placement: 'single anchor', css: 'width: 1px; height: 1px;', use: 'card reference',
+        typography: null, confidence: 'high', notes: '', crop: null,
+    });
+    const region = (name) => ({
+        name, kind: 'card', box: { x: 0, y: 0, width: 1, height: 1 },
+        how: 'the whole tile', use: 'card reference', crop: null,
+    });
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({ summary: 'замер', complexity: 'normal', steps: [{ goal: 'Создать страницу', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        }
+        if (role === 'measurer') {
+            measureBodies.push(body);
+            measureCalls += 1;
+            return { text: JSON.stringify(measureCalls === 1
+                ? sheet('overview', [element('Card')], [region('Card region')])
+                : sheet('fragments', [element('Card'), element('Badge')], [region('Card region')])) };
+        }
+        if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        return { text: 'worker done' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.agent = { ...config.agent, measurerPasses: 2, measurerMaxTurns: 6 };
+    try {
+        const result = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'страница по макету',
+            root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+            emit: (event) => events.push(event),
+        });
+        assert.equal(result.status, 'completed', result.error?.message);
+        assert.equal(measureCalls, 2);
+        assert.match(JSON.stringify(measureBodies[1].input), /# Staged fragments/);
+        assert.match(JSON.stringify(measureBodies[1].input), /\.tmp\/[^/]+\/crops\/01-region-card-region\.png/);
+        const saved = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.json'), 'utf8'));
+        assert.equal(saved.summary, 'fragments');
+        assert.equal(saved.elements.length, 2);
+        assert.equal(saved.elements[0].crop, saved.elements[1].crop, 'the shared box reuses one crop');
+        assert.equal(saved.regions[0].crop, saved.elements[0].crop);
+        const conclusion = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.conclusion.json'), 'utf8'));
+        assert.equal(conclusion.counts.crops, 1);
+        assert.match(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.toon'), 'utf8'), /summary: fragments/);
+        assert.ok(events.some((event) => event.type === 'measure.crops' && event.count === 1));
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
 });
 
 test('architect runs after the measurements and gives the structure to the orchestrator and the author', async () => {
@@ -1599,7 +1687,7 @@ test('a spent measurement budget still returns the sheet for what the role alrea
     };
     const config = baseConfig();
     config.memory = { ...defaults.memory, enabled: false };
-    config.agent = { ...config.agent, chain: false, resume: false, measurerMaxTurns: 1 };
+    config.agent = { ...config.agent, chain: false, resume: false, measurerPasses: 1, measurerMaxTurns: 1 };
     const result = await runTeam({
         client: client(), config, ledger: createLedger(), task: 'замерь макет',
         root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],

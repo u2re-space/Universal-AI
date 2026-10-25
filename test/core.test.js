@@ -255,6 +255,25 @@ test('agent.extract accepts off, auto, and always', async () => {
     }
 });
 
+test('measurer passes, turns, and context budget are validated', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-measurer-cfg-'));
+    const env = { AI_AGENT_HOME: home };
+    try {
+        const config = await loadConfig({ env, ensureHome: false });
+        assert.equal(config.agent.measurerPasses, 2);
+        assert.equal(config.agent.measurerMaxTurns, 16);
+        assert.equal(config.agent.measurerMaxContextBytes, 8 * 1024 * 1024);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ agent: { measurerPasses: 3 } }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /agent\.measurerPasses: 1\.\.2/);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ agent: { measurerMaxContextBytes: 512 } }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /agent\.measurerMaxContextBytes ≥ 1024/);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ agent: { measurerMaxContextBytes: 9 * 1024 * 1024 } }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /agent\.measurerMaxContextBytes не больше limits\.maxRequestBytes/);
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
 test('web search, turn extension, and magickPath defaults; reviewer model is validated', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-tools-cfg-'));
     const env = { AI_AGENT_HOME: home };
