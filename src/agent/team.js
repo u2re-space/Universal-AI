@@ -80,6 +80,7 @@ export function toolNamesForRole(allNames, role) {
     }
     if (role === 'image-processor') {
         const allowed = new Set(IMAGE_TOOL_NAMES);
+        allowed.add('fetch_url');
         return allNames.filter((name) => allowed.has(name));
     }
     return allNames;
@@ -838,7 +839,7 @@ export async function runTeam({
             const model = encodeRoute || !paced?.ready
                 ? choice.model
                 : clampModel(choice.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.measurer?.model));
-            const measureNames = ['view_image', 'crop_image', 'split_image'].filter((name) => allNames.includes(name));
+            const measureNames = ['view_image', 'crop_image', 'split_image', 'fetch_url'].filter((name) => allNames.includes(name));
             const measureTools = measureNames.length
                 ? createToolset({ ...toolBase, names: measureNames, approvalLevel, describeScreen: roles.describeScreen })
                 : null;
