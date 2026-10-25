@@ -4,8 +4,11 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { generateSvg } from '../src/agent/assets.js';
-import { detectMagick } from '../src/agent/image-magick.js';
-import { enabledToolNames } from '../src/agent/tool-specs.js';
+import { detectMagick, magickIdentify } from '../src/agent/image-magick.js';
+import { enabledToolNames, TOOL_SPECS } from '../src/agent/tool-specs.js';
+import { createToolset } from '../src/agent/tools.js';
+import { runProgram } from '../src/agent/shell.js';
+import { defaults } from '../src/core/config.js';
 
 let root;
 after(async () => { if (root) await rm(root, { recursive: true, force: true }); });
@@ -46,4 +49,43 @@ test('image tools are enabled with images and asset downloads with fetch', () =>
 test('detectMagick answers with an executable path or null and never throws', async () => {
     const found = await detectMagick();
     assert.ok(found === null || typeof found === 'string');
+});
+
+test('crop_image is the one tool for both a box and a padding trim', async (t) => {
+    assert.ok(TOOL_SPECS.crop_image.parameters.properties.trim);
+    assert.match(TOOL_SPECS.crop_image.description, /trim=true/);
+
+    const exe = await detectMagick();
+    if (!exe) return t.skip('ImageMagick is not installed');
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-crop-trim-'));
+    try {
+        // White 200x200 canvas with a 41x41 red square: the trim result is known in advance.
+        await runProgram({
+            file: exe,
+            args: ['-size', '200x200', 'xc:white', '-fill', 'red', '-draw', 'rectangle 60,60 100,100', 'subject.png'],
+            cwd: dir, timeoutMs: 15000, maxOutputBytes: 4096,
+        });
+        const toolset = createToolset({ root: dir, config: defaults, names: ['crop_image'], approvalLevel: 'all' });
+        const call = (args) => toolset.execute({ name: 'crop_image', call_id: 'c1', arguments: JSON.stringify(args) });
+
+        const trimmed = await call({ path: 'subject.png', x: null, y: null, width: null, height: null, trim: true, output: 'assets/subject.png', reason: 'снять белый фон' });
+        assert.equal(trimmed.ok, true, trimmed.output);
+        assert.match(trimmed.output, /Снят padding/);
+        assert.equal(trimmed.summary, 'assets/subject.png');
+        const cut = await magickIdentify({ exe, input: 'assets/subject.png', cwd: dir });
+        assert.equal(cut.width, 41);
+        assert.equal(cut.height, 41);
+
+        const box = await call({ path: 'subject.png', x: 10, y: 10, width: 50, height: 40, trim: false, output: 'assets/box.png', reason: 'кроп детали' });
+        assert.equal(box.ok, true, box.output);
+        const cropped = await magickIdentify({ exe, input: 'assets/box.png', cwd: dir });
+        assert.equal(cropped.width, 50);
+        assert.equal(cropped.height, 40);
+
+        const plain = await call({ path: 'subject.png', x: null, y: null, width: null, height: null, trim: false, output: '', reason: 'без размеров' });
+        assert.equal(plain.ok, false);
+        assert.match(plain.output, /trim=true/);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
 });

@@ -27,7 +27,7 @@ import { structureCode } from '../structure/structure.js';
 import { DESKTOP_TOOL_NAMES, createDesktopHandlers } from './desktop.js';
 import { createImageHandlers } from './image-tools.js';
 import { createChannelHandlers } from '../channels/tool-handlers.js';
-import { detectMagick, magickSplit, magickCrop, magickIdentify } from './image-magick.js';
+import { detectMagick, magickSplit, magickCrop, magickTrimImage, magickIdentify } from './image-magick.js';
 import { generateSvg, downloadFont, downloadIcons } from './assets.js';
 import {
     TOOL_SPECS,
@@ -39,6 +39,17 @@ import {
 } from './tool-specs.js';
 export { TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory };
 
+
+/**
+ * Why `crop_image(trim=true)` left the file alone, in the wording the model reads back.
+ * @ai.hint pure
+ */
+const TRIM_REFUSED = {
+    'no-padding': 'ни прозрачного, ни равномерного padding по краям нет',
+    'too-small': 'trim снял бы больше 90 % кадра',
+    'unreadable': 'размеры изображения не читаются',
+    'failed': 'ImageMagick отклонил trim',
+};
 
 /**
  * Drop scripts, styles, and tags so fetched HTML becomes readable text.
@@ -239,7 +250,7 @@ export function createToolset({
             case 'run_ahk': return `Скрипт: ${truncate(args.script ?? '', 400)}`;
             case 'run_batch': return `Пакет: ${truncate(batchSource(args), 400)}`;
             case 'split_image': return `Разбить ${args.path} на ${args.rows ?? 1}×${args.cols ?? 1} плиток\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
-            case 'crop_image': return `Обрезать ${args.path}: ${args.width ?? '?'}×${args.height ?? '?'} в (${args.x ?? 0},${args.y ?? 0})\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
+            case 'crop_image': return `${args.trim ? `Снять padding ${args.path}` : `Обрезать ${args.path}: ${args.width ?? '?'}×${args.height ?? '?'} в (${args.x ?? 0},${args.y ?? 0}) `}\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
             case 'generate_svg': return `SVG ${args.width ?? 512}×${args.height ?? 512}: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}\nПричина: ${args.reason ?? '—'}`;
             case 'vectorize_image': return `Векторизовать ${args.image || 'кроп из замеров'} в SVG`;
             case 'download_font': return `Шрифт: ${args.name || args.url || '?'} ${args.style || ''}\nВыход: ${args.output || 'авто'}`;
@@ -544,17 +555,18 @@ export function createToolset({
             }
             throw new Error('ImageMagick не найден. Установите ImageMagick (magick или convert) или используйте generate_image/edit_image для работы с изображениями.');
         },
-        /** Crop a region from an image. Reports source dimensions in the output. */
+        /** Crop a box from an image, or cut its padding off when `trim` is set. Reports source dimensions. */
         async crop_image(args) {
             const { abs, rel } = await resolveInside(root, args.path, { allowRoot: false });
             const info = await stat(abs).catch(() => null);
             if (!info?.isFile()) throw new Error(`Файл не найден: ${args.path}`);
+            const trim = Boolean(args.trim);
             const x = Math.max(0, args.x ?? 0);
             const y = Math.max(0, args.y ?? 0);
             const width = args.width ?? 0;
             const height = args.height ?? 0;
-            if (!width || !height) throw new Error('Укажите width и height для обрезки.');
-            const requested = String(args.output ?? '').trim() || `.tmp/crop-${Date.now()}.png`;
+            if (!trim && (!width || !height)) throw new Error('Укажите width и height для обрезки — или trim=true, чтобы снять padding по краям.');
+            const requested = String(args.output ?? '').trim() || `.tmp/${trim ? 'trim' : 'crop'}-${Date.now()}.png`;
             const output = (await resolveInside(root, requested, { forWrite: true, allowRoot: false })).rel;
             const exe = await detectMagick({ magickPath: config.magickPath ?? null });
             if (exe) {
@@ -564,6 +576,14 @@ export function createToolset({
                     const id = await magickIdentify({ exe, input: abs, cwd: root, signal });
                     srcDims = ` (исходный: ${id.width}x${id.height})`;
                 } catch { /* optional */ }
+                if (trim) {
+                    // `fuzz` lets a uniform opaque padding go too, not only the transparent one.
+                    const cut = await magickTrimImage({ exe, input: abs, output, cwd: root, signal, fuzz: 6 });
+                    if (!cut.changed) return { output: `Padding не снят (${TRIM_REFUSED[cut.reason] ?? cut.reason}): ${rel}${srcDims}`, summary: rel };
+                    const size = await stat(path.isAbsolute(output) ? output : path.join(root, output)).catch(() => null);
+                    const box = `${cut.before.width}×${cut.before.height} → ${cut.after.width}×${cut.after.height}`;
+                    return { output: `Снят padding ${rel}${srcDims} → ${output} (${box}, ${formatBytes(size?.size ?? 0)})`, summary: output };
+                }
                 const result = await magickCrop({ exe, input: abs, output, x, y, width, height, cwd: root, signal });
                 return { output: `Обрезано ${rel}${srcDims} → ${result.rel} (${width}×${height} в ${x},${y}, ${formatBytes(result.bytes)})`, summary: result.rel };
             }

@@ -486,35 +486,43 @@ async function probeMatte({ exe, output, cwd, signal, width, height, reason }) {
 }
 
 /**
- * Trim uniform-color padding from the edges of an image in place.
- * Adds a 1-pixel border of the opposite color before trimming so that ImageMagick
- * recognizes the outer area as trimmable even when the subject touches the edge.
- * Only trims when the result is at least 10 % of the original in both dimensions.
- * @param {{ exe: string, input: string, output?: string, cwd: string, signal?: AbortSignal }} opts
+ * Trim padding from the edges of an image, writing to `output` (in place by default).
+ * The strict pass adds a 1-pixel transparent border first, so ImageMagick recognizes the outer
+ * area as trimmable even when the subject touches the edge; it cuts transparent padding.
+ * With `fuzz` set, a second pass compares the corner color with that fuzz and also cuts a
+ * uniform opaque padding. Only trims when the result is at least 10 % of the original in both
+ * dimensions.
+ * @param {{ exe: string, input: string, output?: string, cwd: string, signal?: AbortSignal, fuzz?: number|null }} opts
  * @returns {Promise<{ changed: boolean, reason: string, before?: {width:number,height:number}, after?: {width:number,height:number} }>}
  * @exports
  * @ai.hint io
  */
-export async function magickTrimImage({ exe, input, output = input, cwd, signal }) {
+export async function magickTrimImage({ exe, input, output = input, cwd, signal, fuzz = null }) {
     const before = await magickIdentify({ exe, input, cwd, signal });
     if (!before.width || !before.height) return { changed: false, reason: 'unreadable' };
     const outPath = path.isAbsolute(output) ? output : path.join(cwd, output);
+    await mkdir(path.dirname(outPath), { recursive: true });
     const suffix = path.extname(outPath) || '.png';
     const tmpPath = path.join(path.dirname(outPath), `.tmp-trim-${process.pid}-${Date.now()}${suffix}`);
+    const passes = [['-bordercolor', 'none', '-border', '1', '-trim']];
+    if (Number.isFinite(fuzz) && fuzz > 0) passes.push(['-fuzz', `${fuzz}%`, '-trim']);
     try {
-        await magickRun(exe, [input, '-bordercolor', 'none', '-border', '1', '-trim', '+repage', tmpPath], { cwd, signal });
-        const after = await magickIdentify({ exe, input: tmpPath, cwd, signal });
-        if (!after.width || !after.height) { await unlink(tmpPath).catch(() => {}); return { changed: false, reason: 'unreadable' }; }
-        if (after.width < before.width * 0.1 || after.height < before.height * 0.1) {
-            await unlink(tmpPath).catch(() => {});
-            return { changed: false, reason: 'too-small', before, after };
+        let after = before;
+        for (const args of passes) {
+            await magickRun(exe, [input, ...args, '+repage', tmpPath], { cwd, signal });
+            after = await magickIdentify({ exe, input: tmpPath, cwd, signal });
+            if (!after.width || !after.height) { await unlink(tmpPath).catch(() => {}); return { changed: false, reason: 'unreadable' }; }
+            // Nothing cut by this pass — try the next one when there is one.
+            if (after.width === before.width && after.height === before.height) continue;
+            if (after.width < before.width * 0.1 || after.height < before.height * 0.1) {
+                await unlink(tmpPath).catch(() => {});
+                return { changed: false, reason: 'too-small', before, after };
+            }
+            await rename(tmpPath, outPath);
+            return { changed: true, reason: 'trimmed', before, after };
         }
-        if (after.width === before.width && after.height === before.height) {
-            await unlink(tmpPath).catch(() => {});
-            return { changed: false, reason: 'no-padding', before, after };
-        }
-        await rename(tmpPath, outPath);
-        return { changed: true, reason: 'trimmed', before, after };
+        await unlink(tmpPath).catch(() => {});
+        return { changed: false, reason: 'no-padding', before, after };
     } catch (error) {
         await unlink(tmpPath).catch(() => {});
         return { changed: false, reason: 'failed', error };

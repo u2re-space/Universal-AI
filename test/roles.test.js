@@ -39,6 +39,11 @@ test('existing role instructions keep their job', () => {
     assert.match(ROLE_INSTRUCTIONS['image-processor'], /Do not edit application code/);
 });
 
+test('the image processor trims padding through crop_image', () => {
+    assert.match(ROLE_INSTRUCTIONS['image-processor'], /Trimming padding is a crop_image call/);
+    assert.match(ROLE_INSTRUCTIONS['image-processor'], /trim=true/);
+});
+
 test('specialists do not delegate or run batches', () => {
     assert.deepEqual(Object.keys(SPECIALISTS).sort(), ['clicker', 'encoder', 'measurer', 'solver', 'tester', 'typer']);
     assert.deepEqual(SPECIALISTS.solver, { tools: ['screenshot', 'view_image'], turns: 6, schema: null });

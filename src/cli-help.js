@@ -71,6 +71,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
                          когда лимит исчерпан, терминал предлагает продлить на limits.extendTurns (10) ходов
   При tools.fetch доступны download_font (Google Fonts или URL) и download_icons (Phosphor, Lucide с CDN).
   split_image и crop_image требуют ImageMagick (magick или convert); путь задаётся полем magickPath.
+  crop_image режет коробку x/y/width/height, а с trim=true снимает padding по краям.
   При tools.shell агент может: run_command (оболочка на вызов), run_script (.ps1 .cmd .bat .sh .bash), ssh (команда или файл, scp put/get).
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 
