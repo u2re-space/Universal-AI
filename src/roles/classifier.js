@@ -23,4 +23,4 @@ export const instructions = 'Classify this task as trivial, normal, or complex. 
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'high', model: "gpt-6.1-sol" };
+export const settings = { effort: 'max', model: "gpt-6.1-sol" };

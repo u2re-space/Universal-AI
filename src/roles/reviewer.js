@@ -32,7 +32,7 @@ Reply in JSON only. ${DESKTOP_NOTE} ${UNTRUSTED}`;
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'high', model: 'gpt-6-luna' };
+export const settings = { effort: 'high', model: 'gpt-6.1-sol' };
 /** Models the reviewer must never run on. Validated in config.js and clamped in pace/config. */
 export const FORBIDDEN_MODELS = Object.freeze(['gpt-6-astra']);
 /** Replacement when a forbidden model is inherited from the default role or the pace ladder. */

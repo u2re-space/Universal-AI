@@ -36,9 +36,9 @@ export const settings = { effort: null, model: null };
 
 /** Model and effort for each plan complexity. Writing stays on the cheaper model. */
 export const WRITER_TIERS = Object.freeze({
-    trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'low' }),
-    normal: Object.freeze({ model: 'gpt-6-luna', effort: 'medium' }),
-    complex: Object.freeze({ model: 'gpt-6-luna', effort: 'high' }),
+    trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'medium' }),
+    normal: Object.freeze({ model: 'gpt-6-luna', effort: 'high' }),
+    complex: Object.freeze({ model: 'gpt-6-luna', effort: 'max' }),
 });
 
 /**

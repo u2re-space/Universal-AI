@@ -156,7 +156,7 @@ MCP:
 
 Чаты и решения:
   ai decide и POST /v1/decisions — модель openai/gpt-6-luna-decisions (или decisions.model). Если маршрута нет, шаг решений пропускается.
-  Запасные модели: gpt-6-luna → anthropic/claude-haiku-5-5, gpt-6.1-sol → anthropic/claude-opus-5.5, решения → typesafe/jev-1.14.
+  Запасные модели: gpt-6-luna → anthropic/claude-haiku-5-5, gpt-6.1-sol → anthropic/claude-sonnet-5.5, решения → typesafe/jev-1.14.
   Если провайдер недоступен и задан SPRUTDOCK_API_KEY или AI_FALLBACK_API_KEY, запрос уходит на https://sprutdock.ru/v1 или AI_FALLBACK_BASE_URL.
   ai moderate в режиме auto сначала вызывает /moderations (omni-moderation-latest). Если шлюз отвечает 404, 405 или 501,
   тот же текст уходит в decisions. Пороги decisions.reviewAt (0.5) и blockAt (0.9) дают allow, review или hide.

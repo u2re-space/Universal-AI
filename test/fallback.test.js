@@ -6,7 +6,7 @@ import { defaults } from '../src/core/config.js';
 
 test('known models fall back to another channel', () => {
     assert.equal(fallbackModel('gpt-6-luna'), 'anthropic/claude-haiku-5-5');
-    assert.equal(fallbackModel('openai/gpt-6.1-sol'), 'anthropic/claude-opus-5.5');
+    assert.equal(fallbackModel('openai/gpt-6.1-sol'), 'anthropic/claude-sonnet-5.5');
     assert.equal(fallbackModel('openai/gpt-6-luna-decisions'), 'typesafe/jev-1.14');
     assert.equal(modelMissing(new ApiError('missing', { status: 404, apiCode: 'model_not_found' })), true);
     assert.equal(modelMissing(new ApiError('bad temperature', { status: 400 })), false);
