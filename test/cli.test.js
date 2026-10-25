@@ -348,7 +348,7 @@ test('launchers print version from outside the repository', async () => {
     for (const launcher of launchers) {
         const { code, stdout, stderr } = await runLauncher(launcher, ['--version'], cwd);
         assert.equal(code, 0, stderr);
-        assert.equal(stdout, '@u2ai/universal-ai 0.1.5\n');
+        assert.equal(stdout, '@u2ai/universal-ai 0.1.6\n');
     }
 });
 
@@ -361,7 +361,7 @@ test('launcher spaced path prints version', async () => {
     try {
         const { code, stdout, stderr } = await runLauncher(path.join(link, 'bin', 'ai.cmd'), ['--version'], os.tmpdir());
         assert.equal(code, 0, stderr);
-        assert.equal(stdout, '@u2ai/universal-ai 0.1.5\n');
+        assert.equal(stdout, '@u2ai/universal-ai 0.1.6\n');
     } finally {
         await rm(link, { force: true });
     }
@@ -375,7 +375,7 @@ test('launcher ignores caller node.cmd', async () => {
         await writeFile(path.join(cwd, 'node.cmd'), '@echo PLANTED& exit /b 42');
         const { code, stdout, stderr } = await runLauncher(path.join(root, 'bin', 'ai.cmd'), ['--version'], cwd);
         assert.equal(code, 0, stderr);
-        assert.equal(stdout, '@u2ai/universal-ai 0.1.5\n');
+        assert.equal(stdout, '@u2ai/universal-ai 0.1.6\n');
         assert.doesNotMatch(stdout, /PLANTED/);
         assert.doesNotMatch(stderr, /PLANTED/);
     } finally {
