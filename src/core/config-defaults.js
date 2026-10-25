@@ -152,9 +152,8 @@ export const defaults = Object.freeze({
      *   extractor  — cleans a verbose answer and writes clean file bodies to .tmp
      *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
      *   image-processor — generates, edits, and prepares requested images and visual assets before implementation
-     *   reader      — sub-agent: reads the project and answers one focused question (run_subagent)
-     *   implementor — sub-agent: one self-contained piece of implementation with its own verification
-     *   verifier    — sub-agent: checks one claim by running the project's own checks and reporting evidence
+     * worker, coder, writer, reviewer, tester, vision, solver, and image-processor double as the
+     * sub-agents of run_subagent (tools.subagents): same prompt, same model settings, own context.
      */
     roles: {
         default: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
@@ -176,9 +175,6 @@ export const defaults = Object.freeze({
         extractor: { model: null, effort: 'high', summary: null, verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
         measurer: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         'image-processor': { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        reader: { model: null, effort: 'medium', summary: null, verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
-        implementor: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        verifier: { model: null, effort: 'high', summary: null, verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
     },
     /** Multi-role orchestration used by `ai run`. */
     agent: {

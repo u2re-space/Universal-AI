@@ -176,7 +176,7 @@ export function handleRendererEvent(event, api) {
             if (verbose) line('info', `${event.role}: ${event.status}${event.toolCalls ? ` · инструментов ${event.toolCalls}` : ''}`, { dim: true });
             break;
         case 'subagent.start':
-            line('action', `суб-агент «${event.kind}» — ${event.role}${event.model ? ` · ${event.model}` : ''}`);
+            line('action', `суб-агент «${event.kind}»${event.model ? ` · ${event.model}` : ''}`);
             setStatus(`суб-агент ${event.kind}…`);
             break;
         case 'subagent.done':

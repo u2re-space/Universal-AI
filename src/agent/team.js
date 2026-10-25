@@ -38,7 +38,7 @@ import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolv
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
 import { formatWorkspace, mergeTaskDraft, scanWorkspace } from './workspace-scan.js';
-import { SHELL_TOOL_NAMES } from './tool-specs.js';
+import { SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES } from './tool-specs.js';
 import { openMcpSources } from '../mcp/session.js';
 import { ANSWER_INSTRUCTIONS, chooseRoute, loadHandoff, openHandoff, readDirectory, saveHandoff, seedDirectory, seedTextFile, spillAnswer } from './handoff.js';
 import { applyFromStep, applyPlanUpdate, briefPlan, briefProgress, continuationText, createProgress, expandPlan, findResumable, loadWork, newWorkId, parsePlanUpdate, pathsIn, recordStep, revisionClause, saveWork, syncProgress } from './work-plan.js';
@@ -79,7 +79,7 @@ export function toolNamesForRole(allNames, role) {
         return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || name === 'run_subagent');
     }
     if (role === 'image-processor') {
-        const allowed = new Set(['view_image', 'crop_image', 'split_image', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons']);
+        const allowed = new Set(IMAGE_TOOL_NAMES);
         return allNames.filter((name) => allowed.has(name));
     }
     return allNames;
@@ -181,7 +181,7 @@ export async function runTeam({
         });
         return { output: result.text, summary: role + ' ' + result.status, data: result.data ?? null };
     }
-    /** Start one nested agent (reader, implementor, verifier) on a fresh context. */
+    /** Start one nested agent (a pipeline role on a fresh context) for run_subagent. */
     const subagent = createSubagentRunner({
         config, roles, root, allNames, approvalLevel, toolBase, emit,
         toolOptions: { describeImage: vision('worker'), describeScreen: roles.describeScreen },

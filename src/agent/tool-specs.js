@@ -4,7 +4,7 @@
  * @purpose JSON schemas and enablement rules for the local function tools.
  * @depends agent/desktop
  * @usedBy agent/tools
- * @exports TOOL_SPECS, READ_ONLY_TOOLS, SHELL_TOOL_NAMES, toolDefinitions, enabledToolNames, describeTool, toolCategory
+ * @exports TOOL_SPECS, READ_ONLY_TOOLS, SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES, toolDefinitions, enabledToolNames, describeTool, toolCategory
  * @ai.tags tools, schema
  * @ai.hint pure
  * @changed 2026-10-25 run_subagent (tools.subagents). Image splitting, cropping, SVG generation, fonts, and icon sets.
@@ -408,10 +408,10 @@ export const TOOL_SPECS = {
         }),
     },
     run_subagent: {
-        category: 'write', group: 'subagents',
-        description: 'Start one sub-agent: a separate agent with a fresh context, its own tools and turn cap, that works on the task and returns a report. It never sees this conversation, so the task must be self-contained — name the paths, the exact question, and what the report must contain. reader reads and answers only; implementor edits files and verifies them; verifier runs the project checks and reports evidence. A sub-agent cannot start another sub-agent.',
+        category: 'read', group: 'subagents',
+        description: 'Start one sub-agent: a separate agent on a fresh context, with its own tools and turn cap, that works on the task and returns a report. It never sees this conversation, so the task must be self-contained — name the paths, the exact question, and what the report must contain. coder, worker, and writer change files; reviewer and tester only check and report; vision describes image files; solver answers from the screen or an image; image-processor prepares assets. A sub-agent cannot start another sub-agent, and it can only write or run commands the caller itself is allowed to.',
         parameters: schema({
-            kind: { type: 'string', enum: ['reader', 'implementor', 'verifier'], description: 'Sub-agent to start.' },
+            kind: { type: 'string', enum: ['coder', 'worker', 'writer', 'reviewer', 'tester', 'vision', 'solver', 'image-processor'], description: 'Sub-agent to start; the name is also the role whose prompt and model are used.' },
             task: str('The whole task for that sub-agent: goal, paths, constraints, and the report it must return.'),
         }),
     },
@@ -421,6 +421,9 @@ export const READ_ONLY_TOOLS = ['list_files', 'read_file', 'search_files', 'view
 
 /** Shell tools enabled together by tools.shell. Orchestrator may run these during coordination; collector context-report uses read-only tools only. */
 export const SHELL_TOOL_NAMES = ['run_command', 'run_script', 'ssh'];
+
+/** Image and asset tools of the image-processor role and sub-agent. */
+export const IMAGE_TOOL_NAMES = ['view_image', 'crop_image', 'split_image', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons'];
 
 /**
  * Strict function-tool definitions for names that exist in `TOOL_SPECS`.

@@ -71,8 +71,10 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
                          когда лимит исчерпан, терминал предлагает продлить на limits.extendTurns (10) ходов
   При tools.fetch доступны download_font (Google Fonts или URL) и download_icons (Phosphor, Lucide с CDN).
   При tools.subagents доступен run_subagent: отдельный агент со своим контекстом, своими инструментами
-  и лимитом ходов. reader читает и отвечает на вопрос, implementor правит файлы, verifier проверяет
-  запуском тестов. Суб-агент не видит переписку — задачу пишут целиком; свой суб-агент ему недоступен.
+  и лимитом ходов. coder, worker, writer правят файлы; reviewer и tester только проверяют; vision описывает
+  картинки; solver отвечает по экрану или картинке; image-processor готовит ассеты. Суб-агент не видит
+  переписку — задачу пишут целиком; свой суб-агент ему недоступен, и правит он лишь то, что разрешено вызвавшему.
+
   split_image и crop_image требуют ImageMagick (magick или convert); путь задаётся полем magickPath.
   crop_image режет коробку x/y/width/height, а с trim=true снимает padding по краям.
   При tools.shell агент может: run_command (оболочка на вызов), run_script (.ps1 .cmd .bat .sh .bash), ssh (команда или файл, scp put/get).
@@ -80,8 +82,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 
 Команда (run и gen):
   --role <роль=модель[:effort]>  модель для роли: planner, architect, orchestrator, worker, coder, writer, reviewer, vision,
-                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, image-processor,
-                         reader, implementor, verifier, default, all
+                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, image-processor, default, all
                          (например: --role planner=gpt-6-luna:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
                          --role collector=... и --role coordinator=... принимают orchestrator (объединённая роль)
     --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
