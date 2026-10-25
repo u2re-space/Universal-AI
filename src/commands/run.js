@@ -12,6 +12,7 @@
 import path from 'node:path';
 import { ensureProjectMap } from '../agent/map.js';
 import { createToolset, enabledToolNames } from '../agent/tools.js';
+import { createSubagentRunner } from '../agent/subagents.js';
 import { builtinTools } from '../agent/loop.js';
 import { createRoleRunner } from '../agent/roles.js';
 import { runTeam } from '../agent/team.js';
@@ -164,12 +165,20 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
     const roles = createRoleRunner({ client, config, ledger, emit, signal });
     const mcp = await openMcpSources(config, { signal, notify: emit });
     try {
-        const toolset = createToolset({
-            root: ctx.cwd, config, client, ledger, names, approvalLevel: level, extras: mcp.extras,
+        const toolBase = {
+            config, client, ledger,
             approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
             backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
-            describeImage: roles.shouldDelegateVision('default') ? roles.describeImage : null, summarizeFile: roles.summarizeFile,
             scaffoldTask: task, processTool: ctx.processTool,
+        };
+        const describeImage = roles.shouldDelegateVision('default') ? roles.describeImage : null;
+        const subagent = createSubagentRunner({
+            config, roles, root: ctx.cwd, allNames: names, approvalLevel: level, emit, toolBase,
+            toolOptions: { describeImage, summarizeFile: roles.summarizeFile }, agentsText,
+        });
+        const toolset = createToolset({
+            root: ctx.cwd, names, approvalLevel: level, subagent, extras: mcp.extras, ...toolBase,
+            describeImage, summarizeFile: roles.summarizeFile,
         });
         const mcpNote = mcp.describe() ? `\n\nMCP sources:\n${mcp.describe()}` : '';
         const baseInstructions = composeInstructions(agentBase({ root: ctx.cwd, approvalLevel: level, toolNames: toolset.names(), interactive, shell: config.shell ?? null }), config, extra) + mcpNote;

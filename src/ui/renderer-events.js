@@ -175,6 +175,13 @@ export function handleRendererEvent(event, api) {
             state.roles.pop();
             if (verbose) line('info', `${event.role}: ${event.status}${event.toolCalls ? ` · инструментов ${event.toolCalls}` : ''}`, { dim: true });
             break;
+        case 'subagent.start':
+            line('action', `суб-агент «${event.kind}» — ${event.role}${event.model ? ` · ${event.model}` : ''}`);
+            setStatus(`суб-агент ${event.kind}…`);
+            break;
+        case 'subagent.done':
+            line(event.status === 'completed' ? 'ok' : 'warn', `суб-агент «${event.kind}»: ${event.status}${event.toolCalls ? ` · инструментов ${event.toolCalls}` : ''}`);
+            break;
         case 'pace':
             line('info', `Темп: speed ${event.speed} · quality ${event.quality} · политика ${String(event.policy).toUpperCase()} · потолок ${event.model}`, { dim: true });
             break;

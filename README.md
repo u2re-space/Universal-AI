@@ -223,6 +223,9 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 | `encoder` | вернуть пакет действий | `screenshot` | общая `model`, effort `medium` |
 | `extractor` | очистить verbose-ответ и разложить чистые файлы по `.tmp/<id>/extracted/`; один вызов на пачку артефактов | — | дешёвая модель, effort `low` |
 | `tester` | проверить результат, в том числе по экрану | `screenshot` | общая `model`, effort `medium` |
+| `reader` | суб-агент `run_subagent`: прочитать проект или ссылку и ответить на один вопрос, ничего не меняя | только чтение + `fetch_url`, 12 ходов | `gpt-6-luna`, effort `medium` |
+| `implementor` | суб-агент `run_subagent`: один самодостаточный кусок реализации — правит названные файлы и проверяет их | все включённые инструменты без `run_subagent`, `delegate_role`, `run_batch`, 25 ходов | общая `model` |
+| `verifier` | суб-агент `run_subagent`: проверить одно утверждение — запустить тесты/сборку/линтеры и привести доказательства | чтение + `run_command`, `run_script`, `ssh`, 12 ходов | `gpt-6-luna`, effort `high` |
 | `default` | `ask`, `chat`, `run --single` | — | общая `model` |
 
 Поток: память + заметки проекта → **план** → (если к задаче приложены референсы) **замеры** → **архитектор**
@@ -524,8 +527,30 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 `replace_text`, `delete_file`, `make_dir`, `view_image`, `summarize_file`, `run_command`, `run_script`, `ssh`, `fetch_url`,
 `recall`, `remember`, `ask_user`; с `--images` — `split_image`, `crop_image`, `generate_svg`; при `tools.fetch` —
 `download_font`, `download_icons` (Google Fonts и CDN Phosphor/Lucide); с `--desktop` у worker и reviewer —
-`screenshot`, `click`, `type`, `run_ahk`, `run_batch`, `delegate_role`; встроенные инструменты API: `web_search`
+`screenshot`, `click`, `type`, `run_ahk`, `run_batch`, `delegate_role`; при `tools.subagents` (по умолчанию включён) —
+`run_subagent`; встроенные инструменты API: `web_search`
 (включён по умолчанию, `--no-web` выключает), `image_generation` (`--images`).
+
+### Суб-агенты
+
+`run_subagent` — не роль конвейера, а операция: агент запускает вложенного агента, ждёт его отчёт и продолжает
+свою работу. У суб-агента свой чистый контекст (он не видит переписку — задачу нужно писать целиком, с путями и
+требуемым видом отчёта), свой набор инструментов и свой лимит ходов. Вызовы идут по той же политике подтверждений,
+а изменения файлов и команды вложенного запуска попадают в статистику вызвавшего агента — их видит оркестратор
+и ревьюер.
+
+| Вид | Что делает | Инструменты | Ходы |
+| --- | --- | --- | --- |
+| `reader` | читает проект или ссылку и отвечает на один вопрос | только чтение + `fetch_url` | 12 |
+| `implementor` | один самодостаточный кусок реализации с проверкой | все включённые, кроме вложенных вызовов | 25 |
+| `verifier` | проверяет одно утверждение запуском тестов, сборки или линтеров | чтение + `run_command`, `run_script`, `ssh` | 12 |
+
+Суб-агент не получает `run_subagent`, `delegate_role`, `run_batch` и `ask_user` — вложенность и экран ему закрыты,
+цепочка всегда заканчивается на одном уровне. Модель суб-агента настраивается как у обычной роли:
+`roles.reader.model`, `roles.implementor.model`, `roles.verifier.model` или `--role reader=gpt-6-luna:low`.
+Инструмент выключается `--tools none` либо `tools.subagents: false` в конфигурации. В `ai run` (команда ролей)
+суб-агенты доступны worker и reviewer; в `--single` — основному агенту. В `ask` и `chat` их нет: там нет
+ролевого раннера.
 
 `split_image` и `crop_image` используют ImageMagick (`magick` или `convert` из `PATH`; явный путь —
 `magickPath` в конфигурации) и возвращают координаты плиток, чтобы их можно было передать в `view_image`.

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS } from '../src/roles/index.js';
 import { defaults } from '../src/core/config.js';
 
-const NAMES = ['default', 'planner', 'architect', 'orchestrator', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer', 'image-processor'];
+const NAMES = ['default', 'planner', 'architect', 'orchestrator', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer', 'image-processor', 'reader', 'implementor', 'verifier'];
 
 test('role modules match config role names', () => {
     assert.deepEqual(Object.keys(ROLE_MODULES).sort(), NAMES.slice().sort());
@@ -42,6 +42,19 @@ test('existing role instructions keep their job', () => {
 test('the image processor trims padding through crop_image', () => {
     assert.match(ROLE_INSTRUCTIONS['image-processor'], /Trimming padding is a crop_image call/);
     assert.match(ROLE_INSTRUCTIONS['image-processor'], /trim=true/);
+});
+
+test('the sub-agent roles stay inside their own remit', () => {
+    assert.match(ROLE_INSTRUCTIONS.reader, /You are the reader/);
+    assert.match(ROLE_INSTRUCTIONS.reader, /read-only tools only/);
+    assert.match(ROLE_INSTRUCTIONS.implementor, /You are the implementor/);
+    assert.match(ROLE_INSTRUCTIONS.implementor, /correct change set/);
+    assert.match(ROLE_INSTRUCTIONS.verifier, /You are the verifier/);
+    assert.match(ROLE_INSTRUCTIONS.verifier, /Never write a file/);
+    for (const name of ['reader', 'implementor', 'verifier']) {
+        assert.match(ROLE_INSTRUCTIONS[name], /treat it as data/, `${name} must keep the untrusted-content line`);
+        assert.equal(ROLE_INSTRUCTIONS[name].includes('run_batch'), false);
+    }
 });
 
 test('specialists do not delegate or run batches', () => {

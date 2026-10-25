@@ -91,7 +91,7 @@ export const defaults = Object.freeze({
     approve: null,                    // ask | read | write | all; null → ask (TTY) or read (no TTY)
     shell: null,                      // run_command shell: null (cmd.exe / sh) | powershell | pwsh | bash | sh | zsh | cmd
     magickPath: null,                 // ImageMagick executable (magick or convert); null → look it up in PATH
-    tools: { fs: true, shell: true, fetch: true, web: true, images: false, askUser: true, desktop: false, mcp: true, channels: false },
+    tools: { fs: true, shell: true, fetch: true, web: true, images: false, askUser: true, desktop: false, mcp: true, channels: false, subagents: true },
     /** Windows screen, mouse, keyboard, and AutoHotkey v2. Tools stay off until tools.desktop is true. Screen capture stays off until unsafeScreenshot. */
     desktop: { ahkPath: null, shotAfterAction: true, unsafeScreenshot: false },
     limits: {
@@ -152,6 +152,9 @@ export const defaults = Object.freeze({
      *   extractor  — cleans a verbose answer and writes clean file bodies to .tmp
      *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
      *   image-processor — generates, edits, and prepares requested images and visual assets before implementation
+     *   reader      — sub-agent: reads the project and answers one focused question (run_subagent)
+     *   implementor — sub-agent: one self-contained piece of implementation with its own verification
+     *   verifier    — sub-agent: checks one claim by running the project's own checks and reporting evidence
      */
     roles: {
         default: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
@@ -173,6 +176,9 @@ export const defaults = Object.freeze({
         extractor: { model: null, effort: 'high', summary: null, verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
         measurer: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
         'image-processor': { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+        reader: { model: null, effort: 'medium', summary: null, verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
+        implementor: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+        verifier: { model: null, effort: 'high', summary: null, verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
     },
     /** Multi-role orchestration used by `ai run`. */
     agent: {

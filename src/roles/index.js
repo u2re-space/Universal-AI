@@ -2,12 +2,12 @@
  * @file src/roles/index.js
  * @module roles/index
  * @purpose Collect role prompts, settings, and desktop specialist limits.
- * @depends roles/default, roles/planner, roles/architect, roles/orchestrator, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer, roles/image-processor
+ * @depends roles/default, roles/planner, roles/architect, roles/orchestrator, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer, roles/image-processor, roles/reader, roles/implementor, roles/verifier
  * @usedBy commands/instructions, agent/team
  * @exports ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS
  * @ai.tags roles, prompts, desktop
  * @ai.hint pure
- * @changed 2026-10-24 Added the architect and designer role.
+ * @changed 2026-10-25 Added the sub-agent roles (reader, implementor, verifier).
  */
 
 import * as roleDefault from './default.js';
@@ -29,6 +29,9 @@ import * as classifier from './classifier.js';
 import * as extractor from './extractor.js';
 import * as measurer from './measurer.js';
 import * as imageProcessor from './image-processor.js';
+import * as reader from './reader.js';
+import * as implementor from './implementor.js';
+import * as verifier from './verifier.js';
 
 /**
  * Instructions and settings for every named role.
@@ -56,6 +59,9 @@ export const ROLE_MODULES = {
     extractor: { instructions: extractor.instructions, settings: extractor.settings },
     measurer: { instructions: measurer.instructions, settings: measurer.settings },
     'image-processor': { instructions: imageProcessor.instructions, settings: imageProcessor.settings },
+    reader: { instructions: reader.instructions, settings: reader.settings },
+    implementor: { instructions: implementor.instructions, settings: implementor.settings },
+    verifier: { instructions: verifier.instructions, settings: verifier.settings },
 };
 
 /**

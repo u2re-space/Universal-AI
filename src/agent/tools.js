@@ -159,6 +159,7 @@ const CHANGE_OPS = new Set(['create', 'overwrite', 'edit', 'delete']);
  * describeScreen({ part, rel }) → string | { toon } — screen vision for a desktop capture (optional).
  * performDesktop(action) → { message, screenshotAbs, screenshotRel } — injected runner; skips AutoHotkey (optional).
  * delegate(role, task) → { output, summary, data? } — specialist call for delegate_role (optional).
+ * subagent(kind, task) → { output, summary, ok, stats? } — nested agent run for run_subagent (optional).
  * extras — additional tools `{ name, description, parameters, category, handler }`, used for MCP.
  * processTool(name, args, signal) → null | { output, summary, changes? } — remote handler for a processable tool. null runs the local handler.
  */
@@ -166,7 +167,7 @@ export function createToolset({
     root = process.cwd(), config, names, approvalLevel = 'read', approve = async () => 'no', askUser = null,
     backupDir = null, signal, emit = () => {}, memory = null, projectKey = null, projectName = null,
     describeImage = null, summarizeFile = null, editPaths = () => null,
-    describeScreen = null, performDesktop = null, delegate = null, extras = [], client = null, ledger = null,
+    describeScreen = null, performDesktop = null, delegate = null, subagent = null, extras = [], client = null, ledger = null,
     scaffoldTask = '', processTool = null,
 }) {
     const limits = config.limits;
@@ -179,6 +180,7 @@ export function createToolset({
     }
     if (!memory) { allowed.delete('recall'); allowed.delete('remember'); }
     if (!summarizeFile) allowed.delete('summarize_file');
+    if (!subagent) allowed.delete('run_subagent');
     const alwaysAllowed = new Set();
     const stats = { calls: 0, byTool: {}, changes: [], commands: [], denied: 0, errors: 0, memories: [] };
     let backupSlot = 'write';
@@ -203,6 +205,18 @@ export function createToolset({
                 notify({ type: 'warning', message: error.message });
             }
         }
+    }
+
+    /** Fold the tool stats of a nested agent run into this run's stats. */
+    function adoptStats(child) {
+        if (!child || typeof child !== 'object') return;
+        stats.calls += child.calls ?? 0;
+        stats.denied += child.denied ?? 0;
+        stats.errors += child.errors ?? 0;
+        for (const [name, count] of Object.entries(child.byTool ?? {})) stats.byTool[name] = (stats.byTool[name] ?? 0) + count;
+        stats.changes.push(...(child.changes ?? []));
+        stats.commands.push(...(child.commands ?? []));
+        stats.memories.push(...(child.memories ?? []));
     }
 
     /** Apply the approval level, and throw when the operator aborts. */
@@ -253,6 +267,7 @@ export function createToolset({
             case 'crop_image': return `${args.trim ? `Снять padding ${args.path}` : `Обрезать ${args.path}: ${args.width ?? '?'}×${args.height ?? '?'} в (${args.x ?? 0},${args.y ?? 0}) `}\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
             case 'generate_svg': return `SVG ${args.width ?? 512}×${args.height ?? 512}: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}\nПричина: ${args.reason ?? '—'}`;
             case 'vectorize_image': return `Векторизовать ${args.image || 'кроп из замеров'} в SVG`;
+            case 'run_subagent': return `Суб-агент ${args.kind}: ${truncate(args.task ?? '', 400)}`;
             case 'download_font': return `Шрифт: ${args.name || args.url || '?'} ${args.style || ''}\nВыход: ${args.output || 'авто'}`;
             case 'download_icons': return `Иконки: ${args.name || '?'}${args.icon ? `/${args.icon}` : ' (набор)'} ${args.variant || 'regular'}\nВыход: ${args.output || 'авто'}`;
             default:
@@ -609,6 +624,12 @@ export function createToolset({
                 output: `Скачано ${result.count} иконок:\n${result.paths.slice(0, 20).join('\n')}${result.paths.length > 20 ? `\n… ещё ${result.paths.length - 20}` : ''}`,
                 summary: `${result.count} иконок`,
             };
+        },
+        /** Start one nested agent on its own context and fold its tool stats into this run. */
+        async run_subagent(args) {
+            const result = await subagent(args.kind, args.task);
+            adoptStats(result.stats);
+            return { output: result.output, summary: result.summary, ok: result.ok !== false };
         },
     };
 

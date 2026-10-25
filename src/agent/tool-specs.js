@@ -7,7 +7,7 @@
  * @exports TOOL_SPECS, READ_ONLY_TOOLS, SHELL_TOOL_NAMES, toolDefinitions, enabledToolNames, describeTool, toolCategory
  * @ai.tags tools, schema
  * @ai.hint pure
- * @changed 2026-10-22 Image splitting, cropping, SVG generation, fonts, and icon sets.
+ * @changed 2026-10-25 run_subagent (tools.subagents). Image splitting, cropping, SVG generation, fonts, and icon sets.
  */
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
 
@@ -407,6 +407,14 @@ export const TOOL_SPECS = {
             output: str('Output directory. Empty string = assets/icons/<set>/.'),
         }),
     },
+    run_subagent: {
+        category: 'write', group: 'subagents',
+        description: 'Start one sub-agent: a separate agent with a fresh context, its own tools and turn cap, that works on the task and returns a report. It never sees this conversation, so the task must be self-contained — name the paths, the exact question, and what the report must contain. reader reads and answers only; implementor edits files and verifies them; verifier runs the project checks and reports evidence. A sub-agent cannot start another sub-agent.',
+        parameters: schema({
+            kind: { type: 'string', enum: ['reader', 'implementor', 'verifier'], description: 'Sub-agent to start.' },
+            task: str('The whole task for that sub-agent: goal, paths, constraints, and the report it must return.'),
+        }),
+    },
 };
 
 export const READ_ONLY_TOOLS = ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall', 'list_backups'];
@@ -442,6 +450,7 @@ export function enabledToolNames(tools, { interactive = false, memory = false, s
     if (tools.images && images) names.push('split_image', 'crop_image', 'generate_svg');
     if (tools.fetch) names.push('download_font', 'download_icons');
     if (tools.channels) names.push('decide', 'moderate_text', 'channel_reply', 'telegram_call');
+    if (tools.subagents) names.push('run_subagent');
     return names;
 }
 

@@ -179,17 +179,17 @@ export function overridesFrom(values, { command = null } = {}) {
     if (values['unsafe-screenshot']) (o.desktop ??= {}).unsafeScreenshot = true;
     if (values.tools !== undefined) {
         const list = values.tools.split(',').map((s) => s.trim()).filter(Boolean);
-        const all = { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false, channels: false };
+        const all = { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false, channels: false, subagents: false };
         if (!(list.length === 1 && list[0] === 'none')) {
             for (const name of list) {
-                if (!(name in all)) throw new UsageError(`--tools: неизвестный инструмент "${name}" (fs, shell, fetch, web, images, askUser, desktop, mcp, channels, none)`);
+                if (!(name in all)) throw new UsageError(`--tools: неизвестный инструмент "${name}" (fs, shell, fetch, web, images, askUser, desktop, mcp, channels, subagents, none)`);
                 all[name] = true;
             }
             if (list.length) all.askUser = true;
         }
         Object.assign(o.tools, all);
     }
-    if (values['no-tools']) Object.assign(o.tools, { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false, channels: false });
+    if (values['no-tools']) Object.assign(o.tools, { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false, channels: false, subagents: false });
     if (values.detail && !IMAGE_DETAILS.includes(values.detail)) throw new UsageError(`--detail: ${IMAGE_DETAILS.join(' | ')}`);
     if (values.fidelity !== undefined || values.creativity !== undefined || values.platform) o.generate = {};
     if (values.fidelity !== undefined) {

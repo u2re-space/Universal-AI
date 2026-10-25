@@ -25,6 +25,7 @@ import { solverChoice } from '../roles/solver.js';
 import { measurerChoice } from '../roles/measurer.js';
 import { writerChoice, isWritingStep } from '../roles/writer.js';
 import { createToolset, enabledToolNames, READ_ONLY_TOOLS } from './tools.js';
+import { createSubagentRunner } from './subagents.js';
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
 import { listFiles } from './fs-tools.js';
 import { describeChangeSet } from './diff.js';
@@ -75,7 +76,7 @@ const HARD_STOP = new Set(['cancelled', 'budget', 'failed']);
 export function toolNamesForRole(allNames, role) {
     if (role === 'orchestrator' || role === 'architect' || role === 'collector' || role === 'coordinator') return allNames.filter((name) => READ_ONLY_TOOLS.includes(name));
     if (role === 'reviewer') {
-        return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name));
+        return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || name === 'run_subagent');
     }
     if (role === 'image-processor') {
         const allowed = new Set(['view_image', 'crop_image', 'split_image', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons']);
@@ -180,15 +181,21 @@ export async function runTeam({
         });
         return { output: result.text, summary: role + ' ' + result.status, data: result.data ?? null };
     }
+    /** Start one nested agent (reader, implementor, verifier) on a fresh context. */
+    const subagent = createSubagentRunner({
+        config, roles, root, allNames, approvalLevel, toolBase, emit,
+        toolOptions: { describeImage: vision('worker'), describeScreen: roles.describeScreen },
+        agentsText: () => effectiveAgentsText,
+    });
     const workerTools = createToolset({
         ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker'), editPaths: () => taskMarks.edit,
-        describeScreen: roles.describeScreen, delegate, extras: mcp.extras,
+        describeScreen: roles.describeScreen, delegate, subagent, extras: mcp.extras,
     });
     const orchestratorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('orchestrator'), extras: mcpRead });
     const architectTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('architect'), extras: mcpRead });
     const reviewerTools = createToolset({
         ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer'),
-        describeScreen: roles.describeScreen, delegate, extras: mcpRead,
+        describeScreen: roles.describeScreen, delegate, subagent, extras: mcpRead,
     });
     const imageProcessorNames = toolNamesForRole(enabled, 'image-processor');
     const imageProcessorTools = createToolset({ ...toolBase, names: imageProcessorNames, approvalLevel });

@@ -57,7 +57,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --no-stream            без потоковой передачи
 
 Инструменты и автономность:
-  --tools fs,shell,fetch,mcp,channels  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
+  --tools fs,shell,fetch,mcp,channels,subagents  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
   search_files scope=path|symbol|content|all читает карту проекта.
   --web                  поиск web_search на /v1/responses (ProxyAPI), включён по умолчанию; --no-web выключает
                          запросы и страницы печатаются под ответом
@@ -70,6 +70,9 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --max-turns <n>        лимит ходов агента          --shell powershell|pwsh|bash|sh|zsh|cmd
                          когда лимит исчерпан, терминал предлагает продлить на limits.extendTurns (10) ходов
   При tools.fetch доступны download_font (Google Fonts или URL) и download_icons (Phosphor, Lucide с CDN).
+  При tools.subagents доступен run_subagent: отдельный агент со своим контекстом, своими инструментами
+  и лимитом ходов. reader читает и отвечает на вопрос, implementor правит файлы, verifier проверяет
+  запуском тестов. Суб-агент не видит переписку — задачу пишут целиком; свой суб-агент ему недоступен.
   split_image и crop_image требуют ImageMagick (magick или convert); путь задаётся полем magickPath.
   crop_image режет коробку x/y/width/height, а с trim=true снимает padding по краям.
   При tools.shell агент может: run_command (оболочка на вызов), run_script (.ps1 .cmd .bat .sh .bash), ssh (команда или файл, scp put/get).
@@ -77,7 +80,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 
 Команда (run и gen):
   --role <роль=модель[:effort]>  модель для роли: planner, architect, orchestrator, worker, coder, writer, reviewer, vision,
-                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, image-processor, default, all
+                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, image-processor,
+                         reader, implementor, verifier, default, all
                          (например: --role planner=gpt-6-luna:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
                          --role collector=... и --role coordinator=... принимают orchestrator (объединённая роль)
     --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
