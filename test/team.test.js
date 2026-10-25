@@ -623,6 +623,46 @@ test('web_search is offered to the answer, the planner, and the worker', async (
     assert.equal(seen.find((item) => item.role === 'worker').tools.some((tool) => tool.type === 'web_search'), true);
 });
 
+test('delegated measurer gets web search only when tools.web is enabled', async () => {
+    for (const web of [true, false]) {
+        const seen = [];
+        script = (body) => {
+            const role = roleOf(body);
+            seen.push({ role, body });
+            if (role === 'planner') return { text: JSON.stringify({
+                summary: 'замер типографики', complexity: 'normal',
+                steps: [{ goal: 'Собрать стили', details: '', verify: 'прочитать стили' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, risks: [], imageTasks: [],
+            }) };
+            if (role === 'measurer') {
+                assert.equal(body.tools.some((tool) => tool.type === 'web_search'), web);
+                assert.ok(body.tools.some((tool) => tool.name === 'fetch_url'));
+                return { text: JSON.stringify({
+                    summary: 'замеров нет', source: 'text-only task', unit: 'px',
+                    canvas: { x: 0, y: 0, width: 1, height: 1 }, elements: [], regions: [], rules: [], notes: '',
+                }) };
+            }
+            if (role === 'worker') {
+                const outputs = body.input.filter((item) => item.type === 'function_call_output');
+                if (!outputs.length) return { calls: [{ name: 'delegate_role', arguments: { role: 'measurer', task: 'measure the typography' } }] };
+                assert.match(outputs[0].output, /замеров нет/);
+                return { text: 'Стили собраны' };
+            }
+            return { text: 'ok' };
+        };
+        const config = baseConfig();
+        config.tools = { ...config.tools, desktop: true, web };
+        config.memory = { ...defaults.memory, enabled: false };
+        const result = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'замерь типографику', root,
+            approvalLevel: 'read', emit() {},
+        });
+        assert.equal(result.status, 'completed', result.error?.message);
+        assert.ok(seen.some((item) => item.role === 'measurer'));
+    }
+});
+
 test('team run puts the confirmed read file in the collector brief', async () => {
     await mkdir(path.join(root, 'src'), { recursive: true });
     await writeFile(path.join(root, 'src', 'sum.js'), 'export function sum(a, b) { return a + b; }\n');
@@ -1147,11 +1187,18 @@ test('image processing runs before implementation and passes prepared assets in 
             filesOfInterest: ['src/index.html'], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
             needsReview: false, imageNotes: null, imageTasks: [{ goal: 'Нарисовать обложку', details: 'Пастельная геометрическая иллюстрация, PNG, assets/cover.png' }], risks: [],
         }) };
-        if (role === 'image-processor') return { text: JSON.stringify({
-            summary: 'Обложка создана.',
-            assets: [{ path: 'assets/cover.png', format: 'png', use: 'Hero background image.' }],
-            notes: [],
-        }) };
+        if (role === 'image-processor') {
+            assert.equal((body.tools ?? []).some((tool) => tool.type === 'web_search'), config.tools.web);
+            return { text: JSON.stringify({
+                summary: 'Обложка создана.',
+                assets: [{ path: 'assets/cover.png', format: 'png', use: 'Hero background image.' }],
+                typography: [
+                    { family: 'DM Sans', role: 'body', cssFamily: '\"DM Sans\", sans-serif', cssUrl: 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;700&display=swap', weights: ['400', '700'], rationale: 'Readable neutral body face.', source: 'https://fonts.google.com/specimen/DM+Sans', localPath: null },
+                    { family: 'Manrope', role: 'heading', cssFamily: '\"Manrope\", sans-serif', cssUrl: 'https://fonts.googleapis.com/css2?family=Manrope:wght@600;700&display=swap', weights: ['600', '700'], rationale: 'Pairs with the restrained body family while giving headings distinction.', source: 'https://fonts.google.com/specimen/Manrope', localPath: null },
+                ],
+                notes: [],
+            }) };
+        }
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
         if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
         return { text: 'worker done' };
@@ -1172,18 +1219,81 @@ test('image processing runs before implementation and passes prepared assets in 
         assert.ok(roles.indexOf('image-processor') < roles.lastIndexOf('worker'));
         const processor = seen.find((item) => item.role === 'image-processor').body;
         const toolNames = processor.tools.map((tool) => tool.name);
-        assert.deepEqual(toolNames, ['view_image', 'fetch_url', 'generate_image', 'edit_image', 'vectorize_image', 'split_image', 'crop_image', 'generate_svg', 'download_font', 'download_icons']);
+        assert.ok(processor.tools.some((tool) => tool.name === 'fetch_url'));
+        assert.ok(processor.tools.some((tool) => tool.name === 'download_font'));
+        assert.ok(processor.tools.some((tool) => tool.type === 'web_search'));
+        assert.deepEqual(toolNames.filter(Boolean), ['view_image', 'fetch_url', 'generate_image', 'edit_image', 'vectorize_image', 'split_image', 'crop_image', 'generate_svg', 'download_font', 'download_icons']);
         assert.equal(toolNames.some((name) => ['write_file', 'replace_text', 'run_command'].includes(name)), false);
         const worker = seen.find((item) => item.role === 'worker').body;
         assert.match(worker.input[0].content[0].text, /Prepared images and visual assets/);
         assert.match(worker.input[0].content[0].text, /assets\/cover\.png/);
+        assert.match(worker.input[0].content[0].text, /Typography recommendations/);
+        assert.match(worker.input[0].content[0].text, /DM Sans/);
+        assert.match(worker.input[0].content[0].text, /Manrope/);
+        assert.match(worker.input[0].content[0].text, /400, 700/);
+        assert.match(worker.input[0].content[0].text, /https:\/\/fonts\.googleapis\.com\/css2\?family=DM\+Sans:wght@400;700&display=swap/);
+        assert.match(worker.input[0].content[0].text, /https:\/\/fonts\.googleapis\.com\/css2\?family=Manrope:wght@600;700&display=swap/);
+        assert.match(worker.input[0].content[0].text, /load this verified stylesheet/);
         assert.ok(events.some((event) => event.type === 'stage.start' && event.stage === 'image-processing' && event.role === 'image-processor'));
         assert.ok(events.some((event) => event.type === 'stage.done' && event.stage === 'image-processing' && event.status === 'completed'));
         assert.equal(result.stats['image-processor'].calls, 0);
         const saved = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'progress.json'), 'utf8'));
         assert.equal(saved.imageProcessing.status, 'completed');
         assert.match(saved.imageProcessing.report, /assets\/cover\.png/);
+        assert.match(saved.imageProcessing.report, /DM Sans/);
+        assert.match(saved.imageProcessing.report, /Manrope/);
+        assert.match(await readFile(path.join(dir, '.tmp', result.workId, 'image-assets.json'), 'utf8'), /Typography recommendations/);
         assert.match(await readFile(path.join(dir, '.tmp', result.workId, 'image-assets.json'), 'utf8'), /assets\/cover\.png/);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('image processor and measurer omit web search when tools.web is disabled', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-font-web-off-'));
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push({ role, body });
+        if (role === 'answer') return { text: 'Страница с типографикой и обложкой.\nroute: plan' };
+        if (role === 'planner') return { text: JSON.stringify({
+            summary: 'Страница по референсу с обложкой', complexity: 'normal',
+            steps: [{ goal: 'Создать страницу', details: 'Использовать замеры и выбранную типографику', verify: 'прочитать страницу' }],
+            filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false,
+            imageNotes: null, imageTasks: [{ goal: 'Подобрать шрифт для страницы и подготовить обложку', details: 'Заголовок и основной текст, локальные файлы не нужны; создать PNG assets/cover.png' }], risks: [],
+        }) };
+        if (role === 'measurer') return { text: JSON.stringify({
+            summary: 'Текст и карточка', source: 'mockup.png', unit: 'px', canvas: { x: 0, y: 0, width: 400, height: 300 },
+            elements: [{
+                name: 'Headline', box: { x: 24, y: 20, width: 300, height: 42 }, rotation: 0, borders: '', radius: null,
+                padding: { top: null, right: null, bottom: null, left: null }, margin: { top: null, right: null, bottom: null, left: null }, gap: null,
+                spacing: '', placement: 'top aligned', typography: { role: 'heading', family: '', familyConfidence: 'unknown', fontSize: 28, weight: 600, lineHeight: 34, letterSpacing: 0, style: '' }, crop: null,
+            }], regions: [], rules: [], notes: '',
+        }) };
+        if (role === 'image-processor') return { text: JSON.stringify({ summary: 'Обложка готова.', assets: [], typography: [], notes: [] }) };
+        if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        return { text: 'worker done' };
+    };
+    const config = baseConfig();
+    config.tools = { ...config.tools, web: false };
+    config.image.transport = 'images';
+    config.memory = { ...defaults.memory, enabled: false };
+    try {
+        const result = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'Страница по макету', root: dir,
+            approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }], emit() {},
+        });
+        assert.equal(result.status, 'completed', result.error?.message);
+        for (const role of ['measurer', 'image-processor']) {
+            const request = seen.find((item) => item.role === role).body;
+            assert.equal(request.tools.some((tool) => tool.type === 'web_search'), false, `${role} must respect tools.web=false`);
+        }
+        const measurer = seen.find((item) => item.role === 'measurer').body;
+        assert.equal(measurer.tools.some((tool) => tool.name === 'fetch_url'), true);
+        const processor = seen.find((item) => item.role === 'image-processor').body;
+        assert.equal(processor.tools.some((tool) => tool.name === 'fetch_url'), true);
+        assert.match(JSON.stringify(seen.find((item) => item.role === 'worker').body.input), /Typography workflow/);
     } finally {
         await rm(dir, { recursive: true, force: true });
     }
@@ -1228,7 +1338,7 @@ test('a completed image stage is not repeated when the run resumes', async () =>
             needsReview: false, imageNotes: null, imageTasks: [{ goal: 'Нарисовать обложку', details: 'PNG, assets/cover.png' }], risks: [],
         }) };
         if (role === 'image-processor') return { text: JSON.stringify({
-            summary: 'Обложка создана.', assets: [{ path: 'assets/cover.png', format: 'png', use: 'Hero background image.' }], notes: [],
+            summary: 'Обложка создана.', assets: [{ path: 'assets/cover.png', format: 'png', use: 'Hero background image.' }], typography: [], notes: [],
         }) };
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
         if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
@@ -1287,7 +1397,7 @@ test('an interrupted image stage resumes before implementation', async () => {
             return { status: 'incomplete', text: '', reason: 'max_output_tokens' };
         }
         if (role === 'image-processor') return { text: JSON.stringify({
-            summary: 'Обложка создана.', assets: [{ path: 'assets/cover.png', format: 'png', use: 'Hero background image.' }], notes: [],
+            summary: 'Обложка создана.', assets: [{ path: 'assets/cover.png', format: 'png', use: 'Hero background image.' }], typography: [], notes: [],
         }) };
         return { text: 'страница готова' };
     };
@@ -1331,6 +1441,7 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
             assert.equal(body.model, 'gpt-6.1-sol');
             assert.equal(body.reasoning?.effort, 'high');
             assert.ok((body.tools ?? []).some((tool) => tool.name === 'fetch_url'), 'the measurer can open its documentation links');
+            assert.equal((body.tools ?? []).some((tool) => tool.type === 'web_search'), config.tools.web);
             return { text: JSON.stringify({
                 summary: 'Карточка в двухколоночной сетке', source: 'mockup.png', unit: 'px',
                 canvas: { x: 0, y: 0, width: 400, height: 300 },
@@ -1339,7 +1450,8 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
                     borders: '1 px solid', radius: 8,
                     padding: { top: 16, right: 20, bottom: 16, left: 20 },
                     margin: { top: null, right: null, bottom: 24, left: null }, gap: 8,
-                    spacing: '', placement: 'two-column grid, centered in the canvas', crop: null,
+                    spacing: '', placement: 'two-column grid, centered in the canvas',
+                    typography: { role: 'heading', family: '', familyConfidence: 'unknown', fontSize: 28, weight: 600, lineHeight: 34, letterSpacing: 0, style: '' }, crop: null,
                 }],
                 regions: [], rules: [{ name: 'spacing', value: 8, unit: 'px', from: 'card items' }], notes: '',
             }) };
@@ -1354,7 +1466,9 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
             assert.match(prompt, /margin: bottom 24 px/);
             assert.match(prompt, /gap: 8 px/);
             assert.match(prompt, /spacing: 8 px/);
+            assert.match(prompt, /typography: heading, size 28 px, weight 600, line-height 34 px, letter-spacing 0 px/);
             assert.match(body.instructions, /canvas-relative percentages/);
+            assert.match(body.instructions, /selected family, CSS stack, role, weights/);
             return { text: 'styles.scss построен по sheet' };
         }
         if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };

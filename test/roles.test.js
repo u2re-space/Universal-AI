@@ -44,6 +44,17 @@ test('the image processor trims padding through crop_image', () => {
     assert.match(ROLE_INSTRUCTIONS['image-processor'], /trim=true/);
 });
 
+test('font selection instructions distinguish research, pairing, measured appearance, and downloading', () => {
+    assert.match(ROLE_INSTRUCTIONS.planner, /font-research task/);
+    assert.match(ROLE_INSTRUCTIONS['image-processor'], /language coverage/);
+    assert.match(ROLE_INSTRUCTIONS['image-processor'], /verified CSS2 stylesheet URL/);
+    assert.match(ROLE_INSTRUCTIONS['image-processor'], /only when local font files are explicitly required/);
+    assert.match(ROLE_INSTRUCTIONS['image-processor'], /candidates could not be verified/);
+    assert.match(ROLE_INSTRUCTIONS.measurer, /source-pixel font size/);
+    assert.match(ROLE_INSTRUCTIONS.measurer, /family confidence/);
+    assert.match(ROLE_INSTRUCTIONS.measurer, /separate from visual measurements/);
+});
+
 test('specialists do not delegate or run batches', () => {
     assert.deepEqual(Object.keys(SPECIALISTS).sort(), ['clicker', 'encoder', 'measurer', 'solver', 'tester', 'typer']);
     assert.deepEqual(SPECIALISTS.solver, { tools: ['screenshot', 'view_image'], turns: 6, schema: null });

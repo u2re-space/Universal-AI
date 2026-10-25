@@ -37,6 +37,20 @@ export const IMAGE_PROCESSOR_SCHEMA = object({
             use: { ...string, description: 'How the implementation should use this asset.' },
         }),
     },
+    typography: {
+        type: 'array',
+        description: 'Researched font recommendations for implementation; empty when no typography work was requested.',
+        items: object({
+            family: { ...string, description: 'Exact Google Fonts family name or an existing project-provided family.' },
+            role: { type: 'string', enum: ['heading', 'body', 'display', 'monospace', 'accent'], description: 'Intended typographic role.' },
+            cssFamily: { ...string, description: 'CSS font-family value, with a suitable fallback.' },
+            cssUrl: { ...nullableString, description: 'Verified Google Fonts CSS2 stylesheet URL for this family and its recommended weights; null for project-provided or local fonts.' },
+            weights: { ...strings, description: 'Recommended available weights, such as 400 and 700.' },
+            rationale: { ...string, description: 'Why this family suits its role and how it pairs with the other recommendations.' },
+            source: { ...string, description: 'URL used to verify the family.' },
+            localPath: { ...nullableString, description: 'Project-relative font file path when downloaded; null when no local file was needed.' },
+        }),
+    },
     notes: { ...strings, description: 'Unavailable tools, failed operations, or important limitations.' },
 });
 
@@ -293,6 +307,20 @@ export const MEASURER_SCHEMA = object({
             gap: { ...nullableNumber, description: 'Numeric gap to adjacent items in source pixels, or null when unknown.' },
             spacing: { ...string, description: 'Additional spacing notes; prefer numeric padding, margin, and gap fields when measurable.' },
             placement: { ...string, description: 'How to place it: grid or flex track, absolute anchor, stacking order; empty when unknown.' },
+            typography: {
+                ...object({
+                    role: { ...string, description: 'Text role such as heading, body, label, or button.' },
+                    family: { ...string, description: 'Visually identified family only when useful; empty when unknown. Do not guess an exact identity.' },
+                    familyConfidence: { type: 'string', enum: ['high', 'medium', 'low', 'unknown'], description: 'Confidence that the visible family identification is correct; unknown when it cannot be identified.' },
+                    fontSize: { ...nullableNumber, description: 'Measured font size in source pixels.' },
+                    weight: { ...nullableNumber, description: 'Measured or estimated CSS numeric font weight; null when unreadable.' },
+                    lineHeight: { ...nullableNumber, description: 'Measured line height in source pixels.' },
+                    letterSpacing: { ...nullableNumber, description: 'Measured letter spacing in source pixels.' },
+                    style: { ...string, description: 'Visible style such as italic, uppercase, or underline; empty when none.' },
+                }),
+                type: ['object', 'null'],
+                description: 'Typography measurements for text elements; null for non-text elements.',
+            },
             crop: { ...nullableString, description: 'Project-relative path to an existing crop of this element, or null.' },
         }),
     },

@@ -67,6 +67,9 @@ test('the measurer schema can record numeric spacing and a crop path', () => {
     assert.ok(MEASURER_SCHEMA.properties.regions.items.properties.crop);
     const element = MEASURER_SCHEMA.properties.elements.items.properties;
     assert.ok(element.crop);
+    assert.deepEqual(element.typography.type, ['object', 'null']);
+    assert.deepEqual(element.typography.properties.familyConfidence.enum, ['high', 'medium', 'low', 'unknown']);
+    assert.deepEqual(element.typography.properties.fontSize.type, ['number', 'null']);
     assert.deepEqual(element.padding.properties.top.type, ['number', 'null']);
     assert.deepEqual(element.margin.properties.left.type, ['number', 'null']);
     assert.deepEqual(element.gap.type, ['number', 'null']);

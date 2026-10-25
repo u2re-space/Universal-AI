@@ -82,7 +82,8 @@ test('every sub-agent stays inside its remit and never delegates again', () => {
     assert.equal(solver.includes('run_command'), false);
 
     const assets = subagentToolNames('image-processor', CALLER_TOOLS);
-    assert.ok(assets.includes('crop_image') && assets.includes('view_image'));
+    assert.ok(assets.includes('crop_image') && assets.includes('view_image') && assets.includes('fetch_url'));
+    assert.equal(subagentToolNames('image-processor', ['view_image', 'crop_image']).includes('fetch_url'), false);
     for (const name of ['write_file', 'run_command']) {
         assert.equal(assets.includes(name), false, `image-processor must not have ${name}`);
     }
@@ -154,6 +155,25 @@ test('the sub-agent runs on its own context, tools, and turn cap', async () => {
         assert.deepEqual(events.map((event) => event.type), ['subagent.start', 'subagent.done']);
         assert.equal(events[0].model, 'model-vision');
         assert.equal(events[1].status, 'completed');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('image-processor sub-agent gets hosted web search only when tools.web is enabled', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-image-subagent-web-'));
+    try {
+        for (const web of [true, false]) {
+            const roles = fakeRoles();
+            const config = { ...defaults, tools: { ...defaults.tools, web } };
+            const subagent = createSubagentRunner({
+                config, roles, root, allNames: CALLER_TOOLS, approvalLevel: 'read',
+            });
+            await subagent('image-processor', 'Research a font pairing');
+            const call = roles.seen[0];
+            assert.equal(call.builtin?.some((tool) => tool.type === 'web_search') ?? false, web);
+            assert.equal(call.toolset.names().includes('fetch_url'), true);
+        }
     } finally {
         await rm(root, { recursive: true, force: true });
     }

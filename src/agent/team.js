@@ -78,9 +78,10 @@ export function toolNamesForRole(allNames, role) {
     if (role === 'reviewer') {
         return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || name === 'run_subagent');
     }
-    if (role === 'image-processor') {
-        const allowed = new Set(IMAGE_TOOL_NAMES);
-        allowed.add('fetch_url');
+    if (role === 'image-processor' || role === 'measurer') {
+        const allowed = new Set(role === 'image-processor'
+            ? [...IMAGE_TOOL_NAMES, 'fetch_url']
+            : ['view_image', 'crop_image', 'split_image', 'fetch_url']);
         return allNames.filter((name) => allowed.has(name));
     }
     return allNames;
@@ -163,7 +164,11 @@ export async function runTeam({
         if (!Object.hasOwn(SPECIALISTS, role)) throw new Error(`delegate_role: неизвестная роль «${role}».`);
         const spec = SPECIALISTS[role];
         const names = spec.tools.filter((name) => allNames.includes(name));
+        if (role === 'measurer' && allNames.includes('fetch_url')) names.push('fetch_url');
         const toolset = createToolset({ ...toolBase, names, approvalLevel, describeScreen: roles.describeScreen });
+        const builtin = role === 'measurer' && config.tools.web
+            ? builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search')
+            : [];
         const known = stepState.complexity === 'trivial' || stepState.complexity === 'complex' ? stepState.complexity : 'normal';
         const solver = role === 'solver' ? solverChoice(known, config.roles?.solver ?? {}) : null;
         const measurer = role === 'measurer' ? measurerChoice(known, config.roles?.measurer ?? {}) : null;
@@ -173,6 +178,7 @@ export async function runTeam({
         }
         const result = await roles.run(role, {
             text: task, instructions: withAgents(ROLE_INSTRUCTIONS[role]), toolset, maxTurns: role === 'measurer' ? (config.agent.measurerMaxTurns ?? spec.turns) : spec.turns,
+            ...(builtin.length ? { builtin } : {}),
             silent: true,
             ...(spec.schema === 'batch' ? { schema: BATCH_SCHEMA, schemaName: 'batch' } : {}),
             ...(spec.schema === 'measure' ? { schema: MEASURER_SCHEMA, schemaName: 'measure' } : {}),
@@ -201,8 +207,8 @@ export async function runTeam({
     const imageProcessorNames = toolNamesForRole(enabled, 'image-processor');
     const imageProcessorTools = createToolset({ ...toolBase, names: imageProcessorNames, approvalLevel });
     const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi });
-    const imageProcessorBuiltin = builtinTools(config, { images: config.tools.images && !imageApi })
-        .filter((tool) => tool.type === 'image_generation');
+    const imageProcessorBuiltin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi })
+        .filter((tool) => tool.type === 'image_generation' || tool.type === 'web_search');
     /** Copy tool stats onto the team result and return it. */
     const fileChanges = [];
     let work = null;
@@ -839,10 +845,13 @@ export async function runTeam({
             const model = encodeRoute || !paced?.ready
                 ? choice.model
                 : clampModel(choice.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.measurer?.model));
-            const measureNames = ['view_image', 'crop_image', 'split_image', 'fetch_url'].filter((name) => allNames.includes(name));
+            const measureNames = ['view_image', 'crop_image', 'split_image', 'fetch_url'].filter((name) => enabled.includes(name));
             const measureTools = measureNames.length
                 ? createToolset({ ...toolBase, names: measureNames, approvalLevel, describeScreen: roles.describeScreen })
                 : null;
+            const measureBuiltin = config.tools.web
+                ? builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search')
+                : [];
             notify({ type: 'stage.start', stage: 'measure', role: 'measurer', model });
             const measureText = `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Measurement brief\n` +
                 `Plan: ${plan.summary}\nSteps:\n${bullets(plan.steps.map((step) => step.goal))}\n` +
@@ -851,7 +860,7 @@ export async function runTeam({
             const measureSession = createSession({ store: false, model });
             let measured = await roles.run('measurer', {
                 text: measureText,
-                parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.measurer), toolset: measureTools,
+                parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.measurer), toolset: measureTools, builtin: measureBuiltin,
                 schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns: config.agent.measurerMaxTurns ?? 12,
                 model, effort: choice.effort, onMaxTurns, session: measureSession,
             });
@@ -993,6 +1002,12 @@ export async function runTeam({
                 const assets = Array.isArray(processed.data.assets)
                     ? processed.data.assets.filter((asset) => asset && typeof asset.path === 'string' && asset.path.trim())
                     : [];
+                const typography = Array.isArray(processed.data.typography) ? processed.data.typography : [];
+                for (const font of typography) {
+                    if (font.localPath && !assets.some((asset) => asset.path === font.localPath)) {
+                        assets.push({ path: font.localPath, format: path.extname(font.localPath).slice(1).toLowerCase() || 'font', use: `${font.role || 'text'} font: ${font.family || font.cssFamily}` });
+                    }
+                }
                 const generated = (processed.images ?? []).map((file) => path.relative(root, file).split(path.sep).join('/'));
                 for (const rel of generated) {
                     if (!assets.some((asset) => asset.path === rel)) {
@@ -1003,6 +1018,7 @@ export async function runTeam({
                 const report = [
                     `Summary: ${String(processed.data.summary ?? '').trim() || '(none)'}`,
                     `Assets:\n${assets.length ? assets.map((asset) => `- ${asset.path} (${asset.format || 'unknown'}): ${asset.use || 'Prepared for implementation.'}`).join('\n') : '- (none)'}`,
+                    ...(typography.length ? [`Typography recommendations:\n${typography.map((font) => `- ${font.role}: ${font.family} — CSS: ${font.cssFamily}; weights: ${font.weights.join(', ') || '(not specified)'}; ${font.rationale} Source: ${font.source}${font.cssUrl ? `; stylesheet: ${font.cssUrl}` : ''}${font.localPath ? `; local file: ${font.localPath}` : font.cssUrl ? '; load this verified stylesheet unless the project specifies another delivery method.' : '; use the existing project-provided font setup.'}`).join('\n')}`] : []),
                     ...(Array.isArray(processed.data.notes) && processed.data.notes.length ? [`Notes:\n${processed.data.notes.map((note) => `- ${note}`).join('\n')}`] : []),
                 ].join('\n\n');
                 progress.imageProcessing = { status: 'completed', report, assets, images: generated };

@@ -12,6 +12,7 @@
 
 import { READ_ONLY_TOOLS, SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES } from './tool-specs.js';
 import { createToolset } from './tools.js';
+import { builtinTools } from './loop.js';
 import { errorMessage } from '../util/text.js';
 
 /**
@@ -33,7 +34,7 @@ const SLICES = {
     read: () => [...READ_ONLY_TOOLS, 'fetch_url'],
     check: () => [...READ_ONLY_TOOLS, ...SHELL_TOOL_NAMES, 'screenshot'],
     screen: () => [...READ_ONLY_TOOLS, 'screenshot'],
-    images: () => IMAGE_TOOL_NAMES,
+    images: (allNames) => [...IMAGE_TOOL_NAMES, ...(allNames.includes('fetch_url') ? ['fetch_url'] : [])],
 };
 
 /**
@@ -143,6 +144,9 @@ export function createSubagentRunner({ config, roles, root, allNames = [], appro
             toolset,
             maxTurns: spec.turns,
             silent: true,
+            ...(kind === 'image-processor' && config.tools?.web
+                ? { builtin: builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search') }
+                : {}),
         });
         notify({ type: 'subagent.done', kind, status: result.status, turns: result.turns, toolCalls: result.toolCalls });
 

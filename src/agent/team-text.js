@@ -83,6 +83,10 @@ export function renderMeasurements(sheet) {
         if (Number.isFinite(item.radius)) bits.push(`radius ${item.radius} ${unit}`);
         const crop = item.crop ? ` · crop: ${item.crop}` : '';
         const lines = [`- ${item.name}: ${bits.join(' · ')}${crop}`];
+        const typography = item.typography;
+        if (typography && (typography.role || typography.family || typography.fontSize != null || typography.weight != null || typography.lineHeight != null || typography.letterSpacing != null || typography.style)) {
+            lines.push(`  typography: ${[typography.role, typography.family && `${typography.family} (${typography.familyConfidence || 'unknown'} confidence)`, Number.isFinite(typography.fontSize) && `size ${typography.fontSize} ${unit}`, Number.isFinite(typography.weight) && `weight ${typography.weight}`, Number.isFinite(typography.lineHeight) && `line-height ${typography.lineHeight} ${unit}`, Number.isFinite(typography.letterSpacing) && `letter-spacing ${typography.letterSpacing} ${unit}`, typography.style].filter(Boolean).join(', ')}`);
+        }
         for (const [label, value] of [['padding', insets(item.padding)], ['margin', insets(item.margin)], ['gap', Number.isFinite(item.gap) ? `${item.gap} ${unit}` : ''], ['borders', item.borders], ['spacing', item.spacing], ['placement', item.placement]]) {
             if (value) lines.push(`  ${label}: ${value}`);
         }
@@ -104,6 +108,7 @@ export function renderMeasurements(sheet) {
         regions && `Regions to cut out${ready ? ` (${ready} ready crop(s); pass the path as generate_image reference, do not crop again)` : ''}:\n${regions}`,
         rules && `Rules:\n${rules}`,
         sheet.notes && `Notes:\n${sheet.notes}`,
+        'Typography workflow: use measured font size, weight, line-height, and letter-spacing as the visual source of truth. Family confidence is only a visual estimate; do not treat an uncertain family as identified. Search for a matching candidate only when needed and report it separately from measurements.',
         'Artwork workflow: reuse existing image candidates. If any stage already produced a PNG with a real alpha channel, keep it; do not regenerate, repaint, or flatten it. An optional SVG conversion may be tried on a copy. If a WebP copy is useful, convert it locally and keep the PNG; never use image generation or editing just to change the format. For flat marks without a suitable existing alpha image, prefer a real SVG made with vectorize_image / Recraft.',
         'For artwork comparison and atlas packing, do not call generate_image, edit_image, or image_generation: use local image operations on existing files. Compare candidates in a common aspect-ratio frame, fitting proportionally with transparent/neutral padding or a deliberate crop; never stretch an image. Keep originals unchanged. Check suitable Lucide or Phosphor icons available to the project (in dependencies or local files), lightweight HTML/CSS drawings, and existing raster or SVG candidates. After the page is built, compare the options in the rendered page and keep the clearest, best-fitting result.',
     ].filter(Boolean).join('\n\n');
