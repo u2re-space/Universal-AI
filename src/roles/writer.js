@@ -38,7 +38,7 @@ export const settings = { effort: null, model: null };
 export const WRITER_TIERS = Object.freeze({
     trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'medium' }),
     normal: Object.freeze({ model: 'gpt-6-luna', effort: 'high' }),
-    complex: Object.freeze({ model: 'gpt-6-luna', effort: 'max' }),
+    complex: Object.freeze({ model: 'gpt-6-luna', effort: 'xhigh' }),
 });
 
 /**

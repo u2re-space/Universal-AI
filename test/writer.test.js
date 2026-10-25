@@ -5,7 +5,7 @@ import { writerChoice, isWritingStep } from '../src/roles/writer.js';
 test('writer stays on the cheaper model and raises effort with complexity', () => {
     assert.deepEqual(writerChoice('trivial'), { model: 'gpt-6-luna', effort: 'medium' });
     assert.deepEqual(writerChoice('normal'), { model: 'gpt-6-luna', effort: 'high' });
-    assert.deepEqual(writerChoice('complex'), { model: 'gpt-6-luna', effort: 'max' });
+    assert.deepEqual(writerChoice('complex'), { model: 'gpt-6-luna', effort: 'xhigh' });
     assert.deepEqual(writerChoice('complex', { effort: 'low' }), { model: 'gpt-6-luna', effort: 'low' });
     assert.deepEqual(writerChoice('unknown'), writerChoice('normal'));
 });

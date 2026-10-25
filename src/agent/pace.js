@@ -276,7 +276,7 @@ export function resolvePace({
         rung, model: models[rung], effort: effortFor(base, paceSpeed, modelQuality, protect, recklessExtra),
     });
     const planner = role(plannerRung(label, modelSpeed, adjusted), plannerRung(label, modelSpeed, adjusted) === 0 ? 'medium' : 'high', true);
-    const reviewerBase = modelQuality >= 67 ? 'max' : 'high';
+    const reviewerBase = modelQuality >= 67 ? 'xhigh' : 'high';
     const directive = {
         ready: label === 'trivial' || label === 'normal' || label === 'complex',
         policy, ceilingIndex: adjusted, ceilingModel: models[adjusted],
