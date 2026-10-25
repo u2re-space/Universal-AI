@@ -7,13 +7,13 @@
  * @exports createRoleRunner
  * @ai.tags roles, models
  * @ai.hint hot
- * @changed 2026-10-22 onMaxTurns reaches the turn loop.
+ * @changed 2026-10-25 Structured replies are parsed leniently and restated once: a fallback model may ignore text.format and fence the JSON.
  */
 
 import { createSession } from '../core/session.js';
 import { buildUserMessage } from '../core/attachments.js';
 import { resolveRole } from '../core/config.js';
-import { clipMiddle } from '../util/text.js';
+import { clipMiddle, extractJson } from '../util/text.js';
 import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { encodeToon } from '../util/toon.js';
 import { runTurn } from './loop.js';
@@ -80,12 +80,32 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
                 textFormat: schema ? { type: 'json_schema', name: schemaName, strict: true, schema } : null, maxTurns, signal, emit: roleEmit, imageTarget,
                 onMaxTurns,
             });
+            if (schema && result.status === 'completed') {
+                // A fallback model may ignore text.format and wrap the answer in a Markdown fence.
+                // Parse leniently first, then give the role one turn to restate the answer as JSON.
+                let data = extractJson(result.text);
+                if (data === null) {
+                    notify({ type: 'warning', message: `Роль ${name} вернула ответ не в JSON, запрошен исправленный формат.` });
+                    conversation.addUserMessage(buildUserMessage({ text: 'The last reply is not valid JSON. Send the answer again as one valid JSON object only — no Markdown fences, no comments, no extra text.' }));
+                    const retry = await runTurn({
+                        client, config: roleConfig, session: conversation, ledger, toolset, builtin, instructions: fullInstructions, model,
+                        textFormat: { type: 'json_schema', name: schemaName, strict: true, schema }, maxTurns, signal, emit: roleEmit, imageTarget, onMaxTurns,
+                    });
+                    result.turns += retry.turns; result.toolCalls += retry.toolCalls;
+                    result.text = retry.text; result.response = retry.response;
+                    result.images.push(...(retry.images ?? []));
+                    result.sources.push(...(retry.sources ?? []));
+                    if (retry.status !== 'completed') { result.status = retry.status; result.error = retry.error; }
+                    else { data = extractJson(retry.text); }
+                }
+                if (data !== null && data !== undefined) result.data = data;
+                else if (result.status === 'completed') {
+                    result.status = 'failed';
+                    result.error = new Error(`Роль ${name} вернула некорректный JSON: ответ не удалось разобрать`);
+                }
+            }
         } finally {
             ledger.setRole(previousRole);
-        }
-        if (schema && result.status === 'completed') {
-            try { result.data = JSON.parse(result.text); }
-            catch (error) { result.status = 'failed'; result.error = new Error(`Роль ${name} вернула некорректный JSON: ${error.message}`); }
         }
         notify({ type: 'role.done', role: name, model, status: result.status, turns: result.turns, toolCalls: result.toolCalls });
         return result;

@@ -9,6 +9,7 @@ import { defaults, resolveRole } from '../src/core/config.js';
 import { openMemory, projectKey } from '../src/core/memory.js';
 import { createSharedContext } from '../src/core/context.js';
 import { createRoleRunner } from '../src/agent/roles.js';
+import { CLASSIFIER_SCHEMA } from '../src/agent/schemas.js';
 import { runTeam, toolNamesForRole } from '../src/agent/team.js';
 import { enabledToolNames } from '../src/agent/tool-specs.js';
 import { diffHunk, describeChangeSet } from '../src/agent/diff.js';
@@ -335,6 +336,46 @@ test('role runner adds web conventions and configured documentation to coding ro
     const roles = createRoleRunner({ client: client(), config, ledger: createLedger() });
     const result = await roles.run('coder', { text: 'update styles' });
     assert.equal(result.status, 'completed', result.error?.message);
+});
+
+test('role runner parses a fenced JSON reply without a retry', async () => {
+    let calls = 0;
+    script = () => { calls++; return { text: '```json\n{"label":"complex"}\n```' }; };
+    const roles = createRoleRunner({ client: client(), config: baseConfig(), ledger: createLedger() });
+    const result = await roles.run('classifier', { text: 'label it', schema: CLASSIFIER_SCHEMA, schemaName: 'task_label' });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.deepEqual(result.data, { label: 'complex' });
+    assert.equal(calls, 1);
+});
+
+test('role runner parses JSON wrapped in prose from a fallback model', async () => {
+    script = () => ({ text: 'The answer is {"label":"normal"} for this task.' });
+    const roles = createRoleRunner({ client: client(), config: baseConfig(), ledger: createLedger() });
+    const result = await roles.run('classifier', { text: 'label it', schema: CLASSIFIER_SCHEMA, schemaName: 'task_label' });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.deepEqual(result.data, { label: 'normal' });
+});
+
+test('role runner asks once for valid JSON when the reply is prose', async () => {
+    const events = [];
+    script = (body, index) => (index === 0 ? { text: 'I cannot structure this task.' } : { text: '{"label":"normal"}' });
+    const roles = createRoleRunner({ client: client(), config: baseConfig(), ledger: createLedger(), emit: (event) => events.push(event) });
+    const result = await roles.run('classifier', { text: 'label it', schema: CLASSIFIER_SCHEMA, schemaName: 'task_label' });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.deepEqual(result.data, { label: 'normal' });
+    assert.equal(result.turns, 2);
+    assert.match(events.filter((e) => e.type === 'warning').map((e) => e.message).join(' '), /не в JSON/);
+    const retry = server.requests.filter((r) => r.method === 'POST' && r.path === '/v1/responses').at(-1);
+    assert.match(JSON.stringify(retry.body.input.at(-1)), /not valid JSON/);
+});
+
+test('role runner fails when the restated reply is not JSON either', async () => {
+    script = () => ({ text: 'still prose' });
+    const roles = createRoleRunner({ client: client(), config: baseConfig(), ledger: createLedger() });
+    const result = await roles.run('classifier', { text: 'label it', schema: CLASSIFIER_SCHEMA, schemaName: 'task_label' });
+    assert.equal(result.status, 'failed');
+    assert.match(result.error.message, /некорректный JSON/);
+    assert.equal(result.turns, 2);
 });
 
 test('role runner: vision delegation and file summaries with cache', async () => {

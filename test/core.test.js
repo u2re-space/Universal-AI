@@ -15,6 +15,7 @@ import { runCommand } from '../src/agent/shell.js';
 import { sanitizeTerminal } from '../src/ui/sanitize.js';
 import { normalizeUsage } from '../src/openai/stream.js';
 import { resolveTextArg } from '../src/commands/shared.js';
+import { extractJson } from '../src/util/text.js';
 import { TINY_PNG } from './helpers/mock-server.js';
 
 test('session: replayable items for stateless history', () => {
@@ -388,4 +389,35 @@ test('agent.encode accepts encoder or mcp and rejects anything else', async () =
     } finally {
         await rm(home, { recursive: true, force: true });
     }
+});
+
+test('extractJson: plain JSON parses unchanged', () => {
+    assert.deepEqual(extractJson('{"a":1}'), { a: 1 });
+    assert.deepEqual(extractJson('  {"a":1}  '), { a: 1 });
+});
+
+test('extractJson: fenced json block is unwrapped', () => {
+    assert.deepEqual(extractJson('```json\n{"a":1,"b":[1,2]}\n```'), { a: 1, b: [1, 2] });
+    assert.deepEqual(extractJson('```\n{"a":1}\n```'), { a: 1 });
+    assert.deepEqual(extractJson('```json\r\n{"a":1}\r\n```'), { a: 1 });
+});
+
+test('extractJson: JSON inside surrounding prose is found', () => {
+    assert.deepEqual(extractJson('Here is the plan:\n```json\n{"summary":"x","steps":[{"goal":"g"}]}\n```\nDone.'),
+        { summary: 'x', steps: [{ goal: 'g' }] });
+    assert.deepEqual(extractJson('The answer is {"label":"normal"} according to the task.'), { label: 'normal' });
+    assert.deepEqual(extractJson('result: [1,2,{"k":"v"}] end'), [1, 2, { k: 'v' }]);
+});
+
+test('extractJson: braces inside strings do not confuse the scanner', () => {
+    assert.deepEqual(extractJson('{"text":"a } brace and { another","n":2}'), { text: 'a } brace and { another', n: 2 });
+    const nested = JSON.stringify({ code: '```js\nconst a = 1;\n```', note: 'say "hi" } then [go]' });
+    assert.deepEqual(extractJson(`Here:\n${nested}\ndone`), JSON.parse(nested));
+});
+
+test('extractJson: returns null for non-JSON text', () => {
+    assert.equal(extractJson('no json at all'), null);
+    assert.equal(extractJson('{"a":1,'), null);
+    assert.equal(extractJson('   '), null);
+    assert.equal(extractJson(null), null);
 });

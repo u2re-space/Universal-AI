@@ -3,10 +3,10 @@
  * @module util/text
  * @purpose Small formatting and byte helpers shared across the CLI.
  * @usedBy commands, agent, ui, core, jobs/manager, interact/filesystem
- * @exports byteSize, isRecord, positiveInteger, formatNumber, formatBytes, formatDuration, formatUsd, truncate, clipMiddle, errorMessage, timestampSlug, deepMerge, estimateTokens
+ * @exports byteSize, isRecord, positiveInteger, formatNumber, formatBytes, formatDuration, formatUsd, truncate, clipMiddle, errorMessage, timestampSlug, deepMerge, estimateTokens, extractJson
  * @ai.tags text, format
  * @ai.hint pure
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-25 extractJson tolerates fenced and prose-wrapped model replies.
  */
 
 /**
@@ -142,4 +142,69 @@ export function deepMerge(base, extra) {
 /** Rough token estimate for budgeting before a request (about 4 bytes per token, conservative). */
 export function estimateTokens(value) {
     return Math.ceil(byteSize(value) / 3.5);
+}
+
+/**
+ * Extract a JSON value from a model reply that may contain Markdown fences, surrounding prose,
+ * or truncated fragments. Returns the parsed value on success, or `null` when nothing works.
+ *
+ * Tries in order:
+ *   1. the trimmed text as-is,
+ *   2. the body of the first fenced block (```json … ``` or bare ```),
+ *   3. the outermost balanced `{…}` or `[…]` span found inside the text (string-aware).
+ *
+ * @param {string} text
+ * @returns {unknown}
+ * @exports
+ * @ai.hint pure
+ */
+export function extractJson(text) {
+    const raw = String(text ?? '').trim();
+    if (!raw) return null;
+    const tries = [raw];
+
+    // 2 — try the first fenced block body
+    const fence = /^\s*```[^\n]*\n([\s\S]*?)\n```$/m.exec(raw);
+    if (fence) tries.push(fence[1].trim());
+
+    // 3 — try the outermost balanced brace/bracket span
+    const span = findBalanced(raw);
+    if (span) tries.push(span);
+
+    for (const candidate of tries) {
+        try { return JSON.parse(candidate); }
+        catch { /* next candidate */ }
+    }
+    return null;
+}
+
+/**
+ * Find the outermost balanced `{…}` or `[…]` span. Brackets inside strings are ignored.
+ * Returns the slice, or `null` when the span never closes.
+ * @param {string} text
+ * @returns {string | null}
+ * @ai.hint pure
+ */
+function findBalanced(text) {
+    for (let start = 0; start < text.length; start++) {
+        if (text[start] !== '{' && text[start] !== '[') continue;
+        let depth = 0;
+        let inString = false;
+        for (let i = start; i < text.length; i++) {
+            const ch = text[i];
+            if (inString) {
+                if (text.charCodeAt(i) === 92) i++;  // backslash: skip the escaped character
+                else if (ch === '"') inString = false;
+                continue;
+            }
+            if (ch === '"') { inString = true; continue; }
+            if (ch === '{' || ch === '[') depth++;
+            else if (ch === '}' || ch === ']') {
+                depth--;
+                if (depth === 0) return text.slice(start, i + 1);
+                if (depth < 0) break;
+            }
+        }
+    }
+    return null;
 }
