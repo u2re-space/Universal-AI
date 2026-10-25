@@ -37,7 +37,7 @@ export async function image(ctx) {
     const extra = await resolveTextArg(values.instructions, { cwd: ctx.cwd, what: 'инструкции' });
     const instructions = composeInstructions(IMAGE_BASE, config, extra);
     if (imageTransport(config) === 'images') return runImagesEndpoint(ctx, prompt, count);
-    const builtin = builtinTools({ ...config, tools: { ...config.tools, images: true } }, { images: true, web: false });
+    const builtin = builtinTools({ ...config, tools: { ...config.tools, images: true } }, { images: true, web: true });
     const target = values.out ?? config.image.outputDir;
     renderer.line('info', `Генерация: ${config.imageModel ?? 'модель по умолчанию инструмента'} · ${config.image.size} · качество ${config.image.quality} · ${config.image.format} → ${target}`, { dim: true });
 
