@@ -4,10 +4,10 @@
  * @purpose Try another model channel, then another OpenAI-compatible host, when the first choice is unavailable.
  * @depends openai/client, openai/errors, openai/model-map, core/config
  * @usedBy commands/shared
- * @exports MODEL_FALLBACKS, fallbackModel, modelMissing, providerDown, routeMissing, attemptChain, providerList, createFallbackClient
+ * @exports MODEL_FALLBACKS, fallbackModel, modelMissing, providerDown, routeMissing, supportsRoute, attemptChain, providerList, primaryBackend, createFallbackClient
  * @ai.tags openai, fallback
  * @ai.hint io
- * @changed 2026-10-17 A missing model can move to anthropic. A dead host can move to another base URL.
+ * @changed 2026-10-27 Ordered backends with custom headers and route switches; decisions skip unsupported hosts.
  */
 
 import { createClient } from './client.js';
@@ -78,30 +78,68 @@ export function routeMissing(error) {
 }
 
 /**
- * Hosts to try after the primary one. Entries without a key are skipped.
+ * Whether a backend serves a route. A missing `supports` map means every route is on.
+ * `images-edit` and `images-vector` share the `images` switch.
+ * @param {object|null|undefined} supports
+ * @param {string} kind
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function supportsRoute(supports, kind) {
+    if (!supports || typeof supports !== 'object') return true;
+    const key = kind === 'images-edit' || kind === 'images-vector' ? 'images' : kind;
+    if (key === 'decisions' && Object.hasOwn(supports, 'decisionAPI')) return supports.decisionAPI !== false;
+    return supports[key] !== false;
+}
+
+/**
+ * One backend entry with a key, or null when it cannot be used.
  * The key of an `env` entry is read from the live environment, so a value that exists only in
  * `.env` is found — `process.env` never sees it.
+ * @param {object} item
+ * @param {object} env
+ * @returns {{ baseURL: string, apiKey: string, headers?: object, supports?: object } | null}
+ * @ai.hint pure
+ */
+function usableBackend(item, env) {
+    const baseURL = String(item?.baseURL ?? '').trim();
+    const apiKey = item?.apiKey || (item?.env ? env[item.env] : '') || '';
+    if (!baseURL || !apiKey) return null;
+    const entry = { baseURL, apiKey };
+    if (item.headers && typeof item.headers === 'object') entry.headers = item.headers;
+    if (item.supports && typeof item.supports === 'object') entry.supports = item.supports;
+    return entry;
+}
+
+/**
+ * Hosts to try after the primary one. Entries without a key are skipped.
+ * `backends` is the ordered list when configured; otherwise the legacy `fallback.providers` is read.
  * @param {object} config
  * @param {object} [env]
- * @returns {{ baseURL: string, apiKey: string }[]}
+ * @returns {{ baseURL: string, apiKey: string, headers?: object, supports?: object }[]}
  * @exports
  * @ai.hint pure
  */
 export function providerList(config, env = liveEnv()) {
     if (config?.fallback?.enabled === false) return [];
-    const listed = Array.isArray(config?.fallback?.providers) ? config.fallback.providers : [];
+    const declared = Array.isArray(config?.backends) && config.backends.length
+        ? config.backends
+        : (Array.isArray(config?.fallback?.providers) ? config.fallback.providers : []);
     const extra = env.AI_FALLBACK_BASE_URL && env.AI_FALLBACK_API_KEY
         ? [{ baseURL: env.AI_FALLBACK_BASE_URL, apiKey: env.AI_FALLBACK_API_KEY }]
         : [];
-    const seen = new Set([String(config?.baseURL ?? '').replace(/\/+$/, '')]);
+    const primaryURL = String(config?.baseURL ?? '').replace(/\/+$/, '');
+    const primaryKey = String(config?.apiKey ?? '');
+    const seen = new Set();
     const out = [];
-    for (const item of [...listed, ...extra]) {
-        const baseURL = String(item?.baseURL ?? '').trim();
-        const apiKey = item?.apiKey || (item?.env ? env[item.env] : '') || '';
-        const normalized = baseURL.replace(/\/+$/, '');
-        if (!baseURL || !apiKey || seen.has(normalized)) continue;
-        seen.add(normalized);
-        out.push({ baseURL, apiKey });
+    for (const item of [...declared, ...extra]) {
+        const entry = usableBackend(item, env);
+        if (!entry) continue;
+        const id = `${entry.baseURL.replace(/\/+$/, '')}\u0000${entry.apiKey}`;
+        if (id === `${primaryURL}\u0000${primaryKey}` || seen.has(id)) continue;
+        seen.add(id);
+        out.push(entry);
     }
     return out;
 }
@@ -158,6 +196,26 @@ function adaptBody(body, model, switchedHost) {
 }
 
 /**
+ * The primary backend entry, including its custom headers and route switches.
+ * A `backends` list names it explicitly; otherwise only the top-level URL and key exist.
+ * @param {object} config
+ * @returns {{ baseURL: string, apiKey: string, headers?: object|null, supports?: object|null }}
+ * @exports
+ * @ai.hint pure
+ */
+export function primaryBackend(config) {
+    const declared = Array.isArray(config?.backends) ? config.backends : [];
+    const match = declared.find((item) => item?.baseURL === config.baseURL && String(item.apiKey ?? '') === String(config.apiKey ?? ''))
+        ?? declared.find((item) => item?.baseURL === config.baseURL);
+    return {
+        baseURL: config.baseURL,
+        apiKey: config.apiKey ?? envValue('OPENAI_API_KEY'),
+        headers: match?.headers ?? null,
+        supports: match?.supports ?? null,
+    };
+}
+
+/**
  * Primary client plus model and host fallback.
  * @param {object} config
  * @param {{ create?: typeof createClient }} [options]
@@ -170,50 +228,76 @@ export function createFallbackClient(config, { create = createClient } = {}) {
         retries: config.retries, idleTimeoutMs: config.limits?.idleTimeoutMs, connectTimeoutMs: config.limits?.connectTimeoutMs,
         organization: config.organization, project: config.project,
     };
+    const primarySpec = primaryBackend(config);
     const primary = create({
-        apiKey: config.apiKey ?? envValue('OPENAI_API_KEY'), baseURL: config.baseURL, ...timeouts,
+        apiKey: primarySpec.apiKey, baseURL: primarySpec.baseURL, headers: primarySpec.headers, ...timeouts,
     });
     const opened = [];
     const map = config.fallback?.models ?? MODEL_FALLBACKS;
-    const endpoints = () => [
-        { label: config.baseURL, client: primary },
+    /**
+     * One endpoint object for a backend. `supports` decides which routes may reach it.
+     * @param {object} spec
+     * @param {object} client
+     * @returns {{ label: string, client: object, supports: object|null }}
+     * @ai.hint pure
+     */
+    const endpointOf = (spec, client) => ({ label: spec.baseURL, client, supports: spec.supports ?? null });
+    /**
+     * Endpoints that serve `kind`, primary first and fallbacks in their configured order.
+     * @param {string} kind
+     * @returns {{ label: string, client: object, supports: object|null }[]}
+     * @ai.hint pure
+     */
+    const endpoints = (kind) => [
+        endpointOf(primarySpec, primary),
         ...providerList(config).map((item) => {
-            let found = opened.find((entry) => entry.baseURL === item.baseURL && entry.apiKey === item.apiKey);
+            const signature = JSON.stringify(item.headers ?? null);
+            let found = opened.find((entry) => entry.baseURL === item.baseURL && entry.apiKey === item.apiKey
+                && JSON.stringify(entry.headers ?? null) === signature);
             if (!found) {
-                found = { ...item, client: create({ apiKey: item.apiKey, baseURL: item.baseURL, retries: config.retries, idleTimeoutMs: timeouts.idleTimeoutMs, connectTimeoutMs: timeouts.connectTimeoutMs }) };
+                found = {
+                    ...item,
+                    client: create({
+                        apiKey: item.apiKey, baseURL: item.baseURL, headers: item.headers, retries: config.retries,
+                        idleTimeoutMs: timeouts.idleTimeoutMs, connectTimeoutMs: timeouts.connectTimeoutMs,
+                    }),
+                };
                 opened.push(found);
             }
-            return { label: item.baseURL, client: found.client };
+            return endpointOf(item, found.client);
         }),
-    ];
+    ].filter((endpoint) => supportsRoute(endpoint.supports, kind));
     let active = primary;
 
     /**
-     * @param {object[]} chain
      * @param {object} body
      * @param {object} options
      * @param {'responses'|'images'|'images-edit'|'images-vector'} kind
      */
-    const sendBody = (chain, body, options, kind) => attemptChain({
-        endpoints: chain,
-        model: body?.model ?? config.model,
-        map,
-        onWarn: (message) => { try { options?.onEvent?.({ type: 'warning', message }); } catch { /* observer */ } },
-        send: (endpoint, model, switchedHost) => {
-            active = endpoint.client;
-            const next = adaptBody(body ?? {}, model, switchedHost);
-            if (kind === 'images') return endpoint.client.images.generate({ ...next, signal: options?.signal });
-            if (kind === 'images-edit') return endpoint.client.images.edit({ ...next, signal: options?.signal });
-            if (kind === 'images-vector') return endpoint.client.images.vectorize({ ...next, signal: options?.signal });
-            return endpoint.client.responses.create(next, options);
-        },
-    });
+    const sendBody = (body, options, kind) => {
+        const chain = endpoints(kind);
+        if (!chain.length) throw new ApiError(`Нет доступного провайдера для маршрута ${kind}.`, { code: 'NO_PROVIDER' });
+        return attemptChain({
+            endpoints: chain,
+            model: body?.model ?? config.model,
+            map,
+            onWarn: (message) => { try { options?.onEvent?.({ type: 'warning', message }); } catch { /* observer */ } },
+            send: (endpoint, model, switchedHost) => {
+                active = endpoint.client;
+                const next = adaptBody(body ?? {}, model, switchedHost);
+                if (kind === 'images') return endpoint.client.images.generate({ ...next, signal: options?.signal });
+                if (kind === 'images-edit') return endpoint.client.images.edit({ ...next, signal: options?.signal });
+                if (kind === 'images-vector') return endpoint.client.images.vectorize({ ...next, signal: options?.signal });
+                return endpoint.client.responses.create(next, options);
+            },
+        });
+    };
 
     return {
         ...primary,
         responses: {
             ...primary.responses,
-            create: (body, options = {}) => sendBody(endpoints(), body, options, 'responses'),
+            create: (body, options = {}) => sendBody(body, options, 'responses'),
             retrieve: (...args) => active.responses.retrieve(...args),
             cancel: (...args) => active.responses.cancel(...args),
             compact: (...args) => active.responses.compact(...args),
@@ -221,32 +305,55 @@ export function createFallbackClient(config, { create = createClient } = {}) {
         },
         images: {
             ...primary.images,
-            generate: (args = {}) => sendBody(endpoints(), args, { signal: args.signal, onEvent: args.onEvent }, 'images'),
-            edit: (args = {}) => sendBody(endpoints(), args, { signal: args.signal, onEvent: args.onEvent }, 'images-edit'),
-            vectorize: (args = {}) => sendBody(endpoints(), args, { signal: args.signal, onEvent: args.onEvent }, 'images-vector'),
+            generate: (args = {}) => sendBody(args, { signal: args.signal, onEvent: args.onEvent }, 'images'),
+            edit: (args = {}) => sendBody(args, { signal: args.signal, onEvent: args.onEvent }, 'images-edit'),
+            vectorize: (args = {}) => sendBody(args, { signal: args.signal, onEvent: args.onEvent }, 'images-vector'),
         },
         decisions: {
             create: async (body, options = {}) => {
+                const chain = endpoints('decisions');
+                if (!chain.length) {
+                    throw new ApiError('Сервис решений недоступен. Шаг пропущен.', { code: 'DECISIONS_UNAVAILABLE', status: 404 });
+                }
                 const models = [...new Set([body?.model, fallbackModel(body?.model, map)].filter(Boolean))];
                 let last = null;
-                for (const candidate of models) {
-                    try {
-                        const raw = await primary.decisions.create({ ...body, model: candidate }, options);
-                        if (candidate !== body?.model) {
-                            try { options?.onEvent?.({ type: 'warning', message: `Модель решений заменена на ${candidate}.` }); } catch { /* observer */ }
+                for (const endpoint of chain) {
+                    for (const candidate of models) {
+                        try {
+                            const raw = await endpoint.client.decisions.create({ ...body, model: candidate }, options);
+                            if (candidate !== body?.model) {
+                                try { options?.onEvent?.({ type: 'warning', message: `Модель решений заменена на ${candidate}.` }); } catch { /* observer */ }
+                            }
+                            return raw;
+                        } catch (error) {
+                            last = error;
+                            if (routeMissing(error)) break;
+                            if (modelMissing(error)) continue;
+                            if (providerDown(error)) break;
+                            throw error;
                         }
-                        return raw;
+                    }
+                }
+                if (last && (routeMissing(last) || modelMissing(last) || providerDown(last))) {
+                    throw new ApiError('Сервис решений недоступен. Шаг пропущен.', { code: 'DECISIONS_UNAVAILABLE', status: last.status ?? 404, cause: last });
+                }
+                throw last ?? new ApiError('Сервис решений недоступен. Шаг пропущен.', { code: 'DECISIONS_UNAVAILABLE', status: 404 });
+            },
+        },
+        moderations: {
+            create: async (body, options = {}) => {
+                const chain = endpoints('moderations');
+                let last = null;
+                for (const endpoint of chain) {
+                    try {
+                        return await endpoint.client.moderations.create(body, options);
                     } catch (error) {
                         last = error;
-                        if (routeMissing(error)) break;
-                        if (modelMissing(error)) continue;
+                        if (routeMissing(error) || providerDown(error)) continue;
                         throw error;
                     }
                 }
-                if (last && (routeMissing(last) || modelMissing(last))) {
-                    throw new ApiError('Сервис решений недоступен. Шаг пропущен.', { code: 'DECISIONS_UNAVAILABLE', status: last.status ?? 404, cause: last });
-                }
-                throw last;
+                throw last ?? new ApiError('Сервис модерации недоступен.', { code: 'MODERATION_UNAVAILABLE', status: 404 });
             },
         },
         close: () => {

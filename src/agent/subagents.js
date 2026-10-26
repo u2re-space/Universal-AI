@@ -50,14 +50,15 @@ export function subagentToolNames(kind, allNames, config = null) {
  * run_subagent tool itself, so a sub-agent cannot delegate further.
  *
  * @param {{ config: object, roles: object, root: string, allNames: string[], approvalLevel: string,
- *   toolBase?: object, toolOptions?: object, agentsText?: string|Function|null, emit?: Function }} options
+ *   toolBase?: object, toolOptions?: object, agentsText?: string|Function|null, emit?: Function, parentTask?: string|null }} options
  *   `roles` is the role runner; `toolBase` and `toolOptions` are passed through to createToolset;
- *   `agentsText` may be a function so AGENTS.md text discovered later still reaches the sub-agent.
+ *   `agentsText` may be a function so AGENTS.md text discovered later still reaches the sub-agent;
+ *   `parentTask` is the caller's task for `{{task:PROMPT}}`.
  * @returns {(kind: string, task: string) => Promise<{ output: string, summary: string, ok: boolean, stats: object, images: string[] }>}
  * @exports
  * @ai.hint hot
  */
-export function createSubagentRunner({ config, roles, root, allNames = [], approvalLevel, toolBase = {}, toolOptions = {}, agentsText = null, emit = () => {} }) {
+export function createSubagentRunner({ config, roles, root, allNames = [], approvalLevel, toolBase = {}, toolOptions = {}, agentsText = null, emit = () => {}, parentTask = null }) {
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
 
     return async function runSubagent(kind, task) {
@@ -79,6 +80,8 @@ export function createSubagentRunner({ config, roles, root, allNames = [], appro
             toolset,
             maxTurns: spec.turns,
             silent: true,
+            task: parentTask,
+            delegated: text,
             ...(kind === 'image-processor' && config.tools?.web
                 ? { builtin: builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search') }
                 : {}),

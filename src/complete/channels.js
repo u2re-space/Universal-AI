@@ -13,7 +13,7 @@
 import { performance } from 'node:perf_hooks';
 import { createClient } from '../openai/client.js';
 import { ApiError, isAbortError } from '../openai/errors.js';
-import { modelMissing, providerDown, providerList } from '../openai/fallback.js';
+import { modelMissing, primaryBackend, providerDown, providerList, supportsRoute } from '../openai/fallback.js';
 import { isReasoningModel, supportsVerbosity } from '../core/config.js';
 import { liveEnv } from '../core/runtime-env.js';
 import { resolveCompletionModel } from './models.js';
@@ -27,9 +27,9 @@ const PROBE_MAX_OUTPUT_TOKENS = 32;
 /**
  * The primary host and every fallback provider that has its own key.
  * The primary entry comes first; duplicates are dropped by base URL and key.
- * @param {object} config Resolved config: baseURL, apiKey, fallback.
+ * @param {object} config Resolved config: baseURL, apiKey, backends, fallback.
  * @param {object} [env] Environment for apiKey and provider env names.
- * @returns {{ baseURL: string, apiKey: string, label: string, primary: boolean }[]}
+ * @returns {{ baseURL: string, apiKey: string, label: string, primary: boolean, headers?: object, supports?: object }[]}
  * @exports
  * @ai.hint pure
  */
@@ -40,22 +40,28 @@ export function completionChannelList(config, env = null) {
      * @param {string} baseURL
      * @param {string} apiKey
      * @param {boolean} primary
+     * @param {object|null} [headers]
+     * @param {object|null} [supports]
      * @returns {void}
      * @ai.hint pure
      */
-    const add = (baseURL, apiKey, primary) => {
+    const add = (baseURL, apiKey, primary, headers = null, supports = null) => {
         const url = String(baseURL ?? '').trim();
         const key = String(apiKey ?? '').trim();
-        if (!url || !key || /[\r\n]/.test(key)) return;
+        if (!url || !key || /[\r\n]/.test(key) || !supportsRoute(supports, 'responses')) return;
         const normalized = url.replace(/\/+$/, '');
         const id = `${normalized}\u0000${key}`;
         if (seen.has(id)) return;
         seen.add(id);
-        out.push({ baseURL: url, apiKey: key, label: normalized, primary });
+        const entry = { baseURL: url, apiKey: key, label: normalized, primary };
+        if (headers && typeof headers === 'object') entry.headers = headers;
+        if (supports && typeof supports === 'object') entry.supports = supports;
+        out.push(entry);
     };
     env ??= liveEnv() ?? process.env;
-    add(config?.baseURL || 'https://api.openai.com/v1/', config?.apiKey || env.OPENAI_API_KEY, true);
-    for (const item of providerList(config, env)) add(item.baseURL, item.apiKey, false);
+    const first = primaryBackend({ ...config, apiKey: config?.apiKey || env.OPENAI_API_KEY });
+    add(first.baseURL || 'https://api.openai.com/v1/', first.apiKey || env.OPENAI_API_KEY, true, first.headers, first.supports);
+    for (const item of providerList(config, env)) add(item.baseURL, item.apiKey, false, item.headers, item.supports);
     return out;
 }
 
@@ -98,7 +104,7 @@ function channelFailed(error) {
  * caches the fastest one, and falls back to the next channel when a request fails.
  *
  * The primary baseURL/API key is a channel too. Alternative channels are
- * fallback.providers entries, each with its own apiKey or env variable.
+ * `backends` entries (or legacy `fallback.providers`), each with its own apiKey or env variable.
  * Probing is skipped when there is only one channel or completion.channelProbe is false.
  *
  * @param {object} config Resolved config.
@@ -134,6 +140,7 @@ export function createCompletionChannels(config, { create = createClient, env = 
         client = create({
             apiKey: endpoint.apiKey,
             baseURL: endpoint.baseURL,
+            headers: endpoint.headers ?? null,
             organization: config.organization,
             project: config.project,
             retries: 0,

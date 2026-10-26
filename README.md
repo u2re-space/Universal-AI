@@ -43,6 +43,10 @@
 * **`delegate_role`** — передаёт следующей роли не только задачу, но и общий контекст команды (`context: true`);
   реестр ролей и раннер общие с `run_subagent`.
 * **Порядок этапов как данные** — `plan.pipeline` и `agent.pipeline` задают, какие этапы выполнять и в каком порядке.
+* **Список бэкендов** — `backends`: несколько OpenAI-совместимых хостов по порядку, у каждого свой ключ,
+  заголовки и выключатели маршрутов (`supports`). Первый хост с ключом становится основным, остальные — резервными.
+* **Подстановки** — `{{env:NAME}}`, `{{task:PROMPT}}`, `{{delegated:PROMPT}}` и `{{fs:путь}}` в конфигурации,
+  инструкциях ролей и тексте задач.
 
 ## Установка
 
@@ -141,7 +145,7 @@ ai serve --port 8765
 
 Сервер слушает только `127.0.0.1`. Секрет `--token` или `AI_COMPLETE_TOKEN` (либо `completion.token` в конфигурации) передаётся заголовком `Authorization: Bearer` или параметром `?token=`. У `ai serve` тот же заголовок принимает токен из `serve.json`.
 
-Для каждой модели дополнение ищет самый быстрый канал. Каналы — основной `baseURL` с `OPENAI_API_KEY` и `fallback.providers` (у каждого свой `apiKey` или `env`). При первом запросе и после `completion.probeTtlMs` (60 с) каналы параллельно получают короткий пробный запрос; побеждает первый ответивший, остальные остаются запасными в порядке задержки. Если канал не обслуживает модель или отвечает ошибкой, запрос уходит следующему. Выбор запоминается отдельно для каждой модели. `completion.channelProbe: false` отключает поиск (порядок: основной, затем запасные), `completion.probeTimeoutMs` (1500 мс) ограничивает пробу.
+Для каждой модели дополнение ищет самый быстрый канал. Каналы — `backends` (у каждого свой ключ, заголовки и маршруты), а если список пуст — основной `baseURL` с `OPENAI_API_KEY` и `fallback.providers`. При первом запросе и после `completion.probeTtlMs` (60 с) каналы параллельно получают короткий пробный запрос; побеждает первый ответивший, остальные остаются запасными в порядке задержки. Если канал не обслуживает модель или отвечает ошибкой, запрос уходит следующему. Выбор запоминается отдельно для каждой модели. `completion.channelProbe: false` отключает поиск (порядок: основной, затем запасные), `completion.probeTimeoutMs` (1500 мс) ограничивает пробу.
 
 Тот же сервер принимает правку структуры: `POST /v1/structure` и кадр WebSocket `{"type":"structure"}`. В `tasks` — `sort-imports`, `dedupe`, `merge`, `group-properties`, `group-selectors`, `sort-rules`, `sort-properties`, `layers`, `clean`, `sort-lines`. В `rules` — свой порядок импортов, группы свойств и слои. `prompt` описывает задачу, которую встроенные шаги не покрывают. `selection` ограничивает правку открытым диапазоном; без `write` сервер только возвращает текст. Агент делает то же самое инструментом `structure_file`.
 
@@ -546,6 +550,11 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
 ```json
 {
   "model": "gpt-6.1-sol",
+  "backends": [
+    { "baseUrl": "https://api.proxyapi.ru/v1", "apiKey": "{{env:OPENAI_API_KEY}}" },
+    { "baseUrl": "https://sprutdock.ru/v1", "apiKey": "{{env:SPRUTDOCK_API_KEY}}", "supports": { "decisions": false } },
+  { "baseUrl": "https://gptunnel.ru/v1", "apiKey": "{{env:GPTUNNEL_API_KEY}}", "headers": { "useWalletBalance": true } }
+  ],
   "imageModel": null,
   "reasoning": { "effort": "medium", "summary": "auto" },
   "store": false,
@@ -631,6 +640,46 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 Встроенные веб-правила используют ES2025 как базу, требуют сверять поддержку ES2026 и новых CSS-возможностей
 с целевым runtime и конфигурацией проекта, а также ориентируют роли на уже настроенные линтеры, форматтеры и проверки.
 Цены в примере условные — проверьте актуальные.
+
+### Бэкенды и подстановки
+
+`backends` — упорядоченный список OpenAI-совместимых хостов. Первый бэкенд с URL и ключом становится основным
+(`baseURL` и `apiKey`), остальные — резервными в порядке списка. Бэкенд без ключа пропускается, а
+`fallback.enabled: false` выключает резервные хосты. Если ключа нет ни у одного, основной — первый бэкенд с URL,
+а ключ берётся из `OPENAI_API_KEY`. Если `backends` пуст, работают прежние `baseURL` +
+`OPENAI_API_KEY` и `fallback.providers`. `AI_FALLBACK_BASE_URL` вместе с `AI_FALLBACK_API_KEY` добавляет ещё
+один резервный хост после списка.
+
+```json
+"backends": [
+  { "baseUrl": "https://api.proxyapi.ru/v1", "apiKey": "{{env:OPENAI_API_KEY}}" },
+  { "baseUrl": "https://sprutdock.ru/v1", "apiKey": "{{env:SPRUTDOCK_API_KEY}}", "supports": { "decisions": false } },
+  { "baseUrl": "https://gptunnel.ru/v1", "apiKey": "{{env:GPTUNNEL_API_KEY}}", "headers": { "useWalletBalance": "true" } }
+]
+```
+
+Поля записи: `baseUrl` (или `baseURL`) — корень, к которому добавляются `/responses`, `/images/...` и `/decisions`;
+`apiKey` — ключ, обычно через `{{env:NAME}}` (вместо него можно указать `env` с именем переменной); `headers` —
+свои заголовки (значения `true` и числа становятся строками; `Authorization`, `Content-Type`, `Accept` и
+заголовки организации/проекта не перезаписываются); `supports` — выключатели маршрутов `responses`, `images`,
+`decisions`, `moderations`. `decisionAPI` — старое имя `decisions`. Значение `false` исключает бэкенд из маршрута;
+для `images-edit` и `images-vector` действует выключатель `images`. Решения и модерация перебирают только
+поддерживающие хосты; если таких нет, шаг решений пропускается.
+
+Подстановки работают в любой строке конфигурации и в промптах:
+
+| Запись | Значение |
+| --- | --- |
+| `{{env:NAME}}` | переменная окружения; отсутствующая — пустая строка |
+| `{{task:PROMPT}}` | текущая задача запуска |
+| `{{delegated:PROMPT}}` | задача, переданная роли или суб-агенту |
+| `{{fs:путь}}` | текст UTF-8 файла внутри рабочего каталога |
+
+`task` и `delegated` знают только слот `PROMPT`. Неизвестный scope или слот остаётся как написан, поэтому
+конфигурация сначала раскрывает `env` и `fs`, а `task` и `delegated` — позже, когда задача уже известна.
+`fs` не выходит за рабочий каталог, не читает секреты, бинарные и не-UTF-8 файлы и файлы больше
+`limits.maxFileReadBytes` (256 КиБ по умолчанию); в этих случаях загрузка конфигурации или запуск завершается
+ошибкой.
 
 Переменные окружения: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID`,
 `AI_MODEL`, `AI_IMAGE_MODEL`, `AI_AGENT_HOME`, `AI_DECISION_MODEL`, `TELEGRAM_BOT_TOKEN`, `AI_CHANNELS_TOKEN`,

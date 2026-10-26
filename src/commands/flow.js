@@ -2,16 +2,18 @@
  * @file src/commands/flow.js
  * @module commands/flow
  * @purpose Shared one-shot flow: open a session, run one turn, print the summary, and return an exit code.
- * @depends node:path, node:fs/promises, core/attachments, agent/loop, util/text, commands/shared
+ * @depends node:path, node:fs/promises, core/attachments, core/placeholders, core/runtime-env, agent/loop, util/text, commands/shared
  * @usedBy commands/ask, commands/run, commands/image
  * @exports loadTextFormat, runOnce
  * @ai.tags cli, turn
  * @ai.hint io
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-27 Prompt and instructions expand {{env:}}, {{fs:}}, {{task:PROMPT}}, and {{delegated:PROMPT}}.
  */
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { buildUserMessage } from '../core/attachments.js';
+import { renderPlaceholders } from '../core/placeholders.js';
+import { liveEnv } from '../core/runtime-env.js';
 import { runTurn, builtinTools } from '../agent/loop.js';
 import { formatBytes } from '../util/text.js';
 import { UsageError, createClientFor, createLedgerFor, openSession, writeOutput, resultObject, exitCodeFor, STATUS_LABELS,
@@ -51,15 +53,20 @@ export async function runOnce(ctx, {
     const { config, renderer, signal, values, emit } = ctx;
     const client = ctx.client ?? createClientFor(config);
     const ledger = ctx.ledger ?? createLedgerFor(config);
-    const { session, file: sessionFile, resumed } = await openSession({ config, name: values.session ?? null, instructions });
+    const scope = {
+        env: liveEnv(), root: ctx.cwd, task: prompt, maxBytes: config.limits.maxFileReadBytes,
+    };
+    const task = await renderPlaceholders(prompt, { ...scope, namespaces: ['env', 'fs'] });
+    const renderedInstructions = await renderPlaceholders(instructions, { ...scope, task });
+    const { session, file: sessionFile, resumed } = await openSession({ config, name: values.session ?? null, instructions: renderedInstructions });
     if (resumed) renderer.line('info', `Сессия продолжена: ${values.session} (${session.size} элементов истории)`, { dim: true });
-    session.addUserMessage(buildUserMessage({ text: prompt, parts }));
+    session.addUserMessage(buildUserMessage({ text: task, parts }));
 
     const builtinList = builtin ?? builtinTools(config, { web: config.tools.web, images: config.tools.images });
     renderer.begin();
     renderer.ledger = ledger.snapshot();
     const result = await runTurn({
-        client, config, session, ledger, toolset, builtin: builtinList, toolChoice, instructions, textFormat,
+        client, config, session, ledger, toolset, builtin: builtinList, toolChoice, instructions: renderedInstructions, textFormat,
         background: Boolean(values.background), imageTarget: imageTarget ?? config.image.outputDir,
         maxTurns: maxTurns ?? (toolset ? config.limits.maxTurns : 1), signal, emit,
         onMaxTurns: turnExtender(renderer, config, signal),

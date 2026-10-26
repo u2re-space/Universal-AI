@@ -2,18 +2,20 @@
  * @file src/commands/team-args.js
  * @module commands/team-args
  * @purpose Shared task, kind, and message template for `ai run` and `ai gen`.
- * @depends node:path, node:fs/promises, commands/flags, generate/brief
+ * @depends node:path, node:fs/promises, commands/flags, generate/brief, core/placeholders, core/runtime-env
  * @usedBy commands/run
  * @exports splitTeamPositionals, resolveKind, applyTemplate, prepareTeamInvocation
  * @ai.tags cli, team
  * @ai.hint io
- * @changed 2026-10-15 One command surface for run and gen.
+ * @changed 2026-10-27 Task text expands {{env:NAME}} and {{fs:PATH}}.
  */
 
 import path from 'node:path';
 import { readFile, stat } from 'node:fs/promises';
 import { UsageError, resolveTextArg } from './shared.js';
 import { GENERATION_KINDS } from '../generate/brief.js';
+import { renderPlaceholders } from '../core/placeholders.js';
+import { liveEnv } from '../core/runtime-env.js';
 
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 const KIND_WORD = /\b(landing|site|backend|app)\b/gi;
@@ -102,7 +104,9 @@ export async function prepareTeamInvocation({ positionals, values, cwd, stdinTex
     }
     if (!inline && stdinText) inline = stdinText;
     const template = await readTemplates(values.template, cwd);
-    const task = applyTemplate(template, inline);
+    const task = await renderPlaceholders(applyTemplate(template, inline), {
+        env: liveEnv(), root: cwd, namespaces: ['env', 'fs'],
+    });
     const kind = resolveKind({ flag: values.kind ?? null, token: split.kindToken, task });
     const wantsProfile = Boolean(kind) || values.fidelity !== undefined || values.creativity !== undefined || Boolean(values.platform) || Boolean(values.example?.length);
     const images = values.image ?? [];

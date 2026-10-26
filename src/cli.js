@@ -157,7 +157,7 @@ export async function main(argvInput = process.argv.slice(2)) {
         const runtimeEnv = await refreshRuntimeEnv({ cwd });
         setLiveEnv(runtimeEnv);
         const config = await loadConfig({
-            configPath: values.config, overrides: overridesFrom(values, { command: commandName }), env: runtimeEnv,
+            configPath: values.config, overrides: overridesFrom(values, { command: commandName }), env: runtimeEnv, cwd,
         });
         if (NEEDS_API_KEY.has(commandName) && !config.apiKey) {
             throw new UsageError('Не задан OPENAI_API_KEY. Укажите его в .env, в окружении или в ~/.ai-agent/config.json.');

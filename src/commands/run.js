@@ -162,7 +162,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
     const role = resolveRole(config, 'default');
     const client = createClientFor(config);
     const ledger = createLedgerFor(config);
-    const roles = createRoleRunner({ client, config, ledger, emit, signal });
+    const roles = createRoleRunner({ client, config, ledger, emit, signal, root: ctx.cwd, task });
     const mcp = await openMcpSources(config, { signal, notify: emit });
     try {
         const toolBase = {
@@ -173,7 +173,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
         };
         const describeImage = roles.shouldDelegateVision('default') ? roles.describeImage : null;
         const subagent = createSubagentRunner({
-            config, roles, root: ctx.cwd, allNames: names, approvalLevel: level, emit, toolBase,
+            config, roles, root: ctx.cwd, allNames: names, approvalLevel: level, emit, toolBase, parentTask: task,
             toolOptions: { describeImage, summarizeFile: roles.summarizeFile }, agentsText,
         });
         const toolset = createToolset({

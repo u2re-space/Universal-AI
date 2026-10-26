@@ -147,9 +147,9 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --file, --line, --character, --language   файл и курсор, если JSON не передан
   --listen    сервер только на 127.0.0.1. Токен: --token или AI_COMPLETE_TOKEN (Bearer или ?token=)
   Строка длиннее 0.5 МиБ в модель не попадает; берутся ближайшие обычные строки. Контекст файла сокращается.
-  Самый быстрый канал под модель: основной baseURL и fallback.providers (свои apiKey/env). Каналы
-  опрашиваются параллельно, выбор запоминается на completion.probeTtlMs (60 000 мс); channelProbe false
-  отключает поиск, probeTimeoutMs (1500 мс) ограничивает пробу.
+  Самый быстрый канал под модель: backends (свои ключи, заголовки и маршруты) или, если список пуст,
+  основной baseURL и fallback.providers. Каналы опрашиваются параллельно, выбор запоминается на
+  completion.probeTtlMs (60 000 мс); channelProbe false отключает поиск, probeTimeoutMs (1500 мс) ограничивает пробу.
   Структура: POST /v1/structure и кадр WebSocket {"type":"structure",...}. tasks: sort-imports, sort-rules,
   sort-properties, group-properties, group-selectors, layers, clean, dedupe, merge, sort-lines.
   rules — порядок импортов, группы свойств, слои. prompt — своя задача. selection правит только диапазон.
@@ -166,7 +166,8 @@ MCP:
 Чаты и решения:
   ai decide и POST /v1/decisions — модель openai/gpt-6-luna-decisions (или decisions.model). Если маршрута нет, шаг решений пропускается.
   Запасные модели: gpt-6-luna → anthropic/claude-haiku-5-5, gpt-6.1-sol → anthropic/claude-sonnet-5.5, решения → typesafe/jev-1.14.
-  Если провайдер недоступен и задан SPRUTDOCK_API_KEY или AI_FALLBACK_API_KEY, запрос уходит на https://sprutdock.ru/v1 или AI_FALLBACK_BASE_URL.
+  Если провайдер недоступен, запрос уходит на следующий бэкенд из backends (или fallback.providers) с ключом.
+  AI_FALLBACK_BASE_URL вместе с AI_FALLBACK_API_KEY добавляет ещё один резервный хост после списка.
   ai moderate в режиме auto сначала вызывает /moderations (omni-moderation-latest). Если шлюз отвечает 404, 405 или 501,
   тот же текст уходит в decisions. Пороги decisions.reviewAt (0.5) и blockAt (0.9) дают allow, review или hide.
   Наборы вопросов: community (группы и каналы), support (клиенты), smm (публикация), guard (подмена инструкций), route (encode или plan).
@@ -175,6 +176,14 @@ MCP:
   ai telegram poll не требует публичного URL. Удаление — только действие hide в группе, супергруппе или канале.
   Личные сообщения и сообщения о вреде себе не удаляются. Ответ клиенту включается telegram.reply.
   Инструменты decide, moderate_text, channel_reply, telegram_call включаются tools.channels или --tools channels.
+
+Бэкенды и подстановки:
+  backends: [{ baseUrl, apiKey: "{{env:NAME}}", headers: {...}, supports: { decisions: false } }, ...]
+  Первый бэкенд с URL и ключом — основной, остальные — резервные по порядку; без ключа бэкенд пропускается.
+  supports: responses | images | decisions | moderations; decisionAPI — старое имя decisions; false выключает маршрут.
+  Заголовки бэкенда не заменяют Authorization, Content-Type, Accept и заголовки организации/проекта.
+  Подстановки в конфигурации и промптах: {{env:NAME}}, {{task:PROMPT}}, {{delegated:PROMPT}}, {{fs:путь}}.
+  {{fs:}} читает UTF-8 файл внутри рабочего каталога, не секрет и не больше limits.maxFileReadBytes.
 
 Прочее:
   --json                 события и результат в формате JSON Lines     --quiet, -q   только ответ

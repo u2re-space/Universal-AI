@@ -2,15 +2,17 @@
  * @file src/commands/chat.js
  * @module commands/chat
  * @purpose Interactive multi-turn REPL with slash commands, attachments, and optional local tools.
- * @depends node:util, core/attachments, agent/loop, agent/tools, core/config, util/text, commands/instructions, commands/shared
+ * @depends node:util, core/attachments, core/placeholders, core/runtime-env, agent/loop, agent/tools, core/config, util/text, commands/instructions, commands/shared
  * @usedBy cli
  * @exports chat
  * @ai.tags cli, repl
  * @ai.hint io
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-10-27 Messages and instructions expand {{env:}}, {{fs:}}, and {{task:PROMPT}}.
  */
 import { styleText } from 'node:util';
 import { buildUserMessage } from '../core/attachments.js';
+import { renderPlaceholders } from '../core/placeholders.js';
+import { liveEnv } from '../core/runtime-env.js';
 import { runTurn, builtinTools, compactSession } from '../agent/loop.js';
 import { createToolset, enabledToolNames } from '../agent/tools.js';
 import { REASONING_EFFORTS, APPROVAL_LEVELS } from '../core/config.js';
@@ -61,7 +63,9 @@ export async function chat(ctx) {
         ? (await discoverAgents({ cwd: ctx.cwd, home: config.home, config: config.agents }).catch(() => null))?.text ?? null
         : null;
     const baseInstructions = agentsText ? `${agentsText}\n\n${ASSISTANT_BASE}` : ASSISTANT_BASE;
-    const instructionsFor = (system) => composeInstructions(baseInstructions, config, system);
+    const instructionsFor = async (system, task = '') => renderPlaceholders(composeInstructions(baseInstructions, config, system), {
+        env: liveEnv(), root: ctx.cwd, task, maxBytes: config.limits.maxFileReadBytes,
+    });
     let systemExtra = extra ?? null;
     const { session, file: sessionFile, resumed } = await openSession({ config, name: values.session ?? null });
     let model = config.model;
@@ -171,7 +175,7 @@ export async function chat(ctx) {
                 if (!input.length) { renderer.line('info', 'История пуста.'); return true; }
                 renderer.setStatus('считает токены…');
                 try {
-                    const counted = await client.responses.inputTokens({ model, input, instructions: instructionsFor(systemExtra) }, { signal });
+                    const counted = await client.responses.inputTokens({ model, input, instructions: await instructionsFor(systemExtra) }, { signal });
                     renderer.idle();
                     renderer.line('info', `Входных токенов в текущем контексте: ${formatNumber(counted.input_tokens ?? NaN)} (${session.size} элементов)`);
                 } catch (error) { renderer.idle(); renderer.line('fail', error.message); }
@@ -181,7 +185,7 @@ export async function chat(ctx) {
                 if (session.store) { renderer.line('warn', 'В режиме --store контекст хранится на сервере; компактизация не требуется.'); return true; }
                 renderer.setStatus('сжимает контекст…');
                 try {
-                    const done = await compactSession({ client, session, model, instructions: instructionsFor(systemExtra), signal });
+                    const done = await compactSession({ client, session, model, instructions: await instructionsFor(systemExtra), signal });
                     renderer.idle();
                     renderer.line('ok', `Контекст сжат: ${done.before} → ${done.after} элементов.`);
                 } catch (error) { renderer.idle(); renderer.line('fail', error.message); }
@@ -213,7 +217,10 @@ export async function chat(ctx) {
                 catch (error) { renderer.line('fail', error.message); }
                 continue;
             }
-            session.addUserMessage(buildUserMessage({ text, parts: pendingParts }));
+            const message = await renderPlaceholders(text, {
+                env: liveEnv(), root: ctx.cwd, namespaces: ['env', 'fs'], maxBytes: config.limits.maxFileReadBytes,
+            });
+            session.addUserMessage(buildUserMessage({ text: message, parts: pendingParts }));
             pendingParts = [];
             const turnController = new AbortController();
             ctx.setTurnController(turnController);
@@ -222,7 +229,7 @@ export async function chat(ctx) {
             renderer.ledger = ledger.snapshot();
             const result = await runTurn({
                 client, config, session, ledger, toolset, builtin: builtinTools(config, tools), model,
-                instructions: instructionsFor(systemExtra), imageTarget: config.image.outputDir,
+                instructions: await instructionsFor(systemExtra, message), imageTarget: config.image.outputDir,
                 maxTurns: toolset ? config.limits.maxTurns : 1, signal: turnSignal, emit,
                 onMaxTurns: turnExtender(renderer, config, turnSignal),
             });

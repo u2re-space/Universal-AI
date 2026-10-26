@@ -2,7 +2,7 @@
  * @file src/core/config.js
  * @module core/config
  * @purpose Load, validate, and redact configuration, and resolve per-role settings.
- * @depends node:os, node:path, node:fs/promises, util/text, core/config-defaults, generate/platform, mcp/servers, channels/questions
+ * @depends node:os, node:path, node:fs/promises, util/text, core/config-defaults, core/placeholders, generate/platform, mcp/servers, channels/questions
  * @usedBy cli, commands/shared, commands/flags, commands/ask, commands/run, commands/chat, commands/misc, agent/loop, agent/roles
  * @exports APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, BUILTIN_ROLE_NAMES, roleNames, defaults, resolveRole, defaultHome, loadConfig, isReasoningModel, supportsVerbosity, redactConfig
  * @ai.tags config
@@ -33,8 +33,19 @@ import { FORBIDDEN_MODELS as REVIEWER_FORBIDDEN, safeReviewerModel } from '../ro
 import { profileFor, snapEffort, lowerEffort, contextBytes, DEFAULT_PROFILE } from '../openai/model-profiles.js';
 import { tierChoice } from './role-tiers.js';
 import { PIPELINE_STAGE_IDS } from '../agent/pipeline.js';
+import { expandConfigStrings } from './placeholders.js';
 
 const KiB = 1024;
+
+/** Route switches a backend may turn off. `decisionAPI` is the older spelling of `decisions`. */
+const BACKEND_ROUTES = Object.freeze(['decisions', 'responses', 'images', 'moderations']);
+const SUPPORT_ALIASES = Object.freeze({
+    decisionapi: 'decisions', decisions: 'decisions',
+    responseapi: 'responses', responses: 'responses',
+    imageapi: 'images', images: 'images',
+    moderationapi: 'moderations', moderations: 'moderations',
+});
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 export {
     APPROVAL_LEVELS,
@@ -244,21 +255,104 @@ function normalizeContext(c) {
 }
 
 /**
+ * Normalize a `supports` map: route names are case-insensitive and `decisionAPI` becomes `decisions`.
+ * Unknown keys are kept so validation can reject them.
+ * @param {unknown} value
+ * @returns {unknown}
+ * @ai.hint pure
+ */
+function normalizeSupports(value) {
+    if (!isRecord(value)) return value;
+    const out = {};
+    for (const [key, flag] of Object.entries(value)) {
+        out[SUPPORT_ALIASES[key.toLowerCase()] ?? key] = flag;
+    }
+    return out;
+}
+
+/**
+ * Stringify header values (`useWalletBalance: true` becomes `"true"`). Other types stay for validation.
+ * @param {unknown} value
+ * @returns {unknown}
+ * @ai.hint pure
+ */
+function normalizeHeaderValues(value) {
+    if (!isRecord(value)) return value;
+    const out = {};
+    for (const [name, item] of Object.entries(value)) {
+        out[name] = typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean' ? String(item) : item;
+    }
+    return out;
+}
+
+/**
+ * Read `baseUrl`/`baseURL`, `headers`, and `supports` of a backend list without changing its order.
+ * @param {unknown} list
+ * @returns {unknown}
+ * @ai.hint pure
+ */
+function normalizeBackendEntries(list) {
+    if (!Array.isArray(list)) return list;
+    return list.map((item) => {
+        if (!isRecord(item)) return item;
+        const { baseUrl, baseURL, headers, supports, ...rest } = item;
+        const out = { ...rest };
+        if (baseUrl !== undefined || baseURL !== undefined) out.baseURL = baseUrl ?? baseURL;
+        if (headers !== undefined) out.headers = normalizeHeaderValues(headers);
+        if (supports !== undefined) out.supports = normalizeSupports(supports);
+        return out;
+    });
+}
+
+/**
+ * Normalize `backends` and the legacy `fallback.providers`, then make the first usable backend the
+ * primary host. A backend is usable when it has a URL and a key; the key may be written in `apiKey`
+ * or named by `env`. A list with no key at all keeps the top-level key and URL from the first entry.
+ * @param {object} c Merged config (mutated in place).
+ * @param {object|null} [env] Environment for `env` entries.
+ * @returns {void}
+ * @ai.hint pure
+ */
+function normalizeBackends(c, env = null) {
+    c.backends = normalizeBackendEntries(c.backends);
+    if (isRecord(c.fallback)) c.fallback.providers = normalizeBackendEntries(c.fallback.providers);
+    if (!Array.isArray(c.backends) || !c.backends.length) return;
+    const keyOf = (item) => {
+        if (typeof item?.apiKey === 'string' && item.apiKey.trim()) return item.apiKey;
+        const value = item?.env && env ? env[item.env] : null;
+        return value == null ? '' : String(value);
+    };
+    const withURL = c.backends.filter((item) => isRecord(item) && typeof item.baseURL === 'string' && item.baseURL.trim());
+    const primary = withURL.find((item) => keyOf(item)) ?? withURL[0];
+    if (!primary) return;
+    c.baseURL = primary.baseURL;
+    const key = keyOf(primary);
+    if (key) c.apiKey = key;
+}
+
+/**
  * Resolve the effective configuration.
  * Precedence: defaults < ~/.ai-agent/config.json < --config file < environment < overrides (CLI).
  * The CLI passes environment after reading .env and repairing a split Windows credential pair.
+ * @param {{ configPath?: string|null, overrides?: object, env?: object|null, ensureHome?: boolean, cwd?: string }} [options]
+ * @returns {Promise<object>}
  */
-export async function loadConfig({ configPath = null, overrides = {}, env = null, ensureHome = true } = {}) {
+export async function loadConfig({ configPath = null, overrides = {}, env = null, ensureHome = true, cwd = process.cwd() } = {}) {
     env ??= liveEnv() ?? process.env;
     const home = defaultHome(env);
     const homeConfig = await readJsonFile(path.join(home, 'config.json'), { optional: true });
     const fileConfig = configPath ? await readJsonFile(path.resolve(configPath)) : {};
-    const config = [homeConfig, fileConfig, fromEnv(env), overrides].reduce((acc, extra) => deepMerge(acc, extra), structuredClone(defaults));
+    let config = [homeConfig, fileConfig, fromEnv(env), overrides].reduce((acc, extra) => deepMerge(acc, extra), structuredClone(defaults));
+    config = await expandConfigStrings(config, {
+        env, root: cwd,
+        maxBytes: Number.isSafeInteger(config.limits?.maxFileReadBytes) ? config.limits.maxFileReadBytes : 256 * KiB,
+    });
     config.home = home;
+    migrateLegacyRoles(config);
+    normalizeBackends(config, env);
     config.baseURL ||= 'https://api.openai.com/v1/';
     config.memory.dbFile ||= path.join(home, 'memory.db');
     config.configFiles = [path.join(home, 'config.json'), ...(configPath ? [path.resolve(configPath)] : [])];
-    migrateLegacyRoles(config);
     normalizeContext(config);
     validateConfig(config);
     const pins = pinsFrom([homeConfig, fileConfig, overrides]);
@@ -266,6 +360,63 @@ export async function loadConfig({ configPath = null, overrides = {}, env = null
     config.stepCapPinned = pins.stepCapPinned;
     if (ensureHome) await mkdir(home, { recursive: true });
     return config;
+}
+
+/**
+ * Validate an optional header map: token names and single-line string values.
+ * @param {unknown} headers
+ * @param {string} where
+ * @param {(message: string) => never} fail
+ * @returns {void}
+ * @ai.hint pure
+ */
+function validateHeaders(headers, where, fail) {
+    if (headers == null) return;
+    if (!isRecord(headers)) fail(`${where} должен быть объектом`);
+    for (const [name, value] of Object.entries(headers)) {
+        if (!HEADER_NAME.test(name)) fail(`${where}.${name}: некорректное имя заголовка`);
+        if (typeof value !== 'string' || /[\r\n]/.test(value)) fail(`${where}.${name}: строка без перевода строки`);
+    }
+}
+
+/**
+ * Validate an optional `supports` map: known routes and boolean flags.
+ * @param {unknown} supports
+ * @param {string} where
+ * @param {(message: string) => never} fail
+ * @returns {void}
+ * @ai.hint pure
+ */
+function validateSupports(supports, where, fail) {
+    if (supports == null) return;
+    if (!isRecord(supports)) fail(`${where} должен быть объектом`);
+    for (const [key, value] of Object.entries(supports)) {
+        if (!BACKEND_ROUTES.includes(key)) fail(`${where}.${key}: ${BACKEND_ROUTES.join(' | ')}`);
+        if (typeof value !== 'boolean') fail(`${where}.${key}: true | false`);
+    }
+}
+
+/**
+ * Validate a backend or provider list.
+ * @param {unknown} list
+ * @param {string} where
+ * @param {(message: string) => never} fail
+ * @returns {void}
+ * @ai.hint pure
+ */
+function validateBackends(list, where, fail) {
+    if (!Array.isArray(list)) fail(`${where} должен быть массивом`);
+    for (const [index, item] of list.entries()) {
+        if (!isRecord(item)) fail(`${where}[${index}] должен быть объектом`);
+        for (const key of Object.keys(item)) {
+            if (!['baseURL', 'apiKey', 'env', 'headers', 'supports'].includes(key)) fail(`${where}[${index}].${key}: неизвестное поле`);
+        }
+        try { new URL(item.baseURL); } catch { fail(`${where}[${index}].baseURL должен быть URL`); }
+        if (item.apiKey != null && (typeof item.apiKey !== 'string' || /[\r\n]/.test(item.apiKey))) fail(`${where}[${index}].apiKey: строка или null`);
+        if (item.env != null && (typeof item.env !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(item.env))) fail(`${where}[${index}].env: имя переменной или null`);
+        validateHeaders(item.headers, `${where}[${index}].headers`, fail);
+        validateSupports(item.supports, `${where}[${index}].supports`, fail);
+    }
 }
 
 /**
@@ -306,14 +457,9 @@ function validateConfig(c) {
     for (const [key, value] of Object.entries(c.fallback.models)) {
         if (typeof key !== 'string' || !key.trim() || typeof value !== 'string' || !value.trim()) fail(`fallback.models.${key} должен быть непустой строкой`);
     }
-    if (!Array.isArray(c.fallback.providers)) fail('fallback.providers должен быть массивом');
-    for (const item of c.fallback.providers) {
-        if (!isRecord(item)) fail('fallback.providers[] должен быть объектом');
-        for (const key of Object.keys(item)) if (!['baseURL', 'apiKey', 'env'].includes(key)) fail(`неизвестный параметр fallback.providers[].${key}`);
-        try { new URL(item.baseURL); } catch { fail('fallback.providers[].baseURL должен быть URL'); }
-        if (item.apiKey != null && (typeof item.apiKey !== 'string' || !item.apiKey.trim() || /[\r\n]/.test(item.apiKey))) fail('fallback.providers[].apiKey: строка или null');
-        if (item.env != null && (typeof item.env !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(item.env))) fail('fallback.providers[].env: имя переменной или null');
-    }
+    if (!Array.isArray(c.backends)) fail('backends должен быть массивом');
+    validateBackends(c.backends, 'backends', fail);
+    validateBackends(c.fallback.providers, 'fallback.providers', fail);
     for (const [key, value] of Object.entries(c.limits)) {
         if (!(key in defaults.limits)) fail(`неизвестный лимит limits.${key}`);
         if (key === 'budgetUsd') { if (value !== null && !(Number.isFinite(value) && value > 0)) fail('limits.budgetUsd > 0'); continue; }
@@ -596,8 +742,18 @@ export function supportsVerbosity(model) {
 export function redactConfig(config) {
     const copy = structuredClone(config);
     if (copy.apiKey) copy.apiKey = `${copy.apiKey.slice(0, 7)}…${copy.apiKey.slice(-4)}`;
+    /** Hide the key and any credential-shaped header of one backend entry. */
+    const redactBackend = (item) => {
+        if (!item || typeof item !== 'object') return;
+        if (item.apiKey) item.apiKey = '…';
+        if (item.headers && typeof item.headers === 'object') {
+            item.headers = Object.fromEntries(Object.entries(item.headers)
+                .map(([key, value]) => [key, /auth|key|token|secret/i.test(key) ? '…' : value]));
+        }
+    };
+    if (Array.isArray(copy.backends)) for (const item of copy.backends) redactBackend(item);
     if (Array.isArray(copy.fallback?.providers)) {
-        for (const item of copy.fallback.providers) if (item?.apiKey) item.apiKey = '…';
+        for (const item of copy.fallback.providers) redactBackend(item);
     }
     if (copy.telegram?.token) copy.telegram.token = '…';
     if (copy.channels?.token) copy.channels.token = '…';

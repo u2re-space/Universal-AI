@@ -2,17 +2,19 @@
  * @file src/agent/roles.js
  * @module agent/roles
  * @purpose Run a named role as a fresh conversation with that role's model, tools, and optional JSON schema.
- * @depends core/session, core/attachments, core/config, util/text, commands/instructions, util/toon, agent/loop, agent/schemas
+ * @depends core/session, core/attachments, core/config, core/placeholders, core/runtime-env, util/text, commands/instructions, util/toon, agent/loop, agent/schemas
  * @usedBy commands/run, agent/team, index.js
  * @exports createRoleRunner
  * @ai.tags roles, models
  * @ai.hint hot
- * @changed 2026-10-25 Structured replies are parsed leniently and restated once: a fallback model may ignore text.format and fence the JSON.
+ * @changed 2026-10-27 Role instructions expand {{env:}}, {{fs:}}, {{task:PROMPT}}, and {{delegated:PROMPT}}.
  */
 
 import { createSession } from '../core/session.js';
 import { buildUserMessage } from '../core/attachments.js';
 import { resolveRole } from '../core/config.js';
+import { renderPlaceholders } from '../core/placeholders.js';
+import { liveEnv } from '../core/runtime-env.js';
 import { clipMiddle, extractJson } from '../util/text.js';
 import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { encodeToon } from '../util/toon.js';
@@ -44,19 +46,22 @@ function roleContextInstructions(config, name) {
 /**
  * Runs requests on behalf of a named role with that role's model / reasoning settings.
  * Every call is a fresh, stateless conversation (shared context is passed in explicitly).
+ * `root` confines `{{fs:...}}`; `task` is the run's top-level task for `{{task:PROMPT}}`.
  */
-export function createRoleRunner({ client, config, ledger, emit = () => {}, signal }) {
+export function createRoleRunner({ client, config, ledger, emit = () => {}, signal, root = process.cwd(), task = null }) {
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
     const resolve = (name, complexity = null) => resolveRole(config, name, complexity);
 
     /**
      * One role request. With `schema`, the final message is strict JSON and `result.data` is the parsed object.
      * Tool loops are allowed (toolset + maxTurns); events flow to `emit` as usual.
+     * `delegated` is the task this role received from its caller for `{{delegated:PROMPT}}`.
      */
     async function run(name, {
         text, parts = [], instructions = '', toolset = null, builtin = [], schema = null, schemaName = 'result',
         maxTurns = 1, imageTarget = config.image.outputDir, session = null, silent = Boolean(schema), instructionsOnly = false,
         model: modelOverride = null, effort: effortOverride = null, onMaxTurns = null,
+        task: taskOverride = null, delegated = null,
     }) {
         const role = resolve(name);
         const model = modelOverride || role.model;
@@ -64,10 +69,17 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
         const roleConfig = model === role.model && effort === role.effort ? role.config : {
             ...role.config, model, reasoning: { ...role.config.reasoning, effort },
         };
+        const scope = {
+            env: liveEnv(), root, task: taskOverride ?? task ?? '', delegated: delegated ?? '',
+            maxBytes: config.limits?.maxFileReadBytes,
+        };
+        const prompt = await renderPlaceholders(text, { ...scope, namespaces: ['env', 'fs'] });
+        const roleInstructions = role.instructions ? await renderPlaceholders(role.instructions, scope) : '';
+        const extraInstructions = instructions ? await renderPlaceholders(instructions, scope) : '';
         const conversation = session ?? createSession({ store: false, model });
-        conversation.addUserMessage(buildUserMessage({ text, parts }));
+        conversation.addUserMessage(buildUserMessage({ text: prompt, parts }));
         const contextInstructions = roleContextInstructions(config, name);
-        const fullInstructions = instructionsOnly ? instructions : [instructions, role.instructions, contextInstructions].filter((part) => part && part.trim()).join('\n\n');
+        const fullInstructions = instructionsOnly ? extraInstructions : [extraInstructions, roleInstructions, contextInstructions].filter((part) => part && part.trim()).join('\n\n');
         const previousRole = ledger.role;
         ledger.setRole(name);
         notify({ type: 'role.start', role: name, model, effort });

@@ -135,7 +135,7 @@ export async function runTeam({
     onMaxTurns = null, referencePaths = [], agentsText = null,
 }) {
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
-    const roles = createRoleRunner({ client, config, ledger, emit, signal });
+    const roles = createRoleRunner({ client, config, ledger, emit, signal, root, task });
     const ctx = createSharedContext({ task, root });
     let effectiveAgentsText = agentsText;
     /** Prepend AGENTS.md to role instructions when present. */
@@ -230,6 +230,7 @@ export async function runTeam({
             text, instructions: withAgents(ROLE_INSTRUCTIONS[role] ?? ''), toolset, maxTurns: role === 'measurer' ? (config.agent.measurerMaxTurns ?? spec.turns) : spec.turns,
             ...(builtin.length ? { builtin } : {}),
             silent: true,
+            delegated: task,
             ...(spec.schema === 'batch' ? { schema: BATCH_SCHEMA, schemaName: 'batch' } : {}),
             ...(spec.schema === 'measure' ? { schema: MEASURER_SCHEMA, schemaName: 'measure' } : {}),
             ...(model ? { model } : {}),
@@ -239,7 +240,7 @@ export async function runTeam({
     }
     /** Start one nested agent (a pipeline role on a fresh context) for run_subagent. */
     const subagent = createSubagentRunner({
-        config, roles, root, allNames, approvalLevel, toolBase, emit,
+        config, roles, root, allNames, approvalLevel, toolBase, emit, parentTask: task,
         toolOptions: { describeImage: vision('worker'), describeScreen: roles.describeScreen },
         agentsText: () => effectiveAgentsText,
     });

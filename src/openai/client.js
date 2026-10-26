@@ -47,6 +47,29 @@ function normalizeBaseURL(value) {
     return url;
 }
 
+/** Headers the client sets itself; a custom header must not replace them. */
+const RESERVED_HEADERS = new Set(['authorization', 'content-type', 'accept', 'x-client-request-id', 'openai-organization', 'openai-project']);
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * Stringify and check per-backend headers. Reserved names are ignored, because auth and content
+ * headers belong to the client.
+ * @param {object|null|undefined} headers
+ * @returns {Record<string, string>}
+ * @ai.hint pure
+ */
+function normalizeHeaders(headers) {
+    if (!headers || typeof headers !== 'object') return {};
+    const out = {};
+    for (const [name, value] of Object.entries(headers)) {
+        if (!HEADER_NAME.test(name) || RESERVED_HEADERS.has(name.toLowerCase()) || value == null) continue;
+        const text = String(value);
+        if (/[\r\n]/.test(text)) throw new TypeError(`Заголовок ${name} содержит перевод строки.`);
+        out[name] = text;
+    }
+    return out;
+}
+
 /**
  * Delay before a retry. A positive Retry-After wins, capped at 60 seconds; otherwise backoff with jitter.
  * HTTP 429 waits at least 3 seconds so a repeat does not look like a burst.
@@ -76,6 +99,7 @@ export function retryDelayMs(attempt, retryAfter, status = null) {
 export function createClient({
     apiKey = envValue('OPENAI_API_KEY'), baseURL = envValue('OPENAI_BASE_URL') || defaults.baseURL,
     organization = envValue('OPENAI_ORG_ID'), project = envValue('OPENAI_PROJECT_ID'),
+    headers = null,
     http, retries = defaults.retries, idleTimeoutMs, connectTimeoutMs, maxErrorBytes = defaults.maxErrorBytes,
     maxResponseBytes = defaults.maxResponseBytes, maxEventBytes = defaults.maxEventBytes,
     onEvent: globalOnEvent,
@@ -84,6 +108,7 @@ export function createClient({
         throw new ApiError('Не задан OPENAI_API_KEY (или ключ содержит недопустимые символы).', { code: 'NO_API_KEY' });
     }
     const root = normalizeBaseURL(baseURL);
+    const customHeaders = normalizeHeaders(headers);
     const transport = http ?? createHttp({ idleTimeoutMs, connectTimeoutMs });
 
     /**
@@ -94,6 +119,7 @@ export function createClient({
      * @ai.hint pure
      */
     const headersFor = (stream, clientRequestId) => ({
+        ...customHeaders,
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         Accept: stream ? 'text/event-stream' : 'application/json',

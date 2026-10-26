@@ -122,7 +122,7 @@ function commandRunner({ hub, baseConfig = null }) {
             const overrides = overridesFrom(values, { command: 'serve' });
             config = baseConfig
                 ? deepMerge(structuredClone(baseConfig), overrides)
-                : await loadConfig({ overrides, env: hasLiveEnv() ? await refreshRuntimeEnv({ cwd }) : liveEnv(), ensureHome: false });
+                : await loadConfig({ overrides, env: hasLiveEnv() ? await refreshRuntimeEnv({ cwd }) : liveEnv(), ensureHome: false, cwd });
         } catch (error) {
             hub.publish(run.id, { type: 'warning', message: error.message });
             hub.finish(run.id, 'failed', error.exitCode ?? 2);
@@ -243,7 +243,7 @@ function editorCompletion({ baseConfig, cwd, tokens }) {
      * @returns {Promise<object>}
      * @ai.hint io
      */
-    const configOf = async () => baseConfig ?? await loadConfig({ env: hasLiveEnv() ? await refreshRuntimeEnv({ cwd }) : liveEnv(), ensureHome: false });
+    const configOf = async () => baseConfig ?? await loadConfig({ env: hasLiveEnv() ? await refreshRuntimeEnv({ cwd }) : liveEnv(), ensureHome: false, cwd });
     const bridge = createCompletionBridge({
         tokens,
         handle: async (request, requestSignal) => {

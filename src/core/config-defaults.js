@@ -59,6 +59,13 @@ export const defaults = Object.freeze({
     baseURL: "https://api.proxyapi.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
     apiKey: null,                     // prefer the OPENAI_API_KEY environment variable
     /**
+     * Ordered OpenAI-compatible backends. The first entry with a URL and a key is the primary host;
+     * the rest are tried when it is down. An entry accepts `baseUrl` (or `baseURL`), `apiKey` with
+     * `{{env:NAME}}`, extra `headers`, and `supports` route switches (`decisions: false`).
+     * When the list is empty, `baseURL` + `apiKey` and `fallback.providers` are used.
+     */
+    backends: [],
+    /**
      * Per-model overrides of the registry in `openai/model-profiles.js`.
      * Accepts `window` (bytes), `maxOutput` (tokens), `ceiling` (effort string), `efforts` (effort array).
      * All fields are optional; omitted ones keep the registry default.
