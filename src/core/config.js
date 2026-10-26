@@ -31,6 +31,7 @@ import { COMPLETION_MODEL_CHOICES, resolveCompletionModel } from '../complete/mo
 import { assertPaceBudget } from '../agent/pace.js';
 import { FORBIDDEN_MODELS as REVIEWER_FORBIDDEN, safeReviewerModel } from '../roles/reviewer.js';
 import { profileFor, snapEffort, lowerEffort, contextBytes, DEFAULT_PROFILE } from '../openai/model-profiles.js';
+import { tierChoice } from './role-tiers.js';
 import { PIPELINE_STAGE_IDS } from '../agent/pipeline.js';
 
 const KiB = 1024;
@@ -50,10 +51,11 @@ export {
 
 /**
  * Effective settings for a role: role → role tier → roles.default → top-level configuration.
- * `complexity` picks `roles.<name>.tiers.<trivial|normal|complex>` when that tier exists; an
- * explicit role model or effort still wins over the tier. Returns a config-like object usable by
- * runTurn (same shape as the main config). Effort is snapped to the model ladder and capped by
- * the stricter of the model ceiling and the role ceiling (roles.<name>.maxEffort).
+ * `complexity` picks `roles.<name>.tiers.<trivial|normal|complex>` in either accepted shape (a
+ * model ladder with its effort levels, or one entry per tier); an explicit role model or effort
+ * still wins over the tier. Returns a config-like object usable by runTurn (same shape as the main
+ * config). Effort is snapped to the model ladder and capped by the stricter of the model ceiling
+ * and the role ceiling (roles.<name>.maxEffort).
  * @param {object} config
  * @param {string} [name]
  * @param {'trivial'|'normal'|'complex'|null} [complexity]
@@ -62,9 +64,7 @@ export {
 export function resolveRole(config, name = 'default', complexity = null) {
     const base = config.roles?.default ?? {};
     const role = config.roles?.[name] ?? {};
-    /** An unknown complexity means normal work, not "no tier": a caller already named a size. */
-    const level = complexity == null ? null : complexity === 'trivial' || complexity === 'complex' ? complexity : 'normal';
-    const tier = level ? role.tiers?.[level] ?? null : null;
+    const tier = tierChoice(role.tiers, complexity);
     const pick = (key, fallback) => role[key] ?? tier?.[key] ?? (name !== 'default' ? base[key] : undefined) ?? fallback;
     const model = name === 'reviewer' ? safeReviewerModel(pick('model', config.model)) : pick('model', config.model);
     const profile = profileFor(model, config.models);
@@ -391,15 +391,33 @@ function validateConfig(c) {
         if (role.tools != null && !Array.isArray(role.tools)) fail(`roles.${name}.tools: массив имён`);
         if (role.turns != null && !(Number.isSafeInteger(role.turns) && role.turns > 0)) fail(`roles.${name}.turns: целое > 0`);
         if (role.tiers != null) {
-            if (!isRecord(role.tiers)) fail(`roles.${name}.tiers должен быть объектом`);
-            for (const [level, tier] of Object.entries(role.tiers)) {
-                if (!['trivial', 'normal', 'complex'].includes(level)) fail(`roles.${name}.tiers.${level}: trivial | normal | complex`);
-                if (!isRecord(tier)) fail(`roles.${name}.tiers.${level} должен быть объектом`);
-                for (const key of Object.keys(tier)) {
-                    if (!['model', 'effort'].includes(key)) fail(`roles.${name}.tiers.${level}.${key}: неизвестное поле`);
+            if (Array.isArray(role.tiers)) {
+                if (!role.tiers.length) fail(`roles.${name}.tiers: непустой массив моделей`);
+                for (const [index, rung] of role.tiers.entries()) {
+                    if (!isRecord(rung)) fail(`roles.${name}.tiers[${index}] должен быть объектом`);
+                    for (const key of Object.keys(rung)) {
+                        if (!['model', 'effort'].includes(key)) fail(`roles.${name}.tiers[${index}].${key}: неизвестное поле`);
+                    }
+                    if (typeof rung.model !== 'string' || !rung.model.trim()) fail(`roles.${name}.tiers[${index}].model должен быть строкой`);
+                    if (rung.effort != null) {
+                        if (!Array.isArray(rung.effort)) fail(`roles.${name}.tiers[${index}].effort: массив уровней`);
+                        for (const level of rung.effort) {
+                            if (!REASONING_EFFORTS.includes(level)) fail(`roles.${name}.tiers[${index}].effort: ${REASONING_EFFORTS.join(' | ')}`);
+                        }
+                    }
                 }
-                if (tier.model != null && (typeof tier.model !== 'string' || !tier.model.trim())) fail(`roles.${name}.tiers.${level}.model должен быть строкой`);
-                if (tier.effort != null && !REASONING_EFFORTS.includes(tier.effort)) fail(`roles.${name}.tiers.${level}.effort: ${REASONING_EFFORTS.join(' | ')}`);
+            } else if (isRecord(role.tiers)) {
+                for (const [level, tier] of Object.entries(role.tiers)) {
+                    if (!['trivial', 'normal', 'complex'].includes(level)) fail(`roles.${name}.tiers.${level}: trivial | normal | complex`);
+                    if (!isRecord(tier)) fail(`roles.${name}.tiers.${level} должен быть объектом`);
+                    for (const key of Object.keys(tier)) {
+                        if (!['model', 'effort'].includes(key)) fail(`roles.${name}.tiers.${level}.${key}: неизвестное поле`);
+                    }
+                    if (tier.model != null && (typeof tier.model !== 'string' || !tier.model.trim())) fail(`roles.${name}.tiers.${level}.model должен быть строкой`);
+                    if (tier.effort != null && !REASONING_EFFORTS.includes(tier.effort)) fail(`roles.${name}.tiers.${level}.effort: ${REASONING_EFFORTS.join(' | ')}`);
+                }
+            } else {
+                fail(`roles.${name}.tiers: массив моделей или объект trivial | normal | complex`);
             }
         }
     }

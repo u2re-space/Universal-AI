@@ -158,6 +158,7 @@ export async function configCommand(ctx) {
         await writeFile(file, `${JSON.stringify(template, null, 2)}\n`, { mode: 0o600 });
         renderer.write(`Создан ${file}\n` +
             `Роли: укажите модели в roles.* (null = общая model). Например: "planner": { "model": "${defaults.model}", "effort": "high" }, "worker": { "model": "gpt-6-luna" }.\n` +
+            `Модели по сложности — roles.<имя>.tiers: лестница [{ "model", "effort": [...] }, ...] или запись на каждый размер (trivial, normal, complex).\n` +
             `Потолки и лестницы effort моделей — в models.<id> (ceiling, efforts); порядок этапов команды — agent.pipeline.\n` +
             `Чтобы видеть стоимость, добавьте актуальные цены (USD за 1M токенов), например:\n` +
             `  "prices": { "${defaults.model}": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-6-luna*": { "input": 0.25, "output": 2 } }\n`);

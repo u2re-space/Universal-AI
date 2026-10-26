@@ -1,21 +1,29 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { loadConfig, resolveRole, roleNames, BUILTIN_ROLE_NAMES, ROLE_NAMES, CUSTOM_ROLE_NAME, defaults } from '../src/core/config.js';
 import { toolNamesForRole } from '../src/agent/team.js';
 
 const home = 'test/.home-custom-roles';
 
 /**
- * Load a config with the given role definitions.
+ * Load a config with the given role definitions. `extra.roles` is a second layer, like a CLI
+ * `--role` override on top of a config file: its fields win, the rest of the role stays.
  * @param {object} roles
  * @param {object} [extra]
  * @returns {Promise<object>}
  */
-const load = (roles, extra = {}) => loadConfig({
-    env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6.1-sol' },
-    overrides: { roles, ...extra },
-    ensureHome: false,
-});
+const load = (roles, extra = {}) => {
+    const merged = { ...roles };
+    for (const [name, role] of Object.entries(extra.roles ?? {})) merged[name] = { ...merged[name], ...role };
+    return loadConfig({
+        env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6.1-sol' },
+        overrides: { ...extra, roles: merged },
+        ensureHome: false,
+    });
+};
 
 // ── names ──────────────────────────────────────────────────────────────────
 
@@ -128,6 +136,20 @@ test('a role tier supplies model and effort for a complexity', async () => {
     assert.equal(role.effort, 'medium');
 });
 
+test('a ladder tier advances the model and the effort together', async () => {
+    const config = await load({
+        researcher: {
+            tiers: [
+                { model: 'gpt-6-luna', effort: ['low', 'medium', 'high'] },
+                { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
+            ],
+        },
+    });
+    assert.deepEqual([resolveRole(config, 'researcher', 'trivial').model, resolveRole(config, 'researcher', 'trivial').effort], ['gpt-6-luna', 'low']);
+    assert.deepEqual([resolveRole(config, 'researcher', 'normal').model, resolveRole(config, 'researcher', 'normal').effort], ['gpt-6.1-sol', 'high']);
+    assert.deepEqual([resolveRole(config, 'researcher', 'complex').model, resolveRole(config, 'researcher', 'complex').effort], ['gpt-6.1-sol', 'xhigh']);
+});
+
 test('an explicit role setting wins over its tier', async () => {
     const config = await load({ coder: { model: 'gpt-6-luna', effort: 'low' } });
     const role = resolveRole(config, 'coder', 'complex');
@@ -140,10 +162,55 @@ test('without a complexity a role ignores its tiers', async () => {
     assert.equal(resolveRole(config, 'coder').model, 'gpt-6.1-sol');
 });
 
-test('a tier is validated', async () => {
+test('a ladder tier from a config file replaces the shipped one', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-tier-cfg-'));
+    try {
+        await writeFile(path.join(dir, 'config.json'), JSON.stringify({
+            roles: {
+                coder: {
+                    tiers: [
+                        { model: 'gpt-6-luna', effort: ['low', 'medium', 'high'] },
+                        { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
+                    ],
+                },
+            },
+        }));
+        const config = await loadConfig({ env: { AI_AGENT_HOME: dir, AI_MODEL: 'gpt-6.1-sol' }, ensureHome: false });
+        const trivial = resolveRole(config, 'coder', 'trivial');
+        const normal = resolveRole(config, 'coder', 'normal');
+        const complex = resolveRole(config, 'coder', 'complex');
+        assert.deepEqual([trivial.model, trivial.effort], ['gpt-6-luna', 'low']);
+        assert.deepEqual([normal.model, normal.effort], ['gpt-6.1-sol', 'high']);
+        assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'xhigh']);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('a --role pin wins over a tier', async () => {
+    const tiers = [
+        { model: 'gpt-6-luna', effort: ['low', 'medium', 'high'] },
+        { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
+    ];
+    const pinnedModel = await load({ coder: { tiers } }, { roles: { coder: { model: 'gpt-6-luna' } } });
+    const complex = resolveRole(pinnedModel, 'coder', 'complex');
+    assert.deepEqual([complex.model, complex.effort], ['gpt-6-luna', 'xhigh']);
+    const pinnedBoth = await load({ coder: { tiers } }, { roles: { coder: { model: 'gpt-6-luna', effort: 'low' } } });
+    const forced = resolveRole(pinnedBoth, 'coder', 'complex');
+    assert.deepEqual([forced.model, forced.effort], ['gpt-6-luna', 'low']);
+});
+
+test('a tier is validated in both shapes', async () => {
     await assert.rejects(load({ coder: { tiers: { huge: { model: 'gpt-6-luna' } } } }), /roles\.coder\.tiers\.huge/);
     await assert.rejects(load({ coder: { tiers: { normal: { speed: 3 } } } }), /roles\.coder\.tiers\.normal\.speed/);
     await assert.rejects(load({ coder: { tiers: { normal: { effort: 'extreme' } } } }), /roles\.coder\.tiers\.normal\.effort/);
+    await assert.rejects(load({ coder: { tiers: [] } }), /roles\.coder\.tiers/);
+    await assert.rejects(load({ coder: { tiers: ['gpt-6-luna'] } }), /roles\.coder\.tiers\[0\]/);
+    await assert.rejects(load({ coder: { tiers: [{ effort: ['high'] }] } }), /roles\.coder\.tiers\[0\]\.model/);
+    await assert.rejects(load({ coder: { tiers: [{ model: 'gpt-6-luna', speed: 3 }] } }), /roles\.coder\.tiers\[0\]\.speed/);
+    await assert.rejects(load({ coder: { tiers: [{ model: 'gpt-6-luna', effort: 'high' }] } }), /roles\.coder\.tiers\[0\]\.effort/);
+    await assert.rejects(load({ coder: { tiers: [{ model: 'gpt-6-luna', effort: ['extreme'] }] } }), /roles\.coder\.tiers\[0\]\.effort/);
+    await assert.rejects(load({ coder: { tiers: 'gpt-6-luna' } }), /roles\.coder\.tiers/);
 });
 
 test('roles.<name>.turns is a positive integer', async () => {
