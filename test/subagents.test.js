@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { SUBAGENTS, SUBAGENT_NAMES, subagentToolNames, createSubagentRunner } from '../src/agent/subagents.js';
 import { TOOL_SPECS, enabledToolNames, createToolset, READ_ONLY_TOOLS } from '../src/agent/tools.js';
 import { SHELL_TOOL_NAMES } from '../src/agent/tool-specs.js';
-import { ROLE_MODULES } from '../src/roles/index.js';
+import { ROLE_INSTRUCTIONS } from '../src/roles/index.js';
 import { defaults } from '../src/core/config.js';
 
 /** A role runner stub: it records the request and lets the test drive the nested toolset. */
@@ -33,7 +33,7 @@ test('every executor is an existing role, and the registry and the tool enum sta
     // 0.2.0: one registry serves both delegation tools, so it holds the union of the old lists.
     assert.deepEqual(SUBAGENT_NAMES, ['coder', 'worker', 'writer', 'reviewer', 'tester', 'vision', 'solver', 'measurer', 'image-processor', 'clicker', 'typer', 'encoder']);
     for (const name of SUBAGENT_NAMES) {
-        assert.ok(ROLE_MODULES[name], `${name} needs a registered role prompt`);
+        assert.ok(ROLE_INSTRUCTIONS[name], `${name} needs a registered role prompt`);
         assert.ok(defaults.roles[name], `${name} needs role settings so its model is configurable`);
         const tools = SUBAGENTS[name].tools;
         assert.ok(Array.isArray(tools) || SLICE_NAMES.includes(tools), `${name} names a known tool slice or a tool list`);

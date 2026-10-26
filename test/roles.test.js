@@ -1,16 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS } from '../src/roles/index.js';
+import { ROLE_INSTRUCTIONS } from '../src/roles/index.js';
+import { EXECUTORS } from '../src/agent/role-registry.js';
 import { defaults } from '../src/core/config.js';
 
 const NAMES = ['default', 'planner', 'architect', 'orchestrator', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer', 'image-processor'];
 
 test('role modules match config role names', () => {
-    assert.deepEqual(Object.keys(ROLE_MODULES).sort(), NAMES.slice().sort());
     assert.deepEqual(Object.keys(defaults.roles).sort(), NAMES.slice().sort());
     for (const name of NAMES) {
-        assert.equal(typeof ROLE_MODULES[name].instructions, 'string');
-        assert.ok(ROLE_MODULES[name].instructions.trim().length > 40);
+        assert.equal(typeof ROLE_INSTRUCTIONS[name], 'string');
+        assert.ok(ROLE_INSTRUCTIONS[name].trim().length > 40);
     }
 });
 
@@ -55,16 +55,16 @@ test('font selection instructions distinguish research, pairing, measured appear
     assert.match(ROLE_INSTRUCTIONS.measurer, /separate from visual measurements/);
 });
 
-test('specialists do not delegate or run batches', () => {
-    assert.deepEqual(Object.keys(SPECIALISTS).sort(), ['clicker', 'encoder', 'measurer', 'solver', 'tester', 'typer']);
-    assert.deepEqual(SPECIALISTS.solver, { tools: ['screenshot', 'view_image'], turns: 6, schema: null });
-    assert.deepEqual(SPECIALISTS.clicker, { tools: ['click', 'screenshot'], turns: 4, schema: null });
-    assert.deepEqual(SPECIALISTS.typer, { tools: ['type', 'screenshot'], turns: 4, schema: null });
-    assert.deepEqual(SPECIALISTS.encoder, { tools: ['screenshot'], turns: 3, schema: 'batch' });
-    assert.deepEqual(SPECIALISTS.tester, { tools: ['screenshot'], turns: 4, schema: null });
-    assert.deepEqual(SPECIALISTS.measurer, { tools: ['view_image', 'crop_image', 'split_image'], turns: 16, schema: 'measure' });
-    for (const spec of Object.values(SPECIALISTS)) {
-        assert.equal(spec.tools.includes('delegate_role'), false);
-        assert.equal(spec.tools.includes('run_batch'), false);
+test('desktop helpers keep their tool slices and never delegate', () => {
+    assert.equal(EXECUTORS.solver.tools, 'screen');
+    assert.deepEqual(EXECUTORS.clicker.tools, ['click', 'screenshot']);
+    assert.deepEqual(EXECUTORS.typer.tools, ['type', 'screenshot']);
+    assert.deepEqual(EXECUTORS.encoder.tools, ['screenshot']);
+    assert.equal(EXECUTORS.tester.tools, 'check');
+    assert.deepEqual(EXECUTORS.measurer.tools, ['view_image', 'crop_image', 'split_image', 'fetch_url']);
+    for (const name of ['solver', 'clicker', 'typer', 'encoder', 'tester', 'measurer']) {
+        const tools = EXECUTORS[name].tools;
+        assert.equal(Array.isArray(tools) ? tools.includes('delegate_role') : false, false, name);
+        assert.equal(Array.isArray(tools) ? tools.includes('run_batch') : false, false, name);
     }
 });

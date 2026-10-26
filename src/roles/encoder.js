@@ -1,10 +1,10 @@
 /**
  * @file src/roles/encoder.js
  * @module roles/encoder
- * @purpose Encoder prompt and settings for a desktop action batch.
+ * @purpose Encoder prompt for a desktop action batch.
  * @depends roles/untrusted
  * @usedBy roles/index
- * @exports instructions, settings
+ * @exports instructions
  * @ai.tags roles, desktop, batch
  * @ai.hint pure
  * @changed 2026-10-15 File encoder prefers paths from the workspace scan.
@@ -32,10 +32,3 @@ export const instructions = `You encode one task into a batch for later executio
 The batch has summary and actions. Each action type is screenshot, click, type, or ahk.
 click.mode is coord, title, control, or image. type.mode is text or keys. ahk.script is AutoHotkey v2 statements, not a complete program.
 Use null for unused fields. Reply in JSON only. ${UNTRUSTED}`;
-/**
- * Medium reasoning effort for the encoder role.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const settings = { effort: 'high', model: 'gpt-6-luna' };

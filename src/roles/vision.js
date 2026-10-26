@@ -1,13 +1,13 @@
 /**
  * @file src/roles/vision.js
  * @module roles/vision
- * @purpose Vision prompts and image-size tiers.
+ * @purpose Vision prompts and the image size band that picks a role tier.
  * @depends roles/untrusted
  * @usedBy roles/index, agent/roles
- * @exports instructions, screenInstructions, settings, VISION_TIERS, imageLongSide, visionChoice
+ * @exports instructions, screenInstructions, imageLongSide, imageTier
  * @ai.tags roles, vision, screenshot
  * @ai.hint pure
- * @changed 2026-10-20 Model and effort follow the long side of the image.
+ * @changed 2026-10-26 Model and effort tiers moved to roles.vision.tiers in the configuration.
  */
 
 import { UNTRUSTED } from './untrusted.js';
@@ -30,20 +30,6 @@ If a question is given, answer it first, then add the supporting description. Pl
 export const screenInstructions = `You describe one screenshot for another agent that will click or type.
 Return JSON only: summary (what is on screen), elements (name, visible text, x, y, width, height in screenshot pixels; use null when unknown), and notes.
 Transcribe visible text. Do not invent controls that are not visible. ${UNTRUSTED}`;
-/**
- * Fallback settings. Callers replace model and effort from {@link visionChoice} unless config pins them.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const settings = { effort: null, model: null };
-
-/** Model and effort for a small crop, a medium image, and a screenshot or large image. */
-export const VISION_TIERS = Object.freeze({
-    trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'medium' }),
-    normal: Object.freeze({ model: 'gpt-6-luna', effort: 'high' }),
-    complex: Object.freeze({ model: 'gpt-6.1-sol', effort: 'high' }),
-});
 
 /**
  * Longer side in pixels, or null when the header does not say.
@@ -70,20 +56,16 @@ export function imageLongSide(buffer) {
 }
 
 /**
- * Model and effort for this image. A screen capture uses the complex tier. A configured model or effort replaces the tier.
+ * Complexity tier of this image: a small crop is trivial, a medium image is normal, a large
+ * image or a screenshot is complex. The model and effort come from roles.vision.tiers.
  * @param {number | null | undefined} longSide
- * @param {{ model?: string | null, effort?: string | null }} [configured]
  * @param {{ screen?: boolean }} [options]
- * @returns {{ model: string, effort: string }}
+ * @returns {'trivial' | 'normal' | 'complex'}
  * @exports
  * @ai.hint pure
  */
-export function visionChoice(longSide, configured = {}, { screen = false } = {}) {
-    const tier = screen ? VISION_TIERS.complex : VISION_TIERS[band(longSide)];
-    return {
-        model: configured.model || tier.model,
-        effort: configured.effort || tier.effort,
-    };
+export function imageTier(longSide, { screen = false } = {}) {
+    return screen ? 'complex' : band(longSide);
 }
 
 /**

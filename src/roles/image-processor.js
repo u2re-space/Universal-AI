@@ -4,7 +4,7 @@
  * @purpose Prepare requested images, fragments, and visual assets before implementation.
  * @depends roles/untrusted
  * @usedBy roles/index, agent/team
- * @exports instructions, settings
+ * @exports instructions
  * @ai.tags roles, images, assets
  * @ai.hint pure
  */
@@ -24,11 +24,3 @@ Trimming padding is a crop_image call, never a separate tool: call crop_image wi
 Save project assets under assets/ unless the task names another path. Keep source references unchanged. Do not edit application code, styles, configuration, or documentation, and do not run shell commands.
 Return typography recommendations in the typography field separately from downloaded assets. Report every created or reused project-relative path, its format, and how the implementation should use it. If an operation is unavailable or denied, report that clearly instead of claiming the asset exists. Do not begin implementation.
 ${UNTRUSTED}`;
-
-/**
- * Role settings fall back to roles.default and the top-level model configuration.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const settings = { effort: 'high', model: "gpt-6.1-sol" };

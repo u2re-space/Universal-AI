@@ -1,10 +1,10 @@
 /**
  * @file src/roles/planner.js
  * @module roles/planner
- * @purpose Planner prompt and reasoning settings for a JSON work plan.
+ * @purpose Planner prompt for a JSON work plan.
  * @depends roles/untrusted
  * @usedBy roles/index
- * @exports instructions, settings
+ * @exports instructions
  * @ai.tags roles, plan
  * @ai.hint pure
  * @changed 2026-10-16 One project file per step; the runtime adds a compatibility step.
@@ -34,10 +34,3 @@ Do not perform the task yourself. Reply in JSON only.
 fileActions may ask the encoder to turn artifacts into fs:write commands, read a file or a line range, copy one artifact to a path, or list a directory.
 A list action uses mode "tree" for a nested tree or "list" for a flat list, and depth from 1 to 6. The directory tree in the message is already a listing you can reuse.
 You do not write files. Use an empty fileActions list when no file work is needed. ${UNTRUSTED}`;
-/**
- * High reasoning effort for the planner role.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const settings = { effort: 'high', model: 'gpt-6.1-sol' };

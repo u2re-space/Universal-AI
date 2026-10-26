@@ -1,13 +1,13 @@
 /**
  * @file src/roles/index.js
  * @module roles/index
- * @purpose Collect role prompts, settings, and desktop specialist limits.
+ * @purpose Collect the prompt of every named role.
  * @depends roles/default, roles/planner, roles/architect, roles/orchestrator, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer, roles/image-processor
  * @usedBy commands/instructions, agent/team
- * @exports ROLE_MODULES, ROLE_INSTRUCTIONS, SPECIALISTS
- * @ai.tags roles, prompts, desktop
+ * @exports ROLE_INSTRUCTIONS
+ * @ai.tags roles, prompts
  * @ai.hint pure
- * @changed 2026-10-25 The sub-agents (agent/subagents) reuse these roles instead of adding their own.
+ * @changed 2026-10-26 Role modules carry prompts only; model settings and tiers live in roles.* of the configuration.
  */
 
 import * as roleDefault from './default.js';
@@ -31,58 +31,34 @@ import * as measurer from './measurer.js';
 import * as imageProcessor from './image-processor.js';
 
 /**
- * Instructions and settings for every named role.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const ROLE_MODULES = {
-    default: { instructions: roleDefault.instructions, settings: roleDefault.settings },
-    planner: { instructions: planner.instructions, settings: planner.settings },
-    architect: { instructions: architect.instructions, settings: architect.settings },
-    orchestrator: { instructions: orchestrator.instructions, settings: orchestrator.settings },
-    worker: { instructions: worker.instructions, settings: worker.settings },
-    coder: { instructions: coder.instructions, settings: coder.settings },
-    writer: { instructions: writer.instructions, settings: writer.settings },
-    reviewer: { instructions: reviewer.instructions, settings: reviewer.settings },
-    vision: { instructions: vision.instructions, settings: vision.settings },
-    summarizer: { instructions: summarizer.fileInstructions, settings: summarizer.settings },
-    solver: { instructions: solver.instructions, settings: solver.settings },
-    clicker: { instructions: clicker.instructions, settings: clicker.settings },
-    typer: { instructions: typer.instructions, settings: typer.settings },
-    encoder: { instructions: encoder.instructions, settings: encoder.settings },
-    tester: { instructions: tester.instructions, settings: tester.settings },
-    classifier: { instructions: classifier.instructions, settings: classifier.settings },
-    extractor: { instructions: extractor.instructions, settings: extractor.settings },
-    measurer: { instructions: measurer.instructions, settings: measurer.settings },
-    'image-processor': { instructions: imageProcessor.instructions, settings: imageProcessor.settings },
-};
-
-/**
- * Prompt strings keyed by role, plus summarizer, vision, and measurer variants.
+ * Prompt strings keyed by role, plus the summarizer, vision, and measurer variants.
+ * Model, effort, tools, and context come from `roles.<name>` in the configuration.
  * @returns {object}
  * @exports
  * @ai.hint pure
  */
 export const ROLE_INSTRUCTIONS = {
-    ...Object.fromEntries(Object.entries(ROLE_MODULES).map(([name, role]) => [name, role.instructions])),
+    default: roleDefault.instructions,
+    planner: planner.instructions,
+    architect: architect.instructions,
+    orchestrator: orchestrator.instructions,
+    worker: worker.instructions,
+    coder: coder.instructions,
+    writer: writer.instructions,
+    reviewer: reviewer.instructions,
+    vision: vision.instructions,
+    summarizer: summarizer.fileInstructions,
+    solver: solver.instructions,
+    clicker: clicker.instructions,
+    typer: typer.instructions,
+    encoder: encoder.instructions,
+    tester: tester.instructions,
+    classifier: classifier.instructions,
+    extractor: extractor.instructions,
+    measurer: measurer.instructions,
+    'image-processor': imageProcessor.instructions,
     summarizerMemory: summarizer.memoryInstructions,
     summarizerFile: summarizer.fileInstructions,
     visionScreen: vision.screenInstructions,
     measurerFragment: measurer.reMeasureInstructions,
-};
-
-/**
- * Desktop helper roles with their tools, turn caps, and optional batch schema.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const SPECIALISTS = {
-    solver: { tools: ['screenshot', 'view_image'], turns: 6, schema: null },
-    clicker: { tools: ['click', 'screenshot'], turns: 4, schema: null },
-    typer: { tools: ['type', 'screenshot'], turns: 4, schema: null },
-    encoder: { tools: ['screenshot'], turns: 3, schema: 'batch' },
-    tester: { tools: ['screenshot'], turns: 4, schema: null },
-    measurer: { tools: ['view_image', 'crop_image', 'split_image'], turns: 16, schema: 'measure' },
 };

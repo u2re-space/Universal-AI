@@ -4,7 +4,7 @@
  * @purpose Architect and designer prompt: turn the plan and the measurements into a file/module structure and an implementation brief for the other roles.
  * @depends roles/untrusted
  * @usedBy roles/index, agent/team
- * @exports instructions, settings
+ * @exports instructions
  * @ai.tags roles, architecture, design
  * @ai.hint pure
  * @changed 2026-10-24 Created: the structure and design contract between the planner and the authors.
@@ -52,11 +52,3 @@ project's current layout over inventing a new one.
    remain. Do not repeat the plan; add only what the plan leaves open.
 
 Do not write project files, do not generate images, do not perform the task. Reply in JSON only. ${UNTRUSTED}`;
-
-/**
- * High reasoning effort for the architect role.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const settings = { effort: 'xhigh', model: 'gpt-6.1-sol' };

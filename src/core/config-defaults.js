@@ -33,10 +33,20 @@ const ROLE_FIELDS = Object.freeze({
     context: null,
     /** Tool names the role is limited to; null keeps the tools of the run. */
     tools: null,
+    /** Tool turns a nested run of this role may spend; null uses the executor default. */
+    turns: null,
+    /**
+     * Model and effort per work size: `{ trivial, normal, complex }`.
+     * A tier applies when the caller names a complexity and the role itself does not pin that field.
+     */
+    tiers: null,
 });
 
 /** One role entry: the standard fields with the given overrides on top. */
 const r = (overrides) => ({ ...ROLE_FIELDS, ...overrides });
+
+/** Complexity tiers of a role: model and effort for trivial, normal, and complex work. */
+const tiers = (trivial, normal, complex) => ({ trivial, normal, complex });
 
 /**
  * Defaults. Everything here may be overridden by ~/.ai-agent/config.json, --config <file>,
@@ -164,7 +174,9 @@ export const defaults = Object.freeze({
     compaction: { auto: false, afterInputTokens: 200_000 },
     /**
      * Per-role model settings. Every field is optional and falls back to roles.default, then to the
-     * top-level settings (model, reasoning.effort, …). Roles:
+     * top-level settings (model, reasoning.effort, …). `tiers` holds the model and effort for
+     * trivial, normal, and complex work; the team applies a tier when pace is not driving the run.
+     * Roles:
      *   default    — ask / chat / single-agent run
      *   planner    — understands the task, writes the plan (senior model)
      *   architect  — turns the plan and the measurements into a file/module structure, design decisions,
@@ -196,19 +208,49 @@ export const defaults = Object.freeze({
         architect: r({ effort: 'high' }),
         orchestrator: r({ effort: 'high' }),
         worker: r({ effort: 'high' }),
-        coder: r({}),
-        writer: r({}),
+        coder: r({
+            tiers: tiers(
+                { model: 'gpt-6-luna', effort: 'high' },
+                { model: 'gpt-6.1-sol', effort: 'high' },
+                { model: 'gpt-6.1-sol', effort: 'xhigh' },
+            ),
+        }),
+        writer: r({
+            tiers: tiers(
+                { model: 'gpt-6-luna', effort: 'medium' },
+                { model: 'gpt-6-luna', effort: 'high' },
+                { model: 'gpt-6-luna', effort: 'xhigh' },
+            ),
+        }),
         reviewer: r({ effort: 'high' }),
-        vision: r({}),
+        vision: r({
+            tiers: tiers(
+                { model: 'gpt-6-luna', effort: 'medium' },
+                { model: 'gpt-6-luna', effort: 'high' },
+                { model: 'gpt-6.1-sol', effort: 'high' },
+            ),
+        }),
         summarizer: r({ effort: 'high', summary: 'none', verbosity: 'medium' }),
-        solver: r({}),
+        solver: r({
+            tiers: tiers(
+                { model: 'gpt-6-luna', effort: 'medium' },
+                { model: 'gpt-6-luna', effort: 'high' },
+                { model: 'gpt-6.1-sol', effort: 'high' },
+            ),
+        }),
         clicker: r({ effort: 'low' }),
         typer: r({ effort: 'low' }),
         encoder: r({ effort: 'high' }),
         tester: r({ effort: 'high' }),
         classifier: r({ effort: 'high' }),
         extractor: r({ effort: 'high', verbosity: 'low' }),
-        measurer: r({}),
+        measurer: r({
+            tiers: tiers(
+                { model: 'gpt-6-luna', effort: 'xhigh' },
+                { model: 'gpt-6.1-sol', effort: 'high' },
+                { model: 'gpt-6.1-sol', effort: 'xhigh' },
+            ),
+        }),
         'image-processor': r({ effort: 'high' }),
     },
     /** Multi-role orchestration used by `ai run`. */

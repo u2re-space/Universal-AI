@@ -1,13 +1,35 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { coderChoice, isCodingStep } from '../src/roles/coder.js';
+import { isCodingStep } from '../src/roles/coder.js';
+import { defaults, resolveRole } from '../src/core/config.js';
+
+const pinned = (overrides) => ({
+    ...defaults,
+    roles: { ...defaults.roles, coder: { ...defaults.roles.coder, ...overrides } },
+});
 
 test('coder effort and model follow the plan complexity', () => {
-    assert.deepEqual(coderChoice('trivial'), { model: 'gpt-6-luna', effort: 'high' });
-    assert.deepEqual(coderChoice('normal'), { model: 'gpt-6.1-sol', effort: 'high' });
-    assert.deepEqual(coderChoice('complex'), { model: 'gpt-6.1-sol', effort: 'xhigh' });
-    assert.deepEqual(coderChoice('complex', { model: 'gpt-6-luna', effort: 'low' }), { model: 'gpt-6-luna', effort: 'low' });
-    assert.deepEqual(coderChoice('unknown'), coderChoice('normal'));
+    const trivial = resolveRole(defaults, 'coder', 'trivial');
+    assert.equal(trivial.model, 'gpt-6-luna');
+    assert.equal(trivial.effort, 'high');
+
+    const normal = resolveRole(defaults, 'coder', 'normal');
+    assert.equal(normal.model, 'gpt-6.1-sol');
+    assert.equal(normal.effort, 'high');
+
+    const complex = resolveRole(defaults, 'coder', 'complex');
+    assert.equal(complex.model, 'gpt-6.1-sol');
+    assert.equal(complex.effort, 'xhigh');
+
+    const unknown = resolveRole(defaults, 'coder', 'unknown');
+    assert.equal(unknown.model, normal.model);
+    assert.equal(unknown.effort, normal.effort);
+});
+
+test('an explicit coder model and effort replace the tier', () => {
+    const role = resolveRole(pinned({ model: 'gpt-6-luna', effort: 'low' }), 'coder', 'complex');
+    assert.equal(role.model, 'gpt-6-luna');
+    assert.equal(role.effort, 'low');
 });
 
 test('code steps use the coder, documents do not', () => {

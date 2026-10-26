@@ -309,8 +309,9 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 `instructions` — только текст: он добавляется к системным инструкциям роли. `tools` — список имён инструментов,
 которые роль может вызывать (пустой список — все инструменты запуска, как у встроенных без ограничения).
 `model`, `effort`, `maxEffort`, `context`, `summary`, `verbosity`, `maxOutputTokens`, `temperature` наследуются
-от `roles.default` и общих настроек. Своя роль видна в `--role <имя>=<модель>` и в `delegate_role`; вложенный
-запуск получает её инструкции, инструменты, модель и потолок effort.
+от `roles.default` и общих настроек. `turns` ограничивает ходы вложенного запуска, `tiers` задаёт модель и effort
+для `trivial`, `normal` и `complex` работы. Своя роль видна в `--role <имя>=<модель>` и в `delegate_role`;
+вложенный запуск получает её инструкции, инструменты, модель и потолок effort.
 
 ### Замеры референсов
 
@@ -570,6 +571,9 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
     "reviewer":   { "model": "gpt-6.1-sol", "effort": "medium" },
     "orchestrator": { "model": "gpt-6.1-sol", "effort": "high" },
     "worker":     { "model": "gpt-6-luna", "effort": "medium", "maxEffort": "high" },
+    "coder":      { "tiers": { "trivial": { "model": "gpt-6-luna", "effort": "high" },
+                               "normal":  { "model": "gpt-6.1-sol", "effort": "high" },
+                               "complex": { "model": "gpt-6.1-sol", "effort": "xhigh" } } },
     "vision":     { "model": "gpt-6-luna" },
     "summarizer": { "model": "gpt-6-luna", "summary": "none" },
     "researcher": { "model": "gpt-6.1-sol", "effort": "high", "context": "large",
@@ -598,10 +602,12 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
 
 Поля роли: `model`, `effort`, `summary`, `verbosity`, `maxOutputTokens`, `temperature`, `instructions`
 (дополнительные инструкции только для этой роли), `maxEffort` (потолок effort роли), `context` (уровень или байты
-бюджета контекста роли) и `tools` (список разрешённых инструментов); `null` — наследовать от `roles.default`,
-затем от общих настроек. Имя вне встроенных создаёт пользовательскую роль. `agent.pipeline` задаёт порядок этапов
-(`null` — порядок по умолчанию, список — переставить или пропустить этапы), а `plan.pipeline` перекрывает его для
-конкретной задачи.
+бюджета контекста роли), `tools` (список разрешённых инструментов), `turns` (лимит ходов вложенного запуска)
+и `tiers` — модель и effort для размера работы `trivial`, `normal`, `complex`. Tier применяется, когда вызывающий
+назвал сложность, а сама роль не задала `model`/`effort`; явные поля роли всегда важнее. `null` — наследовать от
+`roles.default`, затем от общих настроек. Имя вне встроенных создаёт пользовательскую роль. `agent.pipeline` задаёт
+порядок этапов (`null` — порядок по умолчанию, список — переставить или пропустить этапы), а `plan.pipeline`
+перекрывает его для конкретной задачи.
 `documentation.sources` задаёт именованный каталог HTTP(S)-ссылок (по умолчанию доступны MDN CSS/JavaScript,
 ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles` выбирает имена источников для
 `planner`, `architect`, `orchestrator`, `worker` и `coder`. Передача пустого массива отключает ссылки для выбранной роли.

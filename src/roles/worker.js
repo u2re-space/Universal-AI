@@ -1,10 +1,10 @@
 /**
  * @file src/roles/worker.js
  * @module roles/worker
- * @purpose Worker prompt and settings for executing one plan step.
+ * @purpose Worker prompt for executing one plan step.
  * @depends roles/untrusted
  * @usedBy roles/index
- * @exports instructions, settings
+ * @exports instructions
  * @ai.tags roles, tools
  * @ai.hint pure
  * @changed 2026-10-21 No dev servers or package internals during a step.
@@ -31,10 +31,3 @@ To add or revise a later step, end the report with a plan-update fence. Omit the
 {"note":"why","addSteps":[{"goal":"...","details":"...","verify":"...","complexity":"normal"}],"revise":[{"id":"s03","details":"..."}]}
 \`\`\`
 ${DESKTOP_NOTE} ${UNTRUSTED}`;
-/**
- * Medium reasoning effort for the worker role.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const settings = { effort: 'xhigh', model: 'gpt-6-luna' };

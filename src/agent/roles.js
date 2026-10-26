@@ -18,7 +18,7 @@ import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { encodeToon } from '../util/toon.js';
 import { runTurn } from './loop.js';
 import { SCREEN_SCHEMA } from './schemas.js';
-import { imageLongSide, visionChoice } from '../roles/vision.js';
+import { imageLongSide, imageTier } from '../roles/vision.js';
 
 const WEB_STACK_ROLES = new Set(['planner', 'architect', 'orchestrator', 'worker', 'coder', 'measurer', 'image-processor']);
 const WEB_STACK_INSTRUCTIONS = `Web development conventions (apply when relevant to the project's stack):
@@ -47,7 +47,7 @@ function roleContextInstructions(config, name) {
  */
 export function createRoleRunner({ client, config, ledger, emit = () => {}, signal }) {
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
-    const resolve = (name) => resolveRole(config, name);
+    const resolve = (name, complexity = null) => resolveRole(config, name, complexity);
 
     /**
      * One role request. With `schema`, the final message is strict JSON and `result.data` is the parsed object.
@@ -121,7 +121,7 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
 
     /** Describe an image through the vision role; returns plain text. */
     async function describeImage({ part, question = null, rel = 'image', buffer = null }) {
-        const choice = visionChoice(imageLongSide(buffer), config.roles?.vision ?? {});
+        const choice = resolve('vision', imageTier(imageLongSide(buffer)));
         const prompt = question ? `Image: ${rel}\nQuestion: ${question}` : `Image: ${rel}\nDescribe it in detail.`;
         const result = await run('vision', {
             text: prompt, parts: [part], instructions: ROLE_INSTRUCTIONS.vision, silent: true,
@@ -133,7 +133,7 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
 
     /** Describe a screenshot through the vision role; returns structured data and its TOON form. */
     async function describeScreen({ part, rel = 'screenshot', buffer = null }) {
-        const choice = visionChoice(imageLongSide(buffer), config.roles?.vision ?? {}, { screen: true });
+        const choice = resolve('vision', imageTier(imageLongSide(buffer), { screen: true }));
         const prompt = `Screenshot: ${rel}\nDescribe the screen.`;
         const result = await run('vision', {
             text: prompt, parts: [part], instructions: ROLE_INSTRUCTIONS.visionScreen,

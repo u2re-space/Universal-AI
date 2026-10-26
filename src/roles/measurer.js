@@ -1,13 +1,13 @@
 /**
  * @file src/roles/measurer.js
  * @module roles/measurer
- * @purpose Measurer prompt and complexity tiers for a measurement sheet of a reference image.
+ * @purpose Measurer prompt for a measurement sheet of a reference image.
  * @depends roles/untrusted
  * @usedBy roles/index, agent/team
- * @exports instructions, reMeasureInstructions, settings, MEASURER_TIERS, measurerChoice
- * @ai.tags roles, vision, measurement
+ * @exports instructions, reMeasureInstructions
+ * @ai.tags roles, measurements, vision
  * @ai.hint pure
- * @changed 2026-10-25 Two-pass measurement, CSS units, confidence, assumptions, and reusable fragments.
+ * @changed 2026-10-26 Model and effort tiers moved to roles.measurer.tiers in the configuration.
  */
 
 import { UNTRUSTED } from './untrusted.js';
@@ -85,37 +85,3 @@ Set confidence per value: high only when actually read, low when inferred. Keep 
 for the full reference; when the fragment contradicts it, say which value is now correct and why.
 Use view_image, crop_image, or split_image when a closer look is cheaper than a guess. At read access, crops may be written only under .tmp/.
 Do not write project files, do not generate images, do not propose code. Reply in JSON only. ${UNTRUSTED}`;
-
-/**
- * Fallback settings. The team replaces model and effort from {@link measurerChoice} unless config pins them.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const settings = { effort: null, model: null };
-
-/**
- * Model and effort for each measurement job. A plain split stays cheap; styles and SVG take the senior model.
- * trivial: only divide the picture. normal: build styles from the sheet. complex: styles, SVG, and geometry.
- */
-export const MEASURER_TIERS = Object.freeze({
-    trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'xhigh', verbosity: "low" }),
-    normal: Object.freeze({ model: 'gpt-6.1-sol', effort: 'high', verbosity: "low" }),
-    complex: Object.freeze({ model: 'gpt-6.1-sol', effort: 'xhigh', verbosity: "low" }),
-});
-
-/**
- * Model and effort for this measurement job. A configured model or effort replaces the tier.
- * @param {string} [complexity]
- * @param {{ model?: string | null, effort?: string | null }} [configured]
- * @returns {{ model: string, effort: string }}
- * @exports
- * @ai.hint pure
- */
-export function measurerChoice(complexity = 'normal', configured = {}) {
-    const tier = MEASURER_TIERS[complexity] ?? MEASURER_TIERS.normal;
-    return {
-        model: configured.model || tier.model,
-        effort: configured.effort || tier.effort,
-    };
-}

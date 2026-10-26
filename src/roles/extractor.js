@@ -4,7 +4,7 @@
  * @purpose Extract clean file bodies from a verbose model answer.
  * @depends roles/untrusted
  * @usedBy roles/index, agent/team
- * @exports instructions, settings
+ * @exports instructions
  * @ai.tags roles, extraction, tmp
  * @ai.hint pure
  * @changed 2026-10-21 The extractor keeps code and file bodies, and drops prose.
@@ -26,11 +26,3 @@ Use the path named in the answer or in the artifact hint. When no path is known,
 For a small body, put the clean text in content. For a large body, leave content empty and list the 1-based line numbers to remove in removeLines.
 Skip an artifact when it is not a file. Reply in JSON only.
 ${UNTRUSTED}`;
-
-/**
- * A cheap model cleans verbose answers; the effort stays low.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const settings = { effort: 'xhigh', model: 'gpt-6-luna', verbosity: "low" };

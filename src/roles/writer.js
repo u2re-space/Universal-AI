@@ -4,10 +4,10 @@
  * @purpose Generate documents, documentation, reports, and Markdown.
  * @depends roles/untrusted
  * @usedBy roles/index, agent/team
- * @exports instructions, settings, WRITER_TIERS, writerChoice, isWritingStep
+ * @exports instructions, isWritingStep
  * @ai.tags roles, docs
  * @ai.hint pure
- * @changed 2026-10-17 Documents stay on a cheaper model; effort follows complexity.
+ * @changed 2026-10-26 Model and effort tiers moved to roles.writer.tiers in the configuration.
  */
 
 import { UNTRUSTED } from './untrusted.js';
@@ -25,37 +25,6 @@ Write the complete document the step names. State only what the project, the pla
 A trivial note stays short. A complex document may use the sections the plan names, and no extra product claims. Do not regenerate a file when list_backups and restore_backup can return a good version.
 When the step is done, reply with a brief summary: files changed, how you checked them, and what the next step must know. Do not start other steps.
 ${UNTRUSTED}`;
-
-/**
- * Fallback settings. The team replaces model and effort from {@link writerChoice} unless config pins them.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const settings = { effort: null, model: null };
-
-/** Model and effort for each plan complexity. Writing stays on the cheaper model. */
-export const WRITER_TIERS = Object.freeze({
-    trivial: Object.freeze({ model: 'gpt-6-luna', effort: 'medium' }),
-    normal: Object.freeze({ model: 'gpt-6-luna', effort: 'high' }),
-    complex: Object.freeze({ model: 'gpt-6-luna', effort: 'xhigh' }),
-});
-
-/**
- * Model and effort for this complexity. A configured model or effort replaces the tier.
- * @param {string} [complexity]
- * @param {{ model?: string | null, effort?: string | null }} [configured]
- * @returns {{ model: string, effort: string }}
- * @exports
- * @ai.hint pure
- */
-export function writerChoice(complexity = 'normal', configured = {}) {
-    const tier = WRITER_TIERS[complexity] ?? WRITER_TIERS.normal;
-    return {
-        model: configured.model || tier.model,
-        effort: configured.effort || tier.effort,
-    };
-}
 
 const DOC_FILE = /\.(?:md|mdx|rst|adoc|asciidoc|txt)$/i;
 const SKIP_DOC = /^(?:\.rules|\.skills)\//;

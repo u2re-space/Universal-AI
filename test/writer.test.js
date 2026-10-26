@@ -1,13 +1,35 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writerChoice, isWritingStep } from '../src/roles/writer.js';
+import { isWritingStep } from '../src/roles/writer.js';
+import { defaults, resolveRole } from '../src/core/config.js';
+
+const pinned = (overrides) => ({
+    ...defaults,
+    roles: { ...defaults.roles, writer: { ...defaults.roles.writer, ...overrides } },
+});
 
 test('writer stays on the cheaper model and raises effort with complexity', () => {
-    assert.deepEqual(writerChoice('trivial'), { model: 'gpt-6-luna', effort: 'medium' });
-    assert.deepEqual(writerChoice('normal'), { model: 'gpt-6-luna', effort: 'high' });
-    assert.deepEqual(writerChoice('complex'), { model: 'gpt-6-luna', effort: 'xhigh' });
-    assert.deepEqual(writerChoice('complex', { effort: 'low' }), { model: 'gpt-6-luna', effort: 'low' });
-    assert.deepEqual(writerChoice('unknown'), writerChoice('normal'));
+    const trivial = resolveRole(defaults, 'writer', 'trivial');
+    assert.equal(trivial.model, 'gpt-6-luna');
+    assert.equal(trivial.effort, 'medium');
+
+    const normal = resolveRole(defaults, 'writer', 'normal');
+    assert.equal(normal.model, 'gpt-6-luna');
+    assert.equal(normal.effort, 'high');
+
+    const complex = resolveRole(defaults, 'writer', 'complex');
+    assert.equal(complex.model, 'gpt-6-luna');
+    assert.equal(complex.effort, 'xhigh');
+
+    const unknown = resolveRole(defaults, 'writer', 'unknown');
+    assert.equal(unknown.model, normal.model);
+    assert.equal(unknown.effort, normal.effort);
+});
+
+test('an explicit writer effort replaces the tier', () => {
+    const role = resolveRole(pinned({ effort: 'low' }), 'writer', 'complex');
+    assert.equal(role.model, 'gpt-6-luna');
+    assert.equal(role.effort, 'low');
 });
 
 test('documents and reports use the writer, code and rules do not', () => {

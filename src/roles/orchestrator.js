@@ -4,7 +4,7 @@
  * @purpose One senior role that both collects project context and coordinates the team after every stage.
  * @depends roles/untrusted
  * @usedBy roles/index
- * @exports instructions, settings
+ * @exports instructions
  * @ai.tags roles, context, coordination
  * @ai.hint pure
  * @changed 2026-10-22 Merged the former collector and coordinator roles into one orchestrator.
@@ -49,12 +49,3 @@ The architect's brief in the shared context is the agreed file/module structure 
 interfaces, and conventions as the default. When you coordinate, check the plan and the work against it; if a
 concrete problem requires a deviation, say so in nextStep or planUpdate instead of silently changing the structure.
 Never invent file contents, command output, or a test result. ${UNTRUSTED}`;
-
-/**
- * High reasoning effort for the orchestrator. A null model inherits the top-level model;
- * pin a large-context model with roles.orchestrator.model or --role orchestrator=<model>.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const settings = { effort: 'high', model: 'gpt-6.1-sol' };

@@ -1,14 +1,34 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { solverChoice } from '../src/roles/solver.js';
-import { imageLongSide, visionChoice } from '../src/roles/vision.js';
+import { imageLongSide, imageTier } from '../src/roles/vision.js';
+import { defaults, resolveRole } from '../src/core/config.js';
 
 test('solver effort and model follow the step complexity', () => {
-    assert.deepEqual(solverChoice('trivial'), { model: 'gpt-6-luna', effort: 'medium' });
-    assert.deepEqual(solverChoice('normal'), { model: 'gpt-6-luna', effort: 'high' });
-    assert.deepEqual(solverChoice('complex'), { model: 'gpt-6.1-sol', effort: 'high' });
-    assert.deepEqual(solverChoice('complex', { model: 'gpt-6-luna', effort: 'low' }), { model: 'gpt-6-luna', effort: 'low' });
-    assert.deepEqual(solverChoice('unknown'), solverChoice('normal'));
+    const trivial = resolveRole(defaults, 'solver', 'trivial');
+    assert.equal(trivial.model, 'gpt-6-luna');
+    assert.equal(trivial.effort, 'medium');
+
+    const normal = resolveRole(defaults, 'solver', 'normal');
+    assert.equal(normal.model, 'gpt-6-luna');
+    assert.equal(normal.effort, 'high');
+
+    const complex = resolveRole(defaults, 'solver', 'complex');
+    assert.equal(complex.model, 'gpt-6.1-sol');
+    assert.equal(complex.effort, 'high');
+
+    const unknown = resolveRole(defaults, 'solver', 'unknown');
+    assert.equal(unknown.model, normal.model);
+    assert.equal(unknown.effort, normal.effort);
+});
+
+test('an explicit solver model and effort replace the tier', () => {
+    const config = {
+        ...defaults,
+        roles: { ...defaults.roles, solver: { ...defaults.roles.solver, model: 'gpt-6-luna', effort: 'low' } },
+    };
+    const role = resolveRole(config, 'solver', 'complex');
+    assert.equal(role.model, 'gpt-6-luna');
+    assert.equal(role.effort, 'low');
 });
 
 function png(width, height) {
@@ -24,12 +44,26 @@ test('vision effort and model follow the long side, and a screenshot stays compl
     assert.equal(imageLongSide(png(400, 120)), 400);
     assert.equal(imageLongSide(png(1920, 1080)), 1920);
     assert.equal(imageLongSide(Buffer.from('nope')), null);
-    assert.deepEqual(visionChoice(400), { model: 'gpt-6-luna', effort: 'medium' });
-    assert.deepEqual(visionChoice(512), { model: 'gpt-6-luna', effort: 'medium' });
-    assert.deepEqual(visionChoice(800), { model: 'gpt-6-luna', effort: 'high' });
-    assert.deepEqual(visionChoice(1280), { model: 'gpt-6-luna', effort: 'high' });
-    assert.deepEqual(visionChoice(1281), { model: 'gpt-6.1-sol', effort: 'high' });
-    assert.deepEqual(visionChoice(null), visionChoice(800));
-    assert.deepEqual(visionChoice(80, {}, { screen: true }), { model: 'gpt-6.1-sol', effort: 'high' });
-    assert.deepEqual(visionChoice(1920, { model: 'gpt-6-luna', effort: 'low' }), { model: 'gpt-6-luna', effort: 'low' });
+    assert.equal(imageTier(400), 'trivial');
+    assert.equal(imageTier(512), 'trivial');
+    assert.equal(imageTier(800), 'normal');
+    assert.equal(imageTier(1280), 'normal');
+    assert.equal(imageTier(1281), 'complex');
+    assert.equal(imageTier(null), 'normal');
+    assert.equal(imageTier(80, { screen: true }), 'complex');
+
+    assert.equal(resolveRole(defaults, 'vision', imageTier(400)).effort, 'medium');
+    assert.equal(resolveRole(defaults, 'vision', imageTier(800)).effort, 'high');
+    assert.equal(resolveRole(defaults, 'vision', imageTier(1281)).model, 'gpt-6.1-sol');
+    assert.equal(resolveRole(defaults, 'vision', imageTier(80, { screen: true })).model, 'gpt-6.1-sol');
+});
+
+test('an explicit vision model and effort replace the tier', () => {
+    const config = {
+        ...defaults,
+        roles: { ...defaults.roles, vision: { ...defaults.roles.vision, model: 'gpt-6-luna', effort: 'low' } },
+    };
+    const role = resolveRole(config, 'vision', imageTier(1920));
+    assert.equal(role.model, 'gpt-6-luna');
+    assert.equal(role.effort, 'low');
 });

@@ -3,7 +3,7 @@
  * @module agent/role-registry
  * @purpose One registry of the roles another agent may hand work to, shared by `delegate_role` and
  *   `run_subagent`. Holds the built-in executors and the user-defined roles of the configuration.
- * @depends agent/tool-specs, roles/index
+ * @depends agent/tool-specs, core/config-defaults
  * @usedBy agent/subagents, agent/team, agent/tool-specs, agent/tools
  * @exports SLICES, NESTED_FORBIDDEN, EXECUTORS, EXECUTOR_NAMES, executorNames, executorSpec, executorToolNames, isExecutor
  * @ai.tags roles, subagent, delegation
@@ -12,7 +12,6 @@
  */
 
 import { READ_ONLY_TOOLS, SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES } from './tool-specs.js';
-import { SPECIALISTS } from '../roles/index.js';
 import { BUILTIN_ROLE_NAMES } from '../core/config-defaults.js';
 
 /**
@@ -120,7 +119,7 @@ export const EXECUTOR_NAMES = Object.freeze(Object.keys(EXECUTORS));
 export function executorNames(config = null) {
     // config.roles always carries every built-in entry, so the name list, not presence, decides.
     const custom = Object.keys(config?.roles ?? {})
-        .filter((name) => !BUILTIN_ROLE_NAMES.includes(name) && !SPECIALISTS[name]);
+        .filter((name) => !BUILTIN_ROLE_NAMES.includes(name));
     return [...EXECUTOR_NAMES, ...custom];
 }
 

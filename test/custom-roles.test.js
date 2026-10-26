@@ -121,6 +121,37 @@ test('a custom role with no settings still resolves', async () => {
     assert.equal(role.context, null);
 });
 
+test('a role tier supplies model and effort for a complexity', async () => {
+    const config = await load({ coder: { tiers: { complex: { model: 'gpt-6-luna', effort: 'medium' } } } });
+    const role = resolveRole(config, 'coder', 'complex');
+    assert.equal(role.model, 'gpt-6-luna');
+    assert.equal(role.effort, 'medium');
+});
+
+test('an explicit role setting wins over its tier', async () => {
+    const config = await load({ coder: { model: 'gpt-6-luna', effort: 'low' } });
+    const role = resolveRole(config, 'coder', 'complex');
+    assert.equal(role.model, 'gpt-6-luna');
+    assert.equal(role.effort, 'low');
+});
+
+test('without a complexity a role ignores its tiers', async () => {
+    const config = await load({});
+    assert.equal(resolveRole(config, 'coder').model, 'gpt-6.1-sol');
+});
+
+test('a tier is validated', async () => {
+    await assert.rejects(load({ coder: { tiers: { huge: { model: 'gpt-6-luna' } } } }), /roles\.coder\.tiers\.huge/);
+    await assert.rejects(load({ coder: { tiers: { normal: { speed: 3 } } } }), /roles\.coder\.tiers\.normal\.speed/);
+    await assert.rejects(load({ coder: { tiers: { normal: { effort: 'extreme' } } } }), /roles\.coder\.tiers\.normal\.effort/);
+});
+
+test('roles.<name>.turns is a positive integer', async () => {
+    const config = await load({ researcher: { turns: 9 } });
+    assert.equal(config.roles.researcher.turns, 9);
+    await assert.rejects(load({ researcher: { turns: 0 } }), /roles\.researcher\.turns/);
+});
+
 // ── tools ──────────────────────────────────────────────────────────────────
 
 const allNames = [
@@ -155,5 +186,7 @@ test('every built-in role carries the new fields', () => {
         assert.ok(Object.hasOwn(defaults.roles[name], 'maxEffort'), `${name}.maxEffort`);
         assert.ok(Object.hasOwn(defaults.roles[name], 'context'), `${name}.context`);
         assert.ok(Object.hasOwn(defaults.roles[name], 'tools'), `${name}.tools`);
+        assert.ok(Object.hasOwn(defaults.roles[name], 'turns'), `${name}.turns`);
+        assert.ok(Object.hasOwn(defaults.roles[name], 'tiers'), `${name}.tiers`);
     }
 });

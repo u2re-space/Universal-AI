@@ -20,10 +20,8 @@ import { isAbortError, CancelledError, BudgetError } from '../openai/errors.js';
 import { clipMiddle, errorMessage } from '../util/text.js';
 import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { executorSpec, executorToolNames, executorNames } from './role-registry.js';
-import { coderChoice, isCodingStep } from '../roles/coder.js';
-import { solverChoice } from '../roles/solver.js';
-import { measurerChoice } from '../roles/measurer.js';
-import { writerChoice, isWritingStep } from '../roles/writer.js';
+import { isCodingStep } from '../roles/coder.js';
+import { isWritingStep } from '../roles/writer.js';
 import { createToolset, enabledToolNames, READ_ONLY_TOOLS } from './tools.js';
 import { createSubagentRunner } from './subagents.js';
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
@@ -164,10 +162,10 @@ export async function runTeam({
         if (paced.ready) stepLimit = planLimit({ maxSteps: paced.stepCap, generation, pace: true });
         return paced;
     };
+    /** Role settings for a work size when pace is not driving the run (encode route, verify pass). */
     const legacyChoice = (author, complexity) => {
-        const configured = config.roles?.[author] ?? {};
-        const choice = author === 'coder' ? coderChoice(complexity, configured) : author === 'writer' ? writerChoice(complexity, configured) : null;
-        return { model: choice?.model ?? null, effort: choice?.effort ?? null };
+        const role = roles.resolve(author, complexity);
+        return { model: role.model, effort: role.effort };
     };
     const paceChoice = (author, complexity) => {
         const known = complexity === 'trivial' || complexity === 'complex' || complexity === 'normal' ? complexity : 'normal';
@@ -222,9 +220,8 @@ export async function runTeam({
             ? builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search')
             : [];
         const known = stepState.complexity === 'trivial' || stepState.complexity === 'complex' ? stepState.complexity : 'normal';
-        const solver = role === 'solver' ? solverChoice(known, config.roles?.solver ?? {}) : null;
-        const measurer = role === 'measurer' ? measurerChoice(known, config.roles?.measurer ?? {}) : null;
-        let model = solver?.model ?? measurer?.model ?? null;
+        const tier = role === 'solver' || role === 'measurer' ? roles.resolve(role, known) : null;
+        let model = tier?.model ?? null;
         if (!encodeRoute && paced?.ready) {
             model = clampModel(model ?? roles.resolve(role).model, paceSettings.models, paced.ceilingIndex, Boolean(pins[role]?.model));
         }
@@ -236,8 +233,7 @@ export async function runTeam({
             ...(spec.schema === 'batch' ? { schema: BATCH_SCHEMA, schemaName: 'batch' } : {}),
             ...(spec.schema === 'measure' ? { schema: MEASURER_SCHEMA, schemaName: 'measure' } : {}),
             ...(model ? { model } : {}),
-            ...(solver ? { effort: solver.effort } : {}),
-            ...(measurer ? { effort: measurer.effort } : {}),
+            ...(tier ? { effort: tier.effort } : {}),
         });
         return { output: result.text, summary: role + ' ' + result.status, data: result.data ?? null };
     }
@@ -930,10 +926,10 @@ export async function runTeam({
                     const measureMode = config.agent.measure ?? 'auto';
                     if (measureMode !== 'off' && !resumedWork && referenceParts.length && (measureMode === 'always' || plan.complexity !== 'trivial')) {
                         const tier = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
-                        const choice = measurerChoice(tier, config.roles?.measurer ?? {});
+                        const measurerRole = roles.resolve('measurer', tier);
                         const model = encodeRoute || !paced?.ready
-                            ? choice.model
-                            : clampModel(choice.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.measurer?.model));
+                            ? measurerRole.model
+                            : clampModel(measurerRole.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.measurer?.model));
                         const measurePasses = Math.max(1, Math.min(2, config.agent.measurerPasses ?? 2));
                         const measureTurns = Math.max(1, config.agent.measurerMaxTurns ?? 16);
                         const overviewTurns = Math.max(1, Math.ceil(measureTurns / 3));
@@ -966,7 +962,7 @@ export async function runTeam({
                                 text, parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.measurer),
                                 toolset: measureToolsFor(pass), builtin: measureBuiltin,
                                 schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns,
-                                model, effort: choice.effort, onMaxTurns, session,
+                                model, effort: measurerRole.effort, onMaxTurns, session,
                             });
                             if (HARD_STOP.has(result.status)) return result;
                             if (!result.data && ['max_turns', 'incomplete'].includes(result.status)) {
@@ -975,7 +971,7 @@ export async function runTeam({
                                     text: 'Turn budget is spent and no more tools are available. Reply with the complete measurement sheet for everything you already looked at. ' +
                                         'Use CSS units in units/css, null for a number you did not read, confidence for every element, and name the unchecked parts in assumptions and notes. JSON only.',
                                     instructions: withAgents(ROLE_INSTRUCTIONS.measurer), schema: MEASURER_SCHEMA, schemaName: 'measure',
-                                    maxTurns: 1, model, effort: choice.effort, session,
+                                    maxTurns: 1, model, effort: measurerRole.effort, session,
                                 });
                                 if (report.data) return report;
                             }

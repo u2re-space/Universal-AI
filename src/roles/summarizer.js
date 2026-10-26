@@ -3,7 +3,7 @@
  * @module roles/summarizer
  * @purpose Prompts that store durable memories and summarize a source file.
  * @usedBy roles/index
- * @exports memoryInstructions, fileInstructions, settings
+ * @exports memoryInstructions, fileInstructions
  * @ai.tags roles, summary, memory
  * @ai.hint pure
  * @changed 2026-10-15 JSDoc card, 4-space indent.
@@ -28,10 +28,3 @@ no secrets, no restating the diff. Prefer scope "project"; use "global" only for
 export const fileInstructions = `Summarize the given source/text file for other AI agents: purpose, structure (main sections, exported symbols,
 key functions/classes with one-line descriptions), notable conventions, and anything relevant to the stated focus, with line
 numbers when useful. Plain text, compact, no fluff, max ~60 lines. Do not propose changes.`;
-/**
- * Low effort and short verbosity for the summarizer role.
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export const settings = { effort: 'xhigh', summary: 'none', verbosity: 'medium', model: 'gpt-6-luna' };

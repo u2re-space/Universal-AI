@@ -49,15 +49,23 @@ export {
 
 
 /**
- * Effective settings for a role: role → roles.default → top-level configuration.
- * Returns a config-like object usable by runTurn (same shape as the main config).
- * Effort is snapped to the model ladder and capped by the stricter of the model ceiling
- * and the role ceiling (roles.<name>.maxEffort).
+ * Effective settings for a role: role → role tier → roles.default → top-level configuration.
+ * `complexity` picks `roles.<name>.tiers.<trivial|normal|complex>` when that tier exists; an
+ * explicit role model or effort still wins over the tier. Returns a config-like object usable by
+ * runTurn (same shape as the main config). Effort is snapped to the model ladder and capped by
+ * the stricter of the model ceiling and the role ceiling (roles.<name>.maxEffort).
+ * @param {object} config
+ * @param {string} [name]
+ * @param {'trivial'|'normal'|'complex'|null} [complexity]
+ * @returns {object}
  */
-export function resolveRole(config, name = 'default') {
+export function resolveRole(config, name = 'default', complexity = null) {
     const base = config.roles?.default ?? {};
     const role = config.roles?.[name] ?? {};
-    const pick = (key, fallback) => role[key] ?? (name !== 'default' ? base[key] : undefined) ?? fallback;
+    /** An unknown complexity means normal work, not "no tier": a caller already named a size. */
+    const level = complexity == null ? null : complexity === 'trivial' || complexity === 'complex' ? complexity : 'normal';
+    const tier = level ? role.tiers?.[level] ?? null : null;
+    const pick = (key, fallback) => role[key] ?? tier?.[key] ?? (name !== 'default' ? base[key] : undefined) ?? fallback;
     const model = name === 'reviewer' ? safeReviewerModel(pick('model', config.model)) : pick('model', config.model);
     const profile = profileFor(model, config.models);
     const ceiling = lowerEffort(profile.ceiling, pick('maxEffort', null));
@@ -381,6 +389,19 @@ function validateConfig(c) {
         if (role.maxEffort != null && !REASONING_EFFORTS.includes(role.maxEffort)) fail(`roles.${name}.maxEffort: ${REASONING_EFFORTS.join(' | ')}`);
         if (role.context != null && typeof role.context !== 'string' && !(Number.isSafeInteger(role.context) && role.context > 0)) fail(`roles.${name}.context: уровень или целое > 0`);
         if (role.tools != null && !Array.isArray(role.tools)) fail(`roles.${name}.tools: массив имён`);
+        if (role.turns != null && !(Number.isSafeInteger(role.turns) && role.turns > 0)) fail(`roles.${name}.turns: целое > 0`);
+        if (role.tiers != null) {
+            if (!isRecord(role.tiers)) fail(`roles.${name}.tiers должен быть объектом`);
+            for (const [level, tier] of Object.entries(role.tiers)) {
+                if (!['trivial', 'normal', 'complex'].includes(level)) fail(`roles.${name}.tiers.${level}: trivial | normal | complex`);
+                if (!isRecord(tier)) fail(`roles.${name}.tiers.${level} должен быть объектом`);
+                for (const key of Object.keys(tier)) {
+                    if (!['model', 'effort'].includes(key)) fail(`roles.${name}.tiers.${level}.${key}: неизвестное поле`);
+                }
+                if (tier.model != null && (typeof tier.model !== 'string' || !tier.model.trim())) fail(`roles.${name}.tiers.${level}.model должен быть строкой`);
+                if (tier.effort != null && !REASONING_EFFORTS.includes(tier.effort)) fail(`roles.${name}.tiers.${level}.effort: ${REASONING_EFFORTS.join(' | ')}`);
+            }
+        }
     }
     if (!['team', 'single'].includes(c.agent.mode)) fail('agent.mode: team | single');
     for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'architectMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'measurerPasses', 'maxContextBytes']) {
