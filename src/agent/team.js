@@ -84,8 +84,8 @@ function measurementReport(sheet, conclusion, dir) {
     const counts = conclusion?.counts ?? {};
     const line = conclusion
         ? `Conclusion: ${counts.elements ?? 0} element(s), ${counts.regions ?? 0} region(s), ` +
-            `${counts.rules ?? 0} rule(s), ${counts.crops ?? 0} crop(s); overall confidence ${conclusion.confidence ?? 'unknown'}; ` +
-            `${counts.lowConfidence ?? 0} low/unknown element(s).`
+        `${counts.rules ?? 0} rule(s), ${counts.crops ?? 0} crop(s); overall confidence ${conclusion.confidence ?? 'unknown'}; ` +
+        `${counts.lowConfidence ?? 0} low/unknown element(s).`
         : '';
     const files = `Measurement files: ${dir}/measurements.json (full sheet), ${dir}/measurements.toon, ` +
         `${dir}/measurements.conclusion.json, ${dir}/measurements.conclusion.toon.`;
@@ -132,7 +132,7 @@ export function toolNamesForRole(allNames, role, spec = null) {
  */
 export async function runTeam({
     client, config, ledger, task, parts = [], root, approvalLevel = 'read', interactive = false, approve, askUser = null,
-    memory = null, projectKey = null, projectName = null, backupDir = null, extraInstructions = null, emit = () => {}, signal,
+    memory = null, projectKey = null, projectName = null, backupDir = null, extraInstructions = null, emit = () => { }, signal,
     seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, processTool = null, encodeHost = null,
     onMaxTurns = null, referencePaths = [], agentsText = null,
 }) {
@@ -177,8 +177,10 @@ export async function runTeam({
         })), config.roles ?? {}, pins, config.models ?? null);
         return one.steps?.[0] ?? { model: null, effort: null };
     };
-    const result = { status: 'failed', text: '', plan: null, architecture: null, review: null, steps: [], images: [], changes: [], stats: null,
-        recalled: [], memoriesSaved: [], reviewRounds: 0, error: null };
+    const result = {
+        status: 'failed', text: '', plan: null, architecture: null, review: null, steps: [], images: [], changes: [], stats: null,
+        recalled: [], memoriesSaved: [], reviewRounds: 0, error: null
+    };
 
     const toolBase = { root, config, client, ledger, approve, askUser, backupDir, signal, emit, memory, projectKey, projectName, summarizeFile: roles.summarizeFile, scaffoldTask: task, processTool };
     const mcp = await openMcpSources(config, { signal, notify });
@@ -700,838 +702,840 @@ export async function runTeam({
             {
                 id: 'answer',
                 run: async () => {
-        if (!resumedWork && config.agent.chain !== false) {
-            handoff = await openHandoff(root);
-            for (const file of seedFiles) {
-                const seeded = await seedTextFile({ root, state: handoff, file, maxBytes: config.limits.maxFileReadBytes });
-                if (!seeded) await seedDirectory({ root, state: handoff, file, depth: 2, mode: 'tree' });
-            }
-            notify({ type: 'stage.start', stage: 'answer', role: 'default', model: roles.resolve('default').model });
-            const answered = await roles.run('default', {
-                text: `${ctx.render({ maxBytes })}\n\n# Task\n${task}${handoff.text ? `\n\n# Attached files\n${handoff.text}` : ''}`,
-                parts, instructions: withAgents(generation
-                    ? `${ANSWER_INSTRUCTIONS}\nThis is a generation brief. The planner writes the plan and the worker writes the files. Describe the reference and the requested result; do not repeat the plan, the file tree, or file bodies.`
-                    : ANSWER_INSTRUCTIONS),
-                instructionsOnly: true,
-                builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
-            });
-            if (answered.status !== 'completed') return { exit: stop(answered, 'ответ') };
-            const spilled = await spillAnswer(root, handoff, answered.text);
-            let routeChoice = config.agent.route;
-            if (routeChoice === 'decisions') {
-                routeChoice = null;
-                try {
-                    const raw = await requestDecision(client, {
-                        model: config.decisions?.model ?? 'openai/gpt-6-luna-decisions',
-                        state: { task, answer: handoff.text },
-                        questions: questionsFor('route'),
-                        signal,
-                    });
-                    ledger.record({ model: raw.model, usage: raw.usage, kind: 'decision', responseId: raw.id });
-                    routeChoice = routeFlag(raw.answers, { blockAt: config.decisions?.blockAt ?? 0.9 });
-                    notify({ type: 'decision.route', choice: raw.answers?.next?.choice ?? null, flag: routeChoice });
-                } catch (error) {
-                    notify({ type: 'decision.route', error: error.message });
-                }
-            }
-            const route = chooseRoute({
-                flag: routeChoice, label: spilled.label, text: handoff.text,
-                artifacts: handoff.artifacts.filter((item) => item.origin == null),
-            });
-            handoff.route = route;
-            handoff.to = route === 'encode' ? 'encoder' : 'planner';
-            await saveHandoff(root, handoff);
-            notify({ type: 'stage.done', stage: 'answer', status: 'completed', route });
-            const extractMode = config.agent.extract ?? 'auto';
-            if (extractMode !== 'off' && (route === 'encode' || extractMode === 'always') && hasExtractableArtifacts(handoff)) {
-                const extractorPace = paced?.roles?.extractor;
-                const extractor = {
-                    model: extractorPace?.model ?? config.roles?.extractor?.model ?? config.roles?.default?.model
-                        ?? paceSettings.models?.[0] ?? roles.resolve('extractor').model,
-                    effort: config.roles?.extractor?.effort ?? extractorPace?.effort ?? 'low',
-                };
-                notify({ type: 'stage.start', stage: 'extract', role: 'extractor', model: extractor.model });
-                const extracted = await extractHandoff({
-                    root, state: handoff, maxBytes: EXTRACT_MAX_BYTES, maxFiles: EXTRACT_MAX_FILES,
-                    run: (text) => roles.run('extractor', {
-                        text, instructions: withAgents(ROLE_INSTRUCTIONS.extractor), instructionsOnly: true,
-                        schema: EXTRACT_SCHEMA, schemaName: 'extraction',
-                        silent: true, model: extractor.model, effort: extractor.effort,
-                    }),
-                    notify,
-                });
-                notify({
-                    type: 'stage.done', stage: 'extract', status: extracted.files.length ? 'completed' : 'skipped',
-                    files: extracted.files.map((item) => item.hintPath ?? item.rel), calls: extracted.calls,
-                });
-            }
-            ctx.set('answer', 'First answer', handoff.text, { priority: 5 });
-            ctx.set('artifacts', 'Artifacts', handoff.artifacts.filter((item) => !item.supersededBy).map((item) => `${item.id} ${item.rel}`).join('\n') || '(none)', { priority: 8 });
-            if (route === 'encode') {
-                encodeRoute = true;
-                const encoded = await encodeHandoff();
-                if (!encoded.ok) return { exit: encoded.done };
-                if (encoded.written.length >= 2) {
-                    const filePlan = lists(expandPlan({
-                        summary: 'Запись файлов', complexity: 'normal',
-                        steps: encoded.written.map((file) => ({ goal: `Записать ${file}`, details: file, verify: `Прочитать ${file}.` })),
-                        filesOfInterest: [], searchQueries: [], questionsForCollector: [],
-                        acceptanceCriteria: ['Файлы согласованы между собой.'], needsReview: false, imageNotes: null, risks: [],
-                        fileActions: [], taskMap: [],
-                    }, { maxSteps: config.agent.maxSteps }));
-                    let fileProgress = createProgress({ id: handoff.id, task, plan: filePlan });
-                    for (let index = 0; index < filePlan.steps.length; index++) {
-                        if (filePlan.steps[index].kind === 'compat') break;
-                        fileProgress = recordStep(fileProgress, {
-                            index, status: 'completed', report: `записан ${filePlan.steps[index].files?.[0] ?? ''}`,
-                            files: filePlan.steps[index].files ?? [],
+                    if (!resumedWork && config.agent.chain !== false) {
+                        handoff = await openHandoff(root);
+                        for (const file of seedFiles) {
+                            const seeded = await seedTextFile({ root, state: handoff, file, maxBytes: config.limits.maxFileReadBytes });
+                            if (!seeded) await seedDirectory({ root, state: handoff, file, depth: 2, mode: 'tree' });
+                        }
+                        notify({ type: 'stage.start', stage: 'answer', role: 'default', model: roles.resolve('default').model });
+                        const answered = await roles.run('default', {
+                            text: `${ctx.render({ maxBytes })}\n\n# Task\n${task}${handoff.text ? `\n\n# Attached files\n${handoff.text}` : ''}`,
+                            parts, instructions: withAgents(generation
+                                ? `${ANSWER_INSTRUCTIONS}\nThis is a generation brief. The planner writes the plan and the worker writes the files. Describe the reference and the requested result; do not repeat the plan, the file tree, or file bodies.`
+                                : ANSWER_INSTRUCTIONS),
+                            instructionsOnly: true,
+                            builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
                         });
-                    }
-                    bind(filePlan, fileProgress, { expose: false });
-                    await persist('running');
-                    const compatIndex = plan.steps.findIndex((step) => step.kind === 'compat');
-                    if (compatIndex >= 0) {
-                        const step = plan.steps[compatIndex];
-                        notify({ type: 'step.start', index: compatIndex + 1, total: plan.steps.length, goal: step.goal });
-                        const outcome = await runWorker(`Compatibility pass (step ${compatIndex + 1} of ${plan.steps.length})`,
-                            `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}`, config.agent.workerMaxTurnsPerStep, authorFor(step.files, step.goal));
-                        result.images.push(...outcome.images);
-                        progress = recordStep(progress, {
-                            index: compatIndex, status: outcome.status, report: outcome.text.trim() || '(отчёт отсутствует)', files: takeFiles(),
+                        if (answered.status !== 'completed') return { exit: stop(answered, 'ответ') };
+                        const spilled = await spillAnswer(root, handoff, answered.text);
+                        let routeChoice = config.agent.route;
+                        if (routeChoice === 'decisions') {
+                            routeChoice = null;
+                            try {
+                                const raw = await requestDecision(client, {
+                                    model: config.decisions?.model ?? 'openai/gpt-6-luna-decisions',
+                                    state: { task, answer: handoff.text },
+                                    questions: questionsFor('route'),
+                                    signal,
+                                });
+                                ledger.record({ model: raw.model, usage: raw.usage, kind: 'decision', responseId: raw.id });
+                                routeChoice = routeFlag(raw.answers, { blockAt: config.decisions?.blockAt ?? 0.9 });
+                                notify({ type: 'decision.route', choice: raw.answers?.next?.choice ?? null, flag: routeChoice });
+                            } catch (error) {
+                                notify({ type: 'decision.route', error: error.message });
+                            }
+                        }
+                        const route = chooseRoute({
+                            flag: routeChoice, label: spilled.label, text: handoff.text,
+                            artifacts: handoff.artifacts.filter((item) => item.origin == null),
                         });
-                        work.progress = progress;
-                        publish();
-                        await persist(outcome.status === 'completed' ? 'running' : outcome.status);
-                        notify({ type: 'step.done', index: compatIndex + 1, total: plan.steps.length, status: outcome.status, summary: outcome.text.trim() });
-                        if (HARD_STOP.has(outcome.status)) return { exit: stop(outcome, 'согласование') };
-                        if (outcome.status !== 'completed') {
-                            result.status = 'incomplete';
-                            result.text = handoff.text;
-                            await persist('incomplete');
+                        handoff.route = route;
+                        handoff.to = route === 'encode' ? 'encoder' : 'planner';
+                        await saveHandoff(root, handoff);
+                        notify({ type: 'stage.done', stage: 'answer', status: 'completed', route });
+                        const extractMode = config.agent.extract ?? 'auto';
+                        if (extractMode !== 'off' && (route === 'encode' || extractMode === 'always') && hasExtractableArtifacts(handoff)) {
+                            const extractorPace = paced?.roles?.extractor;
+                            const extractor = {
+                                model: extractorPace?.model ?? config.roles?.extractor?.model ?? config.roles?.default?.model
+                                    ?? paceSettings.models?.[0] ?? roles.resolve('extractor').model,
+                                effort: config.roles?.extractor?.effort ?? extractorPace?.effort ?? 'low',
+                            };
+                            notify({ type: 'stage.start', stage: 'extract', role: 'extractor', model: extractor.model });
+                            const extracted = await extractHandoff({
+                                root, state: handoff, maxBytes: EXTRACT_MAX_BYTES, maxFiles: EXTRACT_MAX_FILES,
+                                run: (text) => roles.run('extractor', {
+                                    text, instructions: withAgents(ROLE_INSTRUCTIONS.extractor), instructionsOnly: true,
+                                    schema: EXTRACT_SCHEMA, schemaName: 'extraction',
+                                    silent: true, model: extractor.model, effort: extractor.effort,
+                                }),
+                                notify,
+                            });
+                            notify({
+                                type: 'stage.done', stage: 'extract', status: extracted.files.length ? 'completed' : 'skipped',
+                                files: extracted.files.map((item) => item.hintPath ?? item.rel), calls: extracted.calls,
+                            });
+                        }
+                        ctx.set('answer', 'First answer', handoff.text, { priority: 5 });
+                        ctx.set('artifacts', 'Artifacts', handoff.artifacts.filter((item) => !item.supersededBy).map((item) => `${item.id} ${item.rel}`).join('\n') || '(none)', { priority: 8 });
+                        if (route === 'encode') {
+                            encodeRoute = true;
+                            const encoded = await encodeHandoff();
+                            if (!encoded.ok) return { exit: encoded.done };
+                            if (encoded.written.length >= 2) {
+                                const filePlan = lists(expandPlan({
+                                    summary: 'Запись файлов', complexity: 'normal',
+                                    steps: encoded.written.map((file) => ({ goal: `Записать ${file}`, details: file, verify: `Прочитать ${file}.` })),
+                                    filesOfInterest: [], searchQueries: [], questionsForCollector: [],
+                                    acceptanceCriteria: ['Файлы согласованы между собой.'], needsReview: false, imageNotes: null, risks: [],
+                                    fileActions: [], taskMap: [],
+                                }, { maxSteps: config.agent.maxSteps }));
+                                let fileProgress = createProgress({ id: handoff.id, task, plan: filePlan });
+                                for (let index = 0; index < filePlan.steps.length; index++) {
+                                    if (filePlan.steps[index].kind === 'compat') break;
+                                    fileProgress = recordStep(fileProgress, {
+                                        index, status: 'completed', report: `записан ${filePlan.steps[index].files?.[0] ?? ''}`,
+                                        files: filePlan.steps[index].files ?? [],
+                                    });
+                                }
+                                bind(filePlan, fileProgress, { expose: false });
+                                await persist('running');
+                                const compatIndex = plan.steps.findIndex((step) => step.kind === 'compat');
+                                if (compatIndex >= 0) {
+                                    const step = plan.steps[compatIndex];
+                                    notify({ type: 'step.start', index: compatIndex + 1, total: plan.steps.length, goal: step.goal });
+                                    const outcome = await runWorker(`Compatibility pass (step ${compatIndex + 1} of ${plan.steps.length})`,
+                                        `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}`, config.agent.workerMaxTurnsPerStep, authorFor(step.files, step.goal));
+                                    result.images.push(...outcome.images);
+                                    progress = recordStep(progress, {
+                                        index: compatIndex, status: outcome.status, report: outcome.text.trim() || '(отчёт отсутствует)', files: takeFiles(),
+                                    });
+                                    work.progress = progress;
+                                    publish();
+                                    await persist(outcome.status === 'completed' ? 'running' : outcome.status);
+                                    notify({ type: 'step.done', index: compatIndex + 1, total: plan.steps.length, status: outcome.status, summary: outcome.text.trim() });
+                                    if (HARD_STOP.has(outcome.status)) return { exit: stop(outcome, 'согласование') };
+                                    if (outcome.status !== 'completed') {
+                                        result.status = 'incomplete';
+                                        result.text = handoff.text;
+                                        await persist('incomplete');
+                                        return { exit: finish() };
+                                    }
+                                }
+                                work.progress.stage = 'done';
+                                await persist('completed');
+                            }
+                            result.status = 'completed';
+                            const files = encoded.written.length ? `## Файлы\n${encoded.written.map((item) => `- ${item}`).join('\n')}` : '';
+                            const compatReport = progress?.steps?.find((step) => step.kind === 'compat' && step.report)?.report;
+                            const compat = compatReport ? `## Согласование\n${compatReport}` : '';
+                            result.text = [handoff.text, files, compat].filter(Boolean).join('\n\n');
+                            result.finalNote = encoded.written.length ? `Записаны файлы: ${encoded.written.join(', ')}` : handoff.text;
                             return { exit: finish() };
                         }
                     }
-                    work.progress.stage = 'done';
-                    await persist('completed');
-                }
-                result.status = 'completed';
-                const files = encoded.written.length ? `## Файлы\n${encoded.written.map((item) => `- ${item}`).join('\n')}` : '';
-                const compatReport = progress?.steps?.find((step) => step.kind === 'compat' && step.report)?.report;
-                const compat = compatReport ? `## Согласование\n${compatReport}` : '';
-                result.text = [handoff.text, files, compat].filter(Boolean).join('\n\n');
-                result.finalNote = encoded.written.length ? `Записаны файлы: ${encoded.written.join(', ')}` : handoff.text;
-                return { exit: finish() };
-            }
-        }
                 },
             },
             {
                 id: 'classify',
                 run: async () => {
-        if (!resumedWork && !encodeRoute) {
-            adopt({ label: null });
-            const classified = await roles.run('classifier', {
-                text: task, instructions: withAgents(ROLE_INSTRUCTIONS.classifier), schema: CLASSIFIER_SCHEMA, schemaName: 'task_label',
-                maxTurns: 1, model: paced.roles.classifier.model, effort: paced.roles.classifier.effort,
-            });
-            if (classified.status === 'cancelled' || classified.status === 'budget') return stop(classified, 'классификация');
-            let label = 'normal';
-            if (classified.status === 'completed' && ['trivial', 'normal', 'complex'].includes(classified.data?.label)) label = classified.data.label;
-            else notify({ type: 'warning', message: 'Метка задачи не распознана, взята normal.' });
-            adopt({ label, task, author: authorFor(pathsIn(task), task) });
-            notify({ type: 'pace', speed: paceSettings.speed, quality: paceSettings.quality, policy: paced.policy, model: paced.ceilingModel });
-            if (paced.policy === 'c') {
-                const step = paced.steps[0];
-                const drafted = lists({
-                    summary: task, complexity: label,
-                    steps: [{ goal: step.goal || task, details: step.details || 'Complete the task as described.', verify: step.verify || 'Re-read the result.', complexity: step.complexity }],
-                    filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
-                    needsReview: false, imageNotes: null, risks: [], fileActions: [], taskMap: [],
-                });
-                const expanded = lists(expandPlan(drafted, { maxSteps: 1, splitFiles: false }));
-                bind(expanded, createProgress({ id: handoff?.id ?? newWorkId(), task, plan: expanded }));
-                await persist('running');
-                showPlan();
-            }
-        }
+                    if (!resumedWork && !encodeRoute) {
+                        adopt({ label: null });
+                        const classified = await roles.run('classifier', {
+                            text: task, instructions: withAgents(ROLE_INSTRUCTIONS.classifier), schema: CLASSIFIER_SCHEMA, schemaName: 'task_label',
+                            maxTurns: 1, model: paced.roles.classifier.model, effort: paced.roles.classifier.effort,
+                        });
+                        if (classified.status === 'cancelled' || classified.status === 'budget') return stop(classified, 'классификация');
+                        let label = 'normal';
+                        if (classified.status === 'completed' && ['trivial', 'normal', 'complex'].includes(classified.data?.label)) label = classified.data.label;
+                        else notify({ type: 'warning', message: 'Метка задачи не распознана, взята normal.' });
+                        adopt({ label, task, author: authorFor(pathsIn(task), task) });
+                        notify({ type: 'pace', speed: paceSettings.speed, quality: paceSettings.quality, policy: paced.policy, model: paced.ceilingModel });
+                        if (paced.policy === 'c') {
+                            const step = paced.steps[0];
+                            const drafted = lists({
+                                summary: task, complexity: label,
+                                steps: [{ goal: step.goal || task, details: step.details || 'Complete the task as described.', verify: step.verify || 'Re-read the result.', complexity: step.complexity }],
+                                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                                needsReview: false, imageNotes: null, risks: [], fileActions: [], taskMap: [],
+                            });
+                            const expanded = lists(expandPlan(drafted, { maxSteps: 1, splitFiles: false }));
+                            bind(expanded, createProgress({ id: handoff?.id ?? newWorkId(), task, plan: expanded }));
+                            await persist('running');
+                            showPlan();
+                        }
+                    }
                 },
             },
             {
                 id: 'plan',
                 run: async () => {
-        // 1. Planner. A resumed plan is already bound.
-        if (!plan) {
-        notify({ type: 'stage.start', stage: 'plan', role: 'planner', model: paced.roles.planner.model });
-        const planned = await roles.run('planner', {
-            text: `${ctx.render({ maxBytes })}\n\n# Directory tree\n${directoryTree}\n\n${draft}\n\n# Task\n${task}`, parts: handoff ? [] : parts,
-             instructions: withAgents(`${ROLE_INSTRUCTIONS.planner.replace('{maxSteps}', String(stepLimit))}\n\n${[acceptanceParagraph(paced.acceptance), guaranteesParagraph(paced.guarantees)].filter(Boolean).join('\n\n')}`),
-            schema: PLAN_SCHEMA, schemaName: 'plan',
-            model: paced.roles.planner.model, effort: paced.roles.planner.effort,
-            builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
-        });
-        if (planned.status !== 'completed') return { exit: stop(planned, 'план') };
-        const drafted = lists(planned.data);
-        drafted.steps = drafted.steps.slice(0, stepLimit);
-        if (!drafted.steps.length) drafted.steps = [{ goal: task, details: 'Complete the task as described.', verify: 'Re-read the result.', complexity: drafted.complexity === 'trivial' || drafted.complexity === 'complex' || drafted.complexity === 'normal' ? drafted.complexity : 'normal' }];
-        const expanded = lists(expandPlan(drafted, { maxSteps: stepLimit, splitFiles: !generation }));
-        const id = handoff?.id ?? newWorkId();
-        bind(expanded, createProgress({ id, task, plan: expanded }));
-        // The planner may disagree with the classifier. Its own complexity, and each step's
-        // own complexity, now drive the model rung for every step.
-        const planComplexity = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
-        adopt({
-            label: planComplexity,
-            steps: plan.steps.map((step) => ({
-                complexity: step.complexity, author: authorFor(step.files, step.goal),
-                files: step.files, goal: step.goal, details: step.details, verify: step.verify, kind: step.kind,
-            })),
-        });
-        await persist('running');
-        showPlan();
-        notify({ type: 'stage.done', stage: 'plan', status: 'completed' });
-        if (handoff) {
-            for (const action of plan.fileActions) {
-                if (action?.action === 'encode') {
-                    const encoded = await encodeHandoff();
-                    if (!encoded.ok) return { exit: encoded.done };
-                } else if (action?.action === 'read' || action?.action === 'write' || action?.action === 'list') {
-                    const command = action.action === 'list'
-                        ? {
-                            command: 'fs:list', path: action.path || '.', cwd: action.cwd || '.', type: 'text', language: 'text',
-                            content: null, lines: null, source: null, start: null, end: null,
-                            depth: action.depth ?? 2, mode: action.mode || 'tree',
+                    // 1. Planner. A resumed plan is already bound.
+                    if (!plan) {
+                        notify({ type: 'stage.start', stage: 'plan', role: 'planner', model: paced.roles.planner.model });
+                        const planned = await roles.run('planner', {
+                            text: `${ctx.render({ maxBytes })}\n\n# Directory tree\n${directoryTree}\n\n${draft}\n\n# Task\n${task}`, parts: handoff ? [] : parts,
+                            instructions: withAgents(`${ROLE_INSTRUCTIONS.planner.replace('{maxSteps}', String(stepLimit))}\n\n${[acceptanceParagraph(paced.acceptance), guaranteesParagraph(paced.guarantees)].filter(Boolean).join('\n\n')}`),
+                            schema: PLAN_SCHEMA, schemaName: 'plan',
+                            model: paced.roles.planner.model, effort: paced.roles.planner.effort,
+                            builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
+                        });
+                        if (planned.status !== 'completed') return { exit: stop(planned, 'план') };
+                        const drafted = lists(planned.data);
+                        drafted.steps = drafted.steps.slice(0, stepLimit);
+                        if (!drafted.steps.length) drafted.steps = [{ goal: task, details: 'Complete the task as described.', verify: 'Re-read the result.', complexity: drafted.complexity === 'trivial' || drafted.complexity === 'complex' || drafted.complexity === 'normal' ? drafted.complexity : 'normal' }];
+                        const expanded = lists(expandPlan(drafted, { maxSteps: stepLimit, splitFiles: !generation }));
+                        const id = handoff?.id ?? newWorkId();
+                        bind(expanded, createProgress({ id, task, plan: expanded }));
+                        // The planner may disagree with the classifier. Its own complexity, and each step's
+                        // own complexity, now drive the model rung for every step.
+                        const planComplexity = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
+                        adopt({
+                            label: planComplexity,
+                            steps: plan.steps.map((step) => ({
+                                complexity: step.complexity, author: authorFor(step.files, step.goal),
+                                files: step.files, goal: step.goal, details: step.details, verify: step.verify, kind: step.kind,
+                            })),
+                        });
+                        await persist('running');
+                        showPlan();
+                        notify({ type: 'stage.done', stage: 'plan', status: 'completed' });
+                        if (handoff) {
+                            for (const action of plan.fileActions) {
+                                if (action?.action === 'encode') {
+                                    const encoded = await encodeHandoff();
+                                    if (!encoded.ok) return { exit: encoded.done };
+                                } else if (action?.action === 'read' || action?.action === 'write' || action?.action === 'list') {
+                                    const command = action.action === 'list'
+                                        ? {
+                                            command: 'fs:list', path: action.path || '.', cwd: action.cwd || '.', type: 'text', language: 'text',
+                                            content: null, lines: null, source: null, start: null, end: null,
+                                            depth: action.depth ?? 2, mode: action.mode || 'tree',
+                                        }
+                                        : {
+                                            command: action.action === 'read' ? 'fs:read' : 'fs:write',
+                                            path: action.path ?? '', cwd: action.cwd || '.', type: action.language === 'text' ? 'text' : 'code',
+                                            language: action.language ?? '', content: null, lines: null,
+                                            source: action.action === 'write' ? (action.source ?? null) : null,
+                                            start: action.action === 'read' ? (action.start ?? null) : null,
+                                            end: action.action === 'read' ? (action.end ?? null) : null,
+                                        };
+                                    const applied = await applyCommands([command]);
+                                    if (!applied.ok) return { exit: applied.done };
+                                }
+                            }
+                            ctx.set('answer', 'First answer', handoff.text, { priority: 5 });
+                            ctx.set('artifacts', 'Artifacts', handoff.artifacts.filter((item) => !item.supersededBy).map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''}`.trim()).join('\n') || '(none)', { priority: 8 });
                         }
-                        : {
-                            command: action.action === 'read' ? 'fs:read' : 'fs:write',
-                            path: action.path ?? '', cwd: action.cwd || '.', type: action.language === 'text' ? 'text' : 'code',
-                            language: action.language ?? '', content: null, lines: null,
-                            source: action.action === 'write' ? (action.source ?? null) : null,
-                            start: action.action === 'read' ? (action.start ?? null) : null,
-                            end: action.action === 'read' ? (action.end ?? null) : null,
-                        };
-                    const applied = await applyCommands([command]);
-                    if (!applied.ok) return { exit: applied.done };
-                }
-            }
-            ctx.set('answer', 'First answer', handoff.text, { priority: 5 });
-            ctx.set('artifacts', 'Artifacts', handoff.artifacts.filter((item) => !item.supersededBy).map((item) => `${item.id} ${item.rel} ${item.hintLanguage ?? ''}`.trim()).join('\n') || '(none)', { priority: 8 });
-        }
-        }
+                    }
 
-        await orchestrate('plan');
+                    await orchestrate('plan');
                 },
             },
             {
                 id: 'measure',
                 run: async () => {
-        // 2. Measurer: numbers for the references before any style, SVG, or artwork is written.
-        const measureMode = config.agent.measure ?? 'auto';
-        if (measureMode !== 'off' && !resumedWork && referenceParts.length && (measureMode === 'always' || plan.complexity !== 'trivial')) {
-            const tier = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
-            const choice = measurerChoice(tier, config.roles?.measurer ?? {});
-            const model = encodeRoute || !paced?.ready
-                ? choice.model
-                : clampModel(choice.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.measurer?.model));
-            const measurePasses = Math.max(1, Math.min(2, config.agent.measurerPasses ?? 2));
-            const measureTurns = Math.max(1, config.agent.measurerMaxTurns ?? 16);
-            const overviewTurns = Math.max(1, Math.ceil(measureTurns / 3));
-            const fragmentTurns = Math.max(1, measureTurns - overviewTurns);
-            const measureMaxBytes = Math.min(
-                config.agent.measurerMaxContextBytes ?? 8 * 1024 * 1024,
-                config.limits.maxRequestBytes,
-            );
-            const measureToolsFor = (pass) => {
-                const names = (pass === 1
-                    ? ['view_image', 'fetch_url']
-                    : ['view_image', 'crop_image', 'split_image', 'fetch_url'])
-                    // Local measurement crops are part of the measurer's job even when image generation is off.
-                    .filter((name) => enabled.includes(name) || name === 'crop_image' || name === 'split_image');
-                return names.length
-                    ? createToolset({
-                        ...toolBase, names, approvalLevel, allowWrite: ['crop_image', 'split_image'],
-                        describeScreen: roles.describeScreen,
-                    })
-                    : null;
-            };
-            const measureBuiltin = config.tools.web
-                ? builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search')
-                : [];
-            const measureContext = ctx.render({ maxBytes: measureMaxBytes, exclude: ['tree'] });
-            const measurePlan = `Plan: ${plan.summary}\nSteps:\n${bullets(plan.steps.map((step) => step.goal))}`;
-            /** One measurement pass, with a tool-less report when the turn budget is spent. */
-            const measureRun = async ({ pass, text, maxTurns, session }) => {
-                const result = await roles.run('measurer', {
-                    text, parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.measurer),
-                    toolset: measureToolsFor(pass), builtin: measureBuiltin,
-                    schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns,
-                    model, effort: choice.effort, onMaxTurns, session,
-                });
-                if (HARD_STOP.has(result.status)) return result;
-                if (!result.data && ['max_turns', 'incomplete'].includes(result.status)) {
-                    notify({ type: 'warning', message: `Лимит ходов замера (проход ${pass}) исчерпан; роль отдаёт лист по уже просмотренному.` });
-                    const report = await roles.run('measurer', {
-                        text: 'Turn budget is spent and no more tools are available. Reply with the complete measurement sheet for everything you already looked at. ' +
-                            'Use CSS units in units/css, null for a number you did not read, confidence for every element, and name the unchecked parts in assumptions and notes. JSON only.',
-                        instructions: withAgents(ROLE_INSTRUCTIONS.measurer), schema: MEASURER_SCHEMA, schemaName: 'measure',
-                        maxTurns: 1, model, effort: choice.effort, session,
-                    });
-                    if (report.data) return report;
-                }
-                return result;
-            };
-            notify({ type: 'stage.start', stage: 'measure', role: 'measurer', model });
-            notify({ type: 'measure.pass', pass: 1, phase: 'overview' });
-            let measured = await measureRun({
-                pass: 1,
-                text: `${measureContext}\n\n# Measurement pass 1 — whole reference\n${measurePlan}\n\n` +
-                    'Study the whole reference first: the canvas, the global layout, every element, every reusable region, and the spacing rules. ' +
-                    'Do not start from a fragment. Return the complete overview sheet with CSS units, per-item confidence, and explicit assumptions. ' +
-                    'The harness cuts fragments from your boxes after this pass.',
-                maxTurns: overviewTurns,
-                session: createSession({ store: false, model }),
-            });
-            if (HARD_STOP.has(measured.status)) return { exit: stop(measured, 'замеры') };
-            let sheet = measured.data ?? null;
-            let stagedCrops = { crops: [], warnings: [] };
-            if (sheet && measurePasses > 1) {
-                // Cut the overview regions and reusable elements first, then let the measurer inspect
-                // the actual fragments instead of guessing from the full-size picture.
-                const preliminary = await stageMeasurementCrops({
-                    root, workId: work.id, sheet, referencePaths, config, signal,
-                });
-                const fragmentList = preliminary.crops.length
-                    ? preliminary.crops.map((crop) => {
-                        const box = crop.box ?? {};
-                        return `- ${crop.kind}: ${crop.name} — ${crop.crop} (${box.width ?? '?'}×${box.height ?? '?'} at ${box.x ?? '?'},${box.y ?? '?'})`;
-                    }).join('\n')
-                    : '(no usable boxes yet; add regions or elements with boxes so the harness can cut fragments)';
-                notify({ type: 'measure.pass', pass: 2, phase: 'fragments' });
-                const detailed = await measureRun({
-                    pass: 2,
-                    text: `${measureContext}\n\n# Measurement pass 2 — fragments\n${measurePlan}\n\n` +
-                        'The overview sheet and the fragments cut from it are below. Study the whole sheet first, then inspect the fragments. ' +
-                        'Cut more small, reusable fragments with crop_image or split_image where a detail is too small to read. ' +
-                        'Return the complete final sheet, not a delta: keep every region and element, keep its crop path when the box is unchanged, ' +
-                        'and add new fragments for the worker, architect, and image-processor. Use CSS units with explicit conversions, mark every ' +
-                        'inferred value in assumptions, and set confidence per element. Do not replace the global layout with a single fragment.\n\n' +
-                        `# Overview sheet (JSON)\n${JSON.stringify(sheet)}\n\n# Staged fragments\n${fragmentList}`,
-                    maxTurns: fragmentTurns,
-                    session: createSession({ store: false, model }),
-                });
-                // A failed fragment pass must not throw away the overview sheet; cancellation and
-                // budget exhaustion still stop the run.
-                if (HARD_STOP.has(detailed.status) && detailed.status !== 'failed') return { exit: stop(detailed, 'замеры') };
-                if (detailed.data) {
-                    sheet = detailed.data;
-                    measured = detailed;
-                } else if (detailed.status !== 'completed') {
-                    notify({ type: 'warning', message: `Второй проход замеров не завершён (${detailed.status}); остаётся лист обзорного прохода.` });
-                }
-                stagedCrops = await stageMeasurementCrops({
-                    root, workId: work.id, sheet, referencePaths, config, signal, reuse: preliminary.crops,
-                });
-            } else if (sheet) {
-                stagedCrops = await stageMeasurementCrops({
-                    root, workId: work.id, sheet, referencePaths, config, signal,
-                });
-            }
-            if (sheet) {
-                for (const warning of stagedCrops.warnings) notify({ type: 'warning', message: warning });
-                if (stagedCrops.crops.length) notify({ type: 'measure.crops', count: stagedCrops.crops.length, crops: stagedCrops.crops });
-                const conclusion = measurementConclusion(sheet, stagedCrops.crops);
-                const dir = `.tmp/${work.id}`;
-                const toon = (value) => {
-                    try { return `${encodeToon(value)}\n`; }
-                    catch (error) {
-                        notify({ type: 'warning', message: `TOON замеров не закодирован: ${errorMessage(error)}` });
-                        return null;
+                    // 2. Measurer: numbers for the references before any style, SVG, or artwork is written.
+                    const measureMode = config.agent.measure ?? 'auto';
+                    if (measureMode !== 'off' && !resumedWork && referenceParts.length && (measureMode === 'always' || plan.complexity !== 'trivial')) {
+                        const tier = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
+                        const choice = measurerChoice(tier, config.roles?.measurer ?? {});
+                        const model = encodeRoute || !paced?.ready
+                            ? choice.model
+                            : clampModel(choice.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.measurer?.model));
+                        const measurePasses = Math.max(1, Math.min(2, config.agent.measurerPasses ?? 2));
+                        const measureTurns = Math.max(1, config.agent.measurerMaxTurns ?? 16);
+                        const overviewTurns = Math.max(1, Math.ceil(measureTurns / 3));
+                        const fragmentTurns = Math.max(1, measureTurns - overviewTurns);
+                        const measureMaxBytes = Math.min(
+                            config.agent.measurerMaxContextBytes ?? 8 * 1024 * 1024,
+                            config.limits.maxRequestBytes,
+                        );
+                        const measureToolsFor = (pass) => {
+                            const names = (pass === 1
+                                ? ['view_image', 'fetch_url']
+                                : ['view_image', 'crop_image', 'split_image', 'fetch_url'])
+                                // Local measurement crops are part of the measurer's job even when image generation is off.
+                                .filter((name) => enabled.includes(name) || name === 'crop_image' || name === 'split_image');
+                            return names.length
+                                ? createToolset({
+                                    ...toolBase, names, approvalLevel, allowWrite: ['crop_image', 'split_image'],
+                                    describeScreen: roles.describeScreen,
+                                })
+                                : null;
+                        };
+                        const measureBuiltin = config.tools.web
+                            ? builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search')
+                            : [];
+                        const measureContext = ctx.render({ maxBytes: measureMaxBytes, exclude: ['tree'] });
+                        const measurePlan = `Plan: ${plan.summary}\nSteps:\n${bullets(plan.steps.map((step) => step.goal))}`;
+                        /** One measurement pass, with a tool-less report when the turn budget is spent. */
+                        const measureRun = async ({ pass, text, maxTurns, session }) => {
+                            const result = await roles.run('measurer', {
+                                text, parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.measurer),
+                                toolset: measureToolsFor(pass), builtin: measureBuiltin,
+                                schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns,
+                                model, effort: choice.effort, onMaxTurns, session,
+                            });
+                            if (HARD_STOP.has(result.status)) return result;
+                            if (!result.data && ['max_turns', 'incomplete'].includes(result.status)) {
+                                notify({ type: 'warning', message: `Лимит ходов замера (проход ${pass}) исчерпан; роль отдаёт лист по уже просмотренному.` });
+                                const report = await roles.run('measurer', {
+                                    text: 'Turn budget is spent and no more tools are available. Reply with the complete measurement sheet for everything you already looked at. ' +
+                                        'Use CSS units in units/css, null for a number you did not read, confidence for every element, and name the unchecked parts in assumptions and notes. JSON only.',
+                                    instructions: withAgents(ROLE_INSTRUCTIONS.measurer), schema: MEASURER_SCHEMA, schemaName: 'measure',
+                                    maxTurns: 1, model, effort: choice.effort, session,
+                                });
+                                if (report.data) return report;
+                            }
+                            return result;
+                        };
+                        notify({ type: 'stage.start', stage: 'measure', role: 'measurer', model });
+                        notify({ type: 'measure.pass', pass: 1, phase: 'overview' });
+                        let measured = await measureRun({
+                            pass: 1,
+                            text: `${measureContext}\n\n# Measurement pass 1 — whole reference\n${measurePlan}\n\n` +
+                                'Study the whole reference first: the canvas, the global layout, every element, every reusable region, and the spacing rules. ' +
+                                'Do not start from a fragment. Return the complete overview sheet with CSS units, per-item confidence, and explicit assumptions. ' +
+                                'The harness cuts fragments from your boxes after this pass.',
+                            maxTurns: overviewTurns,
+                            session: createSession({ store: false, model }),
+                        });
+                        if (HARD_STOP.has(measured.status)) return { exit: stop(measured, 'замеры') };
+                        let sheet = measured.data ?? null;
+                        let stagedCrops = { crops: [], warnings: [] };
+                        if (sheet && measurePasses > 1) {
+                            // Cut the overview regions and reusable elements first, then let the measurer inspect
+                            // the actual fragments instead of guessing from the full-size picture.
+                            const preliminary = await stageMeasurementCrops({
+                                root, workId: work.id, sheet, referencePaths, config, signal,
+                            });
+                            const fragmentList = preliminary.crops.length
+                                ? preliminary.crops.map((crop) => {
+                                    const box = crop.box ?? {};
+                                    return `- ${crop.kind}: ${crop.name} — ${crop.crop} (${box.width ?? '?'}×${box.height ?? '?'} at ${box.x ?? '?'},${box.y ?? '?'})`;
+                                }).join('\n')
+                                : '(no usable boxes yet; add regions or elements with boxes so the harness can cut fragments)';
+                            notify({ type: 'measure.pass', pass: 2, phase: 'fragments' });
+                            const detailed = await measureRun({
+                                pass: 2,
+                                text: `${measureContext}\n\n# Measurement pass 2 — fragments\n${measurePlan}\n\n` +
+                                    'The overview sheet and the fragments cut from it are below. Study the whole sheet first, then inspect the fragments. ' +
+                                    'Cut more small, reusable fragments with crop_image or split_image where a detail is too small to read. ' +
+                                    'Return the complete final sheet, not a delta: keep every region and element, keep its crop path when the box is unchanged, ' +
+                                    'and add new fragments for the worker, architect, and image-processor. Use CSS units with explicit conversions, mark every ' +
+                                    'inferred value in assumptions, and set confidence per element. Do not replace the global layout with a single fragment.\n\n' +
+                                    `# Overview sheet (JSON)\n${JSON.stringify(sheet)}\n\n# Staged fragments\n${fragmentList}`,
+                                maxTurns: fragmentTurns,
+                                session: createSession({ store: false, model }),
+                            });
+                            // A failed fragment pass must not throw away the overview sheet; cancellation and
+                            // budget exhaustion still stop the run.
+                            if (HARD_STOP.has(detailed.status) && detailed.status !== 'failed') return { exit: stop(detailed, 'замеры') };
+                            if (detailed.data) {
+                                sheet = detailed.data;
+                                measured = detailed;
+                            } else if (detailed.status !== 'completed') {
+                                notify({ type: 'warning', message: `Второй проход замеров не завершён (${detailed.status}); остаётся лист обзорного прохода.` });
+                            }
+                            stagedCrops = await stageMeasurementCrops({
+                                root, workId: work.id, sheet, referencePaths, config, signal, reuse: preliminary.crops,
+                            });
+                        } else if (sheet) {
+                            stagedCrops = await stageMeasurementCrops({
+                                root, workId: work.id, sheet, referencePaths, config, signal,
+                            });
+                        }
+                        if (sheet) {
+                            for (const warning of stagedCrops.warnings) notify({ type: 'warning', message: warning });
+                            if (stagedCrops.crops.length) notify({ type: 'measure.crops', count: stagedCrops.crops.length, crops: stagedCrops.crops });
+                            const conclusion = measurementConclusion(sheet, stagedCrops.crops);
+                            const dir = `.tmp/${work.id}`;
+                            const toon = (value) => {
+                                try { return `${encodeToon(value)}\n`; }
+                                catch (error) {
+                                    notify({ type: 'warning', message: `TOON замеров не закодирован: ${errorMessage(error)}` });
+                                    return null;
+                                }
+                            };
+                            const files = [
+                                ['measurements.json', `${JSON.stringify(sheet, null, 2)}\n`],
+                                ['measurements.toon', toon(measurementIndex(sheet, stagedCrops.crops))],
+                                ['measurements.conclusion.json', `${JSON.stringify(conclusion, null, 2)}\n`],
+                                ['measurements.conclusion.toon', toon(conclusion)],
+                            ].filter(([, text]) => typeof text === 'string');
+                            await Promise.all(files.map(([name, text]) => writeFile(path.join(root, dir, name), text, 'utf8').catch((error) => {
+                                notify({ type: 'warning', message: `Файл замеров ${name} не сохранён: ${errorMessage(error)}` });
+                            })));
+                            ctx.set('metrics', 'Reference measurements (by the measurer)', measurementReport(sheet, conclusion, dir), { priority: 8 });
+                            notify({ type: 'measure.conclusion', ...conclusion.counts, confidence: conclusion.confidence });
+                        } else if (measured.status !== 'completed') {
+                            notify({ type: 'warning', message: `Замеры референсов не завершены (${measured.status}${measured.error ? `: ${errorMessage(measured.error)}` : ''}); продолжаем без них.` });
+                        }
+                        notify({ type: 'stage.done', stage: 'measure', status: measured.status });
                     }
-                };
-                const files = [
-                    ['measurements.json', `${JSON.stringify(sheet, null, 2)}\n`],
-                    ['measurements.toon', toon(measurementIndex(sheet, stagedCrops.crops))],
-                    ['measurements.conclusion.json', `${JSON.stringify(conclusion, null, 2)}\n`],
-                    ['measurements.conclusion.toon', toon(conclusion)],
-                ].filter(([, text]) => typeof text === 'string');
-                await Promise.all(files.map(([name, text]) => writeFile(path.join(root, dir, name), text, 'utf8').catch((error) => {
-                    notify({ type: 'warning', message: `Файл замеров ${name} не сохранён: ${errorMessage(error)}` });
-                })));
-                ctx.set('metrics', 'Reference measurements (by the measurer)', measurementReport(sheet, conclusion, dir), { priority: 8 });
-                notify({ type: 'measure.conclusion', ...conclusion.counts, confidence: conclusion.confidence });
-            } else if (measured.status !== 'completed') {
-                notify({ type: 'warning', message: `Замеры референсов не завершены (${measured.status}${measured.error ? `: ${errorMessage(measured.error)}` : ''}); продолжаем без них.` });
-            }
-            notify({ type: 'stage.done', stage: 'measure', status: measured.status });
-        }
                 },
             },
             {
                 id: 'architect',
                 run: async () => {
-        // 2b. Architect and designer: the file/module structure and the per-step brief for the remaining roles.
-        // It runs after the measurements (numbers are the source of truth) and before context collection,
-        // so the orchestrator can answer its questions and every author sees the same structure.
-        const architectureMode = config.agent.architect ?? 'auto';
-        const architectureEarly = !resumedWork || ['plan', 'image-processing'].includes(progress?.stage);
-        if (architectureMode !== 'off' && !architecture && architectureEarly
-            && (architectureMode === 'always' || plan.complexity !== 'trivial')) {
-            const role = roles.resolve('architect');
-            const model = paced?.roles.architect?.model ?? role.model;
-            const effort = paced?.roles.architect?.effort ?? role.effort;
-            const stepsBrief = plan.steps.map((step) => `${step.id ?? '(no id)'}: ${step.goal}\n  details: ${step.details || '(none)'}\n  files: ${(step.files ?? []).join(', ') || '(none)'}`).join('\n\n');
-            const references = referencePaths.length ? `\n\n# Reference image paths\n${referencePaths.map((item) => `- ${item}`).join('\n')}` : '';
-            const architectureText = `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Plan steps to design for\n${stepsBrief}${references}`;
-            notify({ type: 'stage.start', stage: 'architect', role: 'architect', model });
-            let architected = await roles.run('architect', {
-                text: architectureText, parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.architect),
-                toolset: architectTools, schema: ARCHITECT_SCHEMA, schemaName: 'architecture',
-                maxTurns: config.agent.architectMaxTurns ?? 8, model, effort, onMaxTurns,
-            });
-            if (HARD_STOP.has(architected.status)) return { exit: stop(architected, 'архитектура') };
-            // A spent turn budget must not lose the brief: one tool-less pass writes it from what the role already saw.
-            if (!architected.data && ['max_turns', 'incomplete'].includes(architected.status)) {
-                notify({ type: 'warning', message: 'Лимит ходов архитектора исчерпан; роль отдаёт структуру по уже просмотренному.' });
-                const report = await roles.run('architect', {
-                    text: 'Turn budget is spent and no more tools are available. Reply with the architecture JSON for everything you already saw. ' +
-                        'Name the unchecked parts in risks. JSON only.',
-                    instructions: withAgents(ROLE_INSTRUCTIONS.architect), schema: ARCHITECT_SCHEMA, schemaName: 'architecture',
-                    maxTurns: 1, model, effort,
-                });
-                if (report.data) architected = report;
-            }
-            if (architected.data) {
-                architecture = architectureLists(architected.data);
-                result.architecture = architecture;
-                ctx.set('architecture', 'Architecture (by the architect)', renderArchitecture(architecture), { priority: 8 });
-                progress.notes ??= [];
-                progress.notes.push({ kind: 'architect', status: 'completed', report: architecture.summary });
-                work.progress = progress;
-                await writeFile(path.join(root, '.tmp', work.id, 'architecture.json'), `${JSON.stringify(architecture, null, 2)}\n`, 'utf8').catch((error) => {
-                    notify({ type: 'warning', message: `Структура не сохранена: ${errorMessage(error)}` });
-                });
-                notify({ type: 'stage.done', stage: 'architect', status: 'completed', files: architecture.structure.map((item) => item.path), steps: architecture.stepGuidance.length });
-            } else {
-                notify({ type: 'warning', message: `Архитектор не ответил (${architected.status}${architected.error ? `: ${errorMessage(architected.error)}` : ''}); продолжаем по плану.` });
-                notify({ type: 'stage.done', stage: 'architect', status: architected.status });
-            }
-        }
+                    // 2b. Architect and designer: the file/module structure and the per-step brief for the remaining roles.
+                    // It runs after the measurements (numbers are the source of truth) and before context collection,
+                    // so the orchestrator can answer its questions and every author sees the same structure.
+                    const architectureMode = config.agent.architect ?? 'auto';
+                    const architectureEarly = !resumedWork || ['plan', 'image-processing'].includes(progress?.stage);
+                    if (architectureMode !== 'off' && !architecture && architectureEarly
+                        && (architectureMode === 'always' || plan.complexity !== 'trivial')) {
+                        const role = roles.resolve('architect');
+                        const model = paced?.roles.architect?.model ?? role.model;
+                        const effort = paced?.roles.architect?.effort ?? role.effort;
+                        const stepsBrief = plan.steps.map((step) => `${step.id ?? '(no id)'}: ${step.goal}\n  details: ${step.details || '(none)'}\n  files: ${(step.files ?? []).join(', ') || '(none)'}`).join('\n\n');
+                        const references = referencePaths.length ? `\n\n# Reference image paths\n${referencePaths.map((item) => `- ${item}`).join('\n')}` : '';
+                        const architectureText = `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Plan steps to design for\n${stepsBrief}${references}`;
+                        notify({ type: 'stage.start', stage: 'architect', role: 'architect', model });
+                        let architected = await roles.run('architect', {
+                            text: architectureText, parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.architect),
+                            toolset: architectTools, schema: ARCHITECT_SCHEMA, schemaName: 'architecture',
+                            maxTurns: config.agent.architectMaxTurns ?? 8, model, effort, onMaxTurns,
+                        });
+                        if (HARD_STOP.has(architected.status)) return { exit: stop(architected, 'архитектура') };
+                        // A spent turn budget must not lose the brief: one tool-less pass writes it from what the role already saw.
+                        if (!architected.data && ['max_turns', 'incomplete'].includes(architected.status)) {
+                            notify({ type: 'warning', message: 'Лимит ходов архитектора исчерпан; роль отдаёт структуру по уже просмотренному.' });
+                            const report = await roles.run('architect', {
+                                text: 'Turn budget is spent and no more tools are available. Reply with the architecture JSON for everything you already saw. ' +
+                                    'Name the unchecked parts in risks. JSON only.',
+                                instructions: withAgents(ROLE_INSTRUCTIONS.architect), schema: ARCHITECT_SCHEMA, schemaName: 'architecture',
+                                maxTurns: 1, model, effort,
+                            });
+                            if (report.data) architected = report;
+                        }
+                        if (architected.data) {
+                            architecture = architectureLists(architected.data);
+                            result.architecture = architecture;
+                            ctx.set('architecture', 'Architecture (by the architect)', renderArchitecture(architecture), { priority: 8 });
+                            progress.notes ??= [];
+                            progress.notes.push({ kind: 'architect', status: 'completed', report: architecture.summary });
+                            work.progress = progress;
+                            await writeFile(path.join(root, '.tmp', work.id, 'architecture.json'), `${JSON.stringify(architecture, null, 2)}\n`, 'utf8').catch((error) => {
+                                notify({ type: 'warning', message: `Структура не сохранена: ${errorMessage(error)}` });
+                            });
+                            notify({ type: 'stage.done', stage: 'architect', status: 'completed', files: architecture.structure.map((item) => item.path), steps: architecture.stepGuidance.length });
+                        } else {
+                            notify({ type: 'warning', message: `Архитектор не ответил (${architected.status}${architected.error ? `: ${errorMessage(architected.error)}` : ''}); продолжаем по плану.` });
+                            notify({ type: 'stage.done', stage: 'architect', status: architected.status });
+                        }
+                    }
                 },
             },
             {
                 id: 'collect',
                 run: async () => {
-        // 2. Context collection by the orchestrator (read-only). Skipped when this run already moved past it.
-        const wantsContext = plan.complexity !== 'trivial' && (
-            plan.filesOfInterest.length || plan.searchQueries.length || plan.questionsForCollector.length
-            || marks.some((item) => item.role === 'read' || item.role === 'edit')
-        );
-        const pastCollect = Boolean(resumedWork) && (
-            progress.cursor > 0 || Boolean(ctx.get('findings')) || ['image-processing', 'work', 'review', 'fix', 'done'].includes(progress.stage)
-        );
-        if (!pastCollect && paced?.collect !== 'off' && wantsContext && readNames.length) {
-            notify({ type: 'stage.start', stage: 'collect', role: 'orchestrator', model: paced.roles.orchestrator.model });
-            const focus = marks.filter((item) => item.role === 'read' || item.role === 'edit').map((item) => `${item.role} ${item.path} — ${item.reason}`);
-            const brief = [
-                `# Orchestrator brief (collect context)\nTask map (read/edit):\n${bullets(focus)}\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`,
-                architectureBrief(),
-            ].filter(Boolean).join('\n\n');
-            const collected = await roles.run('orchestrator', {
-                text: `${ctx.render({ maxBytes })}\n\n${brief}`, instructions: withAgents(ROLE_INSTRUCTIONS.orchestrator), toolset: orchestratorTools,
-                schema: COLLECTOR_SCHEMA, schemaName: 'context_report', maxTurns: config.agent.orchestratorMaxTurns,
-                model: paced.roles.orchestrator.model, effort: paced.roles.orchestrator.effort,
-            });
-            if (HARD_STOP.has(collected.status)) return { exit: stop(collected, 'сбор контекста') };
-            if (collected.status === 'completed' && collected.data) {
-                const text = renderFindings(collected.data);
-                ctx.set('findings', 'Collected context (by the orchestrator)', text, { priority: 6 });
-                await writeFile(path.join(root, '.tmp', work.id, 'findings.md'), text, 'utf8').catch(() => {});
-            } else notify({ type: 'warning', message: `Сбор контекста не завершён (${collected.status}${collected.error ? `: ${errorMessage(collected.error)}` : ''}); продолжаем без него.` });
-            notify({ type: 'stage.done', stage: 'collect', status: collected.status });
-        }
+                    // 2. Context collection by the orchestrator (read-only). Skipped when this run already moved past it.
+                    const wantsContext = plan.complexity !== 'trivial' && (
+                        plan.filesOfInterest.length || plan.searchQueries.length || plan.questionsForCollector.length
+                        || marks.some((item) => item.role === 'read' || item.role === 'edit')
+                    );
+                    const pastCollect = Boolean(resumedWork) && (
+                        progress.cursor > 0 || Boolean(ctx.get('findings')) || ['image-processing', 'work', 'review', 'fix', 'done'].includes(progress.stage)
+                    );
+                    if (!pastCollect && paced?.collect !== 'off' && wantsContext && readNames.length) {
+                        notify({ type: 'stage.start', stage: 'collect', role: 'orchestrator', model: paced.roles.orchestrator.model });
+                        const focus = marks.filter((item) => item.role === 'read' || item.role === 'edit').map((item) => `${item.role} ${item.path} — ${item.reason}`);
+                        const brief = [
+                            `# Orchestrator brief (collect context)\nTask map (read/edit):\n${bullets(focus)}\nFiles of interest:\n${bullets(plan.filesOfInterest)}\nSearch queries:\n${bullets(plan.searchQueries)}\nQuestions to answer:\n${bullets(plan.questionsForCollector)}`,
+                            architectureBrief(),
+                        ].filter(Boolean).join('\n\n');
+                        const collected = await roles.run('orchestrator', {
+                            text: `${ctx.render({ maxBytes })}\n\n${brief}`, instructions: withAgents(ROLE_INSTRUCTIONS.orchestrator), toolset: orchestratorTools,
+                            schema: COLLECTOR_SCHEMA, schemaName: 'context_report', maxTurns: config.agent.orchestratorMaxTurns,
+                            model: paced.roles.orchestrator.model, effort: paced.roles.orchestrator.effort,
+                        });
+                        if (HARD_STOP.has(collected.status)) return { exit: stop(collected, 'сбор контекста') };
+                        if (collected.status === 'completed' && collected.data) {
+                            const text = renderFindings(collected.data);
+                            ctx.set('findings', 'Collected context (by the orchestrator)', text, { priority: 6 });
+                            await writeFile(path.join(root, '.tmp', work.id, 'findings.md'), text, 'utf8').catch(() => { });
+                        } else notify({ type: 'warning', message: `Сбор контекста не завершён (${collected.status}${collected.error ? `: ${errorMessage(collected.error)}` : ''}); продолжаем без него.` });
+                        notify({ type: 'stage.done', stage: 'collect', status: collected.status });
+                    }
 
-        await orchestrate('collect');
+                    await orchestrate('collect');
                 },
             },
             {
                 id: 'images',
                 run: async () => {
-        // 3. Prepare requested visual assets once, before implementation starts.
-        const imageTasks = plan.imageTasks.filter((item) => item && typeof item.goal === 'string' && item.goal.trim());
-        if (imageTasks.length) {
-            const previous = progress.imageProcessing;
-            if (previous?.status === 'completed' && previous.report) {
-                ctx.set('imageAssets', 'Prepared images and visual assets', previous.report, { priority: 9 });
-                for (const image of previous.images ?? []) result.images.push(path.resolve(root, image));
-            } else {
-                const model = roles.resolve('image-processor').model;
-                progress.stage = 'image-processing';
-                progress.imageProcessing = { status: 'running', report: '', images: [] };
-                work.progress = progress;
-                await persist('running');
-                notify({ type: 'stage.start', stage: 'image-processing', role: 'image-processor', model });
-                const tasks = imageTasks.map((item, index) => `${index + 1}. ${item.goal}\n   ${item.details}`).join('\n');
-                const refs = referencePaths.length ? referencePaths.map((item) => `- ${item}`).join('\n') : '(none)';
-                const imageParts = parts.filter((part) => part?.type === 'input_image');
-                const processed = await roles.run('image-processor', {
-                    text: `${ctx.render({ maxBytes })}\n\n# Image preparation tasks\n${tasks}\n\n# Reference image paths\n${refs}`,
-                    parts: imageParts, instructions: withAgents(ROLE_INSTRUCTIONS['image-processor']),
-                    toolset: imageProcessorTools, builtin: imageProcessorBuiltin,
-                    schema: IMAGE_PROCESSOR_SCHEMA, schemaName: 'image_assets',
-                    maxTurns: config.agent.workerMaxTurnsPerStep, imageTarget: path.join(root, 'assets'),
-                });
-                if (processed.status !== 'completed' || !processed.data) {
-                    notify({ type: 'stage.done', stage: 'image-processing', status: processed.status });
-                    return { exit: stop(processed, 'подготовка изображений') };
-                }
-                const assets = Array.isArray(processed.data.assets)
-                    ? processed.data.assets.filter((asset) => asset && typeof asset.path === 'string' && asset.path.trim())
-                    : [];
-                const typography = Array.isArray(processed.data.typography) ? processed.data.typography : [];
-                for (const font of typography) {
-                    if (font.localPath && !assets.some((asset) => asset.path === font.localPath)) {
-                        assets.push({ path: font.localPath, format: path.extname(font.localPath).slice(1).toLowerCase() || 'font', use: `${font.role || 'text'} font: ${font.family || font.cssFamily}` });
+                    // 3. Prepare requested visual assets once, before implementation starts.
+                    const imageTasks = plan.imageTasks.filter((item) => item && typeof item.goal === 'string' && item.goal.trim());
+                    if (imageTasks.length) {
+                        const previous = progress.imageProcessing;
+                        if (previous?.status === 'completed' && previous.report) {
+                            ctx.set('imageAssets', 'Prepared images and visual assets', previous.report, { priority: 9 });
+                            for (const image of previous.images ?? []) result.images.push(path.resolve(root, image));
+                        } else {
+                            const model = roles.resolve('image-processor').model;
+                            progress.stage = 'image-processing';
+                            progress.imageProcessing = { status: 'running', report: '', images: [] };
+                            work.progress = progress;
+                            await persist('running');
+                            notify({ type: 'stage.start', stage: 'image-processing', role: 'image-processor', model });
+                            const tasks = imageTasks.map((item, index) => `${index + 1}. ${item.goal}\n   ${item.details}`).join('\n');
+                            const refs = referencePaths.length ? referencePaths.map((item) => `- ${item}`).join('\n') : '(none)';
+                            const imageParts = parts.filter((part) => part?.type === 'input_image');
+                            const processed = await roles.run('image-processor', {
+                                text: `${ctx.render({ maxBytes })}\n\n# Image preparation tasks\n${tasks}\n\n# Reference image paths\n${refs}`,
+                                parts: imageParts, instructions: withAgents(ROLE_INSTRUCTIONS['image-processor']),
+                                toolset: imageProcessorTools, builtin: imageProcessorBuiltin,
+                                schema: IMAGE_PROCESSOR_SCHEMA, schemaName: 'image_assets',
+                                maxTurns: config.agent.workerMaxTurnsPerStep, imageTarget: path.join(root, 'assets'),
+                            });
+                            if (processed.status !== 'completed' || !processed.data) {
+                                notify({ type: 'stage.done', stage: 'image-processing', status: processed.status });
+                                return { exit: stop(processed, 'подготовка изображений') };
+                            }
+                            const assets = Array.isArray(processed.data.assets)
+                                ? processed.data.assets.filter((asset) => asset && typeof asset.path === 'string' && asset.path.trim())
+                                : [];
+                            const typography = Array.isArray(processed.data.typography) ? processed.data.typography : [];
+                            for (const font of typography) {
+                                if (font.localPath && !assets.some((asset) => asset.path === font.localPath)) {
+                                    assets.push({ path: font.localPath, format: path.extname(font.localPath).slice(1).toLowerCase() || 'font', use: `${font.role || 'text'} font: ${font.family || font.cssFamily}` });
+                                }
+                            }
+                            const generated = (processed.images ?? []).map((file) => path.relative(root, file).split(path.sep).join('/'));
+                            for (const rel of generated) {
+                                if (!assets.some((asset) => asset.path === rel)) {
+                                    assets.push({ path: rel, format: path.extname(rel).slice(1).toLowerCase() || 'image', use: 'Generated for the implementation from the image preparation plan.' });
+                                }
+                                result.images.push(path.resolve(root, rel));
+                            }
+                            const report = [
+                                `Summary: ${String(processed.data.summary ?? '').trim() || '(none)'}`,
+                                `Assets:\n${assets.length ? assets.map((asset) => `- ${asset.path} (${asset.format || 'unknown'}): ${asset.use || 'Prepared for implementation.'}`).join('\n') : '- (none)'}`,
+                                ...(typography.length ? [`Typography recommendations:\n${typography.map((font) => `- ${font.role}: ${font.family} — CSS: ${font.cssFamily}; weights: ${font.weights.join(', ') || '(not specified)'}; ${font.rationale} Source: ${font.source}${font.cssUrl ? `; stylesheet: ${font.cssUrl}` : ''}${font.localPath ? `; local file: ${font.localPath}` : font.cssUrl ? '; load this verified stylesheet unless the project specifies another delivery method.' : '; use the existing project-provided font setup.'}`).join('\n')}`] : []),
+                                ...(Array.isArray(processed.data.notes) && processed.data.notes.length ? [`Notes:\n${processed.data.notes.map((note) => `- ${note}`).join('\n')}`] : []),
+                            ].join('\n\n');
+                            progress.imageProcessing = { status: 'completed', report, assets, images: generated };
+                            ctx.set('imageAssets', 'Prepared images and visual assets', report, { priority: 9 });
+                            await writeFile(path.join(root, '.tmp', work.id, 'image-assets.json'), `${report}\n`, 'utf8').catch((error) => {
+                                notify({ type: 'warning', message: `Отчёт об изображениях не сохранён: ${errorMessage(error)}` });
+                            });
+                            work.progress = progress;
+                            publish();
+                            await persist('running');
+                            notify({ type: 'stage.done', stage: 'image-processing', status: 'completed', assets: assets.map((asset) => asset.path) });
+                        }
                     }
-                }
-                const generated = (processed.images ?? []).map((file) => path.relative(root, file).split(path.sep).join('/'));
-                for (const rel of generated) {
-                    if (!assets.some((asset) => asset.path === rel)) {
-                        assets.push({ path: rel, format: path.extname(rel).slice(1).toLowerCase() || 'image', use: 'Generated for the implementation from the image preparation plan.' });
-                    }
-                    result.images.push(path.resolve(root, rel));
-                }
-                const report = [
-                    `Summary: ${String(processed.data.summary ?? '').trim() || '(none)'}`,
-                    `Assets:\n${assets.length ? assets.map((asset) => `- ${asset.path} (${asset.format || 'unknown'}): ${asset.use || 'Prepared for implementation.'}`).join('\n') : '- (none)'}`,
-                    ...(typography.length ? [`Typography recommendations:\n${typography.map((font) => `- ${font.role}: ${font.family} — CSS: ${font.cssFamily}; weights: ${font.weights.join(', ') || '(not specified)'}; ${font.rationale} Source: ${font.source}${font.cssUrl ? `; stylesheet: ${font.cssUrl}` : ''}${font.localPath ? `; local file: ${font.localPath}` : font.cssUrl ? '; load this verified stylesheet unless the project specifies another delivery method.' : '; use the existing project-provided font setup.'}`).join('\n')}`] : []),
-                    ...(Array.isArray(processed.data.notes) && processed.data.notes.length ? [`Notes:\n${processed.data.notes.map((note) => `- ${note}`).join('\n')}`] : []),
-                ].join('\n\n');
-                progress.imageProcessing = { status: 'completed', report, assets, images: generated };
-                ctx.set('imageAssets', 'Prepared images and visual assets', report, { priority: 9 });
-                await writeFile(path.join(root, '.tmp', work.id, 'image-assets.json'), `${report}\n`, 'utf8').catch((error) => {
-                    notify({ type: 'warning', message: `Отчёт об изображениях не сохранён: ${errorMessage(error)}` });
-                });
-                work.progress = progress;
-                publish();
-                await persist('running');
-                notify({ type: 'stage.done', stage: 'image-processing', status: 'completed', assets: assets.map((asset) => asset.path) });
-            }
-        }
                 },
             },
             {
                 id: 'work',
                 run: async () => {
-        // 4. Worker: one conversation, one step at a time, starting at the saved cursor.
-        notify({ type: 'stage.start', stage: 'work', role: 'worker', model: roles.resolve('worker').model });
-        progress.stage = 'work';
-        workIncomplete = false;
-        revisionUsed = false;
-        revisionAt = String(revision ?? '').trim() ? progress.cursor : -1;
-        revisionOnly = revisionAt >= 0 && progress.cursor >= plan.steps.length;
-        /**
-         * Run one plan step. A file step is two turns: the public surface, then the bodies.
-         * @param {number} index
-         * @returns {Promise<{ outcome: object, report: string, files: string[] }>}
-         */
-        const runStep = async (index) => {
-            const step = plan.steps[index];
-            const number = index + 1;
-            const stepComplexity = step.complexity === 'trivial' || step.complexity === 'complex' ? step.complexity : 'normal';
-            const allowance = stepAllowance({
-                complexity: stepComplexity, kind: step.kind,
-                files: step.files?.length ? step.files : pathsIn(`${step.goal}\n${step.details}`),
-                goal: step.goal, details: step.details, generation, ceiling: config.agent.workerMaxTurnsPerStep,
-            });
-            const file = step.files?.[0];
-            const title = step.kind === 'compat'
-                ? `Compatibility pass (step ${number} of ${plan.steps.length})`
-                : `Your step ${number} of ${plan.steps.length}`;
-            const prior = progress.steps[index];
-            const interrupted = Boolean(prior && prior.status !== 'pending' && prior.status !== 'completed');
-            const chosen = authorModel(step.files, step.goal, step.complexity);
-            const resumeSession = interrupted && progress.checkpoint?.stepId === step.id && pendingSession?.model === chosen.model;
-            const extra = index === revisionAt ? revisionClause(revision) : '';
-            if (extra) revisionUsed = true;
-            const advice = orchestratorGuidance ? `\n\nOrchestrator guidance (from the previous stage):\n${orchestratorGuidance}` : '';
-            const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}${extra}${advice}${architectureAdvice(step)}${paced?.guarantees === 'broken' ? `\n\n${guaranteesParagraph('broken')}` : ''}`;
-            const passes = [];
-            if (interrupted) {
-                const phase = prior.phase === 'surface' ? 'surface' : 'body';
-                passes.push({
-                    body: `${continuationText(step, prior, { resumeSession, revision: index === revisionAt ? revision : '' })}${architectureAdvice(step)}`,
-                    maxTurns: phase === 'surface' ? allowance.surfaceTurns : (allowance.maxTurns ?? allowance.bodyTurns),
-                    phase, resume: resumeSession,
-                });
-                if (phase === 'surface') {
-                    passes.push({
-                        body: `Fill in ${file} so this step is complete. Keep the public surface already written. Do not edit other files.\n${base}`,
-                        maxTurns: allowance.bodyTurns, phase: 'body', resume: false,
-                    });
-                }
-            } else if (allowance.passes === 1) passes.push({ body: base, maxTurns: allowance.maxTurns, phase: 'body', resume: false });
-            else {
-                if (prior?.phase !== 'body') {
-                    passes.push({
-                        body: `Write only the public surface of ${file}: exports, signatures, and headings. Leave bodies as short stubs. Do not edit other files.\n${base}`,
-                        maxTurns: allowance.surfaceTurns, phase: 'surface', resume: false,
-                    });
-                }
-                passes.push({
-                    body: `Fill in ${file} so this step is complete. Keep the public surface already written. Do not edit other files.\n${base}`,
-                    maxTurns: allowance.bodyTurns, phase: 'body', resume: false,
-                });
-            }
-            let outcome = null;
-            let lastPhase = prior?.phase ?? 'body';
-            const reports = [];
-            const files = [];
-            for (const pass of passes) {
-                lastPhase = pass.phase;
-                progress.steps[index].phase = pass.phase;
-                workerTools.setBackupSlot?.(`${step.id ?? `s${number}`}-${pass.phase}`);
-                outcome = await runWorker(title, pass.body, pass.maxTurns, chosen.author, { stepId: step.id, phase: pass.phase, resume: pass.resume, complexity: step.complexity });
-                result.images.push(...outcome.images);
-                reports.push(outcome.text.trim());
-                files.push(...takeFiles());
-                if (outcome.status !== 'completed') break;
-                if (pass.phase === 'surface') {
-                    progress.steps[index].phase = 'body';
-                    progress.steps[index].report = reports.filter(Boolean).join('\n\n');
-                    progress.steps[index].files = [...new Set([...(progress.steps[index].files ?? []), ...files])];
-                    work.progress = progress;
-                    await persist('running');
-                }
-            }
-            // A generation step often spends its last turns on the same failing check.
-            // One short pass on the cheapest rung gives verification a fresh budget without
-            // keeping the expensive model for the rest of the plan.
-            if (generation && outcome?.status === 'max_turns' && files.length > 0) {
-                const verifyTurns = Math.min(8, Math.max(1, config.agent.workerMaxTurnsPerStep));
-                const verifyChoice = encodeRoute || !paced?.ready ? legacyChoice(chosen.author, 'trivial') : paceChoice(chosen.author, 'trivial');
-                notify({ type: 'stage.start', stage: 'verify', role: chosen.author, model: verifyChoice.model ?? roles.resolve(chosen.author).model });
-                const verifyBody = [
-                    `Goal: ${step.goal}`,
-                    `Verify: ${step.verify || 'Re-read the files and run the project check.'}`,
-                    '',
-                    `The previous attempt ran out of turns before verification. Files already written: ${files.join(', ')}.`,
-                    'Run the verification now. Fix only errors that block it. Do not rewrite files that already work, do not add features, and do not start a dev or preview server.',
-                    'If the check still fails, report the exact error and what remains unverified.',
-                ].join('\n');
-                const repaired = await runWorker(`${title} — verify`, verifyBody, verifyTurns, chosen.author,
-                    { stepId: step.id, phase: 'verify', resume: false, complexity: 'trivial' });
-                result.images.push(...repaired.images);
-                reports.push(repaired.text.trim());
-                files.push(...takeFiles());
-                progress.notes ??= [];
-                progress.notes.push({ kind: 'verify', status: repaired.status, report: repaired.text.trim(), note: step.verify || '' });
-                notify({ type: 'stage.done', stage: 'verify', status: repaired.status });
-                if (repaired.status === 'completed') {
-                    outcome = repaired;
-                    lastPhase = 'body';
-                } else if (HARD_STOP.has(repaired.status)) {
-                    outcome = repaired;
-                } else {
-                    const reason = repaired.error ? `: ${errorMessage(repaired.error)}` : '';
-                    notify({ type: 'warning', message: `Проверка шага ${number} не завершена (${repaired.status}${reason}); шаг остаётся незавершённым.` });
-                }
-            }
-            return {
-                outcome, phase: lastPhase, files: [...new Set(files)],
-                report: reports.filter(Boolean).join('\n\n') || '(отчёт отсутствует)',
-            };
-        };
-        for (let index = progress.cursor; index < plan.steps.length; index++) {
-            if (progress.steps[index]?.status === 'completed') continue;
-            const step = plan.steps[index];
-            const number = index + 1;
-            notify({ type: 'step.start', index: number, total: plan.steps.length, goal: step.goal });
-            const ran = await runStep(index);
-            const update = parsePlanUpdate(ran.report);
-            if (update) {
-                const applied = applyPlanUpdate(plan, update, { maxSteps: stepLimit, afterId: step.id });
-                plan = applied.plan;
-                progress = syncProgress(progress, plan);
-                progress.notes ??= [];
-                if (applied.note) progress.notes.push({ kind: 'plan', note: applied.note });
-                work.plan = plan;
-                result.plan = plan;
-            }
-            const recordAt = plan.steps.findIndex((item) => item.id === step.id);
-            if (recordAt < 0) {
-                workIncomplete = true;
-                notify({ type: 'warning', message: `Шаг ${number} пропал из плана после обновления.` });
-                break;
-            }
-            progress = recordStep(progress, { index: recordAt, status: ran.outcome.status, report: ran.report, files: ran.files, phase: ran.phase });
-            work.plan = plan;
-            work.progress = progress;
-            publish();
-            await persist();
-            index = recordAt;
-            result.steps.push({ index: recordAt + 1, goal: step.goal, status: ran.outcome.status, report: ran.report });
-            notify({ type: 'step.done', index: recordAt + 1, total: plan.steps.length, status: ran.outcome.status, summary: ran.report });
-            if (HARD_STOP.has(ran.outcome.status)) return { exit: stop(ran.outcome, `шаг ${number}`) };
-            await orchestrate('work', { step, status: ran.outcome.status, report: ran.report });
-            if (ran.outcome.status !== 'completed') {
-                workIncomplete = true;
-                if (generation && ran.outcome.status === 'max_turns') {
-                    notify({ type: 'warning', message: `Шаг ${number} упёрся в лимит ходов; следующий шаг всё равно выполняется.` });
-                    continue;
-                }
-                notify({ type: 'warning', message: `Шаг ${number} не завершён (${ran.outcome.status}${ran.outcome.error ? `: ${errorMessage(ran.outcome.error)}` : ''}); дальнейшие шаги пропущены.` });
-                break;
-            }
-        }
-            notify({ type: 'stage.done', stage: 'work', status: workIncomplete ? 'incomplete' : 'completed' });
-            if (String(revision ?? '').trim() && !revisionUsed) {
-                const chosen = authorModel(pathsIn(revision), revision);
-                notify({ type: 'step.start', index: plan.steps.length + 1, total: plan.steps.length, goal: 'Доработка' });
-                const outcome = await runWorker(
-                    'Operator revision',
-                    `The plan steps are already complete. Apply this revision to the existing project. Do not repeat finished steps.${revisionClause(revision)}`,
-                    config.agent.workerMaxTurnsPerStep,
-                    chosen.author,
-                    { stepId: 'revision', phase: 'body', resume: false },
-                );
-                result.images.push(...outcome.images);
-                result.steps.push({ index: 'revision', goal: 'Доработка', status: outcome.status, report: outcome.text.trim() });
-                progress.notes ??= [];
-                progress.notes.push({ kind: 'revision', status: outcome.status, report: outcome.text.trim(), note: String(revision).trim() });
-                work.progress = progress;
-                await persist(outcome.status === 'completed' ? 'running' : outcome.status);
-                notify({ type: 'step.done', index: 'revision', total: plan.steps.length, status: outcome.status, summary: outcome.text.trim() });
-                if (HARD_STOP.has(outcome.status)) return { exit: stop(outcome, 'доработка') };
-                if (outcome.status !== 'completed') workIncomplete = true;
-                revisionUsed = true;
-            }
+                    // 4. Worker: one conversation, one step at a time, starting at the saved cursor.
+                    notify({ type: 'stage.start', stage: 'work', role: 'worker', model: roles.resolve('worker').model });
+                    progress.stage = 'work';
+                    workIncomplete = false;
+                    revisionUsed = false;
+                    revisionAt = String(revision ?? '').trim() ? progress.cursor : -1;
+                    revisionOnly = revisionAt >= 0 && progress.cursor >= plan.steps.length;
+                    /**
+                     * Run one plan step. A file step is two turns: the public surface, then the bodies.
+                     * @param {number} index
+                     * @returns {Promise<{ outcome: object, report: string, files: string[] }>}
+                     */
+                    const runStep = async (index) => {
+                        const step = plan.steps[index];
+                        const number = index + 1;
+                        const stepComplexity = step.complexity === 'trivial' || step.complexity === 'complex' ? step.complexity : 'normal';
+                        const allowance = stepAllowance({
+                            complexity: stepComplexity, kind: step.kind,
+                            files: step.files?.length ? step.files : pathsIn(`${step.goal}\n${step.details}`),
+                            goal: step.goal, details: step.details, generation, ceiling: config.agent.workerMaxTurnsPerStep,
+                        });
+                        const file = step.files?.[0];
+                        const title = step.kind === 'compat'
+                            ? `Compatibility pass (step ${number} of ${plan.steps.length})`
+                            : `Your step ${number} of ${plan.steps.length}`;
+                        const prior = progress.steps[index];
+                        const interrupted = Boolean(prior && prior.status !== 'pending' && prior.status !== 'completed');
+                        const chosen = authorModel(step.files, step.goal, step.complexity);
+                        const resumeSession = interrupted && progress.checkpoint?.stepId === step.id && pendingSession?.model === chosen.model;
+                        const extra = index === revisionAt ? revisionClause(revision) : '';
+                        if (extra) revisionUsed = true;
+                        const advice = orchestratorGuidance ? `\n\nOrchestrator guidance (from the previous stage):\n${orchestratorGuidance}` : '';
+                        const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}${extra}${advice}${architectureAdvice(step)}${paced?.guarantees === 'broken' ? `\n\n${guaranteesParagraph('broken')}` : ''}`;
+                        const passes = [];
+                        if (interrupted) {
+                            const phase = prior.phase === 'surface' ? 'surface' : 'body';
+                            passes.push({
+                                body: `${continuationText(step, prior, { resumeSession, revision: index === revisionAt ? revision : '' })}${architectureAdvice(step)}`,
+                                maxTurns: phase === 'surface' ? allowance.surfaceTurns : (allowance.maxTurns ?? allowance.bodyTurns),
+                                phase, resume: resumeSession,
+                            });
+                            if (phase === 'surface') {
+                                passes.push({
+                                    body: `Fill in ${file} so this step is complete. Keep the public surface already written. Do not edit other files.\n${base}`,
+                                    maxTurns: allowance.bodyTurns, phase: 'body', resume: false,
+                                });
+                            }
+                        } else if (allowance.passes === 1) passes.push({ body: base, maxTurns: allowance.maxTurns, phase: 'body', resume: false });
+                        else {
+                            if (prior?.phase !== 'body') {
+                                passes.push({
+                                    body: `Write only the public surface of ${file}: exports, signatures, and headings. Leave bodies as short stubs. Do not edit other files.\n${base}`,
+                                    maxTurns: allowance.surfaceTurns, phase: 'surface', resume: false,
+                                });
+                            }
+                            passes.push({
+                                body: `Fill in ${file} so this step is complete. Keep the public surface already written. Do not edit other files.\n${base}`,
+                                maxTurns: allowance.bodyTurns, phase: 'body', resume: false,
+                            });
+                        }
+                        let outcome = null;
+                        let lastPhase = prior?.phase ?? 'body';
+                        const reports = [];
+                        const files = [];
+                        for (const pass of passes) {
+                            lastPhase = pass.phase;
+                            progress.steps[index].phase = pass.phase;
+                            workerTools.setBackupSlot?.(`${step.id ?? `s${number}`}-${pass.phase}`);
+                            outcome = await runWorker(title, pass.body, pass.maxTurns, chosen.author, { stepId: step.id, phase: pass.phase, resume: pass.resume, complexity: step.complexity });
+                            result.images.push(...outcome.images);
+                            reports.push(outcome.text.trim());
+                            files.push(...takeFiles());
+                            if (outcome.status !== 'completed') break;
+                            if (pass.phase === 'surface') {
+                                progress.steps[index].phase = 'body';
+                                progress.steps[index].report = reports.filter(Boolean).join('\n\n');
+                                progress.steps[index].files = [...new Set([...(progress.steps[index].files ?? []), ...files])];
+                                work.progress = progress;
+                                await persist('running');
+                            }
+                        }
+                        // A generation step often spends its last turns on the same failing check.
+                        // One short pass on the cheapest rung gives verification a fresh budget without
+                        // keeping the expensive model for the rest of the plan.
+                        if (generation && outcome?.status === 'max_turns' && files.length > 0) {
+                            const verifyTurns = Math.min(8, Math.max(1, config.agent.workerMaxTurnsPerStep));
+                            const verifyChoice = encodeRoute || !paced?.ready ? legacyChoice(chosen.author, 'trivial') : paceChoice(chosen.author, 'trivial');
+                            notify({ type: 'stage.start', stage: 'verify', role: chosen.author, model: verifyChoice.model ?? roles.resolve(chosen.author).model });
+                            const verifyBody = [
+                                `Goal: ${step.goal}`,
+                                `Verify: ${step.verify || 'Re-read the files and run the project check.'}`,
+                                '',
+                                `The previous attempt ran out of turns before verification. Files already written: ${files.join(', ')}.`,
+                                'Run the verification now. Fix only errors that block it. Do not rewrite files that already work, do not add features, and do not start a dev or preview server.',
+                                'If the check still fails, report the exact error and what remains unverified.',
+                            ].join('\n');
+                            const repaired = await runWorker(`${title} — verify`, verifyBody, verifyTurns, chosen.author,
+                                { stepId: step.id, phase: 'verify', resume: false, complexity: 'trivial' });
+                            result.images.push(...repaired.images);
+                            reports.push(repaired.text.trim());
+                            files.push(...takeFiles());
+                            progress.notes ??= [];
+                            progress.notes.push({ kind: 'verify', status: repaired.status, report: repaired.text.trim(), note: step.verify || '' });
+                            notify({ type: 'stage.done', stage: 'verify', status: repaired.status });
+                            if (repaired.status === 'completed') {
+                                outcome = repaired;
+                                lastPhase = 'body';
+                            } else if (HARD_STOP.has(repaired.status)) {
+                                outcome = repaired;
+                            } else {
+                                const reason = repaired.error ? `: ${errorMessage(repaired.error)}` : '';
+                                notify({ type: 'warning', message: `Проверка шага ${number} не завершена (${repaired.status}${reason}); шаг остаётся незавершённым.` });
+                            }
+                        }
+                        return {
+                            outcome, phase: lastPhase, files: [...new Set(files)],
+                            report: reports.filter(Boolean).join('\n\n') || '(отчёт отсутствует)',
+                        };
+                    };
+                    for (let index = progress.cursor; index < plan.steps.length; index++) {
+                        if (progress.steps[index]?.status === 'completed') continue;
+                        const step = plan.steps[index];
+                        const number = index + 1;
+                        notify({ type: 'step.start', index: number, total: plan.steps.length, goal: step.goal });
+                        const ran = await runStep(index);
+                        const update = parsePlanUpdate(ran.report);
+                        if (update) {
+                            const applied = applyPlanUpdate(plan, update, { maxSteps: stepLimit, afterId: step.id });
+                            plan = applied.plan;
+                            progress = syncProgress(progress, plan);
+                            progress.notes ??= [];
+                            if (applied.note) progress.notes.push({ kind: 'plan', note: applied.note });
+                            work.plan = plan;
+                            result.plan = plan;
+                        }
+                        const recordAt = plan.steps.findIndex((item) => item.id === step.id);
+                        if (recordAt < 0) {
+                            workIncomplete = true;
+                            notify({ type: 'warning', message: `Шаг ${number} пропал из плана после обновления.` });
+                            break;
+                        }
+                        progress = recordStep(progress, { index: recordAt, status: ran.outcome.status, report: ran.report, files: ran.files, phase: ran.phase });
+                        work.plan = plan;
+                        work.progress = progress;
+                        publish();
+                        await persist();
+                        index = recordAt;
+                        result.steps.push({ index: recordAt + 1, goal: step.goal, status: ran.outcome.status, report: ran.report });
+                        notify({ type: 'step.done', index: recordAt + 1, total: plan.steps.length, status: ran.outcome.status, summary: ran.report });
+                        if (HARD_STOP.has(ran.outcome.status)) return { exit: stop(ran.outcome, `шаг ${number}`) };
+                        await orchestrate('work', { step, status: ran.outcome.status, report: ran.report });
+                        if (ran.outcome.status !== 'completed') {
+                            workIncomplete = true;
+                            if (generation && ran.outcome.status === 'max_turns') {
+                                notify({ type: 'warning', message: `Шаг ${number} упёрся в лимит ходов; следующий шаг всё равно выполняется.` });
+                                continue;
+                            }
+                            notify({ type: 'warning', message: `Шаг ${number} не завершён (${ran.outcome.status}${ran.outcome.error ? `: ${errorMessage(ran.outcome.error)}` : ''}); дальнейшие шаги пропущены.` });
+                            break;
+                        }
+                    }
+                    notify({ type: 'stage.done', stage: 'work', status: workIncomplete ? 'incomplete' : 'completed' });
+                    if (String(revision ?? '').trim() && !revisionUsed) {
+                        const chosen = authorModel(pathsIn(revision), revision);
+                        notify({ type: 'step.start', index: plan.steps.length + 1, total: plan.steps.length, goal: 'Доработка' });
+                        const outcome = await runWorker(
+                            'Operator revision',
+                            `The plan steps are already complete. Apply this revision to the existing project. Do not repeat finished steps.${revisionClause(revision)}`,
+                            config.agent.workerMaxTurnsPerStep,
+                            chosen.author,
+                            { stepId: 'revision', phase: 'body', resume: false },
+                        );
+                        result.images.push(...outcome.images);
+                        result.steps.push({ index: 'revision', goal: 'Доработка', status: outcome.status, report: outcome.text.trim() });
+                        progress.notes ??= [];
+                        progress.notes.push({ kind: 'revision', status: outcome.status, report: outcome.text.trim(), note: String(revision).trim() });
+                        work.progress = progress;
+                        await persist(outcome.status === 'completed' ? 'running' : outcome.status);
+                        notify({ type: 'step.done', index: 'revision', total: plan.steps.length, status: outcome.status, summary: outcome.text.trim() });
+                        if (HARD_STOP.has(outcome.status)) return { exit: stop(outcome, 'доработка') };
+                        if (outcome.status !== 'completed') workIncomplete = true;
+                        revisionUsed = true;
+                    }
                 },
             },
             {
                 id: 'review',
                 run: async () => {
-        // 4. Review and fix rounds.
-        const shouldReview = paced?.reviewMode === 'force'
-            ? paced.reviewRounds > 0 && !workIncomplete && !revisionOnly
-            : paced?.reviewMode === 'plan'
-                ? Boolean(plan.needsReview) && plan.complexity !== 'trivial' && paced.reviewRounds > 0 && !workIncomplete && !revisionOnly
-                : false;
-        if (shouldReview) {
-            progress.stage = 'review';
-            work.progress = progress;
-            await persist('running');
-            // One decisions call can accept the result and skip the reviewer's tool loop.
-            const assessed = await assessQuality({
-                client, config, ledger, signal, notify,
-                state: {
-                    task,
-                    acceptance: plan.acceptanceCriteria,
-                    plan: plan.summary,
-                    steps: result.steps.map((step) => ({
-                        index: step.index, goal: step.goal, status: step.status,
-                        report: clipMiddle(step.report ?? '', 4000),
-                    })),
-                    changes: workerTools.stats().changes.map((change) => change.path),
-                    commands: workerTools.stats().commands.map((command) => ({ command: command.command, exitCode: command.exitCode ?? null })),
-                    tree: directoryTree,
-                },
-                images: await assessmentImages({ root, parts, produced: result.images }),
-            });
-            if (assessed) {
-                notify({
-                    type: 'decision.review', verdict: assessed.verdict, summary: assessed.summary,
-                    model: assessed.model, vision: assessed.vision, scores: assessed.scores,
-                });
-                if (assessed.verdict === 'accept') {
-                    decisionsAccepted = true;
-                    review = { verdict: 'accept', summary: assessed.summary, issues: [], unverified: [] };
-                    result.review = review;
-                    result.reviewRounds = 0;
-                    notify({ type: 'review.done', round: 0, verdict: 'accept', summary: assessed.summary, issues: [], unverified: [], source: 'decisions' });
-                    notify({ type: 'stage.done', stage: 'review', status: 'accept' });
-                }
-            }
-        }
-        for (let round = 1; shouldReview && !decisionsAccepted; round++) {
-            notify({ type: 'stage.start', stage: 'review', role: 'reviewer', model: safeReviewerModel(paced.roles.reviewer.model), round });
-            ctx.set('diff', 'Changes made by the worker (diff)', await describeChangeSet({ root, changes: workerTools.stats().changes, maxBytes: 48 * 1024 }), { priority: 5 });
-            const commands = workerTools.stats().commands.map((c) => `- ${c.command} → exit ${c.exitCode ?? '?'}`).join('\n') || '- (none)';
-            const reviewed = await roles.run('reviewer', {
-                text: `${ctx.render({ maxBytes })}\n\n# Review request (round ${round})\nAcceptance criteria:\n${bullets(plan.acceptanceCriteria)}\nCommands run by the worker:\n${commands}`,
-                instructions: `${withAgents(ROLE_INSTRUCTIONS.reviewer)}\n\n${[acceptanceParagraph(paced.acceptance), guaranteesParagraph(paced.guarantees)].filter(Boolean).join('\n\n')}`, toolset: reviewerTools, schema: REVIEW_SCHEMA, schemaName: 'review', maxTurns: config.agent.reviewerMaxTurns,
-                model: safeReviewerModel(paced.roles.reviewer.model), effort: paced.roles.reviewer.effort, onMaxTurns,
-            });
-            if (HARD_STOP.has(reviewed.status)) return { exit: stop(reviewed, 'ревью') };
-            if (reviewed.status !== 'completed' || !reviewed.data) {
-                notify({ type: 'warning', message: `Ревью не завершено (${reviewed.status}); результат принят без независимой проверки.` });
-                break;
-            }
-            review = reviewed.data;
-            result.review = review;
-            result.reviewRounds = round;
-            notify({ type: 'review.done', round, verdict: review.verdict, summary: review.summary, issues: review.issues, unverified: review.unverified });
-            notify({ type: 'stage.done', stage: 'review', status: review.verdict });
-            const reviewAdvice = await orchestrate('review', { review, status: review.verdict });
-            if (review.verdict === 'accept' || round >= paced.reviewRounds) break;
-            notify({ type: 'stage.start', stage: 'fix', role: 'worker', model: roles.resolve('worker').model, round });
-            const issues = review.issues.map((i) => `- [${i.severity}] ${i.path ? `${i.path}: ` : ''}${i.message} → ${i.requestedChange}`).join('\n') || '- (see summary)';
-            const fixGuidance = reviewAdvice?.nextStep ? `\n\nOrchestrator guidance:\n${reviewAdvice.nextStep}` : '';
-            const fixed = await runWorker(`Review round ${round}: changes requested`, `${review.summary}\n${issues}${fixGuidance}\n\nAddress every issue, verify, and report what you changed.`, config.agent.workerMaxTurnsPerStep, plan.steps.some((step) => authorFor(step.files, step.goal) === 'coder') ? 'coder' : plan.steps.some((step) => authorFor(step.files, step.goal) === 'writer') ? 'writer' : 'worker', { complexity: [...plan.steps].sort((a, b) => (({ trivial: 0, normal: 1, complex: 2 })[b.complexity] ?? 1) - (({ trivial: 0, normal: 1, complex: 2 })[a.complexity] ?? 1))[0]?.complexity ?? plan.complexity });
-            result.images.push(...fixed.images);
-            result.steps.push({ index: `fix-${round}`, goal: 'Устранение замечаний ревью', status: fixed.status, report: fixed.text.trim() });
-            progress.notes ??= [];
-            progress.notes.push({ kind: 'fix', round, status: fixed.status, report: fixed.text.trim() });
-            work.progress = progress;
-            publish();
-            await persist();
-            notify({ type: 'stage.done', stage: 'fix', status: fixed.status });
-            if (HARD_STOP.has(fixed.status)) return { exit: stop(fixed, 'исправления') };
-            await orchestrate('fix', { status: fixed.status, report: fixed.text.trim(), review });
-        }
+                    // 4. Review and fix rounds.
+                    const shouldReview = paced?.reviewMode === 'force'
+                        ? paced.reviewRounds > 0 && !workIncomplete && !revisionOnly
+                        : paced?.reviewMode === 'plan'
+                            ? Boolean(plan.needsReview) && plan.complexity !== 'trivial' && paced.reviewRounds > 0 && !workIncomplete && !revisionOnly
+                            : false;
+                    if (shouldReview) {
+                        progress.stage = 'review';
+                        work.progress = progress;
+                        await persist('running');
+                        // One decisions call can accept the result and skip the reviewer's tool loop.
+                        const assessed = await assessQuality({
+                            client, config, ledger, signal, notify,
+                            state: {
+                                task,
+                                acceptance: plan.acceptanceCriteria,
+                                plan: plan.summary,
+                                steps: result.steps.map((step) => ({
+                                    index: step.index, goal: step.goal, status: step.status,
+                                    report: clipMiddle(step.report ?? '', 4000),
+                                })),
+                                changes: workerTools.stats().changes.map((change) => change.path),
+                                commands: workerTools.stats().commands.map((command) => ({ command: command.command, exitCode: command.exitCode ?? null })),
+                                tree: directoryTree,
+                            },
+                            images: await assessmentImages({ root, parts, produced: result.images }),
+                        });
+                        if (assessed) {
+                            notify({
+                                type: 'decision.review', verdict: assessed.verdict, summary: assessed.summary,
+                                model: assessed.model, vision: assessed.vision, scores: assessed.scores,
+                            });
+                            if (assessed.verdict === 'accept') {
+                                decisionsAccepted = true;
+                                review = { verdict: 'accept', summary: assessed.summary, issues: [], unverified: [] };
+                                result.review = review;
+                                result.reviewRounds = 0;
+                                notify({ type: 'review.done', round: 0, verdict: 'accept', summary: assessed.summary, issues: [], unverified: [], source: 'decisions' });
+                                notify({ type: 'stage.done', stage: 'review', status: 'accept' });
+                            }
+                        }
+                    }
+                    for (let round = 1; shouldReview && !decisionsAccepted; round++) {
+                        notify({ type: 'stage.start', stage: 'review', role: 'reviewer', model: safeReviewerModel(paced.roles.reviewer.model), round });
+                        ctx.set('diff', 'Changes made by the worker (diff)', await describeChangeSet({ root, changes: workerTools.stats().changes, maxBytes: 48 * 1024 }), { priority: 5 });
+                        const commands = workerTools.stats().commands.map((c) => `- ${c.command} → exit ${c.exitCode ?? '?'}`).join('\n') || '- (none)';
+                        const reviewed = await roles.run('reviewer', {
+                            text: `${ctx.render({ maxBytes })}\n\n# Review request (round ${round})\nAcceptance criteria:\n${bullets(plan.acceptanceCriteria)}\nCommands run by the worker:\n${commands}`,
+                            instructions: `${withAgents(ROLE_INSTRUCTIONS.reviewer)}\n\n${[acceptanceParagraph(paced.acceptance), guaranteesParagraph(paced.guarantees)].filter(Boolean).join('\n\n')}`, toolset: reviewerTools, schema: REVIEW_SCHEMA, schemaName: 'review', maxTurns: config.agent.reviewerMaxTurns,
+                            model: safeReviewerModel(paced.roles.reviewer.model), effort: paced.roles.reviewer.effort, onMaxTurns,
+                        });
+                        if (HARD_STOP.has(reviewed.status)) return { exit: stop(reviewed, 'ревью') };
+                        if (reviewed.status !== 'completed' || !reviewed.data) {
+                            notify({ type: 'warning', message: `Ревью не завершено (${reviewed.status}); результат принят без независимой проверки.` });
+                            break;
+                        }
+                        review = reviewed.data;
+                        result.review = review;
+                        result.reviewRounds = round;
+                        notify({ type: 'review.done', round, verdict: review.verdict, summary: review.summary, issues: review.issues, unverified: review.unverified });
+                        notify({ type: 'stage.done', stage: 'review', status: review.verdict });
+                        const reviewAdvice = await orchestrate('review', { review, status: review.verdict });
+                        if (review.verdict === 'accept' || round >= paced.reviewRounds) break;
+                        notify({ type: 'stage.start', stage: 'fix', role: 'worker', model: roles.resolve('worker').model, round });
+                        const issues = review.issues.map((i) => `- [${i.severity}] ${i.path ? `${i.path}: ` : ''}${i.message} → ${i.requestedChange}`).join('\n') || '- (see summary)';
+                        const fixGuidance = reviewAdvice?.nextStep ? `\n\nOrchestrator guidance:\n${reviewAdvice.nextStep}` : '';
+                        const fixed = await runWorker(`Review round ${round}: changes requested`, `${review.summary}\n${issues}${fixGuidance}\n\nAddress every issue, verify, and report what you changed.`, config.agent.workerMaxTurnsPerStep, plan.steps.some((step) => authorFor(step.files, step.goal) === 'coder') ? 'coder' : plan.steps.some((step) => authorFor(step.files, step.goal) === 'writer') ? 'writer' : 'worker', { complexity: [...plan.steps].sort((a, b) => (({ trivial: 0, normal: 1, complex: 2 })[b.complexity] ?? 1) - (({ trivial: 0, normal: 1, complex: 2 })[a.complexity] ?? 1))[0]?.complexity ?? plan.complexity });
+                        result.images.push(...fixed.images);
+                        result.steps.push({ index: `fix-${round}`, goal: 'Устранение замечаний ревью', status: fixed.status, report: fixed.text.trim() });
+                        progress.notes ??= [];
+                        progress.notes.push({ kind: 'fix', round, status: fixed.status, report: fixed.text.trim() });
+                        work.progress = progress;
+                        publish();
+                        await persist();
+                        notify({ type: 'stage.done', stage: 'fix', status: fixed.status });
+                        if (HARD_STOP.has(fixed.status)) return { exit: stop(fixed, 'исправления') };
+                        await orchestrate('fix', { status: fixed.status, report: fixed.text.trim(), review });
+                    }
                 },
             },
             {
                 id: 'outcome',
                 run: async () => {
-        // 5. Outcome.
-        if (workIncomplete) result.status = 'incomplete';
-        else if (review && review.verdict !== 'accept') result.status = 'revise';
-        else result.status = 'completed';
-        const lastReport = result.steps.at(-1)?.report ?? '';
-        result.text = [
-            `## План\n${plan.summary}`,
-            ...result.steps.map((s) => `## Шаг ${s.index}: ${s.goal} — ${s.status}\n${s.report}`),
-            review ? `## Ревью (${review.verdict})\n${review.summary}${review.issues.length ? `\n${review.issues.map((i) => `- [${i.severity}] ${i.path ? `${i.path}: ` : ''}${i.message}`).join('\n')}` : ''}${review.unverified.length ? `\nНе проверено:\n${bullets(review.unverified)}` : ''}` : '',
-        ].filter(Boolean).join('\n\n');
-        result.finalNote = review ? `${review.verdict === 'accept' ? 'Ревью: принято.' : 'Ревью: остались замечания.'} ${review.summary}` : lastReport;
+                    // 5. Outcome.
+                    if (workIncomplete) result.status = 'incomplete';
+                    else if (review && review.verdict !== 'accept') result.status = 'revise';
+                    else result.status = 'completed';
+                    const lastReport = result.steps.at(-1)?.report ?? '';
+                    result.text = [
+                        `## План\n${plan.summary}`,
+                        ...result.steps.map((s) => `## Шаг ${s.index}: ${s.goal} — ${s.status}\n${s.report}`),
+                        review ? `## Ревью (${review.verdict})\n${review.summary}${review.issues.length ? `\n${review.issues.map((i) => `- [${i.severity}] ${i.path ? `${i.path}: ` : ''}${i.message}`).join('\n')}` : ''}${review.unverified.length ? `\nНе проверено:\n${bullets(review.unverified)}` : ''}` : '',
+                    ].filter(Boolean).join('\n\n');
+                    result.finalNote = review ? `${review.verdict === 'accept' ? 'Ревью: принято.' : 'Ревью: остались замечания.'} ${review.summary}` : lastReport;
                 },
             },
             {
                 id: 'memory',
                 run: async () => {
-        // 6. Memory extraction (cheap summarizer role).
-        if (memory) {
-            if (config.memory.autoSave) {
-                notify({ type: 'stage.start', stage: 'memory', role: 'summarizer', model: paced?.roles.summarizer.model ?? roles.resolve('summarizer').model });
-                const extracted = await roles.run('summarizer', {
-                    text: `# Task\n${task}\n\n# Plan summary\n${plan.summary}\n\n# Worker reports\n${clipMiddle(ctx.get('progress'), 24 * 1024)}\n\n# Review\n${review ? `${review.verdict}: ${review.summary}` : 'not performed'}` +
-                        `\n\n# Existing memories (do not repeat)\n${renderMemories(result.recalled) || '(none)'}`,
-                    instructions: withAgents(ROLE_INSTRUCTIONS.summarizerMemory), schema: MEMORY_SCHEMA, schemaName: 'memory_update',
-                    model: paced?.roles.summarizer.model ?? null, effort: paced?.roles.summarizer.effort ?? null,
-                });
-                if (extracted.status === 'completed' && extracted.data) {
-                    for (const item of extracted.data.memories.slice(0, 6)) {
-                        try {
-                            result.memoriesSaved.push(memory.remember({ scope: item.scope, project: projectKey, projectName, kind: item.kind, content: item.content, tags: item.tags, source: 'summarizer' }));
-                        } catch (error) { notify({ type: 'warning', message: `Память: ${errorMessage(error)}` }); }
+                    // 6. Memory extraction (cheap summarizer role).
+                    if (memory) {
+                        if (config.memory.autoSave) {
+                            notify({ type: 'stage.start', stage: 'memory', role: 'summarizer', model: paced?.roles.summarizer.model ?? roles.resolve('summarizer').model });
+                            const extracted = await roles.run('summarizer', {
+                                text: `# Task\n${task}\n\n# Plan summary\n${plan.summary}\n\n# Worker reports\n${clipMiddle(ctx.get('progress'), 24 * 1024)}\n\n# Review\n${review ? `${review.verdict}: ${review.summary}` : 'not performed'}` +
+                                    `\n\n# Existing memories (do not repeat)\n${renderMemories(result.recalled) || '(none)'}`,
+                                instructions: withAgents(ROLE_INSTRUCTIONS.summarizerMemory), schema: MEMORY_SCHEMA, schemaName: 'memory_update',
+                                model: paced?.roles.summarizer.model ?? null, effort: paced?.roles.summarizer.effort ?? null,
+                            });
+                            if (extracted.status === 'completed' && extracted.data) {
+                                for (const item of extracted.data.memories.slice(0, 6)) {
+                                    try {
+                                        result.memoriesSaved.push(memory.remember({ scope: item.scope, project: projectKey, projectName, kind: item.kind, content: item.content, tags: item.tags, source: 'summarizer' }));
+                                    } catch (error) { notify({ type: 'warning', message: `Память: ${errorMessage(error)}` }); }
+                                }
+                                if (result.memoriesSaved.length) notify({ type: 'memory.saved', count: result.memoriesSaved.length, items: result.memoriesSaved });
+                                result.taskSummary = extracted.data.taskSummary;
+                            }
+                            notify({ type: 'stage.done', stage: 'memory', status: extracted.status });
+                        }
+                        memory.recordTask({
+                            project: projectKey, projectName, task, status: result.status, summary: result.taskSummary ?? plan.summary,
+                            changes: workerTools.stats().changes.map((c) => c.path), usage: ledger.snapshot()
+                        });
                     }
-                    if (result.memoriesSaved.length) notify({ type: 'memory.saved', count: result.memoriesSaved.length, items: result.memoriesSaved });
-                    result.taskSummary = extracted.data.taskSummary;
-                }
-                notify({ type: 'stage.done', stage: 'memory', status: extracted.status });
-            }
-            memory.recordTask({ project: projectKey, projectName, task, status: result.status, summary: result.taskSummary ?? plan.summary,
-                changes: workerTools.stats().changes.map((c) => c.path), usage: ledger.snapshot() });
-        }
                 },
             },
         ];

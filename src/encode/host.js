@@ -24,7 +24,7 @@ const TOOLS = ['list_files', 'read_file', 'search_files', 'write_file', 'replace
  * @ai.hint io
  */
 export async function startEncodeHost({
-    root, config, decide = async () => 'yes', signal, stderr = process.stderr, approvalLevel = 'all', emit = () => {}, port = 3000,
+    root, config, decide = async () => 'yes', signal, stderr = process.stderr, approvalLevel = 'all', emit = () => { }, port = 3000,
 }) {
     const registry = createProcessRegistry();
     const { encodeArtifacts } = await import('./encode.ts');

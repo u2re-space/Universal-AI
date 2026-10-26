@@ -206,7 +206,7 @@ export function runProgram({ file, args = [], cwd, input = null, timeoutMs = 180
                 windowsVerbatimArguments: Boolean(verbatim), detached: process.platform !== 'win32',
             });
             if (input != null) {
-                child.stdin.on('error', () => {});
+                child.stdin.on('error', () => { });
                 child.stdin.end(input);
             }
         } catch (error) {

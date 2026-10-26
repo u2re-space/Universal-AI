@@ -93,12 +93,12 @@ export const defaults = Object.freeze({
         },
         roles: {
             'image-processor': ['cssMasking', 'cssImages', 'cssFonts', 'phosphorIcons', 'lucideIcons', 'magickOptions', 'magickTools', 'googleFonts'],
-            measurer:     ['cssUnits', 'cssShapes', 'phosphorIcons', 'lucideIcons', 'cssTransform', 'cssMotion', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'googleFonts'],
-            planner:      ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'googleFonts'],
-            architect:    ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
+            measurer: ['cssUnits', 'cssShapes', 'phosphorIcons', 'lucideIcons', 'cssTransform', 'cssMotion', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'googleFonts'],
+            planner: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'googleFonts'],
+            architect: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
             orchestrator: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
-            worker:       ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
-            coder:        ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
+            worker: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
+            coder: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
         },
     },
     reasoning: { effort: "low", summary: 'auto' },
@@ -162,33 +162,33 @@ export const defaults = Object.freeze({
     },
     webSearch: { contextSize: null },       // null → { type: "web_search" }. low | medium | high adds search_context_size
     compaction: { auto: false, afterInputTokens: 200_000 },
-/**
- * Per-role model settings. Every field is optional and falls back to roles.default, then to the
- * top-level settings (model, reasoning.effort, …). Roles:
- *   default    — ask / chat / single-agent run
- *   planner    — understands the task, writes the plan (senior model)
- *   architect  — turns the plan and the measurements into a file/module structure, design decisions,
- *                and a per-step brief for the orchestrator and the authors (senior model)
- *   orchestrator — knows the project best: collects context from files, then reads the plan, progress,
- *                  findings, and recent diff after every stage and decides what to do next
- *   worker     — executes plan steps that are not code generation
- *   coder      — writes code; model and effort follow plan complexity unless config pins them
- *   writer     — writes documents, reports, and Markdown; stays on the cheaper model, effort follows complexity
- *   reviewer   — verifies the result (read-only tools, may run tests)
- *   vision     — describes images; model and effort follow the long side, unless config pins them
- *   summarizer — compaction, file summaries, memory extraction (cheapest model)
- *   solver     — solves a step from the screen or an image; model and effort follow step complexity
- *   clicker    — clicks one UI target
- *   typer      — types into a named UI field
- *   encoder    — returns a batch for later execution
- *   tester     — checks whether the step result is true
- *   classifier — labels a task as trivial, normal, or complex
- *   extractor  — cleans a verbose answer and writes clean file bodies to .tmp
- *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
- *   image-processor — generates, edits, and prepares requested images and visual assets before implementation
- * worker, coder, writer, reviewer, tester, vision, solver, and image-processor double as the
- * sub-agents of run_subagent (tools.subagents): same prompt, same model settings, own context.
- */
+    /**
+     * Per-role model settings. Every field is optional and falls back to roles.default, then to the
+     * top-level settings (model, reasoning.effort, …). Roles:
+     *   default    — ask / chat / single-agent run
+     *   planner    — understands the task, writes the plan (senior model)
+     *   architect  — turns the plan and the measurements into a file/module structure, design decisions,
+     *                and a per-step brief for the orchestrator and the authors (senior model)
+     *   orchestrator — knows the project best: collects context from files, then reads the plan, progress,
+     *                  findings, and recent diff after every stage and decides what to do next
+     *   worker     — executes plan steps that are not code generation
+     *   coder      — writes code; model and effort follow plan complexity unless config pins them
+     *   writer     — writes documents, reports, and Markdown; stays on the cheaper model, effort follows complexity
+     *   reviewer   — verifies the result (read-only tools, may run tests)
+     *   vision     — describes images; model and effort follow the long side, unless config pins them
+     *   summarizer — compaction, file summaries, memory extraction (cheapest model)
+     *   solver     — solves a step from the screen or an image; model and effort follow step complexity
+     *   clicker    — clicks one UI target
+     *   typer      — types into a named UI field
+     *   encoder    — returns a batch for later execution
+     *   tester     — checks whether the step result is true
+     *   classifier — labels a task as trivial, normal, or complex
+     *   extractor  — cleans a verbose answer and writes clean file bodies to .tmp
+     *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
+     *   image-processor — generates, edits, and prepares requested images and visual assets before implementation
+     * worker, coder, writer, reviewer, tester, vision, solver, and image-processor double as the
+     * sub-agents of run_subagent (tools.subagents): same prompt, same model settings, own context.
+     */
 
     roles: {
         default: r({}),

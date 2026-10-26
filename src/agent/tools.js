@@ -166,7 +166,7 @@ const CHANGE_OPS = new Set(['create', 'overwrite', 'edit', 'delete']);
  */
 export function createToolset({
     root = process.cwd(), config, names, approvalLevel = 'read', allowWrite = [], approve = async () => 'no', askUser = null,
-    backupDir = null, signal, emit = () => {}, memory = null, projectKey = null, projectName = null,
+    backupDir = null, signal, emit = () => { }, memory = null, projectKey = null, projectName = null,
     describeImage = null, summarizeFile = null, editPaths = () => null,
     describeScreen = null, performDesktop = null, delegate = null, subagent = null, extras = [], client = null, ledger = null,
     scaffoldTask = '', processTool = null, toolEnums = {},
@@ -303,8 +303,10 @@ export function createToolset({
     const handlers = {
         /** List a directory and return the entry count. */
         async list_files(args) {
-            const result = await listFiles({ root, dir: args.path || '.', depth: Math.min(6, Math.max(1, args.depth ?? 2)),
-                includeHidden: Boolean(args.include_hidden), maxEntries: limits.maxListEntries });
+            const result = await listFiles({
+                root, dir: args.path || '.', depth: Math.min(6, Math.max(1, args.depth ?? 2)),
+                includeHidden: Boolean(args.include_hidden), maxEntries: limits.maxListEntries
+            });
             const summary = result.missing ? `${result.missing} не найден; записей рядом: ${result.count}` : `${result.count} записей`;
             return { output: result.text, summary };
         },
@@ -330,8 +332,10 @@ export function createToolset({
         },
         /** Write the file, record the change, and refresh that map path. */
         async write_file(args) {
-            const result = await writeTextFile({ root, file: args.path, content: args.content, overwrite: args.overwrite !== false,
-                maxBytes: limits.maxFileWriteBytes, backupDir, backupSlot });
+            const result = await writeTextFile({
+                root, file: args.path, content: args.content, overwrite: args.overwrite !== false,
+                maxBytes: limits.maxFileWriteBytes, backupDir, backupSlot
+            });
             stats.changes.push({ op: result.created ? 'create' : 'overwrite', path: result.rel, backupPath: result.backupPath });
             try { await updateProjectMapPath(root, result.rel); }
             catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
@@ -341,8 +345,10 @@ export function createToolset({
         },
         /** Replace the fragment, record the edit, and refresh that map path. */
         async replace_text(args) {
-            const result = await replaceInFile({ root, file: args.path, search: args.search, replacement: args.replacement, all: Boolean(args.all),
-                maxBytes: limits.maxFileWriteBytes, backupDir, backupSlot });
+            const result = await replaceInFile({
+                root, file: args.path, search: args.search, replacement: args.replacement, all: Boolean(args.all),
+                maxBytes: limits.maxFileWriteBytes, backupDir, backupSlot
+            });
             stats.changes.push({ op: 'edit', path: result.rel, backupPath: result.backupPath });
             try { await updateProjectMapPath(root, result.rel); }
             catch (error) { notify({ type: 'warning', message: `Карта проекта не обновлена: ${error.message}` }); }
@@ -488,10 +494,10 @@ export function createToolset({
                 const reader = res.body?.getReader();
                 const chunks = []; let total = 0; let truncated = false;
                 if (reader) {
-                    for (;;) {
+                    for (; ;) {
                         const { value, done } = await reader.read();
                         if (done) break;
-                        if (total + value.length > cap) { chunks.push(value.subarray(0, cap - total)); total = cap; truncated = true; await reader.cancel().catch(() => {}); break; }
+                        if (total + value.length > cap) { chunks.push(value.subarray(0, cap - total)); total = cap; truncated = true; await reader.cancel().catch(() => { }); break; }
                         chunks.push(value); total += value.length;
                     }
                 }
@@ -550,8 +556,10 @@ export function createToolset({
         },
         /** Save one memory row and emit `memory.saved`. */
         async remember(args) {
-            const row = memory.remember({ scope: args.scope ?? 'project', project: projectKey, projectName, kind: args.kind ?? 'fact',
-                content: args.content, tags: args.tags ?? [], source: 'agent' });
+            const row = memory.remember({
+                scope: args.scope ?? 'project', project: projectKey, projectName, kind: args.kind ?? 'fact',
+                content: args.content, tags: args.tags ?? [], source: 'agent'
+            });
             stats.memories.push({ id: row.id, scope: row.scope, kind: row.kind, content: row.content });
             notify({ type: 'memory.saved', count: 1, items: [row] });
             return { output: `Сохранено в память (#${row.id}, ${row.scope}/${row.kind}).`, summary: truncate(row.content, 60) };
