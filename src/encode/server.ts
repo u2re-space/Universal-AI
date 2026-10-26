@@ -13,7 +13,7 @@ const loose = z.object({}).passthrough();
  */
 export function createEncodeHandler(callTool: (name: string, args: Record<string, unknown>) => Promise<{ output: string }>) {
     const handler = createMcpHandler(() => {
-        const server = new McpServer({ name: 'universal-ai-encode', version: '0.1.6' });
+        const server = new McpServer({ name: 'universal-ai-encode', version: '0.1.7' });
         for (const name of TOOLS) {
             server.registerTool(name, { description: name, inputSchema: loose }, async (args) => {
                 try {

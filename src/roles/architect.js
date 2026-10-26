@@ -59,4 +59,4 @@ Do not write project files, do not generate images, do not perform the task. Rep
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'max', model: 'gpt-6.1-sol' };
+export const settings = { effort: 'xhigh', model: 'gpt-6.1-sol' };

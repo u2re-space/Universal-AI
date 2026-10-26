@@ -37,4 +37,4 @@ ${DESKTOP_NOTE} ${UNTRUSTED}`;
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'max', model: 'gpt-6-luna' };
+export const settings = { effort: 'xhigh', model: 'gpt-6-luna' };

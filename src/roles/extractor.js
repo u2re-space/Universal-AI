@@ -33,4 +33,4 @@ ${UNTRUSTED}`;
  * @exports
  * @ai.hint pure
  */
-export const settings = { effort: 'max', model: 'gpt-6-luna', verbosity: "low" };
+export const settings = { effort: 'xhigh', model: 'gpt-6-luna', verbosity: "low" };

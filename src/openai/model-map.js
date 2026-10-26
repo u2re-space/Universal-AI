@@ -16,4 +16,6 @@ export const MODEL_FALLBACKS = Object.freeze({
     'openai/gpt-6.1-sol': 'anthropic/claude-sonnet-5.5',
     'gpt-6-luna-decisions': 'typesafe/jev-1.14',
     'openai/gpt-6-luna-decisions': 'typesafe/jev-1.14',
+    'gpt-6-astra': 'anthropic/claude-opus-5.5',
+    'openai/gpt-6-astra': 'anthropic/claude-opus-5.5'
 });
