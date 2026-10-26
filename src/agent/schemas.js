@@ -7,7 +7,10 @@
  * @ai.tags schema, roles
  * @ai.hint pure
  * @changed 2026-10-24 Added the architect structure and design brief.
+ * @changed 2026-10-26 The planner may order or skip team stages through `pipeline`.
  */
+
+import { PIPELINE_STAGE_IDS } from './pipeline.js';
 
 const string = { type: 'string' };
 const strings = { type: 'array', items: string };
@@ -57,6 +60,11 @@ export const IMAGE_PROCESSOR_SCHEMA = object({
 export const PLAN_SCHEMA = object({
     summary: { ...string, description: 'One paragraph: what will be done and why.' },
     complexity: { type: 'string', enum: ['trivial', 'normal', 'complex'] },
+    pipeline: {
+        type: 'array',
+        description: 'Stage order for this task. Omit a stage to skip it. Empty means the default order. Known stages: answer, classify, plan, measure, architect, collect, images, work, review, outcome, memory.',
+        items: { type: 'string', enum: [...PIPELINE_STAGE_IDS] },
+    },
     steps: {
         type: 'array',
             items: object({

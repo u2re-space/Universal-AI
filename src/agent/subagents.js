@@ -1,110 +1,45 @@
 /**
  * @file src/agent/subagents.js
  * @module agent/subagents
- * @purpose Registry of sub-agents (existing roles one level deep) and the runner that executes one of them.
- * @depends agent/tool-specs, agent/tools, util/text
+ * @purpose Runner for `run_subagent`: one nested agent on a fresh context, with its own tools and turn cap.
+ *   The role list itself lives in `agent/role-registry`, shared with `delegate_role`.
+ * @depends agent/role-registry, agent/tools, agent/loop, util/text
  * @usedBy agent/tools, agent/team, commands/run
  * @exports SUBAGENTS, SUBAGENT_NAMES, subagentToolNames, createSubagentRunner
  * @ai.tags subagent, roles, tools
  * @ai.hint hot
- * @changed 2026-10-25 Sub-agents are the pipeline roles (coder, worker, writer, reviewer, tester, vision, solver, image-processor).
+ * @changed 2026-10-26 Version 0.2.0: one registry for delegate_role and run_subagent, plus custom roles.
  */
 
-import { READ_ONLY_TOOLS, SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES } from './tool-specs.js';
+import { EXECUTORS, EXECUTOR_NAMES, executorNames, executorSpec, executorToolNames } from './role-registry.js';
 import { createToolset } from './tools.js';
 import { builtinTools } from './loop.js';
 import { errorMessage } from '../util/text.js';
 
 /**
- * Tools a sub-agent never gets: they would let a nested run delegate again or drive the screen blindly.
- * @returns {string[]}
- * @ai.hint pure
- */
-const NESTED_FORBIDDEN = ['run_subagent', 'delegate_role', 'run_batch', 'ask_user'];
-
-/**
- * Tool slices a sub-agent kind may use, before they are intersected with the caller's tools.
- * `all` keeps whatever the calling agent has; the other slices name a remit and never carry click, type,
- * or run_ahk — a checker or a solver may look at the screen with `screenshot`, it does not drive it.
- * @returns {object}
- * @ai.hint pure
- */
-const SLICES = {
-    all: (allNames) => allNames,
-    read: () => [...READ_ONLY_TOOLS, 'fetch_url'],
-    check: () => [...READ_ONLY_TOOLS, ...SHELL_TOOL_NAMES, 'screenshot'],
-    screen: () => [...READ_ONLY_TOOLS, 'screenshot'],
-    images: (allNames) => [...IMAGE_TOOL_NAMES, ...(allNames.includes('fetch_url') ? ['fetch_url'] : [])],
-};
-
-/**
- * Sub-agents the model can start with run_subagent. A key is a role name from roles/index, so its prompt
- * and its model settings (`roles.<name>`, `--role <name>=…`) are the sub-agent's. `tools` picks a slice
- * from SLICES, `turns` caps the loop, and `description` is what the calling model reads when it chooses.
+ * The built-in executors, kept under the historical name.
  * @returns {object}
  * @exports
  * @ai.hint pure
  */
-export const SUBAGENTS = {
-    coder: {
-        tools: 'all',
-        turns: 25,
-        description: 'Code for one self-contained piece of work: edits the files the task names, follows the stack it finds, and checks the result.',
-    },
-    worker: {
-        tools: 'all',
-        turns: 25,
-        description: 'General doer for one self-contained task of any kind: reads, edits, runs commands, and reports what changed.',
-    },
-    writer: {
-        tools: 'all',
-        turns: 20,
-        description: 'Documents, README, report, or Markdown built only from the facts the task provides.',
-    },
-    reviewer: {
-        tools: 'check',
-        turns: 12,
-        description: 'Independent review of a result: reads the changed files, runs the project checks, lists findings with evidence. Changes nothing.',
-    },
-    tester: {
-        tools: 'check',
-        turns: 8,
-        description: 'Pass or fail one claim from evidence: runs the command or looks at the screen, then reports what was observed and what stayed unverified.',
-    },
-    vision: {
-        tools: 'read',
-        turns: 6,
-        description: 'Describes the image files the task names in plain text, so their full description never enters this context.',
-    },
-    solver: {
-        tools: 'screen',
-        turns: 8,
-        description: 'Solves one problem from the screen or an image: an answer, a calculation, a formula, a captcha, element coordinates.',
-    },
-    'image-processor': {
-        tools: 'images',
-        turns: 12,
-        description: 'Prepares images and visual assets: crops, splits, trims padding, generates or edits artwork, saves them under assets/.',
-    },
-};
+export const SUBAGENTS = EXECUTORS;
 
-/** @returns {string[]} Sub-agent names in the order the tool lists them. */
-export const SUBAGENT_NAMES = Object.keys(SUBAGENTS);
+/** @returns {string[]} Built-in executor names in registry order. */
+export const SUBAGENT_NAMES = EXECUTOR_NAMES;
 
 /**
- * Tool names available to a sub-agent kind, intersected with what the caller has enabled.
- * @param {string} kind A key of SUBAGENTS and a role name.
+ * Tool names available to an executor, intersected with what the caller has enabled.
+ * @param {string} kind A registry name or a user-defined role.
  * @param {string[]} allNames Tool names the calling agent has.
+ * @param {object} [config]
  * @returns {string[]}
  * @exports
  * @ai.hint pure
  */
-export function subagentToolNames(kind, allNames) {
-    const spec = SUBAGENTS[kind];
+export function subagentToolNames(kind, allNames, config = null) {
+    const spec = executorSpec(kind, config);
     if (!spec) throw new Error(`Неизвестный суб-агент «${kind}».`);
-    const base = SLICES[spec.tools](allNames);
-    const forbidden = new Set(NESTED_FORBIDDEN);
-    return allNames.filter((name) => base.includes(name) && !forbidden.has(name));
+    return executorToolNames(spec, allNames, { nested: true });
 }
 
 /**
@@ -126,12 +61,12 @@ export function createSubagentRunner({ config, roles, root, allNames = [], appro
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
 
     return async function runSubagent(kind, task) {
-        const spec = SUBAGENTS[kind];
-        if (!spec) throw new Error(`run_subagent: неизвестный суб-агент «${kind}» (${SUBAGENT_NAMES.join(', ')}).`);
+        const spec = executorSpec(kind, config);
+        if (!spec) throw new Error(`run_subagent: неизвестный суб-агент «${kind}» (${executorNames(config).join(', ')}).`);
         const text = String(task ?? '').trim();
         if (!text) throw new Error('run_subagent: task пуст — опиши задачу целиком, суб-агент не видит переписку.');
 
-        const names = subagentToolNames(kind, allNames);
+        const names = executorToolNames(spec, allNames, { nested: true });
         const toolset = createToolset({ ...toolBase, ...toolOptions, root, config, names, approvalLevel });
         const model = roles.resolve(kind).model;
         // The role prompt itself comes from the role runner; here only the project rules are added.

@@ -3,12 +3,13 @@
  * @module core/config-defaults
  * @purpose Frozen default configuration and the enums that validate it.
  * @usedBy core/config, commands/flags
- * @exports defaults, ROLE_NAMES, REASONING_EFFORTS, REASONING_SUMMARIES, APPROVAL_LEVELS, IMAGE_DETAILS
+ * @exports defaults, ROLE_NAMES, REASONING_EFFORTS, REASONING_SUMMARIES, APPROVAL_LEVELS, IMAGE_DETAILS, CONTEXT_LEVEL_NAMES
  * @ai.tags config
  * @ai.hint pure
- * @changed 2026-10-22 Web search is on by default; magickPath and limits.extendTurns are declared.
+ * @changed 2026-10-26 Model profiles section and word context levels for 0.2.0.
  */
 import { MODEL_FALLBACKS } from '../openai/model-map.js';
+import { CONTEXT_LEVELS } from '../openai/model-profiles.js';
 const KiB = 1024;
 const MiB = KiB * KiB;
 
@@ -16,6 +17,26 @@ export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'x
 export const REASONING_SUMMARIES = ['auto', 'concise', 'detailed', 'none'];
 export const APPROVAL_LEVELS = ['ask', 'read', 'write', 'all'];
 export const IMAGE_DETAILS = ['auto', 'low', 'high', 'original'];
+/** Word levels of a context budget, plus `auto`, which follows the window of the model in use. */
+export const CONTEXT_LEVEL_NAMES = Object.freeze([...Object.keys(CONTEXT_LEVELS), 'auto']);
+
+/**
+ * Base fields of one role entry in `roles`. A helper rather than a literal per role, so a new
+ * field lands in every role at once and the whitelist check of `roles.<name>.<field>` follows.
+ */
+const ROLE_FIELDS = Object.freeze({
+    model: null, effort: null, summary: null, verbosity: null,
+    maxOutputTokens: null, temperature: null, instructions: null,
+    /** Hardest reasoning effort this role may use; the stricter of this and the model ceiling wins. */
+    maxEffort: null,
+    /** Context budget of the role: a word level (small | normal | large | max | auto) or bytes. */
+    context: null,
+    /** Tool names the role is limited to; null keeps the tools of the run. */
+    tools: null,
+});
+
+/** One role entry: the standard fields with the given overrides on top. */
+const r = (overrides) => ({ ...ROLE_FIELDS, ...overrides });
 
 /**
  * Defaults. Everything here may be overridden by ~/.ai-agent/config.json, --config <file>,
@@ -27,6 +48,12 @@ export const defaults = Object.freeze({
     imageModel: 'gpt-image-2.5-sunburst',                 // null → gpt-image-2.5 (flare for generation, sunburst for edits) on the images API
     baseURL: "https://api.proxyapi.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
     apiKey: null,                     // prefer the OPENAI_API_KEY environment variable
+    /**
+     * Per-model overrides of the registry in `openai/model-profiles.js`.
+     * Accepts `window` (bytes), `maxOutput` (tokens), `ceiling` (effort string), `efforts` (effort array).
+     * All fields are optional; omitted ones keep the registry default.
+     */
+    models: {},
     organization: null,
     project: null,
     instructions: null,               // extra system instructions appended to the built-in ones
@@ -109,7 +136,7 @@ export const defaults = Object.freeze({
         budgetTokens: null,
         idleTimeoutMs: 600_000,
         connectTimeoutMs: 30_000,
-        maxRequestBytes: 8 * MiB,
+        maxRequestBytes: 'max',         // small | normal | large | max | auto; the request body ceiling
         maxFileReadBytes: 256 * KiB,
         maxFileWriteBytes: 4 * MiB,
         maxSearchResults: 60,
@@ -135,63 +162,70 @@ export const defaults = Object.freeze({
     },
     webSearch: { contextSize: null },       // null → { type: "web_search" }. low | medium | high adds search_context_size
     compaction: { auto: false, afterInputTokens: 200_000 },
-    /**
-     * Per-role model settings. Every field is optional and falls back to roles.default, then to the
-     * top-level settings (model, reasoning.effort, …). Roles:
-     *   default    — ask / chat / single-agent run
-     *   planner    — understands the task, writes the plan (senior model)
-     *   architect  — turns the plan and the measurements into a file/module structure, design decisions,
-     *                and a per-step brief for the orchestrator and the authors (senior model)
-     *   orchestrator — knows the project best: collects context from files, then reads the plan, progress,
-     *                  findings, and recent diff after every stage and decides what to do next
-     *   worker     — executes plan steps that are not code generation
-     *   coder      — writes code; model and effort follow plan complexity unless config pins them
-     *   writer     — writes documents, reports, and Markdown; stays on the cheaper model, effort follows complexity
-     *   reviewer   — verifies the result (read-only tools, may run tests)
-     *   vision     — describes images; model and effort follow the long side, unless config pins them
-     *   summarizer — compaction, file summaries, memory extraction (cheapest model)
-     *   solver     — solves a step from the screen or an image; model and effort follow step complexity
-     *   clicker    — clicks one UI target
-     *   typer      — types into a named UI field
-     *   encoder    — returns a batch for later execution
-     *   tester     — checks whether the step result is true
-     *   classifier — labels a task as trivial, normal, or complex
-     *   extractor  — cleans a verbose answer and writes clean file bodies to .tmp
-     *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
-     *   image-processor — generates, edits, and prepares requested images and visual assets before implementation
-     * worker, coder, writer, reviewer, tester, vision, solver, and image-processor double as the
-     * sub-agents of run_subagent (tools.subagents): same prompt, same model settings, own context.
-     */
+/**
+ * Per-role model settings. Every field is optional and falls back to roles.default, then to the
+ * top-level settings (model, reasoning.effort, …). Roles:
+ *   default    — ask / chat / single-agent run
+ *   planner    — understands the task, writes the plan (senior model)
+ *   architect  — turns the plan and the measurements into a file/module structure, design decisions,
+ *                and a per-step brief for the orchestrator and the authors (senior model)
+ *   orchestrator — knows the project best: collects context from files, then reads the plan, progress,
+ *                  findings, and recent diff after every stage and decides what to do next
+ *   worker     — executes plan steps that are not code generation
+ *   coder      — writes code; model and effort follow plan complexity unless config pins them
+ *   writer     — writes documents, reports, and Markdown; stays on the cheaper model, effort follows complexity
+ *   reviewer   — verifies the result (read-only tools, may run tests)
+ *   vision     — describes images; model and effort follow the long side, unless config pins them
+ *   summarizer — compaction, file summaries, memory extraction (cheapest model)
+ *   solver     — solves a step from the screen or an image; model and effort follow step complexity
+ *   clicker    — clicks one UI target
+ *   typer      — types into a named UI field
+ *   encoder    — returns a batch for later execution
+ *   tester     — checks whether the step result is true
+ *   classifier — labels a task as trivial, normal, or complex
+ *   extractor  — cleans a verbose answer and writes clean file bodies to .tmp
+ *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
+ *   image-processor — generates, edits, and prepares requested images and visual assets before implementation
+ * worker, coder, writer, reviewer, tester, vision, solver, and image-processor double as the
+ * sub-agents of run_subagent (tools.subagents): same prompt, same model settings, own context.
+ */
+
     roles: {
-        default: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        planner: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        architect: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        orchestrator: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        worker: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        coder: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        writer: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        reviewer: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        vision: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        summarizer: { model: null, effort: 'high', summary: 'none', verbosity: 'medium', maxOutputTokens: null, temperature: null, instructions: null },
-        solver: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        clicker: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        typer: { model: null, effort: 'low', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        encoder: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        tester: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        classifier: { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        extractor: { model: null, effort: 'high', summary: null, verbosity: 'low', maxOutputTokens: null, temperature: null, instructions: null },
-        measurer: { model: null, effort: null, summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
-        'image-processor': { model: null, effort: 'high', summary: null, verbosity: null, maxOutputTokens: null, temperature: null, instructions: null },
+        default: r({}),
+        planner: r({ effort: 'high' }),
+        architect: r({ effort: 'high' }),
+        orchestrator: r({ effort: 'high' }),
+        worker: r({ effort: 'high' }),
+        coder: r({}),
+        writer: r({}),
+        reviewer: r({ effort: 'high' }),
+        vision: r({}),
+        summarizer: r({ effort: 'high', summary: 'none', verbosity: 'medium' }),
+        solver: r({}),
+        clicker: r({ effort: 'low' }),
+        typer: r({ effort: 'low' }),
+        encoder: r({ effort: 'high' }),
+        tester: r({ effort: 'high' }),
+        classifier: r({ effort: 'high' }),
+        extractor: r({ effort: 'high', verbosity: 'low' }),
+        measurer: r({}),
+        'image-processor': r({ effort: 'high' }),
     },
     /** Multi-role orchestration used by `ai run`. */
     agent: {
         mode: 'team',                   // team (planner → architect → orchestrator → worker → reviewer) | single (one model, one loop)
+        /**
+         * Stage order for team runs. null = the catalog order; a list reorders or drops stages
+         * (answer, classify, plan, measure, architect, collect, images, work, review, outcome, memory).
+         * The plan may supply its own order, which wins over this list for that task.
+         */
+        pipeline: null,
         maxSteps: 12,                   // plan steps accepted from the planner
         maxReviewRounds: 2,             // reviewer → worker fix cycles
         orchestratorMaxTurns: 12,       // tool turns the orchestrator may spend collecting context
         workerMaxTurnsPerStep: 25,
         reviewerMaxTurns: 10,
-        maxContextBytes: 96 * KiB,      // rendered shared context per request
+        maxContextBytes: 'normal',      // small | normal | large | max | auto
         visionDelegate: 'auto',         // auto (when roles.vision has its own model) | always | never
         chain: true,                    // first answer, then encoder or planner
         route: null,                    // null | encoder | planner; null lets the answer and the heuristic choose
@@ -213,7 +247,7 @@ export const defaults = Object.freeze({
         measure: 'auto',                // off | auto | always
         measurerPasses: 2,              // 1 = one sheet; 2 = whole reference, then staged fragments
         measurerMaxTurns: 16,           // total tool turns for the measurement passes, split between them
-        measurerMaxContextBytes: 8 * MiB, // measurement context budget; keep it within limits.maxRequestBytes
+        measurerMaxContextBytes: 'max', // measurement context budget; keep it within limits.maxRequestBytes
         encode: 'encoder',              // encoder (file-command model) | mcp (this process hosts the encode server)
         resume: true,                   // continue the newest unfinished step and its saved turn
         /**
@@ -348,3 +382,25 @@ export const defaults = Object.freeze({
 });
 
 export const ROLE_NAMES = Object.keys(defaults.roles);
+
+/**
+ * Names of the roles the code knows: their prompts live in `roles/index.js`.
+ * Any other name in `roles.<name>` is a user-defined role: it takes its instructions, tools,
+ * model and ceilings from the configuration and runs on the same role runner.
+ */
+export const BUILTIN_ROLE_NAMES = Object.freeze([...ROLE_NAMES]);
+
+/** A user role name: a short lower-case slug that cannot collide with a built-in one. */
+export const CUSTOM_ROLE_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+
+/**
+ * Every role name available to a configuration: the built-ins plus the user-defined ones.
+ * @param {object} config
+ * @returns {string[]}
+ * @exports
+ * @ai.hint pure
+ */
+export function roleNames(config) {
+    const own = Object.keys(config?.roles ?? {}).filter((name) => !BUILTIN_ROLE_NAMES.includes(name));
+    return [...BUILTIN_ROLE_NAMES, ...own];
+}

@@ -298,10 +298,11 @@ export const TOOL_SPECS = {
     },
     delegate_role: {
         category: 'read', group: 'desktop',
-        description: 'Send one task to a specialist and return its answer. encoder returns a batch and does not run it; pass that batch to run_batch. measurer re-measures a crop or a layer and returns its measurement sheet.',
+        description: 'Send one task to another role and return its answer. Unlike run_subagent it may carry the shared context of this run with the task (context=true), so the role does not have to rediscover what this run already knows. encoder returns a batch and does not run it; pass that batch to run_batch. measurer re-measures a crop or a layer and returns its measurement sheet. User-defined roles from roles.<name> are accepted too.',
         parameters: schema({
-            role: { type: 'string', enum: ['solver', 'clicker', 'typer', 'encoder', 'tester', 'measurer'], description: 'Specialist to call.' },
-            task: str('One task for that specialist.'),
+            role: { type: 'string', enum: ['solver', 'clicker', 'typer', 'encoder', 'tester', 'measurer'], description: 'Role to call: a built-in executor or a name from roles.<name>.' },
+            task: str('One task for that role. Say what to return; a self-contained task is still better.'),
+            context: bool('True includes the shared context of this run (task, plan, progress, findings, diff) with the task. False sends the task alone, like run_subagent.'),
         }),
     },
     decide: {
@@ -409,7 +410,7 @@ export const TOOL_SPECS = {
     },
     run_subagent: {
         category: 'read', group: 'subagents',
-        description: 'Start one sub-agent: a separate agent on a fresh context, with its own tools and turn cap, that works on the task and returns a report. It never sees this conversation, so the task must be self-contained — name the paths, the exact question, and what the report must contain. coder, worker, and writer change files; reviewer and tester only check and report; vision describes image files; solver answers from the screen or an image; image-processor prepares assets. A sub-agent cannot start another sub-agent, and it can only write or run commands the caller itself is allowed to.',
+        description: 'Start one sub-agent: a separate agent on a fresh context, with its own tools and turn cap, that works on the task and returns a report. It never sees this conversation, so the task must be self-contained — name the paths, the exact question, and what the report must contain. coder, worker, and writer change files; reviewer and tester only check and report; vision describes image files; solver answers from the screen or an image; image-processor prepares assets; measurer returns a measurement sheet. A sub-agent cannot start another sub-agent, and it can only write or run commands the caller itself is allowed to. Use delegate_role instead when the role should see this run’s context.',
         parameters: schema({
             kind: { type: 'string', enum: ['coder', 'worker', 'writer', 'reviewer', 'tester', 'vision', 'solver', 'image-processor'], description: 'Sub-agent to start; the name is also the role whose prompt and model are used.' },
             task: str('The whole task for that sub-agent: goal, paths, constraints, and the report it must return.'),
@@ -428,15 +429,28 @@ export const IMAGE_TOOL_NAMES = ['view_image', 'crop_image', 'split_image', 'gen
 /**
  * Strict function-tool definitions for names that exist in `TOOL_SPECS`.
  * `createToolset` returns these from `definitions()`.
+ * `enums` narrows one field of one tool to the values a configuration actually offers,
+ * for example the role list of `delegate_role` once user-defined roles are known.
  * @param {string[]} names
+ * @param {object} [enums] `{ toolName: { fieldName: string[] } }`
  * @returns {object[]}
  * @exports
  * @ai.hint pure
  */
-export function toolDefinitions(names) {
-    return names.filter((name) => TOOL_SPECS[name]).map((name) => ({
-        type: 'function', name, description: TOOL_SPECS[name].description, parameters: TOOL_SPECS[name].parameters, strict: true,
-    }));
+export function toolDefinitions(names, enums = {}) {
+    return names.filter((name) => TOOL_SPECS[name]).map((name) => {
+        const spec = TOOL_SPECS[name];
+        const fields = enums?.[name];
+        const parameters = fields
+            ? {
+                ...spec.parameters,
+                properties: Object.fromEntries(Object.entries(spec.parameters.properties).map(([key, value]) => [
+                    key, Array.isArray(fields[key]) && fields[key].length ? { ...value, enum: [...fields[key]] } : value,
+                ])),
+            }
+            : spec.parameters;
+        return { type: 'function', name, description: spec.description, parameters, strict: true };
+    });
 }
 
 /** Which tools are enabled for a config.tools selection. */
@@ -453,7 +467,7 @@ export function enabledToolNames(tools, { interactive = false, memory = false, s
     if (tools.images && images) names.push('split_image', 'crop_image', 'generate_svg');
     if (tools.fetch) names.push('download_font', 'download_icons');
     if (tools.channels) names.push('decide', 'moderate_text', 'channel_reply', 'telegram_call');
-    if (tools.subagents) names.push('run_subagent');
+    if (tools.subagents) names.push('run_subagent', 'delegate_role');
     return names;
 }
 

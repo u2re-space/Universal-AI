@@ -19,6 +19,7 @@ import { attachBackground, awaitBackground, TERMINAL_STATUSES } from '../core/ba
 import { byteSize, clipMiddle, estimateTokens, errorMessage, formatBytes } from '../util/text.js';
 import { guardCommandInput } from './command-risk.js';
 import { remoteMcpTools } from '../mcp/servers.js';
+import { profileFor, snapEffort } from '../openai/model-profiles.js';
 
 /** Built-in tool definitions derived from the configuration. */
 export function builtinTools(config, { web = false, images = false } = {}) {
@@ -54,7 +55,8 @@ export function buildRequestBody({
     const include = [];
     if (isReasoningModel(model)) {
         const reasoning = {};
-        if (reasoningEffort) reasoning.effort = reasoningEffort;
+        // The ceiling is a hard limit: whatever asked for this level, the model never gets more.
+        if (reasoningEffort) reasoning.effort = snapEffort(reasoningEffort, profileFor(model, config.models));
         if (reasoningSummary && reasoningSummary !== 'none') reasoning.summary = reasoningSummary;
         if (Object.keys(reasoning).length) body.reasoning = reasoning;
         if (!body.store) include.push('reasoning.encrypted_content');
@@ -66,7 +68,8 @@ export function buildRequestBody({
     if (supportsVerbosity(model)) text.verbosity = config.verbosity || "low";
     if (Object.keys(text).length) body.text = text;
     if (config.truncation) body.truncation = config.truncation;
-    if (maxOutputTokens) body.max_output_tokens = maxOutputTokens;
+    // The profile is the model's own answer limit: asking for more is a 400, not a preference.
+    if (maxOutputTokens) body.max_output_tokens = Math.min(maxOutputTokens, profileFor(model, config.models).maxOutput);
     if (config.serviceTier) body.service_tier = config.serviceTier;
     if (config.promptCacheKey) body.prompt_cache_key = config.promptCacheKey;
     if (include.length) body.include = include;

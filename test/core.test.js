@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { mkdtemp, writeFile, rm, symlink, mkdir } from 'node:fs/promises';
 import { createSession, loadSession } from '../src/core/session.js';
-import { loadConfig } from '../src/core/config.js';
+import { loadConfig, resolveRole } from '../src/core/config.js';
 import { discoverAgents } from '../src/core/agents-md.js';
 import { createLedger, priceFor, costOf } from '../src/core/usage.js';
 import { loadImageAttachment, loadFileAttachment, buildUserMessage, detectImageMime, detectBinary, stdinFence } from '../src/core/attachments.js';
@@ -15,6 +15,7 @@ import { runCommand } from '../src/agent/shell.js';
 import { sanitizeTerminal } from '../src/ui/sanitize.js';
 import { normalizeUsage } from '../src/openai/stream.js';
 import { resolveTextArg } from '../src/commands/shared.js';
+import { overridesFrom } from '../src/commands/flags.js';
 import { extractJson } from '../src/util/text.js';
 import { TINY_PNG } from './helpers/mock-server.js';
 
@@ -439,4 +440,92 @@ test('extractJson: returns null for non-JSON text', () => {
     assert.equal(extractJson('{"a":1,'), null);
     assert.equal(extractJson('   '), null);
     assert.equal(extractJson(null), null);
+});
+
+// ── Context levels (0.2.0) ────────────────────────────────────────────────
+
+test('agent.maxContextBytes resolves a word level to bytes', async () => {
+    const config = await loadConfig({
+        env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6.1-sol' },
+        overrides: { agent: { maxContextBytes: 'large' } },
+        ensureHome: false,
+    });
+    assert.equal(config.agent.maxContextBytes, 512 * 1024);
+});
+
+test('--context accepts a word level or a byte count', () => {
+    assert.deepEqual(overridesFrom({ context: 'large' }).agent, { maxContextBytes: 'large' });
+    assert.deepEqual(overridesFrom({ context: '65536' }).agent, { maxContextBytes: 65536 });
+    assert.throws(() => overridesFrom({ context: 'huge' }), /--context/);
+    assert.throws(() => overridesFrom({ context: '512' }), /--context/);
+});
+
+test('auto resolves to the model window', async () => {
+    const sol = await loadConfig({
+        env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6.1-sol' },
+        overrides: { agent: { maxContextBytes: 'auto' } },
+        ensureHome: false,
+    });
+    assert.equal(sol.agent.maxContextBytes, 128 * 1024);
+    const astra = await loadConfig({
+        env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6-astra' },
+        overrides: { agent: { maxContextBytes: 'auto' } },
+        ensureHome: false,
+    });
+    assert.equal(astra.agent.maxContextBytes, 200 * 1024);
+});
+
+test('a raw number passes through unchanged', async () => {
+    const config = await loadConfig({
+        env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6-luna' },
+        overrides: { agent: { maxContextBytes: 123456 } },
+        ensureHome: false,
+    });
+    assert.equal(config.agent.maxContextBytes, 123456);
+});
+
+test('all context fields normalize: measurer, orchestrator, completion', async () => {
+    const config = await loadConfig({
+        env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6-luna' },
+        overrides: {
+            agent: {
+                maxContextBytes: 'normal',
+                measurerMaxContextBytes: 'max',
+                orchestrator: { maxContextBytes: 'large' },
+            },
+            completion: { maxContextBytes: 'large' },
+        },
+        ensureHome: false,
+    });
+    assert.equal(config.agent.maxContextBytes, 96 * 1024);
+    assert.equal(config.agent.measurerMaxContextBytes, 8 * 1024 * 1024);
+    assert.equal(config.agent.orchestrator.maxContextBytes, 512 * 1024);
+    assert.equal(config.completion.maxContextBytes, 512 * 1024);
+});
+
+test('a word level in role.context resolves to bytes in resolveRole', async () => {
+    const config = await loadConfig({
+        env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6.1-sol' },
+        overrides: { roles: { planner: { context: 'large' } } },
+        ensureHome: false,
+    });
+    assert.equal(resolveRole(config, 'planner').context, 512 * 1024);
+});
+
+test('a raw number in role.context passes through', async () => {
+    const config = await loadConfig({
+        env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6-luna' },
+        overrides: { roles: { planner: { context: 33333 } } },
+        ensureHome: false,
+    });
+    assert.equal(resolveRole(config, 'planner').context, 33333);
+});
+
+test('null context stays null', async () => {
+    const config = await loadConfig({
+        env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6-luna' },
+        overrides: { roles: { planner: { context: null } } },
+        ensureHome: false,
+    });
+    assert.equal(resolveRole(config, 'planner').context, null);
 });

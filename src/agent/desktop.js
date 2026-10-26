@@ -17,7 +17,7 @@ import { findAhk, performAction } from '../interact/filesystem.js';
 import { errorMessage, truncate } from '../util/text.js';
 import { resolveInside } from './paths.js';
 
-export const DESKTOP_TOOL_NAMES = Object.freeze(['screenshot', 'click', 'type', 'run_ahk', 'run_batch', 'delegate_role']);
+export const DESKTOP_TOOL_NAMES = Object.freeze(['screenshot', 'click', 'type', 'run_ahk', 'run_batch']);
 
 const BATCH_SOURCES = ['batch_json', 'batch_toon', 'path'];
 
@@ -170,7 +170,7 @@ export function createDesktopHandlers(ctx) {
     /** Call `delegate` and flatten its output, summary, and JSON data. */
     async function delegate_role(args) {
         if (typeof delegate !== 'function') throw new Error('delegate_role недоступен.');
-        const result = await delegate(args.role, args.task);
+        const result = await delegate(args.role, args.task, { context: args.context === true });
         if (result == null || typeof result !== 'object') {
             const output = result == null ? '' : String(result);
             return { output, summary: truncate(output, 80) };

@@ -169,7 +169,7 @@ export function createToolset({
     backupDir = null, signal, emit = () => {}, memory = null, projectKey = null, projectName = null,
     describeImage = null, summarizeFile = null, editPaths = () => null,
     describeScreen = null, performDesktop = null, delegate = null, subagent = null, extras = [], client = null, ledger = null,
-    scaffoldTask = '', processTool = null,
+    scaffoldTask = '', processTool = null, toolEnums = {},
 }) {
     const limits = config.limits;
     const allowed = new Set(names);
@@ -659,9 +659,12 @@ export function createToolset({
         if (allowed.has('vectorize_image')) handlers.vectorize_image = imageHandlers.vectorize_image;
     }
     const desktopNames = DESKTOP_TOOL_NAMES.filter((name) => allowed.has(name));
-    if (desktopNames.length) {
+    // delegate_role is its own tool, not a desktop one, but it shares the desktop handler factory.
+    const needsDelegate = allowed.has('delegate_role') && typeof delegate === 'function';
+    if (desktopNames.length || needsDelegate) {
         const desktopHandlers = createDesktopHandlers({ root, config, decide, describeScreen, performDesktop, delegate });
         for (const name of desktopNames) handlers[name] = desktopHandlers[name];
+        if (needsDelegate) handlers.delegate_role = desktopHandlers.delegate_role;
     }
     if (['decide', 'moderate_text', 'channel_reply', 'telegram_call'].some((name) => allowed.has(name))) {
         Object.assign(handlers, createChannelHandlers({ client, config, signal, ledger }));
@@ -722,7 +725,7 @@ export function createToolset({
 
     return Object.freeze({
         definitions: () => [
-            ...toolDefinitions([...allowed].filter((name) => TOOL_SPECS[name])),
+            ...toolDefinitions([...allowed].filter((name) => TOOL_SPECS[name]), toolEnums),
             ...[...extraByName.values()].filter((extra) => allowed.has(extra.name)).map((extra) => ({
                 type: 'function', name: extra.name, description: extra.description, parameters: extra.parameters, strict: true,
             })),

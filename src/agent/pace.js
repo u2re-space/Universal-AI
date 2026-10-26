@@ -2,16 +2,17 @@
  * @file src/agent/pace.js
  * @module agent/pace
  * @purpose Choose policy, model rung, effort, stages, and step merge from speed and quality.
- * @depends generate/fidelity
- * @usedBy agent/team
+ * @depends generate/fidelity, openai/model-profiles
+ * @usedBy agent/team, core/config, commands/flags
  * @exports ceilingIndex, mergeSteps, acceptanceParagraph, guaranteesParagraph, assertPaceBudget, resolvePace, applyPins, clampModel
  * @ai.tags team, pace
  * @ai.hint pure
- * @changed 2026-10-19 Speed, quality, and pace decide a team run.
+ * @changed 2026-10-26 Every effort the directive carries is snapped to the ladder and ceiling of its model.
  */
 
 import { effectiveFidelity } from '../generate/fidelity.js';
 import { FORBIDDEN_MODELS as REVIEWER_FORBIDDEN } from '../roles/reviewer.js';
+import { profileFor, snapEffort, lowerEffort } from '../openai/model-profiles.js';
 
 export const PACE_QUALITY_MESSAGE = 'pace.quality: целое 0..200, и speed + quality не больше 200';
 export const PACE_SPEED_MESSAGE = 'pace.speed: целое от 0, и speed + quality не больше 200';
@@ -217,19 +218,20 @@ function knownComplexity(value, fallback = 'normal') {
 
 /**
  * @param {object[]} steps
- * @param {{ modelSpeed: number, paceSpeed: number, modelQuality: number, models: string[], adjusted: number, recklessExtra: number }} context
+ * @param {{ modelSpeed: number, paceSpeed: number, modelQuality: number, models: string[], adjusted: number, recklessExtra: number, bounded: Function }} context
  * @returns {object[]}
  * @ai.hint pure
  */
-function decorate(steps, { modelSpeed, paceSpeed, modelQuality, models, adjusted, recklessExtra }) {
+function decorate(steps, { modelSpeed, paceSpeed, modelQuality, models, adjusted, recklessExtra, bounded }) {
     return steps.map((step) => {
         const complexity = knownComplexity(step.complexity);
         const rung = authorRung(complexity, modelSpeed, adjusted);
         const base = complexity === 'trivial' ? 'low' : complexity === 'complex' ? 'high' : 'medium';
         const author = step.author === 'coder' || step.author === 'writer' ? step.author : 'worker';
+        const model = models[rung];
         return {
-            author, complexity, rung, model: models[rung],
-            effort: effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra),
+            author, complexity, rung, model,
+            effort: bounded(model, effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra)),
             files: Array.isArray(step.files) ? [...step.files] : [],
             goal: String(step.goal ?? ''), details: String(step.details ?? ''), verify: String(step.verify ?? ''),
             kind: step.kind ?? 'work',
@@ -246,9 +248,11 @@ function decorate(steps, { modelSpeed, paceSpeed, modelQuality, models, adjusted
  */
 export function resolvePace({
     speed, quality, mode, models, label = null, steps = null, generation = false,
-    fidelity = null, stepCapOverride = null, task = '', author = 'worker',
+    fidelity = null, stepCapOverride = null, task = '', author = 'worker', modelProfiles = null,
 } = {}) {
     assertPaceBudget(speed, quality);
+    /** Snap one effort onto the ladder and ceiling of the model that would carry it. */
+    const bounded = (model, level) => snapEffort(level, profileFor(model, modelProfiles));
     const modelQuality = Math.min(quality, 100);
     const modelSpeed = Math.min(100, speed + Math.max(0, quality - 100));
     const paceSpeed = Math.min(speed, 100);
@@ -272,9 +276,10 @@ export function resolvePace({
                     : label === 'trivial' ? (generation ? 2 : 4)
                         : (generation ? 4 : 12);
     if (guarantees !== 'broken' && policy !== 'c' && Number.isInteger(stepCapOverride)) stepCap = Math.max(1, stepCapOverride);
-    const role = (rung, base, protect) => ({
-        rung, model: models[rung], effort: effortFor(base, paceSpeed, modelQuality, protect, recklessExtra),
-    });
+    const role = (rung, base, protect) => {
+        const model = models[rung];
+        return { rung, model, effort: bounded(model, effortFor(base, paceSpeed, modelQuality, protect, recklessExtra)) };
+    };
     const planner = role(plannerRung(label, modelSpeed, adjusted), plannerRung(label, modelSpeed, adjusted) === 0 ? 'medium' : 'high', true);
     const reviewerBase = modelQuality >= 67 ? 'xhigh' : 'high';
     const directive = {
@@ -302,38 +307,45 @@ export function resolvePace({
         const complexity = knownComplexity(label);
         const rung = singleRung(label, adjusted);
         const base = complexity === 'trivial' ? 'low' : complexity === 'complex' ? 'high' : 'medium';
+        const model = models[rung];
         directive.steps = [{
             author: author === 'coder' || author === 'writer' ? author : 'worker',
-            complexity, rung, model: models[rung],
-            effort: effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra),
+            complexity, rung, model,
+            effort: bounded(model, effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra)),
             files: [], goal: String(task), details: '', verify: '', kind: 'work',
         }];
         return directive;
     }
     if (Array.isArray(steps)) {
-        const decorated = decorate(steps, { modelSpeed, paceSpeed, modelQuality, models, adjusted, recklessExtra });
+        const decorated = decorate(steps, { modelSpeed, paceSpeed, modelQuality, models, adjusted, recklessExtra, bounded });
         directive.steps = fast ? mergeSteps(decorated) : decorated;
     }
     return directive;
 }
 
 /**
- * Replace a role's model or effort when that side is pinned.
+ * Replace a role's model or effort when that side is pinned, then re-apply the ceilings.
+ * A ceiling is a hard limit, so it holds over a pinned effort too: a pin asks for a level,
+ * the model and the role decide which level they can actually serve.
  * @param {object} directive
  * @param {object} [configRoles]
  * @param {object} [rolePins]
+ * @param {object} [modelProfiles] the `models` section of the config
  * @returns {object}
  * @exports
  * @ai.hint pure
  */
-export function applyPins(directive, configRoles = {}, rolePins = {}) {
+export function applyPins(directive, configRoles = {}, rolePins = {}, modelProfiles = null) {
     const apply = (name, role) => {
         const pin = rolePins[name] ?? {};
         const configured = configRoles[name] ?? {};
+        const model = pin.model && configured.model ? configured.model : role.model;
+        const wanted = pin.effort && configured.effort ? configured.effort : role.effort;
+        const profile = profileFor(model, modelProfiles);
         return {
             ...role,
-            model: pin.model && configured.model ? configured.model : role.model,
-            effort: pin.effort && configured.effort ? configured.effort : role.effort,
+            model,
+            effort: snapEffort(wanted, { ...profile, ceiling: lowerEffort(profile.ceiling, configured.maxEffort ?? null) }),
         };
     };
     const roles = Object.fromEntries(Object.entries(directive.roles).map(([name, role]) => [name, apply(name, role)]));

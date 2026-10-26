@@ -4,10 +4,10 @@
  * @purpose Load, validate, and redact configuration, and resolve per-role settings.
  * @depends node:os, node:path, node:fs/promises, util/text, core/config-defaults, generate/platform, mcp/servers, channels/questions
  * @usedBy cli, commands/shared, commands/flags, commands/ask, commands/run, commands/chat, commands/misc, agent/loop, agent/roles
- * @exports APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, defaults, resolveRole, defaultHome, loadConfig, isReasoningModel, supportsVerbosity, redactConfig
+ * @exports APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, BUILTIN_ROLE_NAMES, roleNames, defaults, resolveRole, defaultHome, loadConfig, isReasoningModel, supportsVerbosity, redactConfig
  * @ai.tags config
  * @ai.hint io
- * @changed 2026-10-22 Validate magickPath and keep gpt-6-astra out of the reviewer role.
+ * @changed 2026-10-26 Model ceilings, word context levels, user-defined roles, and the stage pipeline.
  */
 import os from 'node:os';
 import path from 'node:path';
@@ -22,11 +22,16 @@ import {
     REASONING_EFFORTS,
     REASONING_SUMMARIES,
     ROLE_NAMES,
+    BUILTIN_ROLE_NAMES,
+    CUSTOM_ROLE_NAME,
+    roleNames,
     defaults,
 } from './config-defaults.js';
 import { COMPLETION_MODEL_CHOICES, resolveCompletionModel } from '../complete/models.js';
 import { assertPaceBudget } from '../agent/pace.js';
 import { FORBIDDEN_MODELS as REVIEWER_FORBIDDEN, safeReviewerModel } from '../roles/reviewer.js';
+import { profileFor, snapEffort, lowerEffort, contextBytes, DEFAULT_PROFILE } from '../openai/model-profiles.js';
+import { PIPELINE_STAGE_IDS } from '../agent/pipeline.js';
 
 const KiB = 1024;
 
@@ -36,6 +41,9 @@ export {
     REASONING_EFFORTS,
     REASONING_SUMMARIES,
     ROLE_NAMES,
+    BUILTIN_ROLE_NAMES,
+    CUSTOM_ROLE_NAME,
+    roleNames,
     defaults,
 };
 
@@ -43,26 +51,42 @@ export {
 /**
  * Effective settings for a role: role → roles.default → top-level configuration.
  * Returns a config-like object usable by runTurn (same shape as the main config).
+ * Effort is snapped to the model ladder and capped by the stricter of the model ceiling
+ * and the role ceiling (roles.<name>.maxEffort).
  */
 export function resolveRole(config, name = 'default') {
     const base = config.roles?.default ?? {};
     const role = config.roles?.[name] ?? {};
     const pick = (key, fallback) => role[key] ?? (name !== 'default' ? base[key] : undefined) ?? fallback;
     const model = name === 'reviewer' ? safeReviewerModel(pick('model', config.model)) : pick('model', config.model);
+    const profile = profileFor(model, config.models);
+    const ceiling = lowerEffort(profile.ceiling, pick('maxEffort', null));
+    const effort = snapEffort(pick('effort', config.reasoning.effort), { ...profile, ceiling });
+    const summary = pick('summary', config.reasoning.summary);
+    const verbosity = pick('verbosity', config.verbosity);
+    const maxOutputTokens = pick('maxOutputTokens', config.maxOutputTokens);
+    /** The profile's answer limit: an explicit role cap is never raised above what the model accepts. */
+    const outputLimit = maxOutputTokens != null ? Math.min(maxOutputTokens, profile.maxOutput) : null;
+    const temperature = pick('temperature', config.temperature);
+    /** Resolve the per-role context level to bytes; null means the shared agent budget. */
+    const rawContext = pick('context', null);
+    const context = rawContext != null ? contextBytes(rawContext, profile) : null;
     return {
-        name, model,
-        effort: pick('effort', config.reasoning.effort),
-        summary: pick('summary', config.reasoning.summary),
-        verbosity: pick('verbosity', config.verbosity),
-        maxOutputTokens: pick('maxOutputTokens', config.maxOutputTokens),
-        temperature: pick('temperature', config.temperature),
+        name, model, effort, summary, verbosity, maxOutputTokens: outputLimit, temperature,
+        /** The ceiling that bounded this role: the stricter of model ceiling and roles.<name>.maxEffort. */
+        ceiling,
+        /** The model's own answer limit from its profile. */
+        maxOutput: profile.maxOutput,
+        /** Context budget in bytes for this role; null means the shared agent budget. */
+        context,
         instructions: role.instructions ?? null,
+        /** Tools the role may use; null means the tools of the run. */
+        tools: role.tools ?? null,
         /** A config object with this role's settings applied (for runTurn / buildRequestBody). */
         config: {
             ...config, model,
-            reasoning: { effort: pick('effort', config.reasoning.effort), summary: pick('summary', config.reasoning.summary) },
-            verbosity: pick('verbosity', config.verbosity), maxOutputTokens: pick('maxOutputTokens', config.maxOutputTokens),
-            temperature: pick('temperature', config.temperature),
+            reasoning: { effort, summary },
+            verbosity, maxOutputTokens: outputLimit, temperature,
         },
     };
 }
@@ -181,6 +205,37 @@ function migrateLegacyRoles(c) {
 }
 
 /**
+ * Resolve word-level context values to byte counts.
+ * Called in `loadConfig` after the deep-merge and before validation, so a user can write
+ * `"agent.maxContextBytes": "large"` and the rest of the system sees a number.
+ * `auto` takes the window of the configured model.
+ * @param {object} c — the merged configuration (mutated in place)
+ * @returns {void}
+ * @ai.hint pure
+ */
+function normalizeContext(c) {
+    const model = typeof c.model === 'string' && c.model.trim() ? c.model : 'gpt-6-luna';
+    const profile = profileFor(model, c.models);
+    const fields = [
+        ['agent', 'maxContextBytes'],
+        ['agent', 'measurerMaxContextBytes'],
+        ['agent', 'orchestrator', 'maxContextBytes'],
+        ['completion', 'maxContextBytes'],
+        ['limits', 'maxRequestBytes'],
+    ];
+    for (const path of fields) {
+        const last = path.at(-1);
+        let owner = c;
+        for (const step of path.slice(0, -1)) {
+            owner = owner?.[step];
+        }
+        if (isRecord(owner) && Object.hasOwn(owner, last)) {
+            owner[last] = contextBytes(owner[last], profile);
+        }
+    }
+}
+
+/**
  * Resolve the effective configuration.
  * Precedence: defaults < ~/.ai-agent/config.json < --config file < environment < overrides (CLI).
  * The CLI passes environment after reading .env and repairing a split Windows credential pair.
@@ -196,6 +251,7 @@ export async function loadConfig({ configPath = null, overrides = {}, env = null
     config.memory.dbFile ||= path.join(home, 'memory.db');
     config.configFiles = [path.join(home, 'config.json'), ...(configPath ? [path.resolve(configPath)] : [])];
     migrateLegacyRoles(config);
+    normalizeContext(config);
     validateConfig(config);
     const pins = pinsFrom([homeConfig, fileConfig, overrides]);
     config.rolePins = pins.rolePins;
@@ -214,6 +270,17 @@ function validateConfig(c) {
     const fail = (message) => { throw new Error(`Конфигурация: ${message}`); };
     if (typeof c.model !== 'string' || !c.model.trim()) fail('укажите model (или AI_MODEL / --model).');
     if (c.imageModel !== null && (typeof c.imageModel !== 'string' || !c.imageModel.trim())) fail('imageModel должен быть строкой.');
+    if (!isRecord(c.models)) fail('models должен быть объектом');
+    for (const [modelId, profile] of Object.entries(c.models)) {
+        if (!isRecord(profile)) fail(`models.${modelId} должен быть объектом`);
+        for (const key of Object.keys(profile)) {
+            if (!['window', 'maxOutput', 'ceiling', 'efforts'].includes(key)) fail(`models.${modelId}.${key}: неизвестное поле`);
+        }
+        if (typeof profile.window === 'number' && !(Number.isSafeInteger(profile.window) && profile.window > 0)) fail(`models.${modelId}.window: целое > 0`);
+        if (typeof profile.maxOutput === 'number' && !(Number.isSafeInteger(profile.maxOutput) && profile.maxOutput > 0)) fail(`models.${modelId}.maxOutput: целое > 0`);
+        if (profile.ceiling !== null && !REASONING_EFFORTS.includes(profile.ceiling)) fail(`models.${modelId}.ceiling: ${REASONING_EFFORTS.join(' | ')}`);
+        if (profile.efforts !== null && (!Array.isArray(profile.efforts) || profile.efforts.some((e) => !REASONING_EFFORTS.includes(e)))) fail(`models.${modelId}.efforts: массив уровней`);
+    }
     if (c.reasoning.effort !== null && !REASONING_EFFORTS.includes(c.reasoning.effort)) fail(`reasoning.effort: ${REASONING_EFFORTS.join(' | ')}`);
     if (c.reasoning.summary !== null && !REASONING_SUMMARIES.includes(c.reasoning.summary)) fail(`reasoning.summary: ${REASONING_SUMMARIES.join(' | ')}`);
     if (c.verbosity !== null && !['low', 'medium', 'high'].includes(c.verbosity)) fail('verbosity: low | medium | high');
@@ -298,7 +365,10 @@ function validateConfig(c) {
     if (!isRecord(c.roles)) fail('roles должен быть объектом');
     if (Object.hasOwn(c.roles, 'scanner')) delete c.roles.scanner;
     for (const [name, role] of Object.entries(c.roles)) {
-        if (!ROLE_NAMES.includes(name)) fail(`roles.${name}: неизвестная роль (${ROLE_NAMES.join(', ')})`);
+        // A name the code does not know is a user-defined role, not an error, as long as the slug is sane.
+        if (!BUILTIN_ROLE_NAMES.includes(name) && !CUSTOM_ROLE_NAME.test(name)) {
+            fail(`roles.${name}: имя своей роли — ${CUSTOM_ROLE_NAME.source} (до 32 символов, строчные)`);
+        }
         if (!isRecord(role)) fail(`roles.${name} должен быть объектом`);
         for (const key of Object.keys(role)) if (!(key in defaults.roles.default)) fail(`roles.${name}.${key}: неизвестное поле`);
         if (role.model !== null && role.model !== undefined && (typeof role.model !== 'string' || !role.model.trim())) fail(`roles.${name}.model должен быть строкой`);
@@ -308,6 +378,9 @@ function validateConfig(c) {
         if (role.temperature != null && !(Number.isFinite(role.temperature) && role.temperature >= 0 && role.temperature <= 2)) fail(`roles.${name}.temperature: 0..2`);
         if (role.maxOutputTokens != null && !(Number.isSafeInteger(role.maxOutputTokens) && role.maxOutputTokens >= 16)) fail(`roles.${name}.maxOutputTokens ≥ 16`);
         if (role.instructions != null && typeof role.instructions !== 'string') fail(`roles.${name}.instructions должен быть строкой`);
+        if (role.maxEffort != null && !REASONING_EFFORTS.includes(role.maxEffort)) fail(`roles.${name}.maxEffort: ${REASONING_EFFORTS.join(' | ')}`);
+        if (role.context != null && typeof role.context !== 'string' && !(Number.isSafeInteger(role.context) && role.context > 0)) fail(`roles.${name}.context: уровень или целое > 0`);
+        if (role.tools != null && !Array.isArray(role.tools)) fail(`roles.${name}.tools: массив имён`);
     }
     if (!['team', 'single'].includes(c.agent.mode)) fail('agent.mode: team | single');
     for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'architectMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'measurerPasses', 'maxContextBytes']) {
@@ -324,6 +397,11 @@ function validateConfig(c) {
     if (!['off', 'auto', 'always'].includes(c.agent.extract)) fail('agent.extract: off | auto | always');
     if (!['off', 'auto', 'always'].includes(c.agent.measure)) fail('agent.measure: off | auto | always');
     if (!['off', 'auto', 'always'].includes(c.agent.architect)) fail('agent.architect: off | auto | always');
+    if (c.agent.pipeline != null) {
+        if (!Array.isArray(c.agent.pipeline)) fail('agent.pipeline: массив этапов');
+        const unknown = c.agent.pipeline.filter((id) => !PIPELINE_STAGE_IDS.includes(id));
+        if (unknown.length) fail(`agent.pipeline: неизвестные этапы ${unknown.join(', ')}; разрешены ${PIPELINE_STAGE_IDS.join(' | ')}`);
+    }
     if (c.agent.route !== null && !['encoder', 'planner', 'decisions'].includes(c.agent.route)) fail('agent.route: encoder | planner | decisions');
     if (!['encoder', 'mcp'].includes(c.agent.encode)) fail('agent.encode: encoder | mcp');
     if (!isRecord(c.agent.orchestrator)) fail('agent.orchestrator должен быть объектом');

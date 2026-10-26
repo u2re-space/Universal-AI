@@ -7,9 +7,10 @@
  * @exports UsageError, overridesFrom
  * @ai.tags cli, config
  * @ai.hint pure
- * @changed 2026-10-15 Fidelity, creativity, platform, and mcp in --tools.
+ * @changed 2026-10-26 --role accepts a user-defined role name, --max-effort, and --context.
  */
-import { APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES } from '../core/config.js';
+import { APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, CUSTOM_ROLE_NAME } from '../core/config.js';
+import { CONTEXT_LEVELS } from '../openai/model-profiles.js';
 import { PLATFORMS } from '../generate/platform.js';
 import { assertPaceBudget, PACE_QUALITY_MESSAGE, PACE_SPEED_MESSAGE } from '../agent/pace.js';
 
@@ -75,6 +76,11 @@ export function overridesFrom(values, { command = null } = {}) {
         if (!REASONING_EFFORTS.includes(values.effort)) throw new UsageError(`--effort: ${REASONING_EFFORTS.join(' | ')}`);
         o.reasoning.effort = values.effort;
     }
+    if (values['max-effort']) {
+        if (!REASONING_EFFORTS.includes(values['max-effort'])) throw new UsageError(`--max-effort: ${REASONING_EFFORTS.join(' | ')}`);
+        // roles.default.maxEffort is the fallback every role reads through resolveRole.
+        (o.roles ??= {}).default = { ...(o.roles.default ?? {}), maxEffort: values['max-effort'] };
+    }
     if (values.summary) {
         if (!REASONING_SUMMARIES.includes(values.summary)) throw new UsageError(`--summary: ${REASONING_SUMMARIES.join(' | ')}`);
         o.reasoning.summary = values.summary;
@@ -112,15 +118,19 @@ export function overridesFrom(values, { command = null } = {}) {
     if (values.role?.length) {
         o.roles = {};
         for (const spec of values.role) {
-            const match = /^([\w*-]+)=([^:]+?)(?::([a-z]+))?$/.exec(spec.trim());
-            if (!match) throw new UsageError(`--role: ожидается имя=модель[:effort], получено "${spec}"`);
-            const [, rawName, model, effort] = match;
+            const match = /^([\w*-]+)=([^:]+?)(?::([a-z]*))?(?::([a-z]*))?$/.exec(spec.trim());
+            if (!match) throw new UsageError(`--role: ожидается имя=модель[:effort[:max-effort]], получено "${spec}"`);
+            const [, rawName, model, effort, maxEffort] = match;
             const name = canonicalRole(rawName);
             if (effort && !REASONING_EFFORTS.includes(effort)) throw new UsageError(`--role ${rawName}: effort должен быть одним из ${REASONING_EFFORTS.join(' | ')}`);
+            if (maxEffort && !REASONING_EFFORTS.includes(maxEffort)) throw new UsageError(`--role ${rawName}: max-effort должен быть одним из ${REASONING_EFFORTS.join(' | ')}`);
             const targets = name === 'all' || name === '*' ? ROLE_NAMES : [name];
             for (const target of targets) {
-                if (!ROLE_NAMES.includes(target)) throw new UsageError(`--role: неизвестная роль "${target}" (${ROLE_NAMES.join(', ')})`);
-                o.roles[target] = { ...(o.roles[target] ?? {}), model, ...(effort ? { effort } : {}) };
+                // A name the code does not know becomes a user-defined role, if the slug is sane.
+                if (!ROLE_NAMES.includes(target) && !CUSTOM_ROLE_NAME.test(target)) {
+                    throw new UsageError(`--role: неизвестная роль "${target}" (${ROLE_NAMES.join(', ')}) или своё имя ${CUSTOM_ROLE_NAME.source}`);
+                }
+                o.roles[target] = { ...(o.roles[target] ?? {}), model, ...(effort ? { effort } : {}), ...(maxEffort ? { maxEffort } : {}) };
             }
         }
     }
@@ -162,6 +172,15 @@ export function overridesFrom(values, { command = null } = {}) {
         (o.pace ??= {}).mode = values.pace;
     }
     if (values['max-steps'] !== undefined) (o.agent ??= {}).maxSteps = number(values['max-steps'], 'max-steps', { integer: true, min: 1 });
+    if (values.context !== undefined) {
+        const raw = String(values.context).trim();
+        const bytes = /^\d+$/.test(raw) ? Number(raw) : null;
+        if (bytes == null && !Object.hasOwn(CONTEXT_LEVELS, raw)) {
+            throw new UsageError(`--context: ${Object.keys(CONTEXT_LEVELS).join(' | ')} или байты`);
+        }
+        if (bytes != null && bytes < 1024) throw new UsageError('--context: не меньше 1024 байт');
+        (o.agent ??= {}).maxContextBytes = bytes ?? raw;
+    }
     if (Number.isInteger(o.pace?.speed) && Number.isInteger(o.pace?.quality)) {
         try { assertPaceBudget(o.pace.speed, o.pace.quality); }
         catch (error) { throw new UsageError(error.message); }

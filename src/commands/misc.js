@@ -143,7 +143,8 @@ export async function configCommand(ctx) {
                 measurer: { model: null, effort: null },
                 'image-processor': { model: null, effort: 'high' },
             },
-            agent: { mode: 'team', maxReviewRounds: 2, resume: true, extract: 'auto', architect: 'auto', orchestrator: { enabled: false } },
+            models: {},
+            agent: { mode: 'team', pipeline: null, maxReviewRounds: 2, resume: true, extract: 'auto', architect: 'auto', orchestrator: { enabled: false } },
             memory: { enabled: true, autoSave: true, maxRecall: 8, notesFile: 'AGENTS.md' },
             agents: { enabled: true, filenames: ['AGENTS.md', 'agents.md'], globalFile: null, maxBytes: 16384, maxTotalBytes: 65536, discoverUpward: true, nested: true },
             generate: { fidelity: defaults.generate.fidelity, creativity: defaults.generate.creativity, platform: defaults.generate.platform },
@@ -157,6 +158,7 @@ export async function configCommand(ctx) {
         await writeFile(file, `${JSON.stringify(template, null, 2)}\n`, { mode: 0o600 });
         renderer.write(`Создан ${file}\n` +
             `Роли: укажите модели в roles.* (null = общая model). Например: "planner": { "model": "${defaults.model}", "effort": "high" }, "worker": { "model": "gpt-6-luna" }.\n` +
+            `Потолки и лестницы effort моделей — в models.<id> (ceiling, efforts); порядок этапов команды — agent.pipeline.\n` +
             `Чтобы видеть стоимость, добавьте актуальные цены (USD за 1M токенов), например:\n` +
             `  "prices": { "${defaults.model}": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-6-luna*": { "input": 0.25, "output": 2 } }\n`);
         return 0;

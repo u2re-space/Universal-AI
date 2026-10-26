@@ -192,6 +192,9 @@ export function handleRendererEvent(event, api) {
         case 'stage.done':
             if (verbose) line('info', `этап «${STAGES[event.stage] ?? event.stage}»: ${event.status}`, { dim: true });
             break;
+        case 'stage.skip':
+            if (verbose) line('info', `этап «${STAGES[event.stage] ?? event.stage}» пропущен`, { dim: true });
+            break;
         case 'plan.resume':
             line('info', `продолжение .tmp/${event.id}: ${event.stage === 'review' || event.stage === 'fix' ? 'ревью' : `шаг ${event.cursor + 1} из ${event.steps}`}${event.phase && event.phase !== 'pending' && event.phase !== 'done' ? `, фаза ${event.phase}` : ''}`, { dim: true });
             break;

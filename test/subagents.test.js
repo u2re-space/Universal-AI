@@ -29,31 +29,41 @@ const CALLER_TOOLS = [
     'write_file', 'fetch_url', 'crop_image', 'ask_user', 'run_subagent', 'delegate_role', 'run_batch',
 ];
 
-test('a sub-agent is an existing role, and the registry and the tool enum stay in step', () => {
-    assert.deepEqual(SUBAGENT_NAMES, ['coder', 'worker', 'writer', 'reviewer', 'tester', 'vision', 'solver', 'image-processor']);
+test('every executor is an existing role, and the registry and the tool enum stay in step', () => {
+    // 0.2.0: one registry serves both delegation tools, so it holds the union of the old lists.
+    assert.deepEqual(SUBAGENT_NAMES, ['coder', 'worker', 'writer', 'reviewer', 'tester', 'vision', 'solver', 'measurer', 'image-processor', 'clicker', 'typer', 'encoder']);
     for (const name of SUBAGENT_NAMES) {
         assert.ok(ROLE_MODULES[name], `${name} needs a registered role prompt`);
         assert.ok(defaults.roles[name], `${name} needs role settings so its model is configurable`);
-        assert.ok(SLICE_NAMES.includes(SUBAGENTS[name].tools), `${name} names a known tool slice`);
+        const tools = SUBAGENTS[name].tools;
+        assert.ok(Array.isArray(tools) || SLICE_NAMES.includes(tools), `${name} names a known tool slice or a tool list`);
         assert.ok(Number.isSafeInteger(SUBAGENTS[name].turns) && SUBAGENTS[name].turns > 0);
         assert.ok(SUBAGENTS[name].description.length > 20);
     }
-    assert.deepEqual(TOOL_SPECS.run_subagent.parameters.properties.kind.enum, SUBAGENT_NAMES);
+    // The static enum is the legacy run_subagent list; createToolset widens it to the whole registry.
+    for (const name of TOOL_SPECS.run_subagent.parameters.properties.kind.enum) {
+        assert.ok(SUBAGENT_NAMES.includes(name), `${name} of the static enum must exist in the registry`);
+    }
     assert.deepEqual(TOOL_SPECS.run_subagent.parameters.required.slice().sort(), ['kind', 'task']);
 
     assert.equal(enabledToolNames({ ...defaults.tools, subagents: true }).includes('run_subagent'), true);
     assert.equal(enabledToolNames({ ...defaults.tools, subagents: false }).includes('run_subagent'), false);
+    // delegate_role is a delegation tool, not a desktop one.
+    assert.equal(enabledToolNames({ ...defaults.tools, subagents: true, desktop: false }).includes('delegate_role'), true);
+    assert.equal(enabledToolNames({ ...defaults.tools, subagents: false, desktop: true }).includes('delegate_role'), false);
 });
 
-test('every sub-agent stays inside its remit and never delegates again', () => {
+test('every executor stays inside its remit and never delegates again', () => {
+    // Executors whose job is to drive the screen are allowed click and type; the rest never get them.
+    const DRIVERS = new Set(['clicker', 'typer']);
     for (const kind of SUBAGENT_NAMES) {
         const names = subagentToolNames(kind, CALLER_TOOLS);
         assert.ok(names.length > 0, `${kind} needs at least one tool`);
         for (const name of ['run_subagent', 'delegate_role', 'run_batch', 'ask_user']) {
             assert.equal(names.includes(name), false, `${kind} must not have ${name}`);
         }
-        // A sub-agent that only checks may look at the screen but never drives it.
-        if (SUBAGENTS[kind].tools !== 'all') {
+        // An executor that does not take the whole caller set may look at the screen but never drive it.
+        if (SUBAGENTS[kind].tools !== 'all' && !DRIVERS.has(kind)) {
             for (const name of ['click', 'type', 'run_ahk']) {
                 assert.equal(names.includes(name), false, `${kind} must not have ${name}`);
             }
@@ -87,6 +97,10 @@ test('every sub-agent stays inside its remit and never delegates again', () => {
     for (const name of ['write_file', 'run_command']) {
         assert.equal(assets.includes(name), false, `image-processor must not have ${name}`);
     }
+
+    // The screen drivers keep their own two tools and nothing else.
+    assert.deepEqual(subagentToolNames('clicker', CALLER_TOOLS), ['screenshot', 'click']);
+    assert.deepEqual(subagentToolNames('typer', CALLER_TOOLS), ['screenshot', 'type']);
 
     // The slice never offers a tool the calling agent does not have.
     assert.deepEqual(subagentToolNames('vision', ['read_file']), ['read_file']);

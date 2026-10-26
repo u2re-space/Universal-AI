@@ -22,10 +22,27 @@
 | Свои MCP-серверы | `ai mcp add design --mcp-command node --mcp-arg server.js` — инструменты и ресурсы по stdio |
 | Решения и модерация | `ai decide`, `ai moderate` — `/v1/decisions` (`openai/gpt-6-luna-decisions`) или `omni-moderation-latest`, если шлюз отдаёт `/v1/moderations` |
 | Чаты и Telegram | `ai channels --listen`, `ai telegram poll` — группы, каналы, личные чаты, черновик ответа или пост |
-| Разные модели под роли | старшая модель планирует и проверяет, младшие собирают контекст и генерируют вызовы инструментов, отдельная модель читает картинки: `--role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna` |
+| Разные модели под роли | старшая модель планирует и проверяет, младшие собирают контекст и генерируют вызовы инструментов, отдельная модель читает картинки: `--role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna`. У каждой модели свой потолок effort и окно контекста (`models.*`), у роли — свой потолок `maxEffort` |
+| Свои роли | любое имя-слаг в `roles.<имя>`: свои инструкции, инструменты, модель, effort и потолок effort. Такая роль работает и через `--role`, и через `delegate_role` |
+| Свой порядок этапов | последовательность задаёт план (поле `pipeline`) и `agent.pipeline`: `answer`, `classify`, `plan`, `measure`, `architect`, `collect`, `images`, `work`, `review`, `outcome`, `memory`. Этап можно пропустить или переставить, зависимость всегда встаёт раньше |
 | Память и общий контекст | долговременная память в SQLite (факты, соглашения, решения — по проекту и глобально), заметки проекта `AGENTS.md`, история задач, кеш сводок файлов; один общий контекст для всех ролей |
 | Фон | `--background` (сервер считает, можно переподключиться `ai resume`) и `--detach` (локальная фоновая задача, `ai jobs …`) |
 | Что происходит | строка статуса: роль и модель, фаза («думает», «выполняется read_file», «генерирует изображение»), время, токены ↑↓, стоимость; краткие рассуждения модели; журнал этапов, шагов и действий; итоговая сводка с расходом по ролям и моделям |
+
+## Что нового в 0.2.0
+
+* **Профили моделей** — окно контекста, максимальный ответ, потолок и лестница reasoning effort. Встроены в код,
+  переопределяются секцией `models` в конфигурации.
+* **Потолок effort** — у модели и у роли. Задают `models.<id>.ceiling`, `roles.<имя>.maxEffort`, `--max-effort`
+  и третье поле `--role`; пейс и пины не могут его превысить.
+* **Уровни контекста словом** — `small` (16 КиБ), `normal` (96 КиБ), `large` (512 КиБ), `max` (8 МиБ), `auto`
+  (окно модели). Слово принимают `agent.*MaxContextBytes`, `limits.maxRequestBytes`, `roles.<имя>.context`
+  и флаг `--context`.
+* **Свои роли** — любое имя-слаг в `roles.<имя>`: свои инструкции, инструменты, модель, effort, потолок и контекст.
+  Роль видна в `--role` и в `delegate_role`.
+* **`delegate_role`** — передаёт следующей роли не только задачу, но и общий контекст команды (`context: true`);
+  реестр ролей и раннер общие с `run_subagent`.
+* **Порядок этапов как данные** — `plan.pipeline` и `agent.pipeline` задают, какие этапы выполнять и в каком порядке.
 
 ## Установка
 
@@ -164,7 +181,7 @@ ai run --role planner=gpt-6.1-sol:high --role reviewer=gpt-6.1-sol --role worker
 # оркестратор после каждого этапа: правки плана и указания следующему шагу
 ai run --orchestrator --role orchestrator=gpt-6.1-sol:high "перепиши слой доступа к данным на репозитории"
 
-# рабочий стол Windows: --desktop включает screenshot, click, type, run_ahk, run_batch и delegate_role для worker и reviewer
+# рабочий стол Windows: --desktop включает screenshot, click, type, run_ahk и run_batch для worker и reviewer
 ai run --desktop --approve ask "посмотри экран и закрой лишний диалог"
 
 # один агент вместо команды (как раньше), без долговременной памяти
@@ -204,7 +221,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 `agent.encode: mcp` поднимает в `ai run`, `ai gen` и `ai chat` локальный MCP-сервер на `127.0.0.1:3000` и печатает в stderr строки `MCP:` и `Processing:`. Если 3000 занят, процесс останавливается. Пока сервер поднят, этап encoder исполняет его и не вызывает модель пакета файлов. `agent.encode: encoder` (значение по умолчанию) оставляет эту модель. `ai serve` этот порт не занимает: без `--port` он берёт свободный.
 
 `ai run` по умолчанию работает **командой ролей**, у каждой роли своя модель и уровень рассуждений
-(`roles.*` в конфигурации или `--role роль=модель[:effort]`):
+(`roles.*` в конфигурации или `--role роль=модель[:effort[:max-effort]]`):
 
 | Роль | Задача | Инструменты | По умолчанию |
 | --- | --- | --- | --- |
@@ -225,9 +242,13 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 | `tester` | проверить результат, в том числе по экрану | `screenshot` | общая `model`, effort `medium` |
 | `default` | `ask`, `chat`, `run --single` | — | общая `model` |
 
-Поток: память + заметки проекта → **план** → (если к задаче приложены референсы) **замеры** → **архитектор**
+Поток по умолчанию: память + заметки проекта → **план** → (если к задаче приложены референсы) **замеры** → **архитектор**
 (если план не тривиальный) → **сбор контекста** → (если `imageTasks` не пуст) **подготовка изображений** → **выполнение**
-по шагам → **ревью** и правки → **память**. Все роли читают один **общий контекст** (задача, окружение,
+по шагам → **ревью** и правки → **память**. Это не жёсткая последовательность: планировщик возвращает `pipeline` —
+список этапов, которые нужны этой задаче, а `agent.pipeline` в конфигурации задаёт порядок по умолчанию. Пропущенный
+этап не выполняется, переставленный выполняется в новом месте; если этап зависит от другого (например, `review`
+от `work`), зависимость всё равно встаёт раньше — и добавляется, даже если её забыли. Планировщик не может отменить этапы, которые прошли до него
+(`answer`, `classify`): его порядок действует начиная с `plan`. Все роли читают один **общий контекст** (задача, окружение,
 заметки `AGENTS.md`, релевантные записи памяти, план, находки оркестратора, отчёты по шагам, diff изменений);
 при переполнении бюджета `agent.maxContextBytes` менее важные разделы обрезаются. Планировщик помечает
 простые задачи как `trivial` — тогда сбор контекста и ревью пропускаются; image processing запускается только если
@@ -236,6 +257,60 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 Крупный шаг, в котором названо несколько файлов, режется на шаг на файл. План и progress пишутся в `.tmp/<id>/plan.json` и `progress.json`, а в общий контекст попадает только краткая сводка. Файл собирается двумя ходами (каркас, затем тела), после файлов идёт шаг согласования импортов и имён. Повтор той же задачи продолжает незавершённый progress; `--no-resume` начинает заново. По ходу worker может дописать план блоком `plan-update`.
 
 Первый ответ сохраняется целиком в `.tmp/<id>/answer.md`, вместе с markdown и описаниями. Для маршрута `encoder` роль `extractor` (по умолчанию `agent.extract: "auto"`) режет ответ на пачки, убирает prose и fences и пишет чистые `js`, `ts`, `html`, `css`, `json` и другие файлы в `.tmp/<id>/extracted/`. Encoder получает ссылки на них и переносит в рабочий каталог через `fs:write`; исходный ответ остаётся в `answer.md`, а его артефакты помечаются `supersededBy`. `--extract always` включает очистку и для маршрута `planner`, `--extract off` или `--no-extract` выключает её. Ошибка extractor не останавливает запуск: остаются исходные артефакты.
+
+### Профили моделей, потолки и уровни контекста
+
+У модели есть профиль: окно контекста, максимальный ответ, потолок reasoning effort и необязательная лестница
+разрешённых effort. Профили встроены для известных моделей (`src/openai/model-profiles.js`) и переопределяются
+секцией `models` в конфигурации:
+
+```json
+"models": {
+  "gpt-6.1-sol":  { "ceiling": "xhigh", "efforts": ["low", "medium", "high", "xhigh"] },
+  "gpt-6-luna":   { "window": 262144, "maxOutput": 16384, "ceiling": "max" },
+  "gpt-6-astra":  { "ceiling": null, "maxOutput": 32768 }
+}
+```
+
+`ceiling` — жёсткий предел: роль, попросившая более высокий effort, получает потолок модели. `efforts` — лестница
+уровней, которые модель реально понимает: запрошенный уровень прижимается к ближайшему разрешённому снизу (вверх —
+только если запрос ниже всей лестницы). `null` в `ceiling` снимает встроенный предел, `window` и `maxOutput` задают
+окно и потолок ответа в токенах. Неизвестная модель получает профиль по умолчанию (128 КиБ окна, 16384 токена ответа).
+
+Потолок роли задаётся `roles.<имя>.maxEffort` (или третьим полем `--role`, например
+`--role worker=gpt-6-luna:high:xhigh`) и действует вместе с потолком модели: побеждает более строгий. Флаг
+`--max-effort <уровень>` ставит потолок всем ролям сразу. Потолок — не предпочтение: пин `--effort` и пейс
+не могут его превысить, `resolveRole`, `resolvePace`, `applyPins` и `buildRequestBody` применяют его повторно.
+
+Бюджет контекста задаётся словом или числом байт: `small` (16 КиБ), `normal` (96 КиБ), `large` (512 КиБ),
+`max` (8 МиБ), `auto` (окно модели). Слово принимают `agent.maxContextBytes`, `agent.measurerMaxContextBytes`,
+`agent.orchestrator.maxContextBytes`, `completion.maxContextBytes`, `limits.maxRequestBytes` и `roles.<имя>.context`;
+флаг `--context <уровень|байты>` задаёт общий бюджет. Слово резолвится в байты при загрузке конфигурации по окну
+модели из профиля, поэтому `auto` для `gpt-6-astra` даёт 200 КиБ, а для `gpt-6.1-sol` — 128 КиБ.
+
+### Свои роли
+
+Имя роли, которого нет среди встроенных, создаёт пользовательскую роль. Имя — слаг: строчная латинская буква,
+дальше буквы, цифры, `_` и `-`, до 32 символов. Роль живёт в `roles.<имя>` и принимает те же поля, что встроенные:
+
+```json
+"roles": {
+  "researcher": {
+    "model": "gpt-6.1-sol",
+    "effort": "high",
+    "maxEffort": "xhigh",
+    "context": "large",
+    "tools": ["read_file", "search_files", "fetch_url", "web_search"],
+    "instructions": "Ты исследуешь внешние источники и возвращаешь короткую сводку со ссылками."
+  }
+}
+```
+
+`instructions` — только текст: он добавляется к системным инструкциям роли. `tools` — список имён инструментов,
+которые роль может вызывать (пустой список — все инструменты запуска, как у встроенных без ограничения).
+`model`, `effort`, `maxEffort`, `context`, `summary`, `verbosity`, `maxOutputTokens`, `temperature` наследуются
+от `roles.default` и общих настроек. Своя роль видна в `--role <имя>=<модель>` и в `delegate_role`; вложенный
+запуск получает её инструкции, инструменты, модель и потолок effort.
 
 ### Замеры референсов
 
@@ -266,7 +341,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 детерминированное заключение (сводка, единицы, уверенность, счётчики, assumptions и список кропов) — в
 `measurements.conclusion.json` и `measurements.conclusion.toon`. Контекст роли задаёт
 `agent.measurerMaxContextBytes` (по умолчанию 8 МиБ, то есть предел `limits.maxRequestBytes`; модель должна
-поддерживать такое окно), поэтому лист и найденные фрагменты не обрезаются общим лимитом `agent.maxContextBytes`. При включённом `--desktop`
+поддерживать такое окно), поэтому лист и найденные фрагменты не обрезаются общим лимитом `agent.maxContextBytes`. При включённых суб-агентах
 worker может вызвать роль повторно через `delegate_role` с ролью `measurer`.
 
 Модель следует сложности плана: только разделить картинку — `gpt-6-luna` / `low`, собрать стили — `gpt-6.1-sol` / `high`,
@@ -328,8 +403,7 @@ worker может вызвать роль повторно через `delegate_
 
 ### Рабочий стол
 
-`--desktop` включает `screenshot`, `click`, `type`, `run_ahk`, `run_batch` и `delegate_role` для worker и reviewer.
-`delegate_role` передаёт один шаг роли `solver`, `clicker`, `typer`, `encoder`, `tester` или `measurer`.
+`--desktop` включает `screenshot`, `click`, `type`, `run_ahk` и `run_batch` для worker и reviewer.
 Нужен AutoHotkey v2: установленный `AutoHotkey64.exe`, либо `desktop.ahkPath` указывает на него.
 `--approve ask` подтверждает каждое действие рабочего стола. `--approve read` и `--approve write` рабочий стол не разрешают. `--approve all` разрешает.
 Снимки попадают в `.ai/desktop/`; роль `vision` описывает их как TOON.
@@ -486,16 +560,23 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
       "coder": ["mdnCss", "teamGuide"]
     }
   },
+  "models": {
+    "gpt-6.1-sol": { "ceiling": "xhigh", "efforts": ["low", "medium", "high", "xhigh"] },
+    "gpt-6-luna":  { "ceiling": "max" }
+  },
   "roles": {
     "planner":    { "model": "gpt-6.1-sol", "effort": "high" },
     "architect":  { "model": "gpt-6.1-sol", "effort": "high" },
     "reviewer":   { "model": "gpt-6.1-sol", "effort": "medium" },
     "orchestrator": { "model": "gpt-6.1-sol", "effort": "high" },
-    "worker":     { "model": "gpt-6-luna", "effort": "medium" },
+    "worker":     { "model": "gpt-6-luna", "effort": "medium", "maxEffort": "high" },
     "vision":     { "model": "gpt-6-luna" },
-    "summarizer": { "model": "gpt-6-luna", "summary": "none" }
+    "summarizer": { "model": "gpt-6-luna", "summary": "none" },
+    "researcher": { "model": "gpt-6.1-sol", "effort": "high", "context": "large",
+                    "tools": ["read_file", "search_files", "fetch_url", "web_search"],
+                    "instructions": "Ты исследуешь внешние источники и возвращаешь сводку со ссылками." }
   },
-  "agent": { "mode": "team", "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": 98304, "visionDelegate": "auto",
+  "agent": { "mode": "team", "pipeline": null, "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": "normal", "visionDelegate": "auto",
              "architect": "auto", "architectMaxTurns": 8,
              "measurerPasses": 2, "measurerMaxTurns": 16, "measurerMaxContextBytes": 8388608,
              "orchestrator": { "enabled": false, "after": ["plan", "work", "review", "fix"], "maxContextBytes": 4194304, "applyPlan": true } },
@@ -516,7 +597,11 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
 ```
 
 Поля роли: `model`, `effort`, `summary`, `verbosity`, `maxOutputTokens`, `temperature`, `instructions`
-(дополнительные инструкции только для этой роли); `null` — наследовать от `roles.default`, затем от общих настроек.
+(дополнительные инструкции только для этой роли), `maxEffort` (потолок effort роли), `context` (уровень или байты
+бюджета контекста роли) и `tools` (список разрешённых инструментов); `null` — наследовать от `roles.default`,
+затем от общих настроек. Имя вне встроенных создаёт пользовательскую роль. `agent.pipeline` задаёт порядок этапов
+(`null` — порядок по умолчанию, список — переставить или пропустить этапы), а `plan.pipeline` перекрывает его для
+конкретной задачи.
 `documentation.sources` задаёт именованный каталог HTTP(S)-ссылок (по умолчанию доступны MDN CSS/JavaScript,
 ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles` выбирает имена источников для
 `planner`, `architect`, `orchestrator`, `worker` и `coder`. Передача пустого массива отключает ссылки для выбранной роли.
@@ -541,8 +626,8 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 `replace_text`, `delete_file`, `make_dir`, `view_image`, `summarize_file`, `run_command`, `run_script`, `ssh`, `fetch_url`,
 `recall`, `remember`, `ask_user`; с `--images` — `split_image`, `crop_image`, `generate_svg`; при `tools.fetch` —
 `download_font`, `download_icons` (Google Fonts и CDN Phosphor/Lucide); с `--desktop` у worker и reviewer —
-`screenshot`, `click`, `type`, `run_ahk`, `run_batch`, `delegate_role`; при `tools.subagents` (по умолчанию включён) —
-`run_subagent`; встроенные инструменты API: `web_search`
+`screenshot`, `click`, `type`, `run_ahk`, `run_batch`; при `tools.subagents` (по умолчанию включён) —
+`run_subagent` и `delegate_role`; встроенные инструменты API: `web_search`
 (включён по умолчанию, `--no-web` выключает), `image_generation` (`--images`).
 
 ### Суб-агенты
@@ -563,7 +648,16 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 | `tester` | pass/fail одного утверждения по доказательству | чтение + `run_command`, `run_script`, `ssh`, `screenshot` | 8 |
 | `vision` | описывает названные в задаче картинки текстом | только чтение + `fetch_url` | 6 |
 | `solver` | решает по экрану или картинке: ответ, расчёт, капча, координаты элементов | только чтение + `screenshot` | 8 |
+| `measurer` | снимает метрики с референсов по заданному плану | `view_image`, `crop_image`, `split_image`, `fetch_url` | 16 |
 | `image-processor` | готовит изображения и assets: кроп, деление, trim, генерация, правка | image/assets-инструменты | 12 |
+| `clicker` | кликает по координатам, заголовку окна или элементу управления | `click`, `screenshot` | 4 |
+| `typer` | вводит текст в поле | `type`, `screenshot` | 4 |
+| `encoder` | возвращает пакет файловых действий | `screenshot` | 3 |
+
+`delegate_role` — второй вход в тот же реестр ролей и тот же раннер. Отличие от `run_subagent` одно:
+`context: true` прикладывает к задаче общий контекст команды (план, находки оркестратора, отчёты по шагам, diff),
+поэтому роль продолжает работу с того же места; `context: false` — чистый запуск, как у суб-агента. Оба инструмента
+принимают любое имя из реестра, включая пользовательские роли, и не дают вложенному запуску делегировать дальше.
 
 Суб-агент не получает `run_subagent`, `delegate_role`, `run_batch` и `ask_user` — вложенность и пакетное
 управление экраном ему закрыты, цепочка всегда заканчивается на одном уровне. Править и запускать он может только

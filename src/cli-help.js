@@ -6,7 +6,7 @@
  * @exports HELP
  * @ai.tags cli
  * @ai.hint pure
- * @changed 2026-10-22 Help mentions turn extension, image tools, and asset downloads.
+ * @changed 2026-10-26 0.2.0: --max-effort, --context, role ceilings, delegate_role, and the stage pipeline.
  */
 export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
 
@@ -49,6 +49,9 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 Модель и вывод:
   --model, -m <id>       модель (по умолчанию из конфигурации / AI_MODEL)
   --effort <уровень>     reasoning: none|minimal|low|medium|high|xhigh|max
+  --max-effort <уровень> потолок effort для всех ролей; модель и roles.<имя>.maxEffort могут быть строже
+  --context <уровень|байты>  бюджет общего контекста: small 16 КиБ, normal 96 КиБ, large 512 КиБ, max 8 МиБ,
+                         auto — окно модели. Слово принимают и agent.*MaxContextBytes, roles.<имя>.context
   --summary <режим>      показ рассуждений: auto|concise|detailed|none      --no-reasoning  скрыть
   --verbosity low|medium|high   --temperature <n>   --max-output-tokens <n>
   --out, -o <путь>       сохранить ответ в файл (для image — путь/каталог изображений)
@@ -70,10 +73,12 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --max-turns <n>        лимит ходов агента          --shell powershell|pwsh|bash|sh|zsh|cmd
                          когда лимит исчерпан, терминал предлагает продлить на limits.extendTurns (10) ходов
   При tools.fetch доступны download_font (Google Fonts или URL) и download_icons (Phosphor, Lucide с CDN).
-  При tools.subagents доступен run_subagent: отдельный агент со своим контекстом, своими инструментами
-  и лимитом ходов. coder, worker, writer правят файлы; reviewer и tester только проверяют; vision описывает
-  картинки; solver отвечает по экрану или картинке; image-processor готовит ассеты. Суб-агент не видит
-  переписку — задачу пишут целиком; свой суб-агент ему недоступен, и правит он лишь то, что разрешено вызвавшему.
+  При tools.subagents доступны run_subagent и delegate_role: отдельный агент со своим контекстом, своими инструментами
+  и лимитом ходов. delegate_role с context=true прикладывает общий контекст команды (план, находки, отчёты, diff),
+  context=false запускает роль на чистом контексте. coder, worker, writer правят файлы; reviewer и tester только
+  проверяют; vision описывает картинки; solver отвечает по экрану или картинке; image-processor готовит ассеты.
+  Вложенный запуск не видит переписку — задачу пишут целиком; свой суб-агент ему недоступен, и правит он лишь
+  то, что разрешено вызвавшему.
 
   split_image и crop_image требуют ImageMagick (magick или convert); путь задаётся полем magickPath.
   crop_image режет коробку x/y/width/height, а с trim=true снимает padding по краям.
@@ -81,9 +86,10 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 
 Команда (run и gen):
-  --role <роль=модель[:effort]>  модель для роли: planner, architect, orchestrator, worker, coder, writer, reviewer, vision,
-                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, image-processor, default, all
-                         (например: --role planner=gpt-6-luna:high --role worker=gpt-6-luna --role vision=gpt-6-luna)
+  --role <роль=модель[:effort[:max-effort]]>  модель для роли: planner, architect, orchestrator, worker, coder, writer, reviewer, vision,
+                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, image-processor, default, all.
+                         Своё имя-слаг создаёт роль в roles.<имя> (инструкции и инструменты задаются в конфигурации)
+                         (например: --role planner=gpt-6-luna:high --role worker=gpt-6-luna:medium:high --role vision=gpt-6-luna)
                          --role collector=... и --role coordinator=... принимают orchestrator (объединённая роль)
     --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
     --orchestrator         оркестратор после этапов: сбор контекста, свежий взгляд на план, правки плана и указания следующему шагу
@@ -97,6 +103,9 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
                           и пошаговый бриф для остальных ролей; его вопросы получает orchestrator.
                           auto — только для нетривиального плана (по умолчанию), always — всегда, --no-architect выключает.
                           Структура уходит в общий контекст и в .tmp/<id>/architecture.json
+   Порядок этапов задаёт план (поле pipeline) и agent.pipeline в конфигурации: answer, classify, plan, measure,
+   architect, collect, images, work, review, outcome, memory. Пропущенный этап не выполняется; зависимость
+   (например, review после work) всё равно встаёт раньше.
   --no-resume            не продолжать незавершённый шаг, фазу и ход из .tmp (по умолчанию тот же текст задачи продолжается с места остановки)
   --route encoder|planner|decisions  куда отдать первый ответ. decisions спрашивает модель решений. Без флага решает метка ответа
   В каталоге Node.js или фронтенда сканер (до ответа, encoder и planner) кладёт в контекст package.json, tsconfig.json или jsconfig.json, import map и найденные по ним файлы. Корневой index.html целиком — если он до 8 КиБ или задача про страницу.

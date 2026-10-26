@@ -41,7 +41,7 @@ import { HELP } from './cli-help.js';
 export { HELP };
 
 const OPTIONS = {
-    model: { type: 'string', short: 'm' }, effort: { type: 'string' }, summary: { type: 'string' },
+    model: { type: 'string', short: 'm' }, effort: { type: 'string' }, 'max-effort': { type: 'string' }, summary: { type: 'string' },
     reasoning: { type: 'boolean', default: true }, instructions: { type: 'string', short: 'i' },
     image: { type: 'string', multiple: true }, file: { type: 'string', short: 'f', multiple: true }, detail: { type: 'string' },
     out: { type: 'string', short: 'o' }, session: { type: 'string', short: 's' }, store: { type: 'boolean', default: false },
@@ -65,7 +65,7 @@ const OPTIONS = {
     listen: { type: 'boolean', default: false }, port: { type: 'string' }, line: { type: 'string' }, character: { type: 'string' },
     language: { type: 'string' }, token: { type: 'string' }, serve: { type: 'boolean', default: false },
     fidelity: { type: 'string' }, creativity: { type: 'string' }, platform: { type: 'string' },
-    speed: { type: 'string' }, pace: { type: 'string' }, 'max-steps': { type: 'string' },
+    speed: { type: 'string' }, pace: { type: 'string' }, 'max-steps': { type: 'string' }, context: { type: 'string' },
     template: { type: 'string', multiple: true }, example: { type: 'string', multiple: true },
     'mcp-command': { type: 'string' }, 'mcp-arg': { type: 'string', multiple: true },
     'mcp-url': { type: 'string' }, 'mcp-description': { type: 'string' }, 'mcp-approval': { type: 'string' },

@@ -97,7 +97,10 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.deepEqual(overrides.roles, { planner: { model: 'gpt-6.1-sol', effort: 'high' }, worker: { model: 'gpt-6-luna' } });
     assert.deepEqual(overrides.agent, { mode: 'single' });
     assert.deepEqual(overrides.memory, { enabled: false });
-    assert.throws(() => overridesFrom({ role: ['nobody=x'] }), /неизвестная роль/);
+    // 0.2.0: an unknown name becomes a user-defined role; only a malformed slug is refused.
+    assert.deepEqual(overridesFrom({ role: ['nobody=x'] }).roles, { nobody: { model: 'x' } });
+    assert.throws(() => overridesFrom({ role: ['Bad Name=x'] }), /--role/);
+    assert.throws(() => overridesFrom({ role: ['UPPER=x'] }), /--role/);
     assert.deepEqual(overridesFrom({ role: ['image-processor=gpt-6-luna:medium'] }).roles, { 'image-processor': { model: 'gpt-6-luna', effort: 'medium' } });
     assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 19);
     assert.equal(overridesFrom({ extract: 'always' }).agent.extract, 'always');
@@ -1700,4 +1703,63 @@ test('a spent measurement budget still returns the sheet for what the role alrea
     const sheet = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.json'), 'utf8'));
     assert.equal(sheet.summary, 'Замерено частично');
     await rm(dir, { recursive: true, force: true });
+});
+
+test('the plan chooses the stage order and a dependency is pulled in front of its dependent', async () => {
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'answer') return { text: 'План.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({ summary: 'порядок', complexity: 'trivial', pipeline: ['work', 'plan', 'outcome'], steps: [{ goal: 'ничего не менять', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        }
+        return { text: 'готово' };
+    };
+    const config = { ...baseConfig(), memory: { ...defaults.memory, enabled: false } };
+    const events = [];
+    const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'порядок', root, approvalLevel: 'read', emit: (e) => events.push(e) });
+    assert.equal(result.status, 'completed', result.error?.message);
+    const started = events.filter((e) => e.type === 'stage.start').map((e) => e.stage);
+    assert.deepEqual(started, ['answer', 'plan', 'work'], 'plan is pulled before work even when the plan lists it later');
+    assert.equal(seen.filter((role) => role === 'collector').length, 0, 'the plan dropped the collector');
+});
+
+test('the plan drops the stages that follow it', async () => {
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'answer') return { text: 'План.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({ summary: 'без сбора', complexity: 'normal', pipeline: ['plan', 'work', 'outcome'], steps: [{ goal: 'сделать', details: '', verify: '' }], filesOfInterest: ['package.json'], searchQueries: ['sum'], questionsForCollector: ['Какой runner?'], acceptanceCriteria: [], needsReview: true, imageNotes: null, risks: [] }) };
+        }
+        return { text: 'готово' };
+    };
+    const config = { ...baseConfig(), memory: { ...defaults.memory, enabled: false } };
+    const events = [];
+    const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'без сбора', root, approvalLevel: 'read', emit: (e) => events.push(e) });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(seen.includes('collector'), false, 'the plan dropped the collector');
+    assert.equal(seen.includes('reviewer'), false, 'the plan dropped the reviewer');
+    assert.deepEqual(events.filter((e) => e.type === 'stage.start').map((e) => e.stage), ['answer', 'plan', 'work']);
+});
+
+test('agent.pipeline from the config orders a run whose plan has no order', async () => {
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'planner') {
+            return { text: JSON.stringify({ summary: 'из конфига', complexity: 'trivial', pipeline: [], steps: [{ goal: 'сделать', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        }
+        return { text: 'готово' };
+    };
+    const config = { ...baseConfig(), memory: { ...defaults.memory, enabled: false } };
+    config.agent = { ...config.agent, pipeline: ['plan', 'work', 'outcome'] };
+    const events = [];
+    const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'из конфига', root, approvalLevel: 'read', emit: (e) => events.push(e) });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.deepEqual(events.filter((e) => e.type === 'stage.start').map((e) => e.stage), ['plan', 'work']);
+    assert.equal(seen.includes('classifier'), false);
 });

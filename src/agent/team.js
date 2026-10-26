@@ -2,12 +2,12 @@
  * @file src/agent/team.js
  * @module agent/team
  * @purpose Run planner, architect, measurer, image processor, orchestrator, worker, reviewer, and summarizer over one shared context.
- * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, agent/work-plan, agent/handoff, agent/quality, mcp/session, channels/decide, channels/questions, channels/verdict
+ * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, agent/work-plan, agent/handoff, agent/quality, agent/pipeline, mcp/session, channels/decide, channels/questions, channels/verdict
  * @usedBy commands/run, index.js
  * @exports toolNamesForRole, runTeam
  * @ai.tags team, roles
  * @ai.hint keep
- * @changed 2026-10-25 The measurer studies the whole reference first, then the staged fragments, and saves JSON/TOON conclusions.
+ * @changed 2026-10-26 Stages run from a data-driven pipeline; the plan and the config choose the order.
  */
 
 import path from 'node:path';
@@ -19,7 +19,7 @@ import { discoverAgents } from '../core/agents-md.js';
 import { isAbortError, CancelledError, BudgetError } from '../openai/errors.js';
 import { clipMiddle, errorMessage } from '../util/text.js';
 import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
-import { SPECIALISTS } from '../roles/index.js';
+import { executorSpec, executorToolNames, executorNames } from './role-registry.js';
 import { coderChoice, isCodingStep } from '../roles/coder.js';
 import { solverChoice } from '../roles/solver.js';
 import { measurerChoice } from '../roles/measurer.js';
@@ -47,6 +47,7 @@ import { CommandBatchError, executeFileCommands, FILE_COMMANDS_SCHEMA } from './
 import { EXTRACT_MAX_BYTES, EXTRACT_MAX_FILES, extractHandoff, hasExtractableArtifacts } from './extract.js';
 import { assessQuality, assessmentImages } from './quality.js';
 import { stageMeasurementCrops, measurementConclusion, measurementIndex } from './measure-crops.js';
+import { createPipeline } from './pipeline.js';
 import { encodeToon } from '../util/toon.js';
 
 /**
@@ -94,11 +95,24 @@ function measurementReport(sheet, conclusion, dir) {
 
 
 
-/** The orchestrator and architect stay read-only. Reviewer may run commands and use the desktop. Worker keeps every enabled name. */
-export function toolNamesForRole(allNames, role) {
+/**
+ * Tools one role may use, cut from the enabled names of the run.
+ * The orchestrator and architect stay read-only. Reviewer may run commands and use the desktop.
+ * Worker keeps every enabled name. A role that names its own tools (a user-defined role) keeps only those.
+ * @param {string[]} allNames
+ * @param {string} role
+ * @param {{ tools?: string[] | null }} [spec] the `roles.<name>` entry of the configuration
+ * @returns {string[]}
+ * @exports
+ * @ai.hint pure
+ */
+export function toolNamesForRole(allNames, role, spec = null) {
+    if (Array.isArray(spec?.tools) && spec.tools.length) {
+        return allNames.filter((name) => spec.tools.includes(name));
+    }
     if (role === 'orchestrator' || role === 'architect' || role === 'collector' || role === 'coordinator') return allNames.filter((name) => READ_ONLY_TOOLS.includes(name));
     if (role === 'reviewer') {
-        return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || name === 'run_subagent');
+        return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || name === 'run_subagent' || name === 'delegate_role');
     }
     if (role === 'image-processor' || role === 'measurer') {
         const allowed = new Set(role === 'image-processor'
@@ -141,10 +155,11 @@ export async function runTeam({
         speed: paceSettings.speed, quality: paceSettings.quality, mode: paceSettings.mode, models: paceSettings.models,
         generation, fidelity: generation ? config.generate?.fidelity : null,
         stepCapOverride: config.stepCapPinned ? config.agent.maxSteps : null,
+        modelProfiles: config.models ?? null,
         ...extra,
     });
     const adopt = (extra) => {
-        paced = applyPins(resolvePace(paceInput(extra)), config.roles ?? {}, pins);
+        paced = applyPins(resolvePace(paceInput(extra)), config.roles ?? {}, pins, config.models ?? null);
         if (extra.label) pacedLabel = extra.label;
         if (paced.ready) stepLimit = planLimit({ maxSteps: paced.stepCap, generation, pace: true });
         return paced;
@@ -159,7 +174,7 @@ export async function runTeam({
         const one = applyPins(resolvePace(paceInput({
             label: pacedLabel,
             steps: [{ complexity: known, author, files: [], goal: '', details: '', verify: '' }],
-        })), config.roles ?? {}, pins);
+        })), config.roles ?? {}, pins, config.models ?? null);
         return one.steps?.[0] ?? { model: null, effort: null };
     };
     const result = { status: 'failed', text: '', plan: null, architecture: null, review: null, steps: [], images: [], changes: [], stats: null,
@@ -170,9 +185,9 @@ export async function runTeam({
     const mcpRead = mcp.extras.filter((extra) => extra.category === 'read');
     const imageApi = imageTransport(config) === 'images';
     const enabled = enabledToolNames(config.tools, { interactive, memory: Boolean(memory), summarize: true, imageApi, unsafeScreenshot: config.desktop?.unsafeScreenshot === true });
-    const readNames = toolNamesForRole(enabled, 'orchestrator');
-    const reviewerNames = toolNamesForRole(enabled, 'reviewer');
-    const allNames = toolNamesForRole(enabled, 'worker');
+    const readNames = toolNamesForRole(enabled, 'orchestrator', config.roles?.orchestrator);
+    const reviewerNames = toolNamesForRole(enabled, 'reviewer', config.roles?.reviewer);
+    const allNames = toolNamesForRole(enabled, 'worker', config.roles?.worker);
     const vision = (role) => {
         if (config.agent.visionDelegate === 'never') return null;
         if (role === 'worker' || role === 'reviewer') return roles.describeImage;
@@ -181,14 +196,21 @@ export async function runTeam({
     const taskMarks = { edit: null };
     const stepState = { complexity: 'normal' };
     let marks = [];
-    /** Run one specialist on `task` and return its text, status, and JSON. */
-    async function delegate(role, task) {
-        if (!Object.hasOwn(SPECIALISTS, role)) throw new Error(`delegate_role: неизвестная роль «${role}».`);
-        const spec = SPECIALISTS[role];
+    /**
+     * Run one executor on `task` and return its text, status, and JSON.
+     * `context` prepends the shared context of this run, so the role does not rediscover what the
+     * run already knows; without it the role sees the task alone, like run_subagent.
+     */
+    async function delegate(role, task, { context = false } = {}) {
+        const spec = executorSpec(role, config);
+        if (!spec) throw new Error(`delegate_role: неизвестная роль «${role}» (${executorNames(config).join(', ')}).`);
         // Measurement crops are local artifacts, not image generation: keep them available to the measurer.
-        const names = spec.tools.filter((name) => allNames.includes(name)
-            || (role === 'measurer' && ['crop_image', 'split_image'].includes(name)));
-        if (role === 'measurer' && allNames.includes('fetch_url')) names.push('fetch_url');
+        const names = executorToolNames(spec, allNames, { nested: true });
+        if (role === 'measurer') {
+            for (const name of ['crop_image', 'split_image', 'fetch_url']) {
+                if (!names.includes(name)) names.push(name);
+            }
+        }
         const toolset = createToolset({
             ...toolBase, names, approvalLevel,
             allowWrite: role === 'measurer' ? ['crop_image', 'split_image'] : [],
@@ -204,8 +226,9 @@ export async function runTeam({
         if (!encodeRoute && paced?.ready) {
             model = clampModel(model ?? roles.resolve(role).model, paceSettings.models, paced.ceilingIndex, Boolean(pins[role]?.model));
         }
+        const text = context ? `${ctx.render({ maxBytes })}\n\n# Task\n${task}` : task;
         const result = await roles.run(role, {
-            text: task, instructions: withAgents(ROLE_INSTRUCTIONS[role]), toolset, maxTurns: role === 'measurer' ? (config.agent.measurerMaxTurns ?? spec.turns) : spec.turns,
+            text, instructions: withAgents(ROLE_INSTRUCTIONS[role] ?? ''), toolset, maxTurns: role === 'measurer' ? (config.agent.measurerMaxTurns ?? spec.turns) : spec.turns,
             ...(builtin.length ? { builtin } : {}),
             silent: true,
             ...(spec.schema === 'batch' ? { schema: BATCH_SCHEMA, schemaName: 'batch' } : {}),
@@ -222,17 +245,20 @@ export async function runTeam({
         toolOptions: { describeImage: vision('worker'), describeScreen: roles.describeScreen },
         agentsText: () => effectiveAgentsText,
     });
+    // Both delegation tools offer the same role list: the built-in executors plus the user-defined roles.
+    const executors = executorNames(config);
+    const toolEnums = { delegate_role: { role: executors }, run_subagent: { kind: executors } };
     const workerTools = createToolset({
         ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker'), editPaths: () => taskMarks.edit,
-        describeScreen: roles.describeScreen, delegate, subagent, extras: mcp.extras,
+        describeScreen: roles.describeScreen, delegate, subagent, extras: mcp.extras, toolEnums,
     });
     const orchestratorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('orchestrator'), extras: mcpRead });
     const architectTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('architect'), extras: mcpRead });
     const reviewerTools = createToolset({
         ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer'),
-        describeScreen: roles.describeScreen, delegate, subagent, extras: mcpRead,
+        describeScreen: roles.describeScreen, delegate, subagent, extras: mcpRead, toolEnums,
     });
-    const imageProcessorNames = toolNamesForRole(enabled, 'image-processor');
+    const imageProcessorNames = toolNamesForRole(enabled, 'image-processor', config.roles?.['image-processor']);
     const imageProcessorTools = createToolset({ ...toolBase, names: imageProcessorNames, approvalLevel });
     const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi });
     const imageProcessorBuiltin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi })
@@ -661,6 +687,19 @@ export async function runTeam({
             notify({ type: 'pace', speed: paceSettings.speed, quality: paceSettings.quality, policy: paced.policy, model: paced.ceilingModel });
         }
 
+        // The stage sequence is data: the planner may order it, the config may pin it, and the
+        // pipeline runner skips what the plan omits. A stage returns { exit } to end the run.
+        let workIncomplete = false;
+        let revisionUsed = false;
+        let revisionAt = -1;
+        let revisionOnly = false;
+        let review = null;
+        let decisionsAccepted = false;
+        const referenceParts = parts.filter((part) => part?.type === 'input_image');
+        const stages = [
+            {
+                id: 'answer',
+                run: async () => {
         if (!resumedWork && config.agent.chain !== false) {
             handoff = await openHandoff(root);
             for (const file of seedFiles) {
@@ -676,7 +715,7 @@ export async function runTeam({
                 instructionsOnly: true,
                 builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
             });
-            if (answered.status !== 'completed') return stop(answered, 'ответ');
+            if (answered.status !== 'completed') return { exit: stop(answered, 'ответ') };
             const spilled = await spillAnswer(root, handoff, answered.text);
             let routeChoice = config.agent.route;
             if (routeChoice === 'decisions') {
@@ -731,7 +770,7 @@ export async function runTeam({
             if (route === 'encode') {
                 encodeRoute = true;
                 const encoded = await encodeHandoff();
-                if (!encoded.ok) return encoded.done;
+                if (!encoded.ok) return { exit: encoded.done };
                 if (encoded.written.length >= 2) {
                     const filePlan = lists(expandPlan({
                         summary: 'Запись файлов', complexity: 'normal',
@@ -764,12 +803,12 @@ export async function runTeam({
                         publish();
                         await persist(outcome.status === 'completed' ? 'running' : outcome.status);
                         notify({ type: 'step.done', index: compatIndex + 1, total: plan.steps.length, status: outcome.status, summary: outcome.text.trim() });
-                        if (HARD_STOP.has(outcome.status)) return stop(outcome, 'согласование');
+                        if (HARD_STOP.has(outcome.status)) return { exit: stop(outcome, 'согласование') };
                         if (outcome.status !== 'completed') {
                             result.status = 'incomplete';
                             result.text = handoff.text;
                             await persist('incomplete');
-                            return finish();
+                            return { exit: finish() };
                         }
                     }
                     work.progress.stage = 'done';
@@ -781,10 +820,14 @@ export async function runTeam({
                 const compat = compatReport ? `## Согласование\n${compatReport}` : '';
                 result.text = [handoff.text, files, compat].filter(Boolean).join('\n\n');
                 result.finalNote = encoded.written.length ? `Записаны файлы: ${encoded.written.join(', ')}` : handoff.text;
-                return finish();
+                return { exit: finish() };
             }
         }
-
+                },
+            },
+            {
+                id: 'classify',
+                run: async () => {
         if (!resumedWork && !encodeRoute) {
             adopt({ label: null });
             const classified = await roles.run('classifier', {
@@ -811,7 +854,11 @@ export async function runTeam({
                 showPlan();
             }
         }
-
+                },
+            },
+            {
+                id: 'plan',
+                run: async () => {
         // 1. Planner. A resumed plan is already bound.
         if (!plan) {
         notify({ type: 'stage.start', stage: 'plan', role: 'planner', model: paced.roles.planner.model });
@@ -822,7 +869,7 @@ export async function runTeam({
             model: paced.roles.planner.model, effort: paced.roles.planner.effort,
             builtin: config.tools.web ? builtinTools(config, { web: true }) : [],
         });
-        if (planned.status !== 'completed') return stop(planned, 'план');
+        if (planned.status !== 'completed') return { exit: stop(planned, 'план') };
         const drafted = lists(planned.data);
         drafted.steps = drafted.steps.slice(0, stepLimit);
         if (!drafted.steps.length) drafted.steps = [{ goal: task, details: 'Complete the task as described.', verify: 'Re-read the result.', complexity: drafted.complexity === 'trivial' || drafted.complexity === 'complex' || drafted.complexity === 'normal' ? drafted.complexity : 'normal' }];
@@ -846,7 +893,7 @@ export async function runTeam({
             for (const action of plan.fileActions) {
                 if (action?.action === 'encode') {
                     const encoded = await encodeHandoff();
-                    if (!encoded.ok) return encoded.done;
+                    if (!encoded.ok) return { exit: encoded.done };
                 } else if (action?.action === 'read' || action?.action === 'write' || action?.action === 'list') {
                     const command = action.action === 'list'
                         ? {
@@ -863,7 +910,7 @@ export async function runTeam({
                             end: action.action === 'read' ? (action.end ?? null) : null,
                         };
                     const applied = await applyCommands([command]);
-                    if (!applied.ok) return applied.done;
+                    if (!applied.ok) return { exit: applied.done };
                 }
             }
             ctx.set('answer', 'First answer', handoff.text, { priority: 5 });
@@ -872,9 +919,12 @@ export async function runTeam({
         }
 
         await orchestrate('plan');
-
+                },
+            },
+            {
+                id: 'measure',
+                run: async () => {
         // 2. Measurer: numbers for the references before any style, SVG, or artwork is written.
-        const referenceParts = parts.filter((part) => part?.type === 'input_image');
         const measureMode = config.agent.measure ?? 'auto';
         if (measureMode !== 'off' && !resumedWork && referenceParts.length && (measureMode === 'always' || plan.complexity !== 'trivial')) {
             const tier = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
@@ -940,7 +990,7 @@ export async function runTeam({
                 maxTurns: overviewTurns,
                 session: createSession({ store: false, model }),
             });
-            if (HARD_STOP.has(measured.status)) return stop(measured, 'замеры');
+            if (HARD_STOP.has(measured.status)) return { exit: stop(measured, 'замеры') };
             let sheet = measured.data ?? null;
             let stagedCrops = { crops: [], warnings: [] };
             if (sheet && measurePasses > 1) {
@@ -970,7 +1020,7 @@ export async function runTeam({
                 });
                 // A failed fragment pass must not throw away the overview sheet; cancellation and
                 // budget exhaustion still stop the run.
-                if (HARD_STOP.has(detailed.status) && detailed.status !== 'failed') return stop(detailed, 'замеры');
+                if (HARD_STOP.has(detailed.status) && detailed.status !== 'failed') return { exit: stop(detailed, 'замеры') };
                 if (detailed.data) {
                     sheet = detailed.data;
                     measured = detailed;
@@ -1013,7 +1063,11 @@ export async function runTeam({
             }
             notify({ type: 'stage.done', stage: 'measure', status: measured.status });
         }
-
+                },
+            },
+            {
+                id: 'architect',
+                run: async () => {
         // 2b. Architect and designer: the file/module structure and the per-step brief for the remaining roles.
         // It runs after the measurements (numbers are the source of truth) and before context collection,
         // so the orchestrator can answer its questions and every author sees the same structure.
@@ -1033,7 +1087,7 @@ export async function runTeam({
                 toolset: architectTools, schema: ARCHITECT_SCHEMA, schemaName: 'architecture',
                 maxTurns: config.agent.architectMaxTurns ?? 8, model, effort, onMaxTurns,
             });
-            if (HARD_STOP.has(architected.status)) return stop(architected, 'архитектура');
+            if (HARD_STOP.has(architected.status)) return { exit: stop(architected, 'архитектура') };
             // A spent turn budget must not lose the brief: one tool-less pass writes it from what the role already saw.
             if (!architected.data && ['max_turns', 'incomplete'].includes(architected.status)) {
                 notify({ type: 'warning', message: 'Лимит ходов архитектора исчерпан; роль отдаёт структуру по уже просмотренному.' });
@@ -1061,7 +1115,11 @@ export async function runTeam({
                 notify({ type: 'stage.done', stage: 'architect', status: architected.status });
             }
         }
-
+                },
+            },
+            {
+                id: 'collect',
+                run: async () => {
         // 2. Context collection by the orchestrator (read-only). Skipped when this run already moved past it.
         const wantsContext = plan.complexity !== 'trivial' && (
             plan.filesOfInterest.length || plan.searchQueries.length || plan.questionsForCollector.length
@@ -1082,7 +1140,7 @@ export async function runTeam({
                 schema: COLLECTOR_SCHEMA, schemaName: 'context_report', maxTurns: config.agent.orchestratorMaxTurns,
                 model: paced.roles.orchestrator.model, effort: paced.roles.orchestrator.effort,
             });
-            if (HARD_STOP.has(collected.status)) return stop(collected, 'сбор контекста');
+            if (HARD_STOP.has(collected.status)) return { exit: stop(collected, 'сбор контекста') };
             if (collected.status === 'completed' && collected.data) {
                 const text = renderFindings(collected.data);
                 ctx.set('findings', 'Collected context (by the orchestrator)', text, { priority: 6 });
@@ -1092,7 +1150,11 @@ export async function runTeam({
         }
 
         await orchestrate('collect');
-
+                },
+            },
+            {
+                id: 'images',
+                run: async () => {
         // 3. Prepare requested visual assets once, before implementation starts.
         const imageTasks = plan.imageTasks.filter((item) => item && typeof item.goal === 'string' && item.goal.trim());
         if (imageTasks.length) {
@@ -1119,7 +1181,7 @@ export async function runTeam({
                 });
                 if (processed.status !== 'completed' || !processed.data) {
                     notify({ type: 'stage.done', stage: 'image-processing', status: processed.status });
-                    return stop(processed, 'подготовка изображений');
+                    return { exit: stop(processed, 'подготовка изображений') };
                 }
                 const assets = Array.isArray(processed.data.assets)
                     ? processed.data.assets.filter((asset) => asset && typeof asset.path === 'string' && asset.path.trim())
@@ -1154,14 +1216,18 @@ export async function runTeam({
                 notify({ type: 'stage.done', stage: 'image-processing', status: 'completed', assets: assets.map((asset) => asset.path) });
             }
         }
-
+                },
+            },
+            {
+                id: 'work',
+                run: async () => {
         // 4. Worker: one conversation, one step at a time, starting at the saved cursor.
         notify({ type: 'stage.start', stage: 'work', role: 'worker', model: roles.resolve('worker').model });
         progress.stage = 'work';
-        let workIncomplete = false;
-        let revisionUsed = false;
-        const revisionAt = String(revision ?? '').trim() ? progress.cursor : -1;
-        const revisionOnly = revisionAt >= 0 && progress.cursor >= plan.steps.length;
+        workIncomplete = false;
+        revisionUsed = false;
+        revisionAt = String(revision ?? '').trim() ? progress.cursor : -1;
+        revisionOnly = revisionAt >= 0 && progress.cursor >= plan.steps.length;
         /**
          * Run one plan step. A file step is two turns: the public surface, then the bodies.
          * @param {number} index
@@ -1304,7 +1370,7 @@ export async function runTeam({
             index = recordAt;
             result.steps.push({ index: recordAt + 1, goal: step.goal, status: ran.outcome.status, report: ran.report });
             notify({ type: 'step.done', index: recordAt + 1, total: plan.steps.length, status: ran.outcome.status, summary: ran.report });
-            if (HARD_STOP.has(ran.outcome.status)) return stop(ran.outcome, `шаг ${number}`);
+            if (HARD_STOP.has(ran.outcome.status)) return { exit: stop(ran.outcome, `шаг ${number}`) };
             await orchestrate('work', { step, status: ran.outcome.status, report: ran.report });
             if (ran.outcome.status !== 'completed') {
                 workIncomplete = true;
@@ -1334,19 +1400,21 @@ export async function runTeam({
                 work.progress = progress;
                 await persist(outcome.status === 'completed' ? 'running' : outcome.status);
                 notify({ type: 'step.done', index: 'revision', total: plan.steps.length, status: outcome.status, summary: outcome.text.trim() });
-                if (HARD_STOP.has(outcome.status)) return stop(outcome, 'доработка');
+                if (HARD_STOP.has(outcome.status)) return { exit: stop(outcome, 'доработка') };
                 if (outcome.status !== 'completed') workIncomplete = true;
                 revisionUsed = true;
             }
-
+                },
+            },
+            {
+                id: 'review',
+                run: async () => {
         // 4. Review and fix rounds.
         const shouldReview = paced?.reviewMode === 'force'
             ? paced.reviewRounds > 0 && !workIncomplete && !revisionOnly
             : paced?.reviewMode === 'plan'
                 ? Boolean(plan.needsReview) && plan.complexity !== 'trivial' && paced.reviewRounds > 0 && !workIncomplete && !revisionOnly
                 : false;
-        let review = null;
-        let decisionsAccepted = false;
         if (shouldReview) {
             progress.stage = 'review';
             work.progress = progress;
@@ -1392,7 +1460,7 @@ export async function runTeam({
                 instructions: `${withAgents(ROLE_INSTRUCTIONS.reviewer)}\n\n${[acceptanceParagraph(paced.acceptance), guaranteesParagraph(paced.guarantees)].filter(Boolean).join('\n\n')}`, toolset: reviewerTools, schema: REVIEW_SCHEMA, schemaName: 'review', maxTurns: config.agent.reviewerMaxTurns,
                 model: safeReviewerModel(paced.roles.reviewer.model), effort: paced.roles.reviewer.effort, onMaxTurns,
             });
-            if (HARD_STOP.has(reviewed.status)) return stop(reviewed, 'ревью');
+            if (HARD_STOP.has(reviewed.status)) return { exit: stop(reviewed, 'ревью') };
             if (reviewed.status !== 'completed' || !reviewed.data) {
                 notify({ type: 'warning', message: `Ревью не завершено (${reviewed.status}); результат принят без независимой проверки.` });
                 break;
@@ -1416,10 +1484,14 @@ export async function runTeam({
             publish();
             await persist();
             notify({ type: 'stage.done', stage: 'fix', status: fixed.status });
-            if (HARD_STOP.has(fixed.status)) return stop(fixed, 'исправления');
+            if (HARD_STOP.has(fixed.status)) return { exit: stop(fixed, 'исправления') };
             await orchestrate('fix', { status: fixed.status, report: fixed.text.trim(), review });
         }
-
+                },
+            },
+            {
+                id: 'outcome',
+                run: async () => {
         // 5. Outcome.
         if (workIncomplete) result.status = 'incomplete';
         else if (review && review.verdict !== 'accept') result.status = 'revise';
@@ -1431,7 +1503,11 @@ export async function runTeam({
             review ? `## Ревью (${review.verdict})\n${review.summary}${review.issues.length ? `\n${review.issues.map((i) => `- [${i.severity}] ${i.path ? `${i.path}: ` : ''}${i.message}`).join('\n')}` : ''}${review.unverified.length ? `\nНе проверено:\n${bullets(review.unverified)}` : ''}` : '',
         ].filter(Boolean).join('\n\n');
         result.finalNote = review ? `${review.verdict === 'accept' ? 'Ревью: принято.' : 'Ревью: остались замечания.'} ${review.summary}` : lastReport;
-
+                },
+            },
+            {
+                id: 'memory',
+                run: async () => {
         // 6. Memory extraction (cheap summarizer role).
         if (memory) {
             if (config.memory.autoSave) {
@@ -1456,6 +1532,13 @@ export async function runTeam({
             memory.recordTask({ project: projectKey, projectName, task, status: result.status, summary: result.taskSummary ?? plan.summary,
                 changes: workerTools.stats().changes.map((c) => c.path), usage: ledger.snapshot() });
         }
+                },
+            },
+        ];
+        // A pipeline may start at the plan or skip the classifier; the pace must exist before any stage reads it.
+        if (!paced) adopt({ label: pacedLabel });
+        const exit = await createPipeline({ stages, config, plan: () => plan, notify }).run();
+        if (exit !== undefined) return exit;
         if (work) {
             work.progress.status = result.status;
             if (!workIncomplete && (result.status === 'completed' || result.status === 'revise')) work.progress.stage = 'done';
