@@ -54,7 +54,7 @@ const r = (overrides) => ({ ...ROLE_FIELDS, ...overrides });
  * AI_MODEL, AI_AGENT_HOME) and finally CLI flags.
  */
 export const defaults = Object.freeze({
-    model: 'gpt-6-luna',
+    model: 'gpt-6.1-terra',
     imageModel: 'gpt-image-2.5-sunburst',                 // null → gpt-image-2.5 (flare for generation, sunburst for edits) on the images API
     baseURL: "https://api.proxyapi.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
     apiKey: "{{env:PROXYAPI_API_KEY}}",                     // prefer the OPENAI_API_KEY environment variable
@@ -222,47 +222,47 @@ export const defaults = Object.freeze({
         writer: r({
             // Documents stay on the cheaper model; only the effort grows with the work.
             tiers: [
-                { model: 'gpt-6-luna', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
         reviewer: r({ effort: 'high' }),
         vision: r({
             // A medium image keeps the cheap model; a screenshot or a large image moves to the senior one.
             tiers: {
-                trivial: { model: 'gpt-6-luna', effort: 'medium' },
-                normal: { model: 'gpt-6-luna', effort: 'high' },
-                complex: { model: 'gpt-6.1-sol', effort: 'high' },
+                trivial: { model: 'gpt-6.1-terra', effort: 'medium' },
+                normal: { model: 'gpt-6.1-terra', effort: 'high' },
+                complex: { model: 'gpt-6.1-terra', effort: 'xhigh' },
             },
         }),
         summarizer: r({ effort: 'high', summary: 'none', verbosity: 'medium' }),
         solver: r({
             tiers: {
-                trivial: { model: 'gpt-6-luna', effort: 'medium' },
-                normal: { model: 'gpt-6-luna', effort: 'high' },
-                complex: { model: 'gpt-6.1-sol', effort: 'high' },
+                trivial: { model: 'gpt-6.1-terra', effort: 'high' },
+                normal: { model: 'gpt-6.1-terra', effort: 'xhigh' },
+                complex: { model: 'gpt-6.1-sol', effort: 'xhigh' },
             },
         }),
         clicker: r({ effort: 'low' }),
         typer: r({ effort: 'low' }),
-        encoder: r({ model: "gpt-6-luna", effort: 'xhigh' }),
+        encoder: r({ model: "gpt-6.1-terra", effort: 'high' }),
         tester: r({ effort: 'high' }),
         classifier: r({ effort: 'high' }),
-        extractor: r({ model: "gpt-6-luna", effort: 'xhigh', verbosity: 'low' }),
+        extractor: r({ model: "gpt-6.1-terra", effort: 'high', verbosity: 'low' }),
         coder: r({
             tiers: [
-                { model: 'gpt-6-luna', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
         measurer: r({
             tiers: [
-                { model: 'gpt-6-luna', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
         decorator: r({
            tiers: [
-                { model: 'gpt-6-luna', effort: ['high', 'xhigh', 'max'] },
+                { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
                 { model: 'gpt-6.1-sol', effort: ['high', 'xhigh', 'max'] },
             ],
         }),
@@ -371,7 +371,7 @@ export const defaults = Object.freeze({
         speed: 10,
         quality: 40,
         mode: 'auto',
-        models: ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'],
+        models: ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol'],
     },
     /** User MCP servers. stdio is spawned here. http is sent to the API as type mcp. */
     mcp: {

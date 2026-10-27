@@ -17,7 +17,7 @@ const cfg = (extra = {}) => ({
     roles: {}, models: null, ...extra,
 });
 
-const ladder = ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'];
+const ladder = ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol'];
 const paceBase = { speed: 10, quality: 40, mode: 'auto', models: ladder };
 
 // ── resolveRole: the model ceiling ─────────────────────────────────────────
@@ -37,7 +37,7 @@ test('resolveRole keeps an effort at or below the ceiling', () => {
 });
 
 test('resolveRole leaves an uncapped model alone', () => {
-    const role = resolveRole(cfg({ roles: { planner: { model: 'gpt-6-luna', effort: 'max' } } }), 'planner');
+    const role = resolveRole(cfg({ roles: { planner: { model: 'gpt-6.1-terra', effort: 'max' } } }), 'planner');
     assert.equal(role.effort, 'max');
 });
 
@@ -49,7 +49,7 @@ test('resolveRole passes none through any ceiling', () => {
 // ── resolveRole: the role ceiling ──────────────────────────────────────────
 
 test('roles.<name>.maxEffort caps a model with no ceiling of its own', () => {
-    const role = resolveRole(cfg({ roles: { summarizer: { model: 'gpt-6-luna', effort: 'max', maxEffort: 'low' } } }), 'summarizer');
+    const role = resolveRole(cfg({ roles: { summarizer: { model: 'gpt-6.1-terra', effort: 'max', maxEffort: 'low' } } }), 'summarizer');
     assert.equal(role.effort, 'low');
     assert.equal(role.ceiling, 'low');
 });
@@ -64,7 +64,7 @@ test('the stricter of the model ceiling and the role ceiling wins', () => {
 });
 
 test('roles.default.maxEffort applies to a role without its own ceiling', () => {
-    const role = resolveRole(cfg({ roles: { default: { maxEffort: 'low' }, planner: { model: 'gpt-6-luna', effort: 'high' } } }), 'planner');
+    const role = resolveRole(cfg({ roles: { default: { maxEffort: 'low' }, planner: { model: 'gpt-6.1-terra', effort: 'high' } } }), 'planner');
     assert.equal(role.effort, 'low');
 });
 
@@ -80,8 +80,8 @@ test('a configured ladder snaps the effort to the nearest level below', () => {
 
 test('a configured ceiling from models.<id> overrides the registry', () => {
     const config = cfg({
-        models: { 'gpt-6-luna': { ceiling: 'medium' } },
-        roles: { planner: { model: 'gpt-6-luna', effort: 'max' } },
+        models: { 'gpt-6.1-terra': { ceiling: 'medium' } },
+        roles: { planner: { model: 'gpt-6.1-terra', effort: 'max' } },
     });
     assert.equal(resolveRole(config, 'planner').effort, 'medium');
 });
@@ -104,21 +104,21 @@ test('resolvePace never hands a role an effort above its model ceiling', () => {
 });
 
 test('resolvePace caps an author step to the model it lands on', () => {
-    // complex + speed 0 → rung 1 (gpt-6.1-sol); with astra ceiling 'low' the step stays on sol
-    // because authorRung chooses the rung, the ceiling only bounds the effort.
+    // complex + speed 0 → rung 1 (gpt-6.1-terra); the ceiling only bounds the effort,
+    // because authorRung chooses the rung.
     const pace = resolvePace({
         ...paceBase, speed: 0, quality: 100, label: 'normal',
-        modelProfiles: { 'gpt-6.1-sol': { ceiling: 'low' } },
+        modelProfiles: { 'gpt-6.1-terra': { ceiling: 'low' } },
         steps: [{ complexity: 'complex', author: 'coder', files: [], goal: 'g', details: '', verify: '' }],
     });
-    assert.equal(pace.steps[0].model, 'gpt-6.1-sol');
+    assert.equal(pace.steps[0].model, 'gpt-6.1-terra');
     assert.equal(pace.steps[0].effort, 'low');
 });
 
 test('resolvePace without profiles keeps the registry ceilings', () => {
     const pace = resolvePace({ ...paceBase, speed: 0, quality: 200, label: 'normal' });
     // quality 200 pushes the planner to xhigh; sol serves it, so nothing changes.
-    assert.equal(pace.roles.planner.model, 'gpt-6-astra');
+    assert.equal(pace.roles.planner.model, 'gpt-6.1-sol');
     assert.equal(pace.roles.planner.effort, 'xhigh');
 });
 
@@ -133,7 +133,7 @@ test('applyPins honours the role ceiling of the pinned model', () => {
     const pace = resolvePace({ ...paceBase, label: 'normal' });
     const pinned = applyPins(
         pace,
-        { planner: { model: 'gpt-6-luna', effort: 'max', maxEffort: 'low' } },
+        { planner: { model: 'gpt-6.1-terra', effort: 'max', maxEffort: 'low' } },
         { planner: { model: true, effort: true } },
     );
     assert.equal(pinned.roles.planner.effort, 'low');
@@ -153,13 +153,13 @@ test('buildRequestBody caps the effort of a request from any caller', () => {
 });
 
 test('buildRequestBody honours a configured ladder', () => {
-    const config = cfg({ models: { 'gpt-6-luna': { efforts: ['low', 'medium'] } } });
-    const body = buildRequestBody({ config, model: 'gpt-6-luna', input: [], reasoningEffort: 'high' });
+    const config = cfg({ models: { 'gpt-6.1-terra': { efforts: ['low', 'medium'] } } });
+    const body = buildRequestBody({ config, model: 'gpt-6.1-terra', input: [], reasoningEffort: 'high' });
     assert.equal(body.reasoning.effort, 'medium');
 });
 
 test('buildRequestBody passes an effort a model can serve', () => {
-    const body = buildRequestBody({ config: cfg(), model: 'gpt-6-luna', input: [], reasoningEffort: 'max' });
+    const body = buildRequestBody({ config: cfg(), model: 'gpt-6.1-terra', input: [], reasoningEffort: 'max' });
     assert.equal(body.reasoning.effort, 'max');
 });
 
@@ -179,29 +179,29 @@ test('models section accepts ceilings and ladders', async () => {
 test('an unknown ceiling in models is rejected', async () => {
     await assert.rejects(
         loadConfig({
-            env: { AI_AGENT_HOME: 'test/.home-ceilings', AI_MODEL: 'gpt-6-luna' },
-            overrides: { models: { 'gpt-6-luna': { ceiling: 'ultra' } } },
+            env: { AI_AGENT_HOME: 'test/.home-ceilings', AI_MODEL: 'gpt-6.1-terra' },
+            overrides: { models: { 'gpt-6.1-terra': { ceiling: 'ultra' } } },
             ensureHome: false,
         }),
-        /models\.gpt-6-luna\.ceiling/,
+        /models\.gpt-6.1-terra\.ceiling/,
     );
 });
 
 test('an unknown field in models is rejected', async () => {
     await assert.rejects(
         loadConfig({
-            env: { AI_AGENT_HOME: 'test/.home-ceilings', AI_MODEL: 'gpt-6-luna' },
-            overrides: { models: { 'gpt-6-luna': { price: 3 } } },
+            env: { AI_AGENT_HOME: 'test/.home-ceilings', AI_MODEL: 'gpt-6.1-terra' },
+            overrides: { models: { 'gpt-6.1-terra': { price: 3 } } },
             ensureHome: false,
         }),
-        /models\.gpt-6-luna\.price: неизвестное поле/,
+        /models\.gpt-6.1-terra\.price: неизвестное поле/,
     );
 });
 
 test('roles.<name>.maxEffort is validated', async () => {
     await assert.rejects(
         loadConfig({
-            env: { AI_AGENT_HOME: 'test/.home-ceilings', AI_MODEL: 'gpt-6-luna' },
+            env: { AI_AGENT_HOME: 'test/.home-ceilings', AI_MODEL: 'gpt-6.1-terra' },
             overrides: { roles: { planner: { maxEffort: 'sometimes' } } },
             ensureHome: false,
         }),
@@ -223,29 +223,29 @@ test('--max-effort caps every role through roles.default', async () => {
 });
 
 test('--role parses an effort and a role ceiling', () => {
-    assert.deepEqual(overridesFrom({ role: ['worker=gpt-6-luna:high:xhigh'] }).roles, {
-        worker: { model: 'gpt-6-luna', effort: 'high', maxEffort: 'xhigh' },
+    assert.deepEqual(overridesFrom({ role: ['worker=gpt-6.1-terra:high:xhigh'] }).roles, {
+        worker: { model: 'gpt-6.1-terra', effort: 'high', maxEffort: 'xhigh' },
     });
-    assert.deepEqual(overridesFrom({ role: ['worker=gpt-6-luna::high'] }).roles, {
-        worker: { model: 'gpt-6-luna', maxEffort: 'high' },
+    assert.deepEqual(overridesFrom({ role: ['worker=gpt-6.1-terra::high'] }).roles, {
+        worker: { model: 'gpt-6.1-terra', maxEffort: 'high' },
     });
-    assert.throws(() => overridesFrom({ role: ['worker=gpt-6-luna:high:ultra'] }), /max-effort/);
-    assert.throws(() => overridesFrom({ role: ['worker=gpt-6-luna:loud'] }), /effort/);
+    assert.throws(() => overridesFrom({ role: ['worker=gpt-6.1-terra:high:ultra'] }), /max-effort/);
+    assert.throws(() => overridesFrom({ role: ['worker=gpt-6.1-terra:loud'] }), /effort/);
 });
 
 test('resolveRole never asks for more output tokens than the model accepts', () => {
-    const role = resolveRole(cfg({ roles: { planner: { model: 'gpt-6.1-sol', maxOutputTokens: 20000 } } }), 'planner');
-    assert.equal(role.maxOutput, 16384);
-    assert.equal(role.maxOutputTokens, 16384);
-    assert.equal(role.config.maxOutputTokens, 16384);
+    const role = resolveRole(cfg({ roles: { planner: { model: 'gpt-6.1-sol', maxOutputTokens: 40000 } } }), 'planner');
+    assert.equal(role.maxOutput, 32768);
+    assert.equal(role.maxOutputTokens, 32768);
+    assert.equal(role.config.maxOutputTokens, 32768);
     const small = resolveRole(cfg({ roles: { planner: { model: 'gpt-6-luna-decisions', maxOutputTokens: 1000 } } }), 'planner');
     assert.equal(small.maxOutputTokens, 256);
     assert.equal(small.config.maxOutputTokens, 256);
 });
 
 test('buildRequestBody caps max_output_tokens at the profile limit', () => {
-    const body = buildRequestBody({ config: cfg({ model: 'gpt-6.1-sol' }), input: [], maxOutputTokens: 32000 });
-    assert.equal(body.max_output_tokens, 16384);
+    const body = buildRequestBody({ config: cfg({ model: 'gpt-6.1-sol' }), input: [], maxOutputTokens: 40000 });
+    assert.equal(body.max_output_tokens, 32768);
     const small = buildRequestBody({ config: cfg({ model: 'gpt-6-luna-decisions' }), input: [], maxOutputTokens: 1000 });
     assert.equal(small.max_output_tokens, 256);
 });

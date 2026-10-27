@@ -40,9 +40,10 @@ export const DEFAULT_PROFILE = Object.freeze({ window: 128 * 1024, maxOutput: 16
  * Override any field for one installation in the `models.<id>` section of the configuration.
  */
 export const MODEL_PROFILES = Object.freeze({
-    'gpt-6.1-sol': { window: 128 * 1024, maxOutput: 16384, ceiling: 'xhigh', efforts: null },
+    'gpt-6.1-sol': { window: 256 * 1024, maxOutput: 32768, ceiling: 'xhigh', efforts: null },
+    'gpt-6.1-terra': { window: 256 * 1024, maxOutput: 32768, ceiling: 'max', efforts: null },
     'gpt-6-luna': { window: 256 * 1024, maxOutput: 16384, ceiling: 'max', efforts: null },
-    'gpt-6-astra': { window: 200 * 1024, maxOutput: 32768, ceiling: 'max', efforts: null },
+    'gpt-6-astra': { window: 200 * 1024, maxOutput: 32768, ceiling: 'xhigh', efforts: null },
     'gpt-6-luna-decisions': { window: 128 * 1024, maxOutput: 256, ceiling: null, efforts: null },
 });
 

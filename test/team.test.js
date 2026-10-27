@@ -47,7 +47,7 @@ const baseConfig = () => structuredClone({
     ...defaults, model: 'gpt-6.1-sol', home: root, baseURL: server.baseURL,
     pace: { ...defaults.pace, quality: 20 },
     agent: { ...defaults.agent, architect: 'off' },
-    roles: { ...defaults.roles, worker: { ...defaults.roles.worker, model: 'gpt-6-luna' }, orchestrator: { ...defaults.roles.orchestrator, model: 'gpt-6-luna' },
+    roles: { ...defaults.roles, worker: { ...defaults.roles.worker, model: 'gpt-6.1-terra' }, orchestrator: { ...defaults.roles.orchestrator, model: 'gpt-6.1-terra' },
         vision: { ...defaults.roles.vision, model: 'gpt-6-luna-vision' }, summarizer: { ...defaults.roles.summarizer, model: 'gpt-6-luna-nano' } },
     memory: { ...defaults.memory, dbFile: ':memory:' },
 });
@@ -91,18 +91,18 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     cfg.roles.default = { ...cfg.roles.default, model: 'default-model' };
     assert.equal(resolveRole(cfg, 'planner').model, 'default-model');
     assert.equal(resolveRole(cfg, 'planner').effort, 'high');
-    assert.equal(resolveRole(cfg, 'worker').model, 'gpt-6-luna');
+    assert.equal(resolveRole(cfg, 'worker').model, 'gpt-6.1-terra');
     assert.equal(resolveRole(cfg, 'default').config.model, 'default-model');
     assert.equal(resolveRole(cfg, 'summarizer').config.reasoning.summary, 'none');
-    const overrides = overridesFrom({ role: ['planner=gpt-6.1-sol:high', 'worker=gpt-6-luna'], single: true, memory: false });
-    assert.deepEqual(overrides.roles, { planner: { model: 'gpt-6.1-sol', effort: 'high' }, worker: { model: 'gpt-6-luna' } });
+    const overrides = overridesFrom({ role: ['planner=gpt-6.1-sol:high', 'worker=gpt-6.1-terra'], single: true, memory: false });
+    assert.deepEqual(overrides.roles, { planner: { model: 'gpt-6.1-sol', effort: 'high' }, worker: { model: 'gpt-6.1-terra' } });
     assert.deepEqual(overrides.agent, { mode: 'single' });
     assert.deepEqual(overrides.memory, { enabled: false });
     // 0.2.0: an unknown name becomes a user-defined role; only a malformed slug is refused.
     assert.deepEqual(overridesFrom({ role: ['nobody=x'] }).roles, { nobody: { model: 'x' } });
     assert.throws(() => overridesFrom({ role: ['Bad Name=x'] }), /--role/);
     assert.throws(() => overridesFrom({ role: ['UPPER=x'] }), /--role/);
-    assert.deepEqual(overridesFrom({ role: ['image-processor=gpt-6-luna:medium'] }).roles, { 'image-processor': { model: 'gpt-6-luna', effort: 'medium' } });
+    assert.deepEqual(overridesFrom({ role: ['image-processor=gpt-6.1-terra:medium'] }).roles, { 'image-processor': { model: 'gpt-6.1-terra', effort: 'medium' } });
     assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 20);
     assert.equal(overridesFrom({ extract: 'always' }).agent.extract, 'always');
     assert.equal(overridesFrom({ 'no-extract': true }).agent.extract, 'off');
@@ -125,7 +125,7 @@ test('memory store: remember / recall (FTS) / list / forget / tasks / file summa
     assert.equal(memory.list({ project }).length, 2);
     assert.ok(memory.forget(a.id));
     assert.equal(memory.list({ project }).length, 1);
-    memory.putFileSummary(project, 'src/a.js', 'sha1', 'summary text', 'gpt-6-luna');
+    memory.putFileSummary(project, 'src/a.js', 'sha1', 'summary text', 'gpt-6.1-terra');
     assert.equal(memory.getFileSummary(project, 'src/a.js', 'sha1').summary, 'summary text');
     assert.equal(memory.getFileSummary(project, 'src/a.js', 'sha2'), null, 'stale hash misses');
     memory.recordTask({ project, projectName: 'demo', task: 'do x', status: 'completed', summary: 'done', changes: ['a.js'] });
@@ -217,7 +217,7 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
     const memory = openMemory({ file: ':memory:' });
     const key = projectKey(root);
     memory.remember({ scope: 'project', project: key, kind: 'fact', content: 'Тесты в проекте пишутся на node:test; функции экспортируются как ESM', tags: ['esm'] });
-    const ledger = createLedger({ prices: { 'gpt-6.1-sol': { input: 10, output: 30 }, 'gpt-6-luna': { input: 1, output: 2 }, 'gpt-6-luna-nano': { input: 0.1, output: 0.4 }, 'gpt-6-astra': { input: 20, output: 60 } } });
+    const ledger = createLedger({ prices: { 'gpt-6.1-sol': { input: 10, output: 30 }, 'gpt-6.1-terra': { input: 1, output: 2 }, 'gpt-6-luna': { input: 1, output: 2 }, 'gpt-6-luna-nano': { input: 0.1, output: 0.4 }, 'gpt-6-astra': { input: 20, output: 60 } } });
     const events = [];
     const result = await runTeam({ client: client(), config, ledger, task: 'Добавь функцию sum с тестом', root, approvalLevel: 'all', memory, projectKey: key,
         projectName: 'demo', emit: (e) => events.push(e) });
@@ -234,10 +234,10 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
     assert.equal(result.recalled.length, 1);
     // Every role used its own model and effort.
     const planner = seen.find((s) => s.role === 'planner');
-    assert.equal(planner.model, 'gpt-6.1-sol');
+    assert.equal(planner.model, 'gpt-6.1-terra');
     assert.equal(planner.effort, 'high');
     assert.ok(seen.filter((s) => s.role === 'worker').every((s) => s.model === 'gpt-6-luna' && s.effort === 'medium'));
-    assert.equal(seen.find((s) => s.role === 'collector').model, 'gpt-6-luna');
+    assert.equal(seen.find((s) => s.role === 'collector').model, 'gpt-6.1-terra');
     assert.equal(seen.find((s) => s.role === 'summarizer').model, 'gpt-6-luna-nano');
     const stages = events.filter((e) => e.type === 'stage.start').map((e) => e.stage);
     assert.deepEqual(stages, ['answer', 'plan', 'collect', 'work', 'review', 'fix', 'review', 'memory']);
@@ -470,7 +470,7 @@ test('the extractor writes clean tmp files and the encoder copies them into the 
         assert.equal(await readFile(path.join(dir, 'src', 'app.js'), 'utf8'), "export const app = 'clean';\n");
         assert.match(encoderText, /# Extracted files/);
         assert.match(encoderText, /extracted/);
-        assert.equal(extractModel, 'gpt-6-luna');
+        assert.equal(extractModel, 'gpt-6.1-terra');
         assert.ok(events.some((event) => event.type === 'stage.start' && event.stage === 'extract' && event.role === 'extractor'));
         const { readdir } = await import('node:fs/promises');
         const id = (await readdir(path.join(dir, '.tmp'))).find((name) => /^[0-9a-f]{8}$/.test(name));
@@ -935,7 +935,7 @@ test('each step takes the model for its own complexity, not the plan complexity'
         const first = seen.filter((item) => item.step === 1);
         const second = seen.filter((item) => item.step === 2);
         assert.ok(first.length >= 1, JSON.stringify(seen));
-        assert.ok(first.every((item) => item.model === 'gpt-6.1-sol'), JSON.stringify(seen));
+        assert.ok(first.every((item) => item.model === 'gpt-6.1-terra'), JSON.stringify(seen));
         assert.ok(second.length >= 1, JSON.stringify(seen));
         assert.ok(second.every((item) => item.model === 'gpt-6-luna'), JSON.stringify(seen));
     } finally {
@@ -982,7 +982,7 @@ test('a generation step that runs out of turns gets one cheap verification pass'
         const first = seen.filter((item) => !item.verify);
         const verify = seen.filter((item) => item.verify);
         assert.ok(first.length >= 1, JSON.stringify(seen));
-        assert.ok(first.every((item) => item.model === 'gpt-6.1-sol'), JSON.stringify(seen));
+        assert.ok(first.every((item) => item.model === 'gpt-6.1-terra'), JSON.stringify(seen));
         assert.equal(verify.length, 1, JSON.stringify(seen));
         assert.equal(verify[0].model, 'gpt-6-luna');
     } finally {

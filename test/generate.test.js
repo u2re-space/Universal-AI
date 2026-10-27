@@ -160,7 +160,7 @@ test('pace defaults to speed 10 and quality 40 and a file can pin a role', async
         assert.equal(config.pace.speed, 10);
         assert.equal(config.pace.quality, 40);
         assert.equal(config.pace.mode, 'auto');
-        assert.deepEqual(config.pace.models, ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra']);
+        assert.deepEqual(config.pace.models, ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol']);
         assert.equal(config.rolePins.summarizer.model, true);
         assert.equal(config.rolePins.summarizer.effort, false);
         assert.equal(config.stepCapPinned, true);
@@ -326,7 +326,7 @@ test('config init writes pace and does not pin the default step cap', async () =
         const code = await new Promise((resolve) => child.once('close', resolve));
         assert.equal(code, 0, stderr);
         const saved = JSON.parse(await readFile(path.join(home, 'config.json'), 'utf8'));
-        assert.deepEqual(saved.pace.models, ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra']);
+        assert.deepEqual(saved.pace.models, ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol']);
         assert.equal(saved.agent?.maxSteps, undefined);
     } finally {
         await rm(home, { recursive: true, force: true });

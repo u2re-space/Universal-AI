@@ -10,7 +10,7 @@ const pinned = (overrides) => ({
 
 test('coder effort and model follow the plan complexity', () => {
     const trivial = resolveRole(defaults, 'coder', 'trivial');
-    assert.equal(trivial.model, 'gpt-6-luna');
+    assert.equal(trivial.model, 'gpt-6.1-terra');
     assert.equal(trivial.effort, 'medium');
 
     const normal = resolveRole(defaults, 'coder', 'normal');

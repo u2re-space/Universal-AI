@@ -67,15 +67,15 @@ test('effortRank returns correct index', () => {
 
 test('profileFor resolves a known model from the registry', () => {
     const p = profileFor('gpt-6.1-sol');
-    assert.equal(p.window, 128 * 1024);
-    assert.equal(p.maxOutput, 16384);
+    assert.equal(p.window, 256 * 1024);
+    assert.equal(p.maxOutput, 32768);
     assert.equal(p.ceiling, 'xhigh');
     assert.equal(p.efforts, null);
 });
 
 test('profileFor resolves a qualified model id', () => {
     const p = profileFor('openai/gpt-6.1-sol');
-    assert.equal(p.window, 128 * 1024);
+    assert.equal(p.window, 256 * 1024);
     assert.equal(p.ceiling, 'xhigh');
 });
 
@@ -90,7 +90,7 @@ test('profileFor returns DEFAULT_PROFILE for unknown models', () => {
 test('profileFor merges user overrides from config.models', () => {
     const overrides = { 'gpt-6.1-sol': { ceiling: 'high', maxOutput: 8192 } };
     const p = profileFor('gpt-6.1-sol', overrides);
-    assert.equal(p.window, 128 * 1024);
+    assert.equal(p.window, 256 * 1024);
     assert.equal(p.maxOutput, 8192);
     assert.equal(p.ceiling, 'high');
     assert.equal(p.efforts, null);

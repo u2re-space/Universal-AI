@@ -12,6 +12,8 @@
 export const MODEL_FALLBACKS = Object.freeze({
     'gpt-6-luna': 'anthropic/claude-haiku-5-5',
     'openai/gpt-6-luna': 'anthropic/claude-haiku-5-5',
+    'gpt-6.1-terra': 'anthropic/claude-haiku-5-5',
+    'openai/gpt-6.1-terra': 'anthropic/claude-haiku-5-5',
     'gpt-6.1-sol': 'anthropic/claude-sonnet-5.5',
     'openai/gpt-6.1-sol': 'anthropic/claude-sonnet-5.5',
     'gpt-6-luna-decisions': 'typesafe/jev-1.14',

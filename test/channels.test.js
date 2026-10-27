@@ -244,7 +244,7 @@ function fakeClient() {
                 return { id: 'gen-dec', model: body.model, answers: { violation: { type: 'noul', noul: 0.97 } }, usage: { input_tokens: 2, output_tokens: 1 } };
             },
         },
-        responses: { create: async () => ({ id: 'resp_1', model: 'gpt-6-luna', output_text: 'Здравствуйте', usage: { input_tokens: 2, output_tokens: 2 } }) },
+        responses: { create: async () => ({ id: 'resp_1', model: 'gpt-6.1-terra', output_text: 'Здравствуйте', usage: { input_tokens: 2, output_tokens: 2 } }) },
     };
 }
 

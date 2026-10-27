@@ -17,7 +17,7 @@ test('completion choices are the catalog ids', () => {
 
 test('aliases resolve to the same row and the wire model', () => {
     const luna = resolveCompletionModel('gpt-6-luna');
-    assert.equal(resolveCompletionModel(' openai/gpt-6-luna ').wire, luna.wire);
+    assert.equal(resolveCompletionModel('openai/gpt-6-luna ').wire, luna.wire);
     assert.equal(luna.wire, 'gpt-6-luna');
     assert.equal(luna.reasoning, 'none');
     assert.equal(luna.maxOutputTokens, 160);

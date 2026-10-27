@@ -28,7 +28,7 @@ Reply in JSON only. ${DESKTOP_NOTE} ${UNTRUSTED}`;
 /** Models the reviewer must never run on. Validated in config.js and clamped in pace/config. */
 export const FORBIDDEN_MODELS = Object.freeze(['gpt-6-astra']);
 /** Replacement when a forbidden model is inherited from the default role or the pace ladder. */
-export const FALLBACK_MODEL = 'gpt-6-luna';
+export const FALLBACK_MODEL = 'gpt-6.1-terra';
 
 /**
  * Replace a forbidden reviewer model with the safe fallback.

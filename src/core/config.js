@@ -233,7 +233,7 @@ function migrateLegacyRoles(c) {
  * @ai.hint pure
  */
 function normalizeContext(c) {
-    const model = typeof c.model === 'string' && c.model.trim() ? c.model : 'gpt-6-luna';
+    const model = typeof c.model === 'string' && c.model.trim() ? c.model : 'gpt-6.1-terra';
     const profile = profileFor(model, c.models);
     const fields = [
         ['agent', 'maxContextBytes'],

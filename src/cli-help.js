@@ -27,7 +27,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai models [фильтр]                список доступных моделей
   ai config [show|init|path]        конфигурация (~/.ai-agent/config.json)
   ai map [path]                     карта проекта .ai/map.json (файлы и символы). Черновик read/edit/scan подтверждает planner; запись вне edit выполняется и помечается
-  ai complete                       вставка в месте курсора (JSON из stdin), учитывает AGENTS.md. Модель gpt-6-luna, effort none
+  ai complete                       вставка в месте курсора (JSON из stdin), учитывает AGENTS.md. Модель gpt-6.1-terra, effort none
   ai complete --listen [--port n]   HTTP POST и WebSocket /v1/complete на 127.0.0.1 (для редактора)
   ai mcp [list|add|remove|probe]    пользовательские MCP-серверы (stdio)
   ai decide [набор] "текст"         вероятности Decisions API (community, support, smm, guard, route)
@@ -89,7 +89,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --role <роль=модель[:effort[:max-effort]]>  модель для роли: planner, architect, orchestrator, worker, coder, writer, reviewer, vision,
                          summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, image-processor, default, all.
                          Своё имя-слаг создаёт роль в roles.<имя> (инструкции и инструменты задаются в конфигурации)
-                         (например: --role planner=gpt-6-luna:high --role worker=gpt-6-luna:medium:high --role vision=gpt-6-luna)
+                         (например: --role planner=gpt-6.1-terra:high --role worker=gpt-6.1-terra:medium:high --role vision=gpt-6.1-terra)
                          --role collector=... и --role coordinator=... принимают orchestrator (объединённая роль)
     --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
     --orchestrator         оркестратор после этапов: сбор контекста, свежий взгляд на план, правки плана и указания следующему шагу
@@ -171,8 +171,8 @@ MCP:
   add/remove правят ~/.ai-agent/config.json. Вызовы локальных инструментов MCP подтверждаются как сеть.
 
 Чаты и решения:
-  ai decide и POST /v1/decisions — модель openai/gpt-6-luna-decisions (или decisions.model). Если маршрута нет, шаг решений пропускается.
-  Запасные модели: gpt-6-luna → anthropic/claude-haiku-5-5, gpt-6.1-sol → anthropic/claude-sonnet-5.5, решения → typesafe/jev-1.14.
+  ai decide и POST /v1/decisions — модель openai/gpt-6.1-terra-decisions (или decisions.model). Если маршрута нет, шаг решений пропускается.
+  Запасные модели: gpt-6.1-terra → anthropic/claude-haiku-5-5, gpt-6.1-sol → anthropic/claude-sonnet-5.5, решения → typesafe/jev-1.14.
   Если провайдер недоступен, запрос уходит на следующий бэкенд из backends (или fallback.providers) с ключом.
   AI_FALLBACK_BASE_URL вместе с AI_FALLBACK_API_KEY добавляет ещё один резервный хост после списка.
   ai moderate в режиме auto сначала вызывает /moderations (omni-moderation-latest). Если шлюз отвечает 404, 405 или 501,

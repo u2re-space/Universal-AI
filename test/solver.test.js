@@ -5,16 +5,16 @@ import { defaults, resolveRole } from '../src/core/config.js';
 
 test('solver effort and model follow the step complexity', () => {
     const trivial = resolveRole(defaults, 'solver', 'trivial');
-    assert.equal(trivial.model, 'gpt-6-luna');
-    assert.equal(trivial.effort, 'medium');
+    assert.equal(trivial.model, 'gpt-6.1-terra');
+    assert.equal(trivial.effort, 'high');
 
     const normal = resolveRole(defaults, 'solver', 'normal');
-    assert.equal(normal.model, 'gpt-6-luna');
-    assert.equal(normal.effort, 'high');
+    assert.equal(normal.model, 'gpt-6.1-terra');
+    assert.equal(normal.effort, 'xhigh');
 
     const complex = resolveRole(defaults, 'solver', 'complex');
     assert.equal(complex.model, 'gpt-6.1-sol');
-    assert.equal(complex.effort, 'high');
+    assert.equal(complex.effort, 'xhigh');
 
     const unknown = resolveRole(defaults, 'solver', 'unknown');
     assert.equal(unknown.model, normal.model);
@@ -24,10 +24,10 @@ test('solver effort and model follow the step complexity', () => {
 test('an explicit solver model and effort replace the tier', () => {
     const config = {
         ...defaults,
-        roles: { ...defaults.roles, solver: { ...defaults.roles.solver, model: 'gpt-6-luna', effort: 'low' } },
+        roles: { ...defaults.roles, solver: { ...defaults.roles.solver, model: 'gpt-6.1-terra', effort: 'low' } },
     };
     const role = resolveRole(config, 'solver', 'complex');
-    assert.equal(role.model, 'gpt-6-luna');
+    assert.equal(role.model, 'gpt-6.1-terra');
     assert.equal(role.effort, 'low');
 });
 
@@ -54,16 +54,16 @@ test('vision effort and model follow the long side, and a screenshot stays compl
 
     assert.equal(resolveRole(defaults, 'vision', imageTier(400)).effort, 'medium');
     assert.equal(resolveRole(defaults, 'vision', imageTier(800)).effort, 'high');
-    assert.equal(resolveRole(defaults, 'vision', imageTier(1281)).model, 'gpt-6.1-sol');
-    assert.equal(resolveRole(defaults, 'vision', imageTier(80, { screen: true })).model, 'gpt-6.1-sol');
+    assert.equal(resolveRole(defaults, 'vision', imageTier(1281)).model, 'gpt-6.1-terra');
+    assert.equal(resolveRole(defaults, 'vision', imageTier(80, { screen: true })).model, 'gpt-6.1-terra');
 });
 
 test('an explicit vision model and effort replace the tier', () => {
     const config = {
         ...defaults,
-        roles: { ...defaults.roles, vision: { ...defaults.roles.vision, model: 'gpt-6-luna', effort: 'low' } },
+        roles: { ...defaults.roles, vision: { ...defaults.roles.vision, model: 'gpt-6.1-terra', effort: 'low' } },
     };
     const role = resolveRole(config, 'vision', imageTier(1920));
-    assert.equal(role.model, 'gpt-6-luna');
+    assert.equal(role.model, 'gpt-6.1-terra');
     assert.equal(role.effort, 'low');
 });

@@ -73,7 +73,7 @@ test('expandConfigStrings walks objects and arrays but leaves task placeholders'
 test('loadConfig expands env and fs in every string, including backends', async () => {
     const root = await project({ 'rules.md': 'Be brief.\n' });
     const config = await loadConfig({
-        env: { AI_AGENT_HOME: root, AI_MODEL: 'gpt-6-luna', HOST: 'api.example.test', KEY: 'sk-from-env', RULES: 'Be brief.' },
+        env: { AI_AGENT_HOME: root, AI_MODEL: 'gpt-6.1-terra', HOST: 'api.example.test', KEY: 'sk-from-env', RULES: 'Be brief.' },
         overrides: {
             baseURL: 'https://{{env:HOST}}/v1',
             roles: { coder: { instructions: '{{env:RULES}} {{fs:rules.md}}' } },
@@ -102,7 +102,7 @@ test('role instructions see the outer task, the delegated task, and env', async 
     const root = await project({ 'note.txt': 'file text' });
     setLiveEnv({ ROLE_ENV: 'live' });
     const config = structuredClone(defaults);
-    config.model = 'gpt-6-luna';
+    config.model = 'gpt-6.1-terra';
     config.roles.coder.instructions = 'Outer={{task:PROMPT}}; Sub={{delegated:PROMPT}}; Env={{env:ROLE_ENV}}; File={{fs:note.txt}}';
     let body = null;
     const client = {

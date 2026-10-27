@@ -149,7 +149,7 @@ export async function configCommand(ctx) {
             memory: { enabled: true, autoSave: true, maxRecall: 8, notesFile: 'AGENTS.md' },
             agents: { enabled: true, filenames: ['AGENTS.md', 'agents.md'], globalFile: null, maxBytes: 16384, maxTotalBytes: 65536, discoverUpward: true, nested: true },
             generate: { fidelity: defaults.generate.fidelity, creativity: defaults.generate.creativity, platform: defaults.generate.platform },
-            pace: { speed: 10, quality: 40, mode: 'auto', models: ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'] },
+            pace: { speed: 10, quality: 40, mode: 'auto', models: ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol'] },
             mcp: { servers: [] },
             image: { ...defaults.image },
             completion: { model: defaults.completion.model, effort: defaults.completion.effort },

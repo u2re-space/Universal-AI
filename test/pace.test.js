@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { acceptanceParagraph, applyPins, ceilingIndex, clampModel, guaranteesParagraph, mergeSteps, resolvePace } from '../src/agent/pace.js';
 
-const models = ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'];
+const models = ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol'];
 const base = { speed: 10, quality: 40, mode: 'auto', models };
 
 test('ceiling index follows quality times ladder length', () => {
@@ -30,19 +30,19 @@ test('auto policy follows speed and the label', () => {
     assert.equal(resolvePace({ ...base, speed: 10, mode: 'c', label: 'complex' }).policy, 'c');
 });
 
-test('default pace keeps a complex author on luna and the planner on sol', () => {
+test('default pace keeps a complex author on luna and the planner on terra', () => {
     const pace = resolvePace({
         ...base, label: 'normal',
         steps: [{ complexity: 'complex', author: 'coder', files: ['src/a.js'], goal: 'write', details: '', verify: '' }],
     });
-    assert.equal(pace.ceilingModel, 'gpt-6.1-sol');
-    assert.equal(pace.roles.planner.model, 'gpt-6.1-sol');
+    assert.equal(pace.ceilingModel, 'gpt-6.1-terra');
+    assert.equal(pace.roles.planner.model, 'gpt-6.1-terra');
     assert.equal(pace.roles.planner.effort, 'high');
-    assert.equal(pace.roles.architect.model, 'gpt-6.1-sol');
+    assert.equal(pace.roles.architect.model, 'gpt-6.1-terra');
     assert.equal(pace.roles.architect.effort, 'high');
     assert.equal(pace.steps[0].model, 'gpt-6-luna');
     assert.equal(pace.steps[0].effort, 'high');
-    assert.equal(pace.roles.classifier.model, 'gpt-6.1-sol');
+    assert.equal(pace.roles.classifier.model, 'gpt-6.1-terra');
     assert.equal(pace.roles.classifier.effort, 'xhigh');
     assert.equal(pace.roles.extractor.model, 'gpt-6-luna');
     assert.equal(pace.roles.extractor.effort, 'high');
@@ -101,7 +101,7 @@ test('policy c builds one author step and a saved plan stays split', () => {
     assert.equal(once.steps[0].goal, 'Build the API');
     assert.equal(once.steps[0].author, 'coder');
     assert.equal(once.steps[0].complexity, 'complex');
-    assert.equal(once.steps[0].model, 'gpt-6.1-sol');
+    assert.equal(once.steps[0].model, 'gpt-6.1-terra');
     assert.equal(once.reviewMode, 'off');
     assert.equal(once.collect, 'off');
     const saved = resolvePace({
@@ -142,11 +142,11 @@ test('rungs and review rounds follow the tables', () => {
         ...base, speed: 90, quality: 80, label: 'normal',
         steps: [{ complexity: 'normal', author: 'coder', files: [], goal: 'g', details: '', verify: '' }],
     }).steps[0];
-    assert.equal(normalAuthor.model, 'gpt-6.1-sol');
+    assert.equal(normalAuthor.model, 'gpt-6.1-terra');
     assert.equal(resolvePace({ ...base, quality: 20, label: 'complex' }).reviewRounds, 0);
     assert.equal(resolvePace({ ...base, quality: 20, label: 'complex' }).acceptance, 'loose');
     const single = resolvePace({ ...base, mode: 'c', speed: 10, quality: 80, label: 'normal', task: 'note', author: 'writer' });
-    assert.equal(single.steps[0].model, 'gpt-6.1-sol');
+    assert.equal(single.steps[0].model, 'gpt-6.1-terra');
     assert.equal(resolvePace({ ...base, mode: 'c', speed: 90, quality: 80, label: 'trivial', task: 'typo', author: 'worker' }).steps[0].model, 'gpt-6-luna');
 });
 
@@ -161,8 +161,8 @@ test('pins replace pace and clamp only an unpinned ladder model', () => {
     const pinned = applyPins(pace, { planner: { model: 'custom-planner', effort: 'max' } }, { planner: { model: true, effort: true } });
     assert.equal(pinned.roles.planner.model, 'custom-planner');
     assert.equal(pinned.roles.planner.effort, 'max');
-    assert.equal(clampModel('gpt-6-astra', models, 1, false), 'gpt-6.1-sol');
-    assert.equal(clampModel('gpt-6-astra', models, 1, true), 'gpt-6-astra');
+    assert.equal(clampModel('gpt-6.1-sol', models, 1, false), 'gpt-6.1-terra');
+    assert.equal(clampModel('gpt-6.1-sol', models, 1, true), 'gpt-6.1-sol');
     assert.equal(clampModel('gpt-6-luna-nano', models, 0, false), 'gpt-6-luna-nano');
 });
 
@@ -174,7 +174,7 @@ test('generation fidelity is attached only when a stated value is passed', () =>
 test('a shared budget of 200 splits stable, strained, and broken pace', () => {
     const steady = resolvePace({ ...base, speed: 10, quality: 40, label: 'normal' });
     assert.equal(steady.guarantees, 'steady');
-    assert.equal(steady.ceilingModel, 'gpt-6.1-sol');
+    assert.equal(steady.ceilingModel, 'gpt-6.1-terra');
     assert.equal(steady.roles.planner.effort, 'high');
     assert.equal(steady.stepCap, 12);
     assert.equal(guaranteesParagraph('steady'), '');
@@ -182,8 +182,8 @@ test('a shared budget of 200 splits stable, strained, and broken pace', () => {
     const qualityMax = resolvePace({ ...base, speed: 0, quality: 200, label: 'normal' });
     assert.equal(qualityMax.guarantees, 'strained');
     assert.equal(qualityMax.policy, 'b');
-    assert.equal(qualityMax.ceilingModel, 'gpt-6-astra');
-    assert.equal(qualityMax.roles.planner.model, 'gpt-6-astra');
+    assert.equal(qualityMax.ceilingModel, 'gpt-6.1-sol');
+    assert.equal(qualityMax.roles.planner.model, 'gpt-6.1-sol');
     assert.equal(qualityMax.roles.planner.effort, 'xhigh');
     assert.equal(qualityMax.stepCap, 16);
     assert.equal(qualityMax.reviewMode, 'plan');
@@ -193,13 +193,13 @@ test('a shared budget of 200 splits stable, strained, and broken pace', () => {
         ...base, speed: 0, quality: 200, label: 'normal',
         steps: [{ complexity: 'complex', author: 'coder', files: ['a.js'], goal: 'write', details: '', verify: '' }],
     }).steps[0];
-    assert.equal(qualityAuthor.model, 'gpt-6-astra');
+    assert.equal(qualityAuthor.model, 'gpt-6.1-sol');
 
     const both = resolvePace({ ...base, speed: 100, quality: 100, label: 'normal' });
     assert.equal(both.guarantees, 'strained');
     assert.equal(both.merge, true);
-    assert.equal(both.ceilingModel, 'gpt-6-astra');
-    assert.equal(both.roles.planner.model, 'gpt-6-astra');
+    assert.equal(both.ceilingModel, 'gpt-6.1-sol');
+    assert.equal(both.roles.planner.model, 'gpt-6.1-sol');
     assert.equal(both.roles.planner.effort, 'medium');
     assert.match(guaranteesParagraph('strained'), /Balance is not promised/);
 

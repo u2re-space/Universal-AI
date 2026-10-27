@@ -5,7 +5,7 @@ import { attemptChain, fallbackModel, modelMissing, providerDown, providerList }
 import { defaults } from '../src/core/config.js';
 
 test('known models fall back to another channel', () => {
-    assert.equal(fallbackModel('gpt-6-luna'), 'anthropic/claude-haiku-5-5');
+    assert.equal(fallbackModel('gpt-6.1-terra'), 'anthropic/claude-haiku-5-5');
     assert.equal(fallbackModel('openai/gpt-6.1-sol'), 'anthropic/claude-sonnet-5.5');
     assert.equal(fallbackModel('openai/gpt-6-luna-decisions'), 'typesafe/jev-1.14');
     assert.equal(modelMissing(new ApiError('missing', { status: 404, apiCode: 'model_not_found' })), true);
@@ -19,7 +19,7 @@ test('a missing model is tried on the same host, then on the next host', async (
     const seen = [];
     const result = await attemptChain({
         endpoints: [{ label: 'primary' }, { label: 'https://sprutdock.ru/v1' }],
-        model: 'gpt-6-luna',
+        model: 'gpt-6.1-terra',
         map: defaults.fallback.models,
         send: async (endpoint, model) => {
             seen.push(`${endpoint.label}:${model}`);
@@ -31,9 +31,9 @@ test('a missing model is tried on the same host, then on the next host', async (
     });
     assert.equal(result.ok, true);
     assert.deepEqual(seen, [
-        'primary:gpt-6-luna',
+        'primary:gpt-6.1-terra',
         'primary:anthropic/claude-haiku-5-5',
-        'https://sprutdock.ru/v1:gpt-6-luna',
+        'https://sprutdock.ru/v1:gpt-6.1-terra',
         'https://sprutdock.ru/v1:anthropic/claude-haiku-5-5',
     ]);
 });
@@ -42,7 +42,7 @@ test('a persistent request error does not move to the next host', async () => {
     let calls = 0;
     await assert.rejects(() => attemptChain({
         endpoints: [{ label: 'primary' }, { label: 'other' }],
-        model: 'gpt-6-luna',
+        model: 'gpt-6.1-terra',
         map: {},
         send: async () => {
             calls += 1;

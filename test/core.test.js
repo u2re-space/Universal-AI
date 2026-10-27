@@ -58,7 +58,7 @@ test('session: save and load round trip', async () => {
 
 test('ledger: price matching, cost and budgets', () => {
     const prices = { 'gpt-6.1-sol': { input: 1.25, cachedInput: 0.125, output: 10 }, 'gpt-6*': { input: 2, output: 20 } };
-    assert.equal(priceFor(prices, 'gpt-6-luna').input, 2);
+    assert.equal(priceFor(prices, 'gpt-6.1-terra').input, 2);
     assert.equal(priceFor(prices, 'gpt-6.1-sol').input, 1.25);
     assert.equal(priceFor(prices, 'o3'), null);
     const usage = normalizeUsage({ input_tokens: 1_000_000, input_tokens_details: { cached_tokens: 200_000 }, output_tokens: 100_000, output_tokens_details: { reasoning_tokens: 50_000 }, total_tokens: 1_100_000 });
@@ -482,7 +482,7 @@ test('auto resolves to the model window', async () => {
         overrides: { agent: { maxContextBytes: 'auto' } },
         ensureHome: false,
     });
-    assert.equal(sol.agent.maxContextBytes, 128 * 1024);
+    assert.equal(sol.agent.maxContextBytes, 256 * 1024);
     const astra = await loadConfig({
         env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6-astra' },
         overrides: { agent: { maxContextBytes: 'auto' } },
@@ -493,7 +493,7 @@ test('auto resolves to the model window', async () => {
 
 test('a raw number passes through unchanged', async () => {
     const config = await loadConfig({
-        env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6-luna' },
+        env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6.1-terra' },
         overrides: { agent: { maxContextBytes: 123456 } },
         ensureHome: false,
     });
@@ -502,7 +502,7 @@ test('a raw number passes through unchanged', async () => {
 
 test('all context fields normalize: measurer, orchestrator, completion', async () => {
     const config = await loadConfig({
-        env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6-luna' },
+        env: { AI_AGENT_HOME: 'test/.home-ctx', AI_MODEL: 'gpt-6.1-terra' },
         overrides: {
             agent: {
                 maxContextBytes: 'normal',

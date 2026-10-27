@@ -41,7 +41,7 @@ const configFor = (backends, baseURL, apiKey) => ({
 test('backends accept baseUrl, expand placeholders, and make the first keyed entry primary', async () => {
     const config = await loadConfig({
         env: {
-            AI_AGENT_HOME: home, AI_MODEL: 'gpt-6-luna',
+            AI_AGENT_HOME: home, AI_MODEL: 'gpt-6.1-terra',
             OPENAI_API_KEY: 'sk-primary', SPRUTDOCK_API_KEY: 'sk-sprut', GPTUNNEL_API_KEY: 'sk-gpt',
         },
         overrides: {
@@ -63,7 +63,7 @@ test('backends accept baseUrl, expand placeholders, and make the first keyed ent
 
 test('a backend without a key does not become primary when a later one has a key', async () => {
     const config = await loadConfig({
-        env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6-luna' },
+        env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6.1-terra' },
         overrides: {
             backends: [
                 { baseUrl: 'https://keyless.example/v1' },
@@ -78,7 +78,7 @@ test('a backend without a key does not become primary when a later one has a key
 
 test('an env key makes a backend primary and is used as the top-level key', async () => {
     const load = (env) => loadConfig({
-        env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6-luna', ...env },
+        env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6.1-terra', ...env },
         overrides: {
             backends: [
                 { baseUrl: 'https://first.example/v1', env: 'FIRST_KEY' },
@@ -97,7 +97,7 @@ test('an env key makes a backend primary and is used as the top-level key', asyn
 
 test('backends validate their fields and route switches', async () => {
     const load = (backends) => loadConfig({
-        env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6-luna' },
+        env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6.1-terra' },
         overrides: { backends }, ensureHome: false,
     });
     await assert.rejects(load([{ baseUrl: 'https://x/v1', apiKey: 'sk', speed: 1 }]), /backends\[0\]\.speed/);
@@ -162,7 +162,7 @@ test('custom headers reach the request and cannot replace Authorization', async 
         headers: { useWalletBalance: true, Authorization: 'Bearer nope' },
     });
     try {
-        await client.responses.create({ model: 'gpt-6-luna', input: [], stream: false });
+        await client.responses.create({ model: 'gpt-6.1-terra', input: [], stream: false });
         const request = server.requests.find((item) => item.path === '/v1/responses');
         assert.equal(request.headers.usewalletbalance, 'true');
         assert.equal(request.headers.authorization, 'Bearer sk-test');
@@ -179,7 +179,7 @@ test('a fallback backend sends its own headers', async () => {
         { baseURL: live.baseURL, apiKey: 'sk-live', headers: { useWalletBalance: 'true' } },
     ], dead, 'sk-dead'));
     try {
-        await client.responses.create({ model: 'gpt-6-luna', input: [], stream: false });
+        await client.responses.create({ model: 'gpt-6.1-terra', input: [], stream: false });
         const request = live.requests.find((item) => item.path === '/v1/responses');
         assert.equal(request.headers.usewalletbalance, 'true');
     } finally {

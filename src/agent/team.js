@@ -150,7 +150,7 @@ export async function runTeam({
     let encodeRoute = false;
     let paced = null;
     let pacedLabel = 'normal';
-    const paceSettings = config.pace ?? { speed: 10, quality: 40, mode: 'auto', models: ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra'] };
+    const paceSettings = config.pace ?? { speed: 10, quality: 40, mode: 'auto', models: ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol'] };
     const pins = config.rolePins ?? Object.fromEntries(Object.entries(config.roles ?? {}).flatMap(([name, role]) => (
         typeof role?.model === 'string' && role.model.trim() ? [[name, { model: true, effort: false }]] : []
     )));
