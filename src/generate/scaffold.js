@@ -435,7 +435,7 @@ export function preparedScaffoldFiles({ kind, platform, recommendations, name = 
         'package.json': `${JSON.stringify(manifest, null, 2)}\n`,
         ...(web ? {
             'vite.config.js': viteConfig(platform),
-            'src/main.js': 'import "styles.scss";'
+            //'src/main.js': 'import "./styles.scss";'
         } : {}),
         'scripts/generate.js': scaffoldScript(),
         ...docs,
