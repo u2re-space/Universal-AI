@@ -30,7 +30,7 @@ test('auto policy follows speed and the label', () => {
     assert.equal(resolvePace({ ...base, speed: 10, mode: 'c', label: 'complex' }).policy, 'c');
 });
 
-test('default pace keeps a complex author on luna and the planner on terra', () => {
+test('default pace keeps a complex author on the coder floor and the planner on terra', () => {
     const pace = resolvePace({
         ...base, label: 'normal',
         steps: [{ complexity: 'complex', author: 'coder', files: ['src/a.js'], goal: 'write', details: '', verify: '' }],
@@ -40,7 +40,7 @@ test('default pace keeps a complex author on luna and the planner on terra', () 
     assert.equal(pace.roles.planner.effort, 'high');
     assert.equal(pace.roles.architect.model, 'gpt-6.1-terra');
     assert.equal(pace.roles.architect.effort, 'high');
-    assert.equal(pace.steps[0].model, 'gpt-6-luna');
+    assert.equal(pace.steps[0].model, 'gpt-6.1-terra');
     assert.equal(pace.steps[0].effort, 'high');
     assert.equal(pace.roles.classifier.model, 'gpt-6.1-terra');
     assert.equal(pace.roles.classifier.effort, 'xhigh');
@@ -147,7 +147,8 @@ test('rungs and review rounds follow the tables', () => {
     assert.equal(resolvePace({ ...base, quality: 20, label: 'complex' }).acceptance, 'loose');
     const single = resolvePace({ ...base, mode: 'c', speed: 10, quality: 80, label: 'normal', task: 'note', author: 'writer' });
     assert.equal(single.steps[0].model, 'gpt-6.1-terra');
-    assert.equal(resolvePace({ ...base, mode: 'c', speed: 90, quality: 80, label: 'trivial', task: 'typo', author: 'worker' }).steps[0].model, 'gpt-6-luna');
+    assert.equal(resolvePace({ ...base, mode: 'c', speed: 90, quality: 80, label: 'trivial', task: 'typo', author: 'worker' }).steps[0].model, 'gpt-6.1-terra');
+    assert.equal(resolvePace({ ...base, mode: 'c', speed: 90, quality: 80, label: 'trivial', task: 'note', author: 'writer' }).steps[0].model, 'gpt-6-luna');
 });
 
 test('acceptance paragraphs name the criterion cap', () => {
@@ -262,4 +263,29 @@ test('the code dial lifts step effort without touching the model ceiling', () =>
 test('an unknown per-stage dial value is rejected', () => {
     assert.throws(() => resolvePace({ ...base, label: 'normal', codeQuality: 201 }), /pace\.codeQuality/);
     assert.throws(() => resolvePace({ ...base, label: 'normal', decorQuality: -1 }), /pace\.decorQuality/);
+});
+
+test('code authors never fall below the coder floor', () => {
+    const step = (author, complexity, extra = {}) => resolvePace({
+        ...base, speed: 90, quality: 20, label: 'normal', ...extra,
+        steps: [{ complexity, author, files: [], goal: 'g', details: '', verify: '' }],
+    }).steps[0];
+    assert.equal(step('coder', 'trivial').model, 'gpt-6.1-terra');
+    assert.equal(step('worker', 'trivial').model, 'gpt-6.1-terra');
+    assert.equal(step('coder', 'normal').model, 'gpt-6.1-terra');
+    // Documents keep the cheapest rung.
+    assert.equal(step('writer', 'trivial').model, 'gpt-6-luna');
+    // A raised code dial no longer leaves the author on the cheap model.
+    assert.equal(step('coder', 'normal', { codeQuality: 120 }).model, 'gpt-6.1-terra');
+    const single = resolvePace({ ...base, mode: 'c', speed: 90, quality: 20, label: 'trivial', task: 'fix', author: 'coder' }).steps[0];
+    assert.equal(single.model, 'gpt-6.1-terra');
+});
+
+test('a ladder without the floor model keeps its own cheapest rung', () => {
+    const custom = ['gpt-6-luna', 'gpt-6-sol'];
+    const pace = resolvePace({
+        speed: 10, quality: 40, mode: 'auto', models: custom, label: 'normal',
+        steps: [{ complexity: 'trivial', author: 'coder', files: [], goal: 'g', details: '', verify: '' }],
+    });
+    assert.equal(pace.steps[0].model, 'gpt-6-luna');
 });

@@ -4,11 +4,12 @@
  * @purpose Choose policy, model rung, effort, stages, and step merge from speed and quality.
  * @depends generate/fidelity, openai/model-profiles
  * @usedBy agent/team, core/config, commands/flags
- * @exports ceilingIndex, mergeSteps, acceptanceParagraph, guaranteesParagraph, assertPaceBudget, resolvePace, applyPins, clampModel, FINE_QUALITY_FLAGS, FINE_QUALITY_KEYS, defaultFineQuality, fineQuality, stageEffort
+ * @exports ceilingIndex, mergeSteps, acceptanceParagraph, guaranteesParagraph, assertPaceBudget, resolvePace, applyPins, clampModel, FINE_QUALITY_FLAGS, FINE_QUALITY_KEYS, CODER_FLOOR_MODEL, defaultFineQuality, fineQuality, stageEffort
  * @ai.tags team, pace
  * @ai.hint pure
  * @changed 2026-10-26 Every effort the directive carries is snapped to the ladder and ceiling of its model.
  * @changed 2026-10-27 Per-stage quality dials (code, decor, image, measurer, architect) shift only their own effort.
+ * @changed 2026-10-27 Coder and worker steps never fall below the gpt-6.1-terra rung.
  */
 
 import { effectiveFidelity } from '../generate/fidelity.js';
@@ -34,6 +35,23 @@ export const FINE_QUALITY_KEYS = Object.freeze(Object.values(FINE_QUALITY_FLAGS)
 
 /** One full band of quality points moves a stage effort by one level. */
 const QUALITY_BAND = 34;
+
+/**
+ * Code authors never fall below this rung: writing code on the cheapest model
+ * wastes a raised code-quality dial, so the floor keeps them on the senior model.
+ * A ladder without this model simply keeps no floor.
+ */
+export const CODER_FLOOR_MODEL = 'gpt-6.1-terra';
+
+/**
+ * @param {string[]} models
+ * @returns {number}
+ * @ai.hint pure
+ */
+function coderFloor(models) {
+    const index = models.indexOf(CODER_FLOOR_MODEL);
+    return index < 0 ? 0 : index;
+}
 
 /**
  * Default for a per-stage dial: spend the speed surplus on the stage, capped at 200.
@@ -286,9 +304,11 @@ function knownComplexity(value, fallback = 'normal') {
  * @ai.hint pure
  */
 function decorate(steps, { modelSpeed, paceSpeed, modelQuality, fineBaseline, codeQuality, models, adjusted, recklessExtra, bounded }) {
+    const floor = coderFloor(models);
     return steps.map((step) => {
         const complexity = knownComplexity(step.complexity);
-        const rung = authorRung(complexity, modelSpeed, adjusted);
+        const isCode = step.author === 'coder' || step.author === 'worker';
+        const rung = Math.max(authorRung(complexity, modelSpeed, adjusted), isCode ? floor : 0);
         const base = complexity === 'trivial' ? 'low' : complexity === 'complex' ? 'high' : 'medium';
         const author = step.author === 'coder' || step.author === 'writer' ? step.author : 'worker';
         const model = models[rung];
@@ -384,12 +404,13 @@ export function resolvePace({
     if (!directive.ready) return directive;
     if (policy === 'c' && !Array.isArray(steps)) {
         const complexity = knownComplexity(label);
-        const rung = singleRung(label, adjusted);
+        const singleAuthor = author === 'coder' || author === 'writer' ? author : 'worker';
+        const rung = Math.max(singleRung(label, adjusted), singleAuthor === 'writer' ? 0 : coderFloor(models));
         const base = complexity === 'trivial' ? 'low' : complexity === 'complex' ? 'high' : 'medium';
         const model = models[rung];
         const level = effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra);
         directive.steps = [{
-            author: author === 'coder' || author === 'writer' ? author : 'worker',
+            author: singleAuthor,
             complexity, rung, model,
             effort: bounded(model, stageEffort(level, baseFine, fine.code)),
             files: [], goal: String(task), details: '', verify: '', kind: 'work',

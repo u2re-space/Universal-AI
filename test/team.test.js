@@ -236,7 +236,7 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
     const planner = seen.find((s) => s.role === 'planner');
     assert.equal(planner.model, 'gpt-6.1-terra');
     assert.equal(planner.effort, 'high');
-    assert.ok(seen.filter((s) => s.role === 'worker').every((s) => s.model === 'gpt-6-luna' && s.effort === 'medium'));
+    assert.ok(seen.filter((s) => s.role === 'worker').every((s) => s.model === 'gpt-6.1-terra' && s.effort === 'medium'));
     assert.equal(seen.find((s) => s.role === 'collector').model, 'gpt-6.1-terra');
     assert.equal(seen.find((s) => s.role === 'summarizer').model, 'gpt-6-luna-nano');
     const stages = events.filter((e) => e.type === 'stage.start').map((e) => e.stage);
@@ -958,8 +958,9 @@ test('a generation step that runs out of turns gets one cheap verification pass'
             }) };
         }
         if (role === 'worker') {
-            const text = body.input[0]?.content?.[0]?.text ?? '';
-            const verify = /— verify/.test(text);
+            // The coder floor keeps the verify pass on the same model as the step, so the
+            // worker session is reused: the verify title can sit in any message of the input.
+            const verify = /— verify/.test(JSON.stringify(body.input));
             seen.push({ verify, model: body.model });
             if (verify) return { text: 'сборка проходит' };
             const outputs = body.input.filter((item) => item.type === 'function_call_output');
@@ -977,14 +978,14 @@ test('a generation step that runs out of turns gets one cheap verification pass'
     };
     try {
         const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'сгенерировать страницу', root: dir, approvalLevel: 'all', generation: true, emit() {} });
-        assert.equal(result.status, 'completed', result.error?.message);
+        assert.equal(result.status, 'completed', result.error?.message ?? result.status);
         assert.equal(result.steps[0].status, 'completed');
         const first = seen.filter((item) => !item.verify);
         const verify = seen.filter((item) => item.verify);
         assert.ok(first.length >= 1, JSON.stringify(seen));
         assert.ok(first.every((item) => item.model === 'gpt-6.1-terra'), JSON.stringify(seen));
         assert.equal(verify.length, 1, JSON.stringify(seen));
-        assert.equal(verify[0].model, 'gpt-6-luna');
+        assert.equal(verify[0].model, 'gpt-6.1-terra', 'the coder floor keeps verification on the senior model');
     } finally {
         await rm(dir, { recursive: true, force: true });
     }
