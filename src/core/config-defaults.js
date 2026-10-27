@@ -263,7 +263,7 @@ export const defaults = Object.freeze({
         decorator: r({
            tiers: [
                 { model: 'gpt-6-luna', effort: ['high', 'xhigh', 'max'] },
-                { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-sol', effort: ['high', 'xhigh', 'max'] },
             ],
         }),
         'image-processor': r({ model: "gpt-6.1-sol", effort: 'xhigh' }),
