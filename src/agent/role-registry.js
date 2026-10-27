@@ -55,11 +55,11 @@ export const SLICES = {
  */
 export const EXECUTORS = Object.freeze({
     coder: {
-        tools: 'all', turns: 25, schema: null,
+        tools: 'all', turns: 50, schema: null,
         description: 'Code for one self-contained piece of work: edits the files the task names, follows the stack it finds, and checks the result.',
     },
     worker: {
-        tools: 'all', turns: 25, schema: null,
+        tools: 'all', turns: 50, schema: null,
         description: 'General doer for one self-contained task of any kind: reads, edits, runs commands, and reports what changed.',
     },
     writer: {

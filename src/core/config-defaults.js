@@ -280,7 +280,7 @@ export const defaults = Object.freeze({
         maxSteps: 12,                   // plan steps accepted from the planner
         maxReviewRounds: 2,             // reviewer → worker fix cycles
         orchestratorMaxTurns: 12,       // tool turns the orchestrator may spend collecting context
-        workerMaxTurnsPerStep: 25,
+        workerMaxTurnsPerStep: 50,
         reviewerMaxTurns: 10,
         maxContextBytes: 'normal',      // small | normal | large | max | auto
         visionDelegate: 'auto',         // auto (when roles.vision has its own model) | always | never
