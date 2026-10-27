@@ -266,7 +266,7 @@ export const defaults = Object.freeze({
                 { model: 'gpt-6.1-sol', effort: ['high', 'xhigh', 'max'] },
             ],
         }),
-        'image-processor': r({ model: "gpt-6.1-sol", effort: 'xhigh' }),
+        'image-processor': r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
     },
     /** Multi-role orchestration used by `ai run`. */
     agent: {
