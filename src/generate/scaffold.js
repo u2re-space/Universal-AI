@@ -433,7 +433,11 @@ export function preparedScaffoldFiles({ kind, platform, recommendations, name = 
     const web = kind === 'landing' || kind === 'site' || kind === 'app';
     return {
         'package.json': `${JSON.stringify(manifest, null, 2)}\n`,
-        ...(web ? { 'vite.config.js': viteConfig(platform) } : {}),
+        ...(web ? {
+            'vite.config.js': viteConfig(platform),
+            'src/main.js': 'import "styles.scss";',
+            'src/styles.scss': '',
+        } : {}),
         'scripts/generate.js': scaffoldScript(),
         ...docs,
     };
