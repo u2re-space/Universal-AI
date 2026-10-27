@@ -219,14 +219,6 @@ export const defaults = Object.freeze({
         architect: r({ effort: 'high' }),
         orchestrator: r({ effort: 'high' }),
         worker: r({ effort: 'high' }),
-        coder: r({
-            // trivial → luna/high, normal → sol/high, complex → sol/xhigh: the model stops at the
-            // top rung, the effort keeps climbing that model's ladder.
-            tiers: [
-                { model: 'gpt-6-luna', effort: ['high', 'xhigh', 'max'] },
-                { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
-            ],
-        }),
         writer: r({
             // Documents stay on the cheaper model; only the effort grows with the work.
             tiers: [
@@ -256,24 +248,23 @@ export const defaults = Object.freeze({
         tester: r({ effort: 'high' }),
         classifier: r({ effort: 'high' }),
         extractor: r({ effort: 'high', verbosity: 'low' }),
-
+        coder: r({
+            tiers: [
+                { model: 'gpt-6-luna', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-sol', effort: ['low', 'medium', 'high'] },
+            ],
+        }),
         measurer: r({
-            // Measurement is mostly reading pixels: the cheap vision model does the common work,
-            // and only a complex plan with styles, SVG, and geometry moves to the senior model.
-            tiers: {
-                trivial: { model: 'gpt-6-luna', effort: 'medium' },
-                normal: { model: 'gpt-6-luna', effort: 'high' },
-                complex: { model: 'gpt-6.1-sol', effort: 'medium' },
-            },
+            tiers: [
+                { model: 'gpt-6-luna', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
+            ],
         }),
         decorator: r({
-            // Decoration is CSS/SVG authoring: the cheap model handles a divider or a pattern,
-            // a complex ornament with geometry moves to the senior model at a medium effort.
-            tiers: {
-                trivial: { model: 'gpt-6-luna', effort: 'medium' },
-                normal: { model: 'gpt-6-luna', effort: 'high' },
-                complex: { model: 'gpt-6.1-sol', effort: 'medium' },
-            },
+           tiers: [
+                { model: 'gpt-6-luna', effort: ['high', 'xhigh', 'max'] },
+                { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
+            ],
         }),
         'image-processor': r({ effort: 'high' }),
     },

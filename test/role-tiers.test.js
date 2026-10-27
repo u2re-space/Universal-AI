@@ -62,9 +62,9 @@ test('the shipped coder tiers keep the old values in the ladder form', () => {
     const trivial = resolveRole(defaults, 'coder', 'trivial');
     const normal = resolveRole(defaults, 'coder', 'normal');
     const complex = resolveRole(defaults, 'coder', 'complex');
-    assert.deepEqual([trivial.model, trivial.effort], ['gpt-6-luna', 'high']);
-    assert.deepEqual([normal.model, normal.effort], ['gpt-6.1-sol', 'high']);
-    assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'xhigh']);
+    assert.deepEqual([trivial.model, trivial.effort], ['gpt-6-luna', 'medium']);
+    assert.deepEqual([normal.model, normal.effort], ['gpt-6.1-sol', 'medium']);
+    assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'high']);
 });
 
 test('the shipped writer tiers stay on one model', () => {
@@ -79,15 +79,15 @@ test('the shipped measurer tiers keep the cheap model for normal work', () => {
     const normal = resolveRole(defaults, 'measurer', 'normal');
     const complex = resolveRole(defaults, 'measurer', 'complex');
     assert.deepEqual([trivial.model, trivial.effort], ['gpt-6-luna', 'medium']);
-    assert.deepEqual([normal.model, normal.effort], ['gpt-6-luna', 'high']);
-    assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'medium']);
+    assert.deepEqual([normal.model, normal.effort], ['gpt-6.1-sol', 'high']);
+    assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'xhigh']);
 });
 
 test('the shipped decorator tiers keep the cheap model until the ornament is complex', () => {
     const trivial = resolveRole(defaults, 'decorator', 'trivial');
     const normal = resolveRole(defaults, 'decorator', 'normal');
     const complex = resolveRole(defaults, 'decorator', 'complex');
-    assert.deepEqual([trivial.model, trivial.effort], ['gpt-6-luna', 'medium']);
-    assert.deepEqual([normal.model, normal.effort], ['gpt-6-luna', 'high']);
-    assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'medium']);
+    assert.deepEqual([trivial.model, trivial.effort], ['gpt-6-luna', 'high']);
+    assert.deepEqual([normal.model, normal.effort], ['gpt-6.1-sol', 'high']);
+    assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'xhigh']);
 });
