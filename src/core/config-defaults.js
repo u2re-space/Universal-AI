@@ -57,7 +57,7 @@ export const defaults = Object.freeze({
     model: 'gpt-6-luna',
     imageModel: 'gpt-image-2.5-sunburst',                 // null → gpt-image-2.5 (flare for generation, sunburst for edits) on the images API
     baseURL: "https://api.proxyapi.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
-    apiKey: null,                     // prefer the OPENAI_API_KEY environment variable
+    apiKey: "{{env:PROXYAPI_API_KEY}}",                     // prefer the OPENAI_API_KEY environment variable
     /**
      * Ordered OpenAI-compatible backends. The first entry with a URL and a key is the primary host;
      * the rest are tried when it is down. An entry accepts `baseUrl` (or `baseURL`), `apiKey` with
@@ -136,7 +136,9 @@ export const defaults = Object.freeze({
         enabled: true,
         models: { ...MODEL_FALLBACKS },
         providers: [
-            { baseURL: 'https://sprutdock.ru/v1', apiKey: null, env: 'SPRUTDOCK_API_KEY' },
+            { baseURL: 'https://api.proxyapi.ru/v1', apiKey: "{{env:PROXYAPI_API_KEY}}", env: 'PROXYAPI_API_KEY' },
+            { baseURL: 'https://sprutdock.ru/v1', apiKey: "{{env:SPRUTDOCK_API_KEY}}", supports: { decisionAPI: false }, env: 'SPRUTDOCK_API_KEY' },
+            { baseURL: 'https://gptunnel.ru/', apiKey: '{{env:GPTUNNEL_API_KEY}}', headers: { useWalletBalance: true }, env: 'GPTUNNEL_API_KEY' }
         ],
     },
     approve: null,                    // ask | read | write | all; null → ask (TTY) or read (no TTY)
