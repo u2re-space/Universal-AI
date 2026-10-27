@@ -251,7 +251,7 @@ export const defaults = Object.freeze({
         coder: r({
             tiers: [
                 { model: 'gpt-6-luna', effort: ['medium', 'high', 'xhigh'] },
-                { model: 'gpt-6.1-sol', effort: ['low', 'medium', 'high'] },
+                { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
         measurer: r({

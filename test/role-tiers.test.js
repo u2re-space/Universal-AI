@@ -63,8 +63,8 @@ test('the shipped coder tiers keep the old values in the ladder form', () => {
     const normal = resolveRole(defaults, 'coder', 'normal');
     const complex = resolveRole(defaults, 'coder', 'complex');
     assert.deepEqual([trivial.model, trivial.effort], ['gpt-6-luna', 'medium']);
-    assert.deepEqual([normal.model, normal.effort], ['gpt-6.1-sol', 'medium']);
-    assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'high']);
+    assert.deepEqual([normal.model, normal.effort], ['gpt-6.1-sol', 'high']);
+    assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'xhigh']);
 });
 
 test('the shipped writer tiers stay on one model', () => {
