@@ -73,3 +73,12 @@ test('the shipped writer tiers stay on one model', () => {
     assert.equal(resolveRole(defaults, 'writer', 'complex').effort, 'xhigh');
     assert.equal(resolveRole(defaults, 'writer', 'complex').model, 'gpt-6-luna');
 });
+
+test('the shipped measurer tiers keep the cheap model for normal work', () => {
+    const trivial = resolveRole(defaults, 'measurer', 'trivial');
+    const normal = resolveRole(defaults, 'measurer', 'normal');
+    const complex = resolveRole(defaults, 'measurer', 'complex');
+    assert.deepEqual([trivial.model, trivial.effort], ['gpt-6-luna', 'medium']);
+    assert.deepEqual([normal.model, normal.effort], ['gpt-6.1-sol', 'high']);
+    assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'xhigh']);
+});

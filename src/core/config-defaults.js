@@ -254,13 +254,14 @@ export const defaults = Object.freeze({
         tester: r({ effort: 'high' }),
         classifier: r({ effort: 'high' }),
         extractor: r({ effort: 'high', verbosity: 'low' }),
+
         measurer: r({
-            // A plain split stays cheap; styles and SVG take the senior model.
-            tiers: {
-                trivial: { model: 'gpt-6-luna', effort: 'xhigh' },
-                normal: { model: 'gpt-6.1-sol', effort: 'high' },
-                complex: { model: 'gpt-6.1-sol', effort: 'xhigh' },
-            },
+            // Measurement is mostly reading pixels: the cheap vision model does the common work,
+            // and only a complex plan with styles, SVG, and geometry moves to the senior model.
+            tiers: [
+                { model: 'gpt-6-luna', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
+            ],
         }),
         'image-processor': r({ effort: 'high' }),
     },
@@ -298,9 +299,9 @@ export const defaults = Object.freeze({
          * context and to `.tmp/<id>/measurements.json`.
          */
         measure: 'auto',                // off | auto | always
-        measurerPasses: 2,              // 1 = one sheet; 2 = whole reference, then staged fragments
-        measurerMaxTurns: 16,           // total tool turns for the measurement passes, split between them
-        measurerMaxContextBytes: 'max', // measurement context budget; keep it within limits.maxRequestBytes
+        measurerPasses: 1,              // 1 = one overview sheet (default); 2 = whole reference, then staged fragments
+        measurerMaxTurns: 8,            // total tool turns for the measurement passes, split between them
+        measurerMaxContextBytes: 'large', // measurement context budget; keep it within limits.maxRequestBytes
         encode: 'encoder',              // encoder (file-command model) | mcp (this process hosts the encode server)
         resume: true,                   // continue the newest unfinished step and its saved turn
         /**

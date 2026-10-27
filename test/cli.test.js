@@ -28,6 +28,8 @@ after(async () => { await server.close(); await rm(home, { recursive: true, forc
 function runCli(args, { input = null, env = {} } = {}) {
     const childEnv = { ...process.env };
     delete childEnv.SPRUTDOCK_API_KEY;
+    delete childEnv.PROXYAPI_API_KEY;
+    delete childEnv.GPTUNNEL_API_KEY;
     delete childEnv.AI_FALLBACK_API_KEY;
     delete childEnv.AI_FALLBACK_BASE_URL;
     Object.assign(childEnv, {

@@ -83,7 +83,7 @@ export const EXECUTORS = Object.freeze({
         description: 'Solves one problem from the screen or an image: an answer, a calculation, a formula, a captcha, element coordinates.',
     },
     measurer: {
-        tools: ['view_image', 'crop_image', 'split_image', 'fetch_url'], turns: 16, schema: 'measure',
+        tools: ['view_image', 'crop_image', 'split_image', 'fetch_url'], turns: 8, schema: 'measure',
         description: 'Re-measures a crop or a layer and returns a measurement sheet: boxes, angles, borders, spacing, and CSS-ready values.',
     },
     'image-processor': {

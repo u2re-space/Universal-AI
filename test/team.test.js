@@ -1486,6 +1486,7 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
     };
     const config = baseConfig();
     config.memory = { ...defaults.memory, enabled: false };
+    config.agent = { ...config.agent, measurerPasses: 2, measurerMaxTurns: 6 };
     config.roles = { ...config.roles, measurer: { ...config.roles.measurer, model: 'gpt-6.1-sol' } };
     const result = await runTeam({
         client: client(), config, ledger: createLedger(), task: 'стили по референсу',
@@ -1516,6 +1517,53 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
     assert.match(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.toon'), 'utf8'), /elements\[1\]/);
     assert.match(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.conclusion.toon'), 'utf8'), /counts/);
     await rm(dir, { recursive: true, force: true });
+});
+
+test('the measurer defaults to one cheap overview pass', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-default-'));
+    const measureBodies = [];
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'стили по референсу', complexity: 'normal',
+                steps: [{ goal: 'Создать styles.scss', details: '', verify: 'прочитать styles.scss' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, risks: [], imageTasks: [],
+            }) };
+        }
+        if (role === 'measurer') {
+            measureBodies.push(body);
+            return { text: JSON.stringify({
+                summary: 'Карточка', source: 'mockup.png', unit: 'px',
+                units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '' },
+                confidence: 'high', assumptions: [], canvas: { x: 0, y: 0, width: 400, height: 300 },
+                elements: [], regions: [], rules: [], notes: '',
+            }) };
+        }
+        if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        return { text: 'worker done' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.agent = { ...config.agent, architect: 'off' };
+    try {
+        const result = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'стили по референсу',
+            root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+            emit() {},
+        });
+        assert.equal(result.status, 'completed', result.error?.message);
+        assert.equal(measureBodies.length, 1, 'one overview pass by default');
+        assert.equal(measureBodies[0].model, 'gpt-6-luna', 'the cheap vision model measures normal work');
+        assert.equal(measureBodies[0].reasoning?.effort, 'high');
+        assert.match(JSON.stringify(measureBodies[0].input), /Measurement pass 1/);
+        assert.doesNotMatch(JSON.stringify(measureBodies[0].input), /Measurement pass 2/);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
 });
 
 test('the fragment pass replaces the overview sheet and reuses its crops', async () => {

@@ -261,9 +261,9 @@ test('measurer passes, turns, and context budget are validated', async () => {
     const env = { AI_AGENT_HOME: home };
     try {
         const config = await loadConfig({ env, ensureHome: false });
-        assert.equal(config.agent.measurerPasses, 2);
-        assert.equal(config.agent.measurerMaxTurns, 16);
-        assert.equal(config.agent.measurerMaxContextBytes, 8 * 1024 * 1024);
+        assert.equal(config.agent.measurerPasses, 1);
+        assert.equal(config.agent.measurerMaxTurns, 8);
+        assert.equal(config.agent.measurerMaxContextBytes, 512 * 1024);
         await writeFile(path.join(home, 'config.json'), JSON.stringify({ agent: { measurerPasses: 3 } }));
         await assert.rejects(loadConfig({ env, ensureHome: false }), /agent\.measurerPasses: 1\.\.2/);
         await writeFile(path.join(home, 'config.json'), JSON.stringify({ agent: { measurerMaxContextBytes: 512 } }));

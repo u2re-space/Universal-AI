@@ -99,6 +99,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
                           Планировщик может назначить imageTasks; image-processor готовит их до worker.
                           auto — только при приложенных картинках и нетривиальном плане (по умолчанию), always — всегда, --no-measure выключает.
                           Лист замеров уходит в общий контекст и в .tmp/<id>/measurements.json
+                          По умолчанию один обзорный проход (agent.measurerPasses: 1, 8 ходов, контекст large);
+                          второй проход по кропам включается agent.measurerPasses: 2
    --architect off|auto|always  architect после плана и замеров строит файловую/модульную структуру, дизайн-решения
                           и пошаговый бриф для остальных ролей; его вопросы получает orchestrator.
                           auto — только для нетривиального плана (по умолчанию), always — всегда, --no-architect выключает.

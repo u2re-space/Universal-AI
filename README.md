@@ -332,11 +332,12 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 отступы и как элемент ставится (грид или флекс, абсолютный якорь, порядок слоёв); отдельно — на какие области и слои
 делится картинка, с коробкой кропа для каждой, и отдельно — повторяющиеся правила (шаг сетки, пропорции, ширина колонки).
 
-Замер идёт в два прохода. Сначала роль изучает весь референс целиком и отдаёт обзорный лист: холст, общий layout,
-элементы, области и правила. Затем harness нарезает кропы по коробкам обзорного листа, а второй проход изучает уже
-готовые фрагменты, при необходимости режет новые и возвращает полный итоговый лист. Число проходов задаёт
-`agent.measurerPasses` (1–2, по умолчанию 2), а `agent.measurerMaxTurns` (по умолчанию 16) — общий лимит ходов,
-который делится между обзором и фрагментами. На исчерпанном лимите интерактивный запуск предложит продлить его ещё
+Замер по умолчанию идёт в один проход: роль изучает весь референс целиком и отдаёт обзорный лист — холст, общий layout,
+элементы, области и правила. Harness сам нарезает кропы по коробкам этого листа. Второй, фрагментный проход
+(`agent.measurerPasses: 2`) изучает уже готовые кропы, при необходимости режет новые и возвращает полный итоговый лист;
+он включается вручную, когда деталей слишком много для одного прохода. `agent.measurerMaxTurns` (по умолчанию 8) —
+общий лимит ходов, который при двух проходах делится поровну между обзором и фрагментами, а при одном отдаётся обзору.
+На исчерпанном лимите интерактивный запуск предложит продлить его ещё
 на `limits.extendTurns`; если продлить нельзя, роль одним последним запросом без инструментов отдаёт лист по тому,
 что уже успела разглядеть, а непроверенные значения остаются `null`.
 
@@ -352,12 +353,12 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 Полный лист пишется в `.tmp/<id>/measurements.json`, компактный TOON-индекс — в `measurements.toon`, а
 детерминированное заключение (сводка, единицы, уверенность, счётчики, assumptions и список кропов) — в
 `measurements.conclusion.json` и `measurements.conclusion.toon`. Контекст роли задаёт
-`agent.measurerMaxContextBytes` (по умолчанию 8 МиБ, то есть предел `limits.maxRequestBytes`; модель должна
+`agent.measurerMaxContextBytes` (по умолчанию `large`, 512 КиБ; модель должна
 поддерживать такое окно), поэтому лист и найденные фрагменты не обрезаются общим лимитом `agent.maxContextBytes`. При включённых суб-агентах
 worker может вызвать роль повторно через `delegate_role` с ролью `measurer`.
 
-Модель следует сложности плана: только разделить картинку — `gpt-6-luna` / `low`, собрать стили — `gpt-6.1-sol` / `high`,
-стили с SVG и геометрией — `gpt-6.1-sol` / `max`. Задают своё: `roles.measurer.model`, `roles.measurer.effort` или
+Модель следует сложности плана: только разделить картинку — `gpt-6-luna` / `medium`, собрать стили — `gpt-6-luna` / `high`,
+стили с SVG и геометрией — `gpt-6.1-sol` / `medium`. Задают своё: `roles.measurer.model`, `roles.measurer.effort` или
 `--role measurer=<модель>[:effort]`.
 
 Лист замеров кладётся в общий контекст (раздел «Reference measurements») и в `.tmp/<id>/measurements.json`, поэтому
@@ -598,7 +599,7 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   },
   "agent": { "mode": "team", "pipeline": null, "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": "normal", "visionDelegate": "auto",
              "architect": "auto", "architectMaxTurns": 8,
-             "measurerPasses": 2, "measurerMaxTurns": 16, "measurerMaxContextBytes": 8388608,
+             "measurerPasses": 1, "measurerMaxTurns": 8, "measurerMaxContextBytes": 524288,
              "orchestrator": { "enabled": false, "after": ["plan", "work", "review", "fix"], "maxContextBytes": 4194304, "applyPlan": true } },
   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
   "agents": { "enabled": true, "filenames": ["AGENTS.md", "agents.md"], "globalFile": null,
@@ -720,7 +721,7 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 | `tester` | pass/fail одного утверждения по доказательству | чтение + `run_command`, `run_script`, `ssh`, `screenshot` | 8 |
 | `vision` | описывает названные в задаче картинки текстом | только чтение + `fetch_url` | 6 |
 | `solver` | решает по экрану или картинке: ответ, расчёт, капча, координаты элементов | только чтение + `screenshot` | 8 |
-| `measurer` | снимает метрики с референсов по заданному плану | `view_image`, `crop_image`, `split_image`, `fetch_url` | 16 |
+| `measurer` | снимает метрики с референсов по заданному плану | `view_image`, `crop_image`, `split_image`, `fetch_url` | 8 |
 | `image-processor` | готовит изображения и assets: кроп, деление, trim, генерация, правка | image/assets-инструменты | 12 |
 | `clicker` | кликает по координатам, заголовку окна или элементу управления | `click`, `screenshot` | 4 |
 | `typer` | вводит текст в поле | `type`, `screenshot` | 4 |

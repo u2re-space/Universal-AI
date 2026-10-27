@@ -33,6 +33,7 @@ import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
 import { PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
 import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace } from './pace.js';
+import { contextBytes, profileFor } from '../openai/model-profiles.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
 import { formatWorkspace, mergeTaskDraft, scanWorkspace } from './workspace-scan.js';
@@ -931,13 +932,16 @@ export async function runTeam({
                         const model = encodeRoute || !paced?.ready
                             ? measurerRole.model
                             : clampModel(measurerRole.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.measurer?.model));
-                        const measurePasses = Math.max(1, Math.min(2, config.agent.measurerPasses ?? 2));
-                        const measureTurns = Math.max(1, config.agent.measurerMaxTurns ?? 16);
-                        const overviewTurns = Math.max(1, Math.ceil(measureTurns / 3));
+                        const measurePasses = Math.max(1, Math.min(2, config.agent.measurerPasses ?? 1));
+                        const measureTurns = Math.max(1, config.agent.measurerMaxTurns ?? 8);
+                        // One pass spends the whole turn budget on the overview. A second pass splits it
+                        // evenly, so the fragment inspection does not starve the overview.
+                        const overviewTurns = measurePasses > 1 ? Math.max(1, Math.ceil(measureTurns / 2)) : measureTurns;
                         const fragmentTurns = Math.max(1, measureTurns - overviewTurns);
+                        const measureProfile = profileFor(config.model, config.models);
                         const measureMaxBytes = Math.min(
-                            config.agent.measurerMaxContextBytes ?? 8 * 1024 * 1024,
-                            config.limits.maxRequestBytes,
+                            contextBytes(config.agent.measurerMaxContextBytes ?? 'large', measureProfile),
+                            contextBytes(config.limits?.maxRequestBytes ?? 'max', measureProfile),
                         );
                         const measureToolsFor = (pass) => {
                             const names = (pass === 1
