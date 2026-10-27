@@ -7,6 +7,7 @@
  * @ai.tags pipeline, team, roles
  * @ai.hint pure
  * @changed 2026-10-26 Stages are a list, not a fixed sequence: the planner and the config may reorder or skip them.
+ * @changed 2026-10-27 `decor` builds the decorative layer before `work` writes the page.
  */
 
 /**
@@ -23,7 +24,8 @@ export const STAGE_CATALOG = Object.freeze([
     { id: 'architect', title: 'Architecture brief', after: ['plan', 'measure'], requires: ['plan'] },
     { id: 'collect', title: 'Context collection', after: ['plan', 'architect'], requires: ['plan'] },
     { id: 'images', title: 'Visual assets', after: ['plan', 'measure'], requires: ['plan'] },
-    { id: 'work', title: 'Plan steps', after: ['plan'], requires: ['plan'] },
+    { id: 'decor', title: 'Decorative elements', after: ['plan', 'measure', 'architect', 'images'], requires: ['plan'] },
+    { id: 'work', title: 'Plan steps', after: ['plan', 'decor'], requires: ['plan'] },
     { id: 'review', title: 'Review and fixes', after: ['plan', 'work'], requires: ['work'] },
     { id: 'outcome', title: 'Outcome', after: ['plan', 'work', 'review'], requires: ['plan'] },
     { id: 'memory', title: 'Memory', after: ['outcome'], requires: ['outcome'] },

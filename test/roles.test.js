@@ -4,7 +4,7 @@ import { ROLE_INSTRUCTIONS } from '../src/roles/index.js';
 import { EXECUTORS } from '../src/agent/role-registry.js';
 import { defaults } from '../src/core/config.js';
 
-const NAMES = ['default', 'planner', 'architect', 'orchestrator', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer', 'image-processor'];
+const NAMES = ['default', 'planner', 'architect', 'orchestrator', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer', 'decorator', 'image-processor'];
 
 test('role modules match config role names', () => {
     assert.deepEqual(Object.keys(defaults.roles).sort(), NAMES.slice().sort());
@@ -37,6 +37,16 @@ test('existing role instructions keep their job', () => {
     assert.match(ROLE_INSTRUCTIONS.extractor, /removeLines/);
     assert.match(ROLE_INSTRUCTIONS['image-processor'], /before implementation begins/);
     assert.match(ROLE_INSTRUCTIONS['image-processor'], /Do not edit application code/);
+});
+
+test('the decorator builds CSS or SVG before the page markup', () => {
+    assert.match(ROLE_INSTRUCTIONS.decorator, /before the first HTML page/);
+    assert.match(ROLE_INSTRUCTIONS.decorator, /offset-path/);
+    assert.match(ROLE_INSTRUCTIONS.decorator, /clip-path/);
+    assert.match(ROLE_INSTRUCTIONS.decorator, /separate SVG file/);
+    assert.match(ROLE_INSTRUCTIONS.decorator, /Do not edit application HTML/);
+    assert.match(ROLE_INSTRUCTIONS.decorator, /styles\/decor\//);
+    assert.match(ROLE_INSTRUCTIONS.decorator, /assets\/decor\//);
 });
 
 test('the image processor trims padding through crop_image', () => {

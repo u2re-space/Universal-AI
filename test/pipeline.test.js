@@ -16,6 +16,7 @@ test('catalog: unique ids, default order matches the catalog, tail stages exist'
     assert.equal(new Set(ids).size, ids.length);
     assert.deepEqual([...DEFAULT_PIPELINE], ids);
     assert.deepEqual([...PIPELINE_STAGE_IDS], ids);
+    assert.ok(ids.indexOf('decor') < ids.indexOf('work'), 'decor runs before the page markup');
     for (const id of TAIL_STAGES) assert.ok(ids.includes(id), `${id} is a catalog stage`);
     for (const stage of STAGE_CATALOG) {
         for (const dependency of stage.after) assert.ok(ids.includes(dependency), `${stage.id} depends on a known stage`);
@@ -57,6 +58,7 @@ test('resolvePipeline pulls a dependency in front of its dependent, keeping the 
     assert.deepEqual(resolvePipeline({ planPipeline: ['review', 'work'] }).order, ['plan', 'work', 'review', 'outcome', 'memory']);
     assert.deepEqual(resolvePipeline({ planPipeline: ['memory', 'outcome'] }).order, ['plan', 'outcome', 'memory']);
     assert.deepEqual(resolvePipeline({ planPipeline: ['collect', 'plan', 'architect'] }).order, ['plan', 'architect', 'collect', 'outcome', 'memory']);
+    assert.deepEqual(resolvePipeline({ planPipeline: ['work', 'decor', 'plan'] }).order, ['plan', 'decor', 'work', 'outcome', 'memory']);
 });
 
 test('resolvePipeline adds a hard dependency a caller forgot', () => {

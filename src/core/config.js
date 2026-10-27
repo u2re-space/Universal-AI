@@ -568,7 +568,7 @@ function validateConfig(c) {
         }
     }
     if (!['team', 'single'].includes(c.agent.mode)) fail('agent.mode: team | single');
-    for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'architectMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'measurerPasses', 'maxContextBytes']) {
+    for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'architectMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'measurerPasses', 'decoratorMaxTurns', 'maxContextBytes']) {
         if (!Number.isSafeInteger(c.agent[key]) || c.agent[key] < (key === 'maxReviewRounds' ? 0 : 1)) fail(`agent.${key} должен быть целым числом`);
     }
     if (c.agent.measurerPasses > 2) fail('agent.measurerPasses: 1..2');
@@ -581,6 +581,7 @@ function validateConfig(c) {
     if (typeof c.agent.resume !== 'boolean') fail('agent.resume: true | false');
     if (!['off', 'auto', 'always'].includes(c.agent.extract)) fail('agent.extract: off | auto | always');
     if (!['off', 'auto', 'always'].includes(c.agent.measure)) fail('agent.measure: off | auto | always');
+    if (!['off', 'auto', 'always'].includes(c.agent.decorations)) fail('agent.decorations: off | auto | always');
     if (!['off', 'auto', 'always'].includes(c.agent.architect)) fail('agent.architect: off | auto | always');
     if (c.agent.pipeline != null) {
         if (!Array.isArray(c.agent.pipeline)) fail('agent.pipeline: массив этапов');

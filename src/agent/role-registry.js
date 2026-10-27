@@ -86,6 +86,10 @@ export const EXECUTORS = Object.freeze({
         tools: ['view_image', 'crop_image', 'split_image', 'fetch_url'], turns: 8, schema: 'measure',
         description: 'Re-measures a crop or a layer and returns a measurement sheet: boxes, angles, borders, spacing, and CSS-ready values.',
     },
+    decorator: {
+        tools: ['list_files', 'read_file', 'search_files', 'view_image', 'write_file', 'replace_text', 'generate_svg', 'fetch_url'], turns: 12, schema: 'decorations',
+        description: 'Builds complex decorative elements (ornaments, flourishes, dividers, patterns, frames) as native HTML+CSS or standalone SVG and returns ready snippets.',
+    },
     'image-processor': {
         tools: 'images', turns: 12, schema: null,
         description: 'Prepares images and visual assets: crops, splits, trims padding, generates or edits artwork, saves them under assets/.',

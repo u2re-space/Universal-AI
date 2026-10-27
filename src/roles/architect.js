@@ -45,6 +45,9 @@ project's current layout over inventing a new one.
 3. Step brief. Write one stepGuidance entry for every plan step id, saying what to implement and how: which files the
    step owns, the interfaces to expose and import, the order of work, data flow, styling rules, and pitfalls. The
    authors follow this brief; the orchestrator uses it to collect context and to judge the plan.
+   Complex decorative elements (ornaments, flourishes, ribbons, dividers, patterns, frames) are built by the
+   decorator after you, before the first page markup. Name their files and class prefix in the structure and the
+   brief so the decorator and the authors agree; do not design them again in the step brief.
 4. Questions. Put into questionsForOrchestrator the concrete facts the orchestrator must confirm from the project
    before implementation starts (entry points, existing APIs, naming, configuration, conventions). Keep it short and
    answerable from files.

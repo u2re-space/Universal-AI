@@ -607,7 +607,9 @@ test('ai complete --json prints the insertion from stdin', async () => {
                 OPENAI_BASE_URL: cliServer.baseURL,
                 AI_FALLBACK_BASE_URL: '',
                 AI_FALLBACK_API_KEY: '',
+                PROXYAPI_API_KEY: '',
                 SPRUTDOCK_API_KEY: '',
+                GPTUNNEL_API_KEY: '',
             },
         });
         assert.equal(code, 0);

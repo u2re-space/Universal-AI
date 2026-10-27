@@ -101,12 +101,17 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
                           Лист замеров уходит в общий контекст и в .tmp/<id>/measurements.json
                           По умолчанию один обзорный проход (agent.measurerPasses: 1, 8 ходов, контекст large);
                           второй проход по кропам включается agent.measurerPasses: 2
+   --decor off|auto|always  decorator строит сложные декоративные элементы (орнаменты, завитки, ленты, разделители,
+                           узоры, рамки) до генерации HTML: нативный HTML+CSS (offset-path, clip-path, mask, градиенты)
+                           или отдельный SVG-файл. Планировщик назначает decorationTasks; готовые сниппеты и файлы
+                           уходят в общий контекст и в .tmp/<id>/decorations.json
+                           auto — только при наличии decorationTasks (по умолчанию), always — и без них, --no-decor выключает
    --architect off|auto|always  architect после плана и замеров строит файловую/модульную структуру, дизайн-решения
                           и пошаговый бриф для остальных ролей; его вопросы получает orchestrator.
                           auto — только для нетривиального плана (по умолчанию), always — всегда, --no-architect выключает.
                           Структура уходит в общий контекст и в .tmp/<id>/architecture.json
    Порядок этапов задаёт план (поле pipeline) и agent.pipeline в конфигурации: answer, classify, plan, measure,
-   architect, collect, images, work, review, outcome, memory. Пропущенный этап не выполняется; зависимость
+   architect, collect, images, decor, work, review, outcome, memory. Пропущенный этап не выполняется; зависимость
    (например, review после work) всё равно встаёт раньше.
   --no-resume            не продолжать незавершённый шаг, фазу и ход из .tmp (по умолчанию тот же текст задачи продолжается с места остановки)
   --route encoder|planner|decisions  куда отдать первый ответ. decisions спрашивает модель решений. Без флага решает метка ответа

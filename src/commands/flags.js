@@ -148,6 +148,11 @@ export function overridesFrom(values, { command = null } = {}) {
         if (!['off', 'auto', 'always'].includes(values.measure)) throw new UsageError('--measure: off | auto | always');
         (o.agent ??= {}).measure = values.measure;
     }
+    if (values['no-decor']) (o.agent ??= {}).decorations = 'off';
+    if (values.decor) {
+        if (!['off', 'auto', 'always'].includes(values.decor)) throw new UsageError('--decor: off | auto | always');
+        (o.agent ??= {}).decorations = values.decor;
+    }
     if (values['no-architect']) (o.agent ??= {}).architect = 'off';
     if (values.architect) {
         if (!['off', 'auto', 'always'].includes(values.architect)) throw new UsageError('--architect: off | auto | always');

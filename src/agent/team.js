@@ -7,6 +7,7 @@
  * @exports toolNamesForRole, runTeam
  * @ai.tags team, roles
  * @ai.hint keep
+ * @changed 2026-10-27 The decorator stage builds the decorative layer before the page markup.
  * @changed 2026-10-26 Stages run from a data-driven pipeline; the plan and the config choose the order.
  */
 
@@ -31,7 +32,7 @@ import { createRoleRunner } from './roles.js';
 import { builtinTools } from './loop.js';
 import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
-import { PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
+import { PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, DECORATOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
 import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace } from './pace.js';
 import { contextBytes, profileFor } from '../openai/model-profiles.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
@@ -67,7 +68,7 @@ import { questionsFor } from '../channels/questions.js';
 import { routeFlag } from '../channels/verdict.js';
 import { safeReviewerModel } from '../roles/reviewer.js';
 
-import { bullets, renderArchitecture, renderFindings, renderMeasurements } from './team-text.js';
+import { bullets, renderArchitecture, renderDecorations, renderFindings, renderMeasurements } from './team-text.js';
 const HARD_STOP = new Set(['cancelled', 'budget', 'failed']);
 
 /**
@@ -113,10 +114,13 @@ export function toolNamesForRole(allNames, role, spec = null) {
     if (role === 'reviewer') {
         return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || name === 'run_subagent' || name === 'delegate_role');
     }
-    if (role === 'image-processor' || role === 'measurer') {
+    if (role === 'image-processor' || role === 'measurer' || role === 'decorator') {
         const allowed = new Set(role === 'image-processor'
             ? [...IMAGE_TOOL_NAMES, 'fetch_url']
-            : ['view_image', 'crop_image', 'split_image', 'fetch_url']);
+            : role === 'measurer'
+                ? ['view_image', 'crop_image', 'split_image', 'fetch_url']
+                // The decorator writes its own stylesheet and SVG files and never touches application markup.
+                : [...READ_ONLY_TOOLS, 'write_file', 'replace_text', 'generate_svg', 'fetch_url']);
         return allNames.filter((name) => allowed.has(name));
     }
     return allNames;
@@ -177,7 +181,7 @@ export async function runTeam({
         return one.steps?.[0] ?? { model: null, effort: null };
     };
     const result = {
-        status: 'failed', text: '', plan: null, architecture: null, review: null, steps: [], images: [], changes: [], stats: null,
+        status: 'failed', text: '', plan: null, architecture: null, decorations: null, review: null, steps: [], images: [], changes: [], stats: null,
         recalled: [], memoriesSaved: [], reviewRounds: 0, error: null
     };
 
@@ -234,6 +238,7 @@ export async function runTeam({
             delegated: task,
             ...(spec.schema === 'batch' ? { schema: BATCH_SCHEMA, schemaName: 'batch' } : {}),
             ...(spec.schema === 'measure' ? { schema: MEASURER_SCHEMA, schemaName: 'measure' } : {}),
+            ...(spec.schema === 'decorations' ? { schema: DECORATOR_SCHEMA, schemaName: 'decorations' } : {}),
             ...(model ? { model } : {}),
             ...(tier ? { effort: tier.effort } : {}),
         });
@@ -260,6 +265,8 @@ export async function runTeam({
     });
     const imageProcessorNames = toolNamesForRole(enabled, 'image-processor', config.roles?.['image-processor']);
     const imageProcessorTools = createToolset({ ...toolBase, names: imageProcessorNames, approvalLevel });
+    const decoratorNames = toolNamesForRole(enabled, 'decorator', config.roles?.decorator);
+    const decoratorTools = createToolset({ ...toolBase, names: decoratorNames, approvalLevel });
     const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi });
     const imageProcessorBuiltin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi })
         .filter((tool) => tool.type === 'image_generation' || tool.type === 'web_search');
@@ -270,7 +277,7 @@ export async function runTeam({
         result.changes = [...fileChanges, ...workerTools.stats().changes];
         result.stats = {
             worker: workerTools.stats(), architect: architectTools.stats(), orchestrator: orchestratorTools.stats(),
-            reviewer: reviewerTools.stats(), 'image-processor': imageProcessorTools.stats(),
+            reviewer: reviewerTools.stats(), 'image-processor': imageProcessorTools.stats(), decorator: decoratorTools.stats(),
         };
         return result;
     };
@@ -595,6 +602,7 @@ export async function runTeam({
             if (!Array.isArray(source.fileActions)) source.fileActions = [];
             if (!Array.isArray(source.taskMap)) source.taskMap = [];
             if (!Array.isArray(source.imageTasks)) source.imageTasks = [];
+            if (!Array.isArray(source.decorationTasks)) source.decorationTasks = [];
             const planComplexity = source.complexity === 'trivial' || source.complexity === 'complex' || source.complexity === 'normal' ? source.complexity : 'normal';
             if (Array.isArray(source.steps)) {
                 for (const step of source.steps) {
@@ -665,6 +673,14 @@ export async function runTeam({
                     result.architecture = architecture;
                     ctx.set('architecture', 'Architecture (by the architect)', renderArchitecture(architecture), { priority: 8 });
                 } catch { /* a damaged brief is skipped; the architect stage can rebuild it */ }
+            }
+            const decorationsFile = await readFile(path.join(root, '.tmp', work.id, 'decorations.json'), 'utf8').catch(() => null);
+            if (decorationsFile) {
+                try {
+                    const decorations = JSON.parse(decorationsFile);
+                    result.decorations = decorations;
+                    ctx.set('decorations', 'Decorative elements (by the decorator)', renderDecorations(decorations, `.tmp/${work.id}`), { priority: 9 });
+                } catch { /* a damaged sheet is skipped; the decor stage can rebuild it */ }
             }
             pendingSession = await loadSession(path.join(root, '.tmp', work.id, 'worker-session.json')).catch(() => null);
             if (pendingSession) neutralSession(pendingSession);
@@ -1219,6 +1235,60 @@ export async function runTeam({
                             notify({ type: 'stage.done', stage: 'image-processing', status: 'completed', assets: assets.map((asset) => asset.path) });
                         }
                     }
+                },
+            },
+            {
+                id: 'decor',
+                run: async () => {
+                    // 3b. Decorator: complex decorative elements as HTML+CSS or standalone SVG, before the page markup.
+                    const decorationMode = config.agent.decorations ?? 'auto';
+                    const decorationTasks = (plan.decorationTasks ?? []).filter((item) => item && typeof item.goal === 'string' && item.goal.trim());
+                    if (decorationMode === 'off' || (!decorationTasks.length && decorationMode !== 'always')) return;
+                    const previous = progress.decorations;
+                    if (previous?.status === 'completed' && previous.report) {
+                        ctx.set('decorations', 'Decorative elements (by the decorator)', previous.report, { priority: 9 });
+                        return;
+                    }
+                    const known = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
+                    const decoratorRole = roles.resolve('decorator', known);
+                    const model = encodeRoute || !paced?.ready
+                        ? decoratorRole.model
+                        : clampModel(decoratorRole.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.decorator?.model));
+                    progress.stage = 'decor';
+                    progress.decorations = { status: 'running', report: '', files: [] };
+                    work.progress = progress;
+                    await persist('running');
+                    notify({ type: 'stage.start', stage: 'decor', role: 'decorator', model });
+                    const tasks = decorationTasks.length
+                        ? decorationTasks.map((item, index) => `${index + 1}. ${item.goal}\n   ${item.details || ''}`).join('\n')
+                        : 'The plan does not list decoration tasks. Read the plan and the architecture brief and build the complex decorative elements the page needs.';
+                    const refs = referencePaths.length ? referencePaths.map((item) => `- ${item}`).join('\n') : '(none)';
+                    const decorated = await roles.run('decorator', {
+                        text: `${ctx.render({ maxBytes })}\n\n# Decoration tasks\n${tasks}\n\n# Reference image paths\n${refs}`,
+                        parts: parts.filter((part) => part?.type === 'input_image'),
+                        instructions: withAgents(ROLE_INSTRUCTIONS.decorator),
+                        toolset: decoratorTools, schema: DECORATOR_SCHEMA, schemaName: 'decorations',
+                        maxTurns: config.agent.decoratorMaxTurns ?? 12,
+                    });
+                    if (HARD_STOP.has(decorated.status)) return { exit: stop(decorated, 'декоративные элементы') };
+                    if (!decorated.data) {
+                        notify({ type: 'warning', message: `Декоратор не ответил (${decorated.status}${decorated.error ? `: ${errorMessage(decorated.error)}` : ''}); продолжаем без готовых декораций.` });
+                        notify({ type: 'stage.done', stage: 'decor', status: decorated.status });
+                        return;
+                    }
+                    const items = Array.isArray(decorated.data.items) ? decorated.data.items : [];
+                    const files = items.flatMap((item) => Array.isArray(item.files) ? item.files : []);
+                    const report = renderDecorations(decorated.data, `.tmp/${work.id}`);
+                    result.decorations = decorated.data;
+                    progress.decorations = { status: 'completed', report, files };
+                    ctx.set('decorations', 'Decorative elements (by the decorator)', report, { priority: 9 });
+                    await writeFile(path.join(root, '.tmp', work.id, 'decorations.json'), `${JSON.stringify(decorated.data, null, 2)}\n`, 'utf8').catch((error) => {
+                        notify({ type: 'warning', message: `Лист декораций не сохранён: ${errorMessage(error)}` });
+                    });
+                    work.progress = progress;
+                    publish();
+                    await persist('running');
+                    notify({ type: 'stage.done', stage: 'decor', status: 'completed', items: items.length, files });
                 },
             },
             {

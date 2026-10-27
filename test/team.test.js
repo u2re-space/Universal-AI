@@ -66,6 +66,7 @@ function roleOf(body) {
     if (format === 'task_label') return 'classifier';
     if (format === 'extraction') return 'extractor';
     if (format === 'measure') return 'measurer';
+    if (format === 'decorations') return 'decorator';
     if (format === 'image_assets') return 'image-processor';
     if (detectCoder && typeof body.instructions === 'string' && body.instructions.includes('You are the coder.')) return 'coder';
     if (typeof body.instructions === 'string' && body.instructions.includes('route: encode')) return 'answer';
@@ -102,7 +103,7 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.throws(() => overridesFrom({ role: ['Bad Name=x'] }), /--role/);
     assert.throws(() => overridesFrom({ role: ['UPPER=x'] }), /--role/);
     assert.deepEqual(overridesFrom({ role: ['image-processor=gpt-6-luna:medium'] }).roles, { 'image-processor': { model: 'gpt-6-luna', effort: 'medium' } });
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 19);
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 20);
     assert.equal(overridesFrom({ extract: 'always' }).agent.extract, 'always');
     assert.equal(overridesFrom({ 'no-extract': true }).agent.extract, 'off');
     assert.throws(() => overridesFrom({ extract: 'nope' }), /--extract/);
@@ -1561,6 +1562,92 @@ test('the measurer defaults to one cheap overview pass', async () => {
         assert.equal(measureBodies[0].reasoning?.effort, 'high');
         assert.match(JSON.stringify(measureBodies[0].input), /Measurement pass 1/);
         assert.doesNotMatch(JSON.stringify(measureBodies[0].input), /Measurement pass 2/);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('the decorator builds the decorative layer before the worker writes the page', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-decor-'));
+    const seen = [];
+    const decoratorBodies = [];
+    const workerBodies = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'лендинг с орнаментом', complexity: 'normal',
+                steps: [{ goal: 'Создать index.html', details: 'Вставить готовый орнамент в hero', verify: 'прочитать index.html' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, imageTasks: [],
+                decorationTasks: [{ goal: 'Орнамент-завиток в hero', details: 'CSS offset-path или отдельный SVG' }],
+                risks: [],
+            }) };
+        }
+        if (role === 'decorator') {
+            decoratorBodies.push(body);
+            return { text: JSON.stringify({
+                summary: 'Завиток собран на CSS.',
+                items: [{
+                    name: 'vine', placement: 'hero background', approach: 'css', files: ['styles/decor/vine.css'],
+                    snippet: '<div class="vine" aria-hidden="true"></div>', fallback: 'Упрощённый бордюр.', notes: '',
+                }],
+                conventions: ['Префикс .decor-'], notes: [],
+            }) };
+        }
+        if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        if (JSON.stringify(body.input).includes('Your step')) workerBodies.push(body);
+        return { text: 'страница готова' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.agent = { ...config.agent, architect: 'off' };
+    try {
+        const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'лендинг с орнаментом', root: dir, emit() {} });
+        assert.equal(result.status, 'completed', result.error?.message);
+        assert.equal(decoratorBodies.length, 1, 'one decorator call for the requested decoration');
+        assert.ok(seen.indexOf('decorator') < seen.lastIndexOf('worker'), 'the decorator runs before the page');
+        assert.match(JSON.stringify(decoratorBodies[0].input), /Decoration tasks/);
+        assert.match(JSON.stringify(decoratorBodies[0].input), /Орнамент-завиток/);
+        assert.match(JSON.stringify(workerBodies[0].input), /Decorative elements \(by the decorator\)/);
+        assert.match(JSON.stringify(workerBodies[0].input), /styles\/decor\/vine\.css/);
+        assert.equal(result.decorations.items[0].name, 'vine');
+        const saved = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'decorations.json'), 'utf8'));
+        assert.equal(saved.items[0].approach, 'css');
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('the decorator stage stays off when the plan names no decorations', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-decor-skip-'));
+    const seen = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push(role);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'текстовая страница', complexity: 'normal',
+                steps: [{ goal: 'Создать index.html', details: 'Заголовок и абзац', verify: 'прочитать index.html' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, imageTasks: [], decorationTasks: [], risks: [],
+            }) };
+        }
+        if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
+        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        return { text: 'страница готова' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.agent = { ...config.agent, architect: 'off' };
+    try {
+        const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'текстовая страница', root: dir, emit() {} });
+        assert.equal(result.status, 'completed', result.error?.message);
+        assert.equal(seen.includes('decorator'), false);
     } finally {
         await rm(dir, { recursive: true, force: true });
     }

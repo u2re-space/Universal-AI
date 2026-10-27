@@ -3,9 +3,10 @@
  * @module agent/team-text
  * @purpose Render planner, architect, orchestrator, and measurer JSON as text the worker and reviewer can read.
  * @usedBy agent/team
- * @exports renderPlan, renderFindings, renderMeasurements, renderArchitecture, bullets
+ * @exports renderPlan, renderFindings, renderMeasurements, renderArchitecture, renderDecorations, bullets
  * @ai.tags team
  * @ai.hint pure
+ * @changed 2026-10-27 Added the decorator report with ready snippets and files.
  * @changed 2026-10-24 Added the architect structure and design brief.
  */
 
@@ -174,5 +175,33 @@ export function renderArchitecture(architecture) {
         guidance && `Step guidance:\n${guidance}`,
         architecture.questionsForOrchestrator?.length ? `Questions for the orchestrator:\n${bullets(architecture.questionsForOrchestrator)}` : '',
         architecture.risks?.length ? `Risks:\n${bullets(architecture.risks)}` : '',
+    ].filter(Boolean).join('\n\n');
+}
+
+/**
+ * Render the decorator's sheet as the text stored on the shared context.
+ * Every item carries the exact snippet the page pastes and the files it links, so the author does not
+ * rebuild the decoration by hand.
+ * @param {object} report
+ * @param {string} dir Project-relative work directory such as `.tmp/<id>`.
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function renderDecorations(report, dir) {
+    const items = (report.items ?? []).map((item) => {
+        const lines = [`- ${item.name} (${item.approach || 'css'}): ${item.placement || '(no placement)'}`];
+        if (item.files?.length) lines.push(`  files: ${item.files.join(', ')}`);
+        if (item.snippet) lines.push(`  snippet: ${item.snippet}`);
+        if (item.fallback) lines.push(`  fallback: ${item.fallback}`);
+        if (item.notes) lines.push(`  notes: ${item.notes}`);
+        return lines.join('\n');
+    }).join('\n');
+    return [
+        report.summary ?? '',
+        items && `Decorations (paste the snippet, link the files, do not rebuild them):\n${items}`,
+        report.conventions?.length ? `Conventions:\n${bullets(report.conventions)}` : '',
+        report.notes?.length ? `Notes:\n${bullets(report.notes)}` : '',
+        `Decoration file: ${dir}/decorations.json`,
     ].filter(Boolean).join('\n\n');
 }

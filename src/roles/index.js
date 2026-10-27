@@ -2,7 +2,7 @@
  * @file src/roles/index.js
  * @module roles/index
  * @purpose Collect the prompt of every named role.
- * @depends roles/default, roles/planner, roles/architect, roles/orchestrator, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer, roles/image-processor
+ * @depends roles/default, roles/planner, roles/architect, roles/orchestrator, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer, roles/decorator, roles/image-processor
  * @usedBy commands/instructions, agent/team
  * @exports ROLE_INSTRUCTIONS
  * @ai.tags roles, prompts
@@ -28,6 +28,7 @@ import * as tester from './tester.js';
 import * as classifier from './classifier.js';
 import * as extractor from './extractor.js';
 import * as measurer from './measurer.js';
+import * as decorator from './decorator.js';
 import * as imageProcessor from './image-processor.js';
 
 /**
@@ -56,6 +57,7 @@ export const ROLE_INSTRUCTIONS = {
     classifier: classifier.instructions,
     extractor: extractor.instructions,
     measurer: measurer.instructions,
+    decorator: decorator.instructions,
     'image-processor': imageProcessor.instructions,
     summarizerMemory: summarizer.memoryInstructions,
     summarizerFile: summarizer.fileInstructions,

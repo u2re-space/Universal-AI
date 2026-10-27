@@ -79,6 +79,15 @@ test('the shipped measurer tiers keep the cheap model for normal work', () => {
     const normal = resolveRole(defaults, 'measurer', 'normal');
     const complex = resolveRole(defaults, 'measurer', 'complex');
     assert.deepEqual([trivial.model, trivial.effort], ['gpt-6-luna', 'medium']);
-    assert.deepEqual([normal.model, normal.effort], ['gpt-6.1-sol', 'high']);
-    assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'xhigh']);
+    assert.deepEqual([normal.model, normal.effort], ['gpt-6-luna', 'high']);
+    assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'medium']);
+});
+
+test('the shipped decorator tiers keep the cheap model until the ornament is complex', () => {
+    const trivial = resolveRole(defaults, 'decorator', 'trivial');
+    const normal = resolveRole(defaults, 'decorator', 'normal');
+    const complex = resolveRole(defaults, 'decorator', 'complex');
+    assert.deepEqual([trivial.model, trivial.effort], ['gpt-6-luna', 'medium']);
+    assert.deepEqual([normal.model, normal.effort], ['gpt-6-luna', 'high']);
+    assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'medium']);
 });

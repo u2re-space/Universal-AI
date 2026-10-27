@@ -24,7 +24,7 @@
 | Чаты и Telegram | `ai channels --listen`, `ai telegram poll` — группы, каналы, личные чаты, черновик ответа или пост |
 | Разные модели под роли | старшая модель планирует и проверяет, младшие собирают контекст и генерируют вызовы инструментов, отдельная модель читает картинки: `--role planner=gpt-6.1-sol:high --role worker=gpt-6-luna --role vision=gpt-6-luna`. У каждой модели свой потолок effort и окно контекста (`models.*`), у роли — свой потолок `maxEffort` |
 | Свои роли | любое имя-слаг в `roles.<имя>`: свои инструкции, инструменты, модель, effort и потолок effort. Такая роль работает и через `--role`, и через `delegate_role` |
-| Свой порядок этапов | последовательность задаёт план (поле `pipeline`) и `agent.pipeline`: `answer`, `classify`, `plan`, `measure`, `architect`, `collect`, `images`, `work`, `review`, `outcome`, `memory`. Этап можно пропустить или переставить, зависимость всегда встаёт раньше |
+| Свой порядок этапов | последовательность задаёт план (поле `pipeline`) и `agent.pipeline`: `answer`, `classify`, `plan`, `measure`, `architect`, `collect`, `images`, `decor`, `work`, `review`, `outcome`, `memory`. Этап можно пропустить или переставить, зависимость всегда встаёт раньше |
 | Память и общий контекст | долговременная память в SQLite (факты, соглашения, решения — по проекту и глобально), заметки проекта `AGENTS.md`, история задач, кеш сводок файлов; один общий контекст для всех ролей |
 | Фон | `--background` (сервер считает, можно переподключиться `ai resume`) и `--detach` (локальная фоновая задача, `ai jobs …`) |
 | Что происходит | строка статуса: роль и модель, фаза («думает», «выполняется read_file», «генерирует изображение»), время, токены ↑↓, стоимость; краткие рассуждения модели; журнал этапов, шагов и действий; итоговая сводка с расходом по ролям и моделям |
@@ -229,8 +229,9 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 
 | Роль | Задача | Инструменты | По умолчанию |
 | --- | --- | --- | --- |
-| `planner` | понять задачу, составить план (JSON: шаги, файлы, вопросы, критерии приёмки, нужно ли ревью), посмотреть приложенные картинки | — | старшая модель, effort `high` |
-| `measurer` | снять метрики с референсов после плана: блоки элементов в пикселях, на какой угол повёрнут каждый, где проходят границы и скругления, как картинка делится на области и слои (с коробками кропа), правила отступов, куда и как ставить каждый элемент | `view_image`, `crop_image`, `split_image` | тривиально (только разделить): `gpt-6-luna` / `low`; стили: `gpt-6.1-sol` / `medium`; стили, SVG и геометрия: `gpt-6.1-sol` / `high` |
+| `planner` | понять задачу, составить план (JSON: шаги, файлы, вопросы, критерии приёмки, нужно ли ревью, `imageTasks` и `decorationTasks`), посмотреть приложенные картинки | — | старшая модель, effort `high` |
+| `measurer` | снять метрики с референсов после плана: блоки элементов в пикселях, на какой угол повёрнут каждый, где проходят границы и скругления, как картинка делится на области и слои (с коробками кропа), правила отступов, куда и как ставить каждый элемент | `view_image`, `crop_image`, `split_image` | тривиально (только разделить): `gpt-6-luna` / `medium`; стили: `gpt-6-luna` / `high`; стили, SVG и геометрия: `gpt-6.1-sol` / `medium` |
+| `decorator` | построить сложные декоративные элементы (`decorationTasks` из плана) до генерации HTML: орнаменты, завитки, ленты, разделители, узоры, рамки. Для каждого выбирает нативный HTML+CSS на современных стандартах (`offset-path`, `clip-path`, `mask`, градиенты, `@property`, scroll-driven анимации) или отдельный SVG-файл; возвращает готовые сниппеты, пути файлов и fallback | `list_files`, `read_file`, `search_files`, `view_image`, `write_file`, `replace_text`, `generate_svg`, `fetch_url` | trivial: `gpt-6-luna` / `medium`; normal: `gpt-6-luna` / `high`; complex: `gpt-6.1-sol` / `medium` |
 | `architect` | после плана и замеров превратить план в конкретную файловую/модульную структуру и дизайн-решения: какие файлы, компоненты, стили и assets создавать, какие у них интерфейсы и зависимости, как реализовать каждый шаг; отдельно — вопросы оркестратору и общие конвенции | только чтение: `list_files`, `search_files`, `read_file`, `summarize_file`, `recall` | старшая модель, effort `high`; `agent.architect: auto` (по умолчанию) — для нетривиального плана, `--no-architect` выключает |
 | `image-processor` | выполнить отдельные `imageTasks` из плана до реализации: подготовить запрошенные изображения, фрагменты и assets; вернуть пути, форматы и рекомендации worker; снять padding — это тоже `crop_image` (`trim=true`) | только включённые image/assets-инструменты; без shell и редактирования кода | общая модель, effort `medium`; настраивается `--role image-processor=<модель>[:effort]` |
 | `orchestrator` | знает проект лучше всех и делает две работы: (1) собрать контекст из файлов для остальных — ответить на вопросы планировщика, выписать нужные фрагменты и соглашения; (2) после этапа (план, сбор контекста, шаг worker, ревью, исправления) посмотреть план, progress, свои находки и свежий diff — вернуть правку плана и указания следующему шагу | только чтение: `list_files`, `search_files`, `read_file`, `summarize_file`, `recall` | старшая модель, effort `high`; координация включается `--orchestrator`, бюджет контекста `agent.orchestrator.maxContextBytes` (4 МиБ ≈ 1M токенов) |
@@ -247,8 +248,9 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 | `default` | `ask`, `chat`, `run --single` | — | общая `model` |
 
 Поток по умолчанию: память + заметки проекта → **план** → (если к задаче приложены референсы) **замеры** → **архитектор**
-(если план не тривиальный) → **сбор контекста** → (если `imageTasks` не пуст) **подготовка изображений** → **выполнение**
-по шагам → **ревью** и правки → **память**. Это не жёсткая последовательность: планировщик возвращает `pipeline` —
+(если план не тривиальный) → **сбор контекста** → (если `imageTasks` не пуст) **подготовка изображений** → (если
+`decorationTasks` не пуст) **декоративные элементы** → **выполнение** по шагам → **ревью** и правки → **память**. Это не
+жёсткая последовательность: планировщик возвращает `pipeline` —
 список этапов, которые нужны этой задаче, а `agent.pipeline` в конфигурации задаёт порядок по умолчанию. Пропущенный
 этап не выполняется, переставленный выполняется в новом месте; если этап зависит от другого (например, `review`
 от `work`), зависимость всё равно встаёт раньше — и добавляется, даже если её забыли. Планировщик не может отменить этапы, которые прошли до него
@@ -397,6 +399,29 @@ worker может вызвать роль повторно через `delegate_
 `agent.architectMaxTurns` (по умолчанию 8). Модель задаётся как у остальных ролей: `roles.architect.model`,
 `roles.architect.effort` или `--role architect=<модель>[:effort]`. Ошибка архитектора запуск не останавливает:
 команда продолжает по плану.
+
+### Декоративные элементы
+
+Роль `decorator` стоит после замеров и архитектора и **до** первого HTML-файла: сложный декор должен быть готов
+раньше, чем автор начнёт разметку. Планировщик перечисляет такие элементы в `decorationTasks` (орнаменты, завитки,
+ленты, разделители, узоры, рамки, декоративные заголовки), а декоратор для каждого выбирает технику:
+
+- `css` — HTML-разметка плюс нативный CSS на современных стандартах: `offset-path` с `offset-distance` и
+  `offset-rotate` (CSS Motion Path), `clip-path: path()/shape()`, `mask-image` с `mask-composite`,
+  `conic-gradient`/`radial-gradient`, `@property`, `transform`, `filter`, `mix-blend-mode`, `shape-outside`,
+  scroll-driven `animation-timeline`, `view-transition-name`, anchor positioning. Новая возможность закрывается
+  `@supports` с упрощённой формой в fallback, анимации уважают `prefers-reduced-motion`.
+- `svg` — отдельный SVG-файл, когда контур слишком сложен для CSS или нужен самодостаточный рисунок: `viewBox`,
+  без внешних ссылок, `currentColor` для перекраски, `role="img"` и `title` либо `aria-hidden` для чистого декора.
+
+Декоратор пишет только свои файлы: `styles/decor/<name>.css` и `assets/decor/<name>.svg`, не трогая HTML, шаблоны,
+компоненты, скрипты и конфигурацию. В ответе — JSON со сниппетом для вставки, путями файлов, fallback и заметками;
+готовый отчёт уходит в общий контекст как раздел «Decorative elements (by the decorator)» и в
+`.tmp/<id>/decorations.json`, а worker и coder вставляют сниппеты и подключают файлы, не пересобирая декор заново.
+Режим задаёт `agent.decorations`: `auto` (по умолчанию, только при непустом `decorationTasks`), `always` (искать
+декор и без списка) или `off`; флаги — `--decor off|auto|always` и `--no-decor`. Число ходов —
+`agent.decoratorMaxTurns` (по умолчанию 12), модель — `roles.decorator` или `--role decorator=<модель>[:effort]`.
+Ошибка декоратора запуск не останавливает: команда продолжает по плану.
 
 ### Оркестратор
 
@@ -599,6 +624,7 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   },
   "agent": { "mode": "team", "pipeline": null, "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": "normal", "visionDelegate": "auto",
              "architect": "auto", "architectMaxTurns": 8,
+             "decorations": "auto", "decoratorMaxTurns": 12,
              "measurerPasses": 1, "measurerMaxTurns": 8, "measurerMaxContextBytes": 524288,
              "orchestrator": { "enabled": false, "after": ["plan", "work", "review", "fix"], "maxContextBytes": 4194304, "applyPlan": true } },
   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
@@ -634,7 +660,8 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
 Tier применяется, когда вызывающий назвал сложность, а сама роль не задала `model`/`effort`; явные поля роли всегда
 важнее. `null` — наследовать от `roles.default`, затем от общих настроек. Имя вне встроенных создаёт пользовательскую
 роль. `agent.pipeline` задаёт порядок этапов (`null` — порядок по умолчанию, список — переставить или пропустить
-этапы), а `plan.pipeline` перекрывает его для конкретной задачи.
+этапы: `answer`, `classify`, `plan`, `measure`, `architect`, `collect`, `images`, `decor`, `work`, `review`,
+`outcome`, `memory`), а `plan.pipeline` перекрывает его для конкретной задачи.
 `documentation.sources` задаёт именованный каталог HTTP(S)-ссылок (по умолчанию доступны MDN CSS/JavaScript,
 ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles` выбирает имена источников для
 `planner`, `architect`, `orchestrator`, `worker` и `coder`. Передача пустого массива отключает ссылки для выбранной роли.
@@ -707,7 +734,7 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 
 `run_subagent` — не роль конвейера, а операция: агент запускает вложенного агента, ждёт его отчёт и продолжает
 свою работу. Суб-агент — это обычная роль (`coder`, `worker`, `writer`, `reviewer`, `tester`, `vision`, `solver`,
-`image-processor`) в чистом контексте: он не видит переписку (задачу нужно писать целиком, с путями и требуемым
+`measurer`, `decorator`, `image-processor`) в чистом контексте: он не видит переписку (задачу нужно писать целиком, с путями и требуемым
 видом отчёта), получает свой срез инструментов и свой лимит ходов, а его модель настраивается теми же настройками
 роли — `roles.<имя>.model` или `--role coder=gpt-6-luna:low`. Изменения файлов и команды вложенного запуска
 попадают в статистику вызвавшего агента — их видит оркестратор и ревьюер.
@@ -722,6 +749,7 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 | `vision` | описывает названные в задаче картинки текстом | только чтение + `fetch_url` | 6 |
 | `solver` | решает по экрану или картинке: ответ, расчёт, капча, координаты элементов | только чтение + `screenshot` | 8 |
 | `measurer` | снимает метрики с референсов по заданному плану | `view_image`, `crop_image`, `split_image`, `fetch_url` | 8 |
+| `decorator` | строит декоративный слой до HTML: CSS или отдельный SVG по `decorationTasks` | чтение + `write_file`, `replace_text`, `generate_svg`, `fetch_url` | 12 |
 | `image-processor` | готовит изображения и assets: кроп, деление, trim, генерация, правка | image/assets-инструменты | 12 |
 | `clicker` | кликает по координатам, заголовку окна или элементу управления | `click`, `screenshot` | 4 |
 | `typer` | вводит текст в поле | `type`, `screenshot` | 4 |

@@ -3,9 +3,10 @@
  * @module agent/schemas
  * @purpose Strict JSON schemas for structured role outputs (Responses API text.format = json_schema).
  * @usedBy agent/team, agent/roles
- * @exports PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA
+ * @exports PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, DECORATOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA
  * @ai.tags schema, roles
  * @ai.hint pure
+ * @changed 2026-10-27 The planner may request decoration tasks; the decorator answers with its artifacts.
  * @changed 2026-10-24 Added the architect structure and design brief.
  * @changed 2026-10-26 The planner may order or skip team stages through `pipeline`.
  */
@@ -57,6 +58,25 @@ export const IMAGE_PROCESSOR_SCHEMA = object({
     notes: { ...strings, description: 'Unavailable tools, failed operations, or important limitations.' },
 });
 
+export const DECORATOR_SCHEMA = object({
+    summary: { ...string, description: 'Which decorative elements were built and with which technique.' },
+    items: {
+        type: 'array',
+        description: 'One entry per decorative element, in the order the page needs them.',
+        items: object({
+            name: { ...string, description: 'Short element name, also the class or file stem the page uses.' },
+            placement: { ...string, description: 'Where the element belongs: section, corner, background, divider, or the measured box it follows.' },
+            approach: { type: 'string', enum: ['css', 'svg'], description: 'css = HTML plus native CSS; svg = a standalone SVG picture.' },
+            files: { ...strings, description: 'Project-relative files this element created, such as styles/decor/vine.css or assets/decor/vine.svg.' },
+            snippet: { ...string, description: 'Exact HTML the worker pastes into the page, with the classes, aria attributes, and image source.' },
+            fallback: { ...string, description: 'What the page shows when the newer CSS feature is unsupported, or the SVG alternative; empty when the element needs none.' },
+            notes: { ...string, description: 'Assumptions, measured values used, or what stayed unverified; empty when nothing.' },
+        }),
+    },
+    conventions: { ...strings, description: 'Shared class prefix, custom properties, motion policy, and linking rules for every decoration.' },
+    notes: { ...strings, description: 'Decorations that could not be built, denied tools, or limitations.' },
+});
+
 export const PLAN_SCHEMA = object({
     summary: { ...string, description: 'One paragraph: what will be done and why.' },
     complexity: { type: 'string', enum: ['trivial', 'normal', 'complex'] },
@@ -86,6 +106,14 @@ export const PLAN_SCHEMA = object({
         items: object({
             goal: { ...string, description: 'Concrete image, fragment, or asset to prepare.' },
             details: { ...string, description: 'Visual direction, source references, intended format, and output path when known.' },
+        }),
+    },
+    decorationTasks: {
+        type: 'array',
+        description: 'Complex decorative elements (ornaments, flourishes, ribbons, dividers, patterns, frames) the decorator must build before the first page markup. Empty when the page needs none.',
+        items: object({
+            goal: { ...string, description: 'Concrete decoration to build.' },
+            details: { ...string, description: 'Where it sits, which reference or measured box it follows, and whether CSS or SVG is expected.' },
         }),
     },
     risks: strings,

@@ -51,6 +51,13 @@ export function neutralPlan(plan) {
             details: neutralWording(item?.details),
         }));
     }
+    if (Array.isArray(next.decorationTasks)) {
+        next.decorationTasks = next.decorationTasks.map((item) => ({
+            ...item,
+            goal: neutralWording(item?.goal),
+            details: neutralWording(item?.details),
+        }));
+    }
     if (Array.isArray(next.taskMap)) {
         next.taskMap = next.taskMap.map((item) => item && typeof item === 'object'
             ? { ...item, reason: typeof item.reason === 'string' ? neutralWording(item.reason) : item.reason }

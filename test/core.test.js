@@ -275,6 +275,22 @@ test('measurer passes, turns, and context budget are validated', async () => {
     }
 });
 
+test('decorator mode and turn cap are validated', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-decorator-cfg-'));
+    const env = { AI_AGENT_HOME: home };
+    try {
+        const config = await loadConfig({ env, ensureHome: false });
+        assert.equal(config.agent.decorations, 'auto');
+        assert.equal(config.agent.decoratorMaxTurns, 12);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ agent: { decorations: 'sometimes' } }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /agent\.decorations: off \| auto \| always/);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ agent: { decoratorMaxTurns: 0 } }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /agent\.decoratorMaxTurns/);
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
 test('web search, turn extension, and magickPath defaults; reviewer model is validated', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-tools-cfg-'));
     const env = { AI_AGENT_HOME: home };

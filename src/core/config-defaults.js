@@ -206,6 +206,8 @@ export const defaults = Object.freeze({
      *   classifier — labels a task as trivial, normal, or complex
      *   extractor  — cleans a verbose answer and writes clean file bodies to .tmp
      *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
+     *   decorator  — builds complex decorative elements (ornaments, flourishes, dividers, patterns) as HTML+CSS or SVG
+     *                before the first page markup is written
      *   image-processor — generates, edits, and prepares requested images and visual assets before implementation
      * worker, coder, writer, reviewer, tester, vision, solver, and image-processor double as the
      * sub-agents of run_subagent (tools.subagents): same prompt, same model settings, own context.
@@ -258,10 +260,20 @@ export const defaults = Object.freeze({
         measurer: r({
             // Measurement is mostly reading pixels: the cheap vision model does the common work,
             // and only a complex plan with styles, SVG, and geometry moves to the senior model.
-            tiers: [
-                { model: 'gpt-6-luna', effort: ['medium', 'high', 'xhigh'] },
-                { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
-            ],
+            tiers: {
+                trivial: { model: 'gpt-6-luna', effort: 'medium' },
+                normal: { model: 'gpt-6-luna', effort: 'high' },
+                complex: { model: 'gpt-6.1-sol', effort: 'medium' },
+            },
+        }),
+        decorator: r({
+            // Decoration is CSS/SVG authoring: the cheap model handles a divider or a pattern,
+            // a complex ornament with geometry moves to the senior model at a medium effort.
+            tiers: {
+                trivial: { model: 'gpt-6-luna', effort: 'medium' },
+                normal: { model: 'gpt-6-luna', effort: 'high' },
+                complex: { model: 'gpt-6.1-sol', effort: 'medium' },
+            },
         }),
         'image-processor': r({ effort: 'high' }),
     },
@@ -270,7 +282,7 @@ export const defaults = Object.freeze({
         mode: 'team',                   // team (planner → architect → orchestrator → worker → reviewer) | single (one model, one loop)
         /**
          * Stage order for team runs. null = the catalog order; a list reorders or drops stages
-         * (answer, classify, plan, measure, architect, collect, images, work, review, outcome, memory).
+         * (answer, classify, plan, measure, architect, collect, images, decor, work, review, outcome, memory).
          * The plan may supply its own order, which wins over this list for that task.
          */
         pipeline: null,
@@ -302,6 +314,15 @@ export const defaults = Object.freeze({
         measurerPasses: 1,              // 1 = one overview sheet (default); 2 = whole reference, then staged fragments
         measurerMaxTurns: 8,            // total tool turns for the measurement passes, split between them
         measurerMaxContextBytes: 'large', // measurement context budget; keep it within limits.maxRequestBytes
+        /**
+         * Complex decorative elements (ornaments, flourishes, ribbons, dividers, patterns, frames) are
+         * built by the `decorator` role after the measurements and the architect, and before the first
+         * page markup. auto = only when the plan names decorationTasks; always = also scan the plan for
+         * decorations; off = never. Artifacts go to styles/decor and assets/decor, and the report goes to
+         * the shared context and `.tmp/<id>/decorations.json`.
+         */
+        decorations: 'auto',            // off | auto | always
+        decoratorMaxTurns: 12,          // tool turns the decorator may spend writing and checking its files
         encode: 'encoder',              // encoder (file-command model) | mcp (this process hosts the encode server)
         resume: true,                   // continue the newest unfinished step and its saved turn
         /**
