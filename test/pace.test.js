@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { acceptanceParagraph, applyPins, ceilingIndex, clampModel, guaranteesParagraph, mergeSteps, resolvePace } from '../src/agent/pace.js';
+import { acceptanceParagraph, applyPins, ceilingIndex, clampModel, guaranteesParagraph, mergeSteps, resolvePace, stageEffort, fineQuality, defaultFineQuality } from '../src/agent/pace.js';
 
 const models = ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol'];
 const base = { speed: 10, quality: 40, mode: 'auto', models };
@@ -216,4 +216,50 @@ test('a shared budget of 200 splits stable, strained, and broken pace', () => {
     assert.throws(() => resolvePace({ ...base, speed: -1, quality: 40 }), /pace\.speed/);
     assert.throws(() => resolvePace({ ...base, speed: 10, quality: 201 }), /pace\.quality/);
     assert.throws(() => resolvePace({ ...base, speed: 100, quality: 101 }), /pace\.speed/);
+});
+
+test('defaultFineQuality is min(quality + speed, 200)', () => {
+    assert.equal(defaultFineQuality(10, 40), 50);
+    assert.equal(defaultFineQuality(100, 100), 200);
+    assert.equal(defaultFineQuality(150, 100), 200);
+    assert.equal(defaultFineQuality(0, 0), 0);
+    assert.equal(defaultFineQuality(undefined, undefined), 0);
+});
+
+test('fineQuality returns the set value or the default', () => {
+    assert.equal(fineQuality({ speed: 10, quality: 40, codeQuality: 120 }, 'codeQuality'), 120);
+    assert.equal(fineQuality({ speed: 10, quality: 40 }, 'codeQuality'), 50);
+    assert.equal(fineQuality({ speed: 10, quality: 40, codeQuality: null }, 'codeQuality'), 50);
+    assert.equal(fineQuality({ speed: 10, quality: 40, codeQuality: 0 }, 'codeQuality'), 0);
+});
+
+test('stageEffort moves one level per 34 points and stays neutral at the default', () => {
+    assert.equal(stageEffort('high', 50, 50), 'high');
+    assert.equal(stageEffort('high', 50, 40), 'high');
+    assert.equal(stageEffort('high', 50, 84), 'xhigh');
+    assert.equal(stageEffort('high', 50, 118), 'max');
+    assert.equal(stageEffort('high', 50, 20), 'medium');
+    assert.equal(stageEffort('low', 50, 0), 'minimal');
+    assert.equal(stageEffort('medium', 50, 200), 'max');
+});
+
+test('a per-stage dial moves only its own stage', () => {
+    const pace = resolvePace({ ...base, label: 'normal', architectQuality: 150 });
+    assert.equal(pace.roles.architect.effort, 'max');
+    assert.equal(pace.roles.planner.effort, resolvePace({ ...base, label: 'normal' }).roles.planner.effort);
+    assert.equal(pace.roles.reviewer.effort, resolvePace({ ...base, label: 'normal' }).roles.reviewer.effort);
+    assert.equal(pace.ceilingModel, resolvePace({ ...base, label: 'normal' }).ceilingModel);
+});
+
+test('the code dial lifts step effort without touching the model ceiling', () => {
+    const quiet = resolvePace({ ...base, label: 'normal', steps: [{ complexity: 'normal', author: 'coder', files: [], goal: 'g', details: '', verify: '' }] });
+    const loud = resolvePace({ ...base, label: 'normal', codeQuality: 150, steps: [{ complexity: 'normal', author: 'coder', files: [], goal: 'g', details: '', verify: '' }] });
+    assert.equal(quiet.steps[0].effort, 'medium');
+    assert.equal(loud.steps[0].effort, 'max');
+    assert.equal(loud.steps[0].model, quiet.steps[0].model);
+});
+
+test('an unknown per-stage dial value is rejected', () => {
+    assert.throws(() => resolvePace({ ...base, label: 'normal', codeQuality: 201 }), /pace\.codeQuality/);
+    assert.throws(() => resolvePace({ ...base, label: 'normal', decorQuality: -1 }), /pace\.decorQuality/);
 });

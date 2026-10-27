@@ -12,7 +12,7 @@
 import { APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, CUSTOM_ROLE_NAME } from '../core/config.js';
 import { CONTEXT_LEVELS } from '../openai/model-profiles.js';
 import { PLATFORMS } from '../generate/platform.js';
-import { assertPaceBudget, PACE_QUALITY_MESSAGE, PACE_SPEED_MESSAGE } from '../agent/pace.js';
+import { assertPaceBudget, PACE_QUALITY_MESSAGE, PACE_SPEED_MESSAGE, FINE_QUALITY_FLAGS } from '../agent/pace.js';
 
 /**
  * Error for invalid arguments or configuration. Command handlers map it to exit code 2.
@@ -175,6 +175,16 @@ export function overridesFrom(values, { command = null } = {}) {
     if (values.pace !== undefined) {
         if (!['auto', 'a', 'b', 'c'].includes(values.pace)) throw new UsageError('--pace: auto | a | b | c');
         (o.pace ??= {}).mode = values.pace;
+    }
+    // Per-stage quality dials: each tunes its own stage only. They never move the
+    // shared speed + quality budget, so the overall --quality stays untouched.
+    for (const [flag, key] of Object.entries(FINE_QUALITY_FLAGS)) {
+        if (values[flag] === undefined) continue;
+        let level;
+        try { level = number(values[flag], flag, { integer: true, min: 0 }); }
+        catch { throw new UsageError(`--${flag}: целое 0..200`); }
+        if (level > 200) throw new UsageError(`--${flag}: целое 0..200`);
+        (o.pace ??= {})[key] = level;
     }
     if (values['max-steps'] !== undefined) (o.agent ??= {}).maxSteps = number(values['max-steps'], 'max-steps', { integer: true, min: 1 });
     if (values.context !== undefined) {

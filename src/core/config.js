@@ -28,7 +28,7 @@ import {
     defaults,
 } from './config-defaults.js';
 import { COMPLETION_MODEL_CHOICES, resolveCompletionModel } from '../complete/models.js';
-import { assertPaceBudget } from '../agent/pace.js';
+import { assertPaceBudget, FINE_QUALITY_KEYS } from '../agent/pace.js';
 import { FORBIDDEN_MODELS as REVIEWER_FORBIDDEN, safeReviewerModel } from '../roles/reviewer.js';
 import { profileFor, snapEffort, lowerEffort, contextBytes, DEFAULT_PROFILE } from '../openai/model-profiles.js';
 import { tierChoice } from './role-tiers.js';
@@ -672,7 +672,10 @@ function validateConfig(c) {
     if (!Object.hasOwn(PLATFORMS, c.generate.platform)) fail(`generate.platform: ${Object.keys(PLATFORMS).join(' | ')}`);
     if (!isRecord(c.pace)) fail('pace должен быть объектом');
     for (const key of Object.keys(c.pace)) {
-        if (!['speed', 'quality', 'mode', 'models'].includes(key)) fail(`неизвестный параметр pace.${key}`);
+        if (!['speed', 'quality', 'mode', 'models', ...FINE_QUALITY_KEYS].includes(key)) fail(`неизвестный параметр pace.${key}`);
+    }
+    for (const key of FINE_QUALITY_KEYS) {
+        if (c.pace[key] != null && (!Number.isInteger(c.pace[key]) || c.pace[key] < 0 || c.pace[key] > 200)) fail(`pace.${key}: целое 0..200`);
     }
     try { assertPaceBudget(c.pace.speed, c.pace.quality); }
     catch (error) { fail(error.message); }

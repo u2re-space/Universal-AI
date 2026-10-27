@@ -190,6 +190,19 @@ test('speed, quality, and pace flags parse and image quality stays a word', () =
     assert.equal(overridesFrom({ quality: '40' }, { command: 'serve' }).pace, undefined);
 });
 
+test('per-stage quality flags do not move the shared budget', () => {
+    assert.equal(overridesFrom({ 'code-quality': '120' }, { command: 'run' }).pace.codeQuality, 120);
+    assert.equal(overridesFrom({ 'decor-quality': '120' }, { command: 'run' }).pace.decorQuality, 120);
+    assert.equal(overridesFrom({ 'image-quality': '120' }, { command: 'run' }).pace.imageQuality, 120);
+    assert.equal(overridesFrom({ 'measurer-quality': '120' }, { command: 'run' }).pace.measurerQuality, 120);
+    assert.equal(overridesFrom({ 'architect-quality': '120' }, { command: 'run' }).pace.architectQuality, 120);
+    assert.equal(overridesFrom({ 'architect-quality': '200' }, { command: 'run' }).pace.quality, undefined);
+    assert.deepEqual(overridesFrom({ speed: '100', quality: '60', 'code-quality': '180' }, { command: 'run' }).pace, { speed: 100, quality: 60, codeQuality: 180 });
+    assert.throws(() => overridesFrom({ 'code-quality': '201' }, { command: 'run' }), /--code-quality: целое 0\.\.200/);
+    assert.throws(() => overridesFrom({ 'code-quality': '-1' }, { command: 'run' }), /--code-quality: целое 0\.\.200/);
+    assert.throws(() => overridesFrom({ 'code-quality': 'nope' }, { command: 'run' }), /--code-quality: целое 0\.\.200/);
+});
+
 test('config rejects a pace pair outside the shared budget', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-pace-budget-'));
     const file = path.join(home, 'bad.json');
@@ -205,6 +218,29 @@ test('config rejects a pace pair outside the shared budget', async () => {
         await assert.rejects(() => load(), /pace\.speed/);
         await writeFile(file, JSON.stringify({ pace: { speed: 100, quality: 101 } }));
         await assert.rejects(() => load(), /pace\.speed/);
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
+test('config accepts a per-stage dial and rejects it out of range', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-fine-quality-'));
+    const file = path.join(home, 'cfg.json');
+    const load = () => loadConfig({
+        configPath: file,
+        env: { AI_AGENT_HOME: home, AI_MODEL: 'mock-model', OPENAI_API_KEY: 'sk-test' },
+        ensureHome: false,
+    });
+    try {
+        await writeFile(file, JSON.stringify({ pace: { codeQuality: 150, architectQuality: 200 } }));
+        const config = await load();
+        assert.equal(config.pace.codeQuality, 150);
+        assert.equal(config.pace.architectQuality, 200);
+        assert.equal(config.pace.quality, 40);
+        await writeFile(file, JSON.stringify({ pace: { decorQuality: 201 } }));
+        await assert.rejects(() => load(), /pace\.decorQuality: целое 0\.\.200/);
+        await writeFile(file, JSON.stringify({ pace: { imageQuality: -1 } }));
+        await assert.rejects(() => load(), /pace\.imageQuality: целое 0\.\.200/);
     } finally {
         await rm(home, { recursive: true, force: true });
     }

@@ -4,10 +4,11 @@
  * @purpose Choose policy, model rung, effort, stages, and step merge from speed and quality.
  * @depends generate/fidelity, openai/model-profiles
  * @usedBy agent/team, core/config, commands/flags
- * @exports ceilingIndex, mergeSteps, acceptanceParagraph, guaranteesParagraph, assertPaceBudget, resolvePace, applyPins, clampModel
+ * @exports ceilingIndex, mergeSteps, acceptanceParagraph, guaranteesParagraph, assertPaceBudget, resolvePace, applyPins, clampModel, FINE_QUALITY_FLAGS, FINE_QUALITY_KEYS, defaultFineQuality, fineQuality, stageEffort
  * @ai.tags team, pace
  * @ai.hint pure
  * @changed 2026-10-26 Every effort the directive carries is snapped to the ladder and ceiling of its model.
+ * @changed 2026-10-27 Per-stage quality dials (code, decor, image, measurer, architect) shift only their own effort.
  */
 
 import { effectiveFidelity } from '../generate/fidelity.js';
@@ -16,6 +17,68 @@ import { profileFor, snapEffort, lowerEffort } from '../openai/model-profiles.js
 
 export const PACE_QUALITY_MESSAGE = 'pace.quality: целое 0..200, и speed + quality не больше 200';
 export const PACE_SPEED_MESSAGE = 'pace.speed: целое от 0, и speed + quality не больше 200';
+
+/**
+ * Per-stage quality dials. Each one tunes its own stage and never touches the
+ * shared speed + quality budget, so the overall --quality stays untouched.
+ * 100 is the optimal level; anything above is an allowed overshoot.
+ */
+export const FINE_QUALITY_FLAGS = Object.freeze({
+    'code-quality': 'codeQuality',
+    'decor-quality': 'decorQuality',
+    'image-quality': 'imageQuality',
+    'measurer-quality': 'measurerQuality',
+    'architect-quality': 'architectQuality',
+});
+export const FINE_QUALITY_KEYS = Object.freeze(Object.values(FINE_QUALITY_FLAGS));
+
+/** One full band of quality points moves a stage effort by one level. */
+const QUALITY_BAND = 34;
+
+/**
+ * Default for a per-stage dial: spend the speed surplus on the stage, capped at 200.
+ * @param {number} speed
+ * @param {number} quality
+ * @returns {number}
+ * @ai.hint pure
+ */
+export function defaultFineQuality(speed, quality) {
+    const s = Number.isInteger(speed) ? speed : 0;
+    const q = Number.isInteger(quality) ? quality : 0;
+    return Math.min(s + q, 200);
+}
+
+/**
+ * One dial value for a stage: the configured number, or the default when it is unset.
+ * @param {object} pace
+ * @param {string} key
+ * @returns {number}
+ * @exports
+ * @ai.hint pure
+ */
+export function fineQuality(pace, key) {
+    const raw = pace?.[key];
+    return Number.isInteger(raw) ? raw : defaultFineQuality(pace?.speed, pace?.quality);
+}
+
+/**
+ * Move a role's effort by how far its stage dial sits above or below the dial's own
+ * default. The baseline is that default (min(quality + speed, 200)), so the untouched
+ * default leaves the effort exactly where pace already put it. 100 is the optimal level;
+ * anything above raises the effort further (an allowed overshoot), anything below lowers it.
+ * @param {string} effort
+ * @param {number} baseline
+ * @param {number} stageQuality
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function stageEffort(effort, baseline, stageQuality) {
+    if (!ORDER.includes(effort)) return effort;
+    const delta = Math.round((stageQuality - baseline) / QUALITY_BAND);
+    if (!delta) return effort;
+    return ORDER[Math.max(0, Math.min(ORDER.length - 1, ORDER.indexOf(effort) + delta))];
+}
 
 /**
  * Highest rung at or below `wanted` whose model may serve the reviewer.
@@ -222,16 +285,17 @@ function knownComplexity(value, fallback = 'normal') {
  * @returns {object[]}
  * @ai.hint pure
  */
-function decorate(steps, { modelSpeed, paceSpeed, modelQuality, models, adjusted, recklessExtra, bounded }) {
+function decorate(steps, { modelSpeed, paceSpeed, modelQuality, fineBaseline, codeQuality, models, adjusted, recklessExtra, bounded }) {
     return steps.map((step) => {
         const complexity = knownComplexity(step.complexity);
         const rung = authorRung(complexity, modelSpeed, adjusted);
         const base = complexity === 'trivial' ? 'low' : complexity === 'complex' ? 'high' : 'medium';
         const author = step.author === 'coder' || step.author === 'writer' ? step.author : 'worker';
         const model = models[rung];
+        const level = effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra);
         return {
             author, complexity, rung, model,
-            effort: bounded(model, effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra)),
+            effort: bounded(model, stageEffort(level, fineBaseline, codeQuality)),
             files: Array.isArray(step.files) ? [...step.files] : [],
             goal: String(step.goal ?? ''), details: String(step.details ?? ''), verify: String(step.verify ?? ''),
             kind: step.kind ?? 'work',
@@ -249,10 +313,23 @@ function decorate(steps, { modelSpeed, paceSpeed, modelQuality, models, adjusted
 export function resolvePace({
     speed, quality, mode, models, label = null, steps = null, generation = false,
     fidelity = null, stepCapOverride = null, task = '', author = 'worker', modelProfiles = null,
+    codeQuality = null, decorQuality = null, imageQuality = null, measurerQuality = null, architectQuality = null,
 } = {}) {
     assertPaceBudget(speed, quality);
     /** Snap one effort onto the ladder and ceiling of the model that would carry it. */
     const bounded = (model, level) => snapEffort(level, profileFor(model, modelProfiles));
+    const fineInputs = { codeQuality, decorQuality, imageQuality, measurerQuality, architectQuality };
+    for (const [key, value] of Object.entries(fineInputs)) {
+        if (value != null && !(Number.isInteger(value) && value >= 0 && value <= 200)) throw new Error(`pace.${key}: целое 0..200`);
+    }
+    const baseFine = defaultFineQuality(speed, quality);
+    const fine = Object.freeze({
+        code: fineInputs.codeQuality ?? baseFine,
+        decor: fineInputs.decorQuality ?? baseFine,
+        image: fineInputs.imageQuality ?? baseFine,
+        measurer: fineInputs.measurerQuality ?? baseFine,
+        architect: fineInputs.architectQuality ?? baseFine,
+    });
     const modelQuality = Math.min(quality, 100);
     const modelSpeed = Math.min(100, speed + Math.max(0, quality - 100));
     const paceSpeed = Math.min(speed, 100);
@@ -276,9 +353,10 @@ export function resolvePace({
                     : label === 'trivial' ? (generation ? 2 : 4)
                         : (generation ? 4 : 12);
     if (guarantees !== 'broken' && policy !== 'c' && Number.isInteger(stepCapOverride)) stepCap = Math.max(1, stepCapOverride);
-    const role = (rung, base, protect) => {
+    const role = (rung, base, protect, stageQuality = null) => {
         const model = models[rung];
-        return { rung, model, effort: bounded(model, effortFor(base, paceSpeed, modelQuality, protect, recklessExtra)) };
+        const level = effortFor(base, paceSpeed, modelQuality, protect, recklessExtra);
+        return { rung, model, effort: bounded(model, stageQuality === null ? level : stageEffort(level, baseFine, stageQuality)) };
     };
     const planner = role(plannerRung(label, modelSpeed, adjusted), plannerRung(label, modelSpeed, adjusted) === 0 ? 'medium' : 'high', true);
     const reviewerBase = modelQuality >= 67 ? 'xhigh' : 'high';
@@ -286,10 +364,11 @@ export function resolvePace({
         ready: label === 'trivial' || label === 'normal' || label === 'complex',
         policy, ceilingIndex: adjusted, ceilingModel: models[adjusted],
         merge: fast, stepCap, reviewRounds, reviewMode, collect, acceptance, guarantees,
+        qualities: fine,
         fidelity: Number.isInteger(fidelity) ? { stated: fidelity, effective: effectiveFidelity(fidelity, quality) } : null,
         roles: {
             classifier: role(1, 'xhigh', false),
-            planner, architect: role(plannerRung(label, modelSpeed, adjusted), 'high', true),
+            planner, architect: role(plannerRung(label, modelSpeed, adjusted), 'high', true, fine.architect),
             orchestrator: role(1, 'high', false),
             reviewer: role(reviewerRung(models, modelQuality >= 67 ? adjusted : Math.min(adjusted, 1)), reviewerBase, true),
             summarizer: role(0, 'max', false),
@@ -308,16 +387,17 @@ export function resolvePace({
         const rung = singleRung(label, adjusted);
         const base = complexity === 'trivial' ? 'low' : complexity === 'complex' ? 'high' : 'medium';
         const model = models[rung];
+        const level = effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra);
         directive.steps = [{
             author: author === 'coder' || author === 'writer' ? author : 'worker',
             complexity, rung, model,
-            effort: bounded(model, effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra)),
+            effort: bounded(model, stageEffort(level, baseFine, fine.code)),
             files: [], goal: String(task), details: '', verify: '', kind: 'work',
         }];
         return directive;
     }
     if (Array.isArray(steps)) {
-        const decorated = decorate(steps, { modelSpeed, paceSpeed, modelQuality, models, adjusted, recklessExtra, bounded });
+        const decorated = decorate(steps, { modelSpeed, paceSpeed, modelQuality, fineBaseline: baseFine, codeQuality: fine.code, models, adjusted, recklessExtra, bounded });
         directive.steps = fast ? mergeSteps(decorated) : decorated;
     }
     return directive;

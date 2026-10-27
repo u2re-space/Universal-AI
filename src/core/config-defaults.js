@@ -366,12 +366,19 @@ export const defaults = Object.freeze({
     /**
      * Team pace. models run from cheap to expensive.
      * speed and quality are 0..100. mode auto follows those numbers.
+     * The per-stage dials never move the shared speed + quality budget:
+     * null means min(quality + speed, 200); 100 is optimal, above is an overshoot.
      */
     pace: {
         speed: 10,
         quality: 40,
         mode: 'auto',
         models: ['gpt-6-luna', 'gpt-6.1-terra', 'gpt-6.1-sol'],
+        codeQuality: null,
+        decorQuality: null,
+        imageQuality: null,
+        measurerQuality: null,
+        architectQuality: null,
     },
     /** User MCP servers. stdio is spawned here. http is sent to the API as type mcp. */
     mcp: {

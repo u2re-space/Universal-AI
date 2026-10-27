@@ -33,7 +33,7 @@ import { builtinTools } from './loop.js';
 import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
 import { PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, DECORATOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
-import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace } from './pace.js';
+import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace, stageEffort, fineQuality, defaultFineQuality } from './pace.js';
 import { contextBytes, profileFor } from '../openai/model-profiles.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
 import { draftTaskMap, filterTaskMap, formatDraft, formatMarks, formatScan } from './task-map.js';
@@ -156,6 +156,8 @@ export async function runTeam({
     )));
     const paceInput = (extra) => ({
         speed: paceSettings.speed, quality: paceSettings.quality, mode: paceSettings.mode, models: paceSettings.models,
+        codeQuality: paceSettings.codeQuality, decorQuality: paceSettings.decorQuality, imageQuality: paceSettings.imageQuality,
+        measurerQuality: paceSettings.measurerQuality, architectQuality: paceSettings.architectQuality,
         generation, fidelity: generation ? config.generate?.fidelity : null,
         stepCapOverride: config.stepCapPinned ? config.agent.maxSteps : null,
         modelProfiles: config.models ?? null,
@@ -948,6 +950,10 @@ export async function runTeam({
                         const model = encodeRoute || !paced?.ready
                             ? measurerRole.model
                             : clampModel(measurerRole.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.measurer?.model));
+                        const baseline = defaultFineQuality(paceSettings.speed, paceSettings.quality);
+                        const measureEffort = encodeRoute || !paced?.ready
+                            ? measurerRole.effort
+                            : stageEffort(measurerRole.effort, baseline, paced.qualities.measurer);
                         const measurePasses = Math.max(1, Math.min(2, config.agent.measurerPasses ?? 1));
                         const measureTurns = Math.max(1, config.agent.measurerMaxTurns ?? 8);
                         // One pass spends the whole turn budget on the overview. A second pass splits it
@@ -983,7 +989,7 @@ export async function runTeam({
                                 text, parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.measurer),
                                 toolset: measureToolsFor(pass), builtin: measureBuiltin,
                                 schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns,
-                                model, effort: measurerRole.effort, onMaxTurns, session,
+                                model, effort: measureEffort, onMaxTurns, session,
                             });
                             if (HARD_STOP.has(result.status)) return result;
                             if (!result.data && ['max_turns', 'incomplete'].includes(result.status)) {
@@ -992,7 +998,7 @@ export async function runTeam({
                                     text: 'Turn budget is spent and no more tools are available. Reply with the complete measurement sheet for everything you already looked at. ' +
                                         'Use CSS units in units/css, null for a number you did not read, confidence for every element, and name the unchecked parts in assumptions and notes. JSON only.',
                                     instructions: withAgents(ROLE_INSTRUCTIONS.measurer), schema: MEASURER_SCHEMA, schemaName: 'measure',
-                                    maxTurns: 1, model, effort: measurerRole.effort, session,
+                                    maxTurns: 1, model, effort: measureEffort, session,
                                 });
                                 if (report.data) return report;
                             }
@@ -1096,7 +1102,8 @@ export async function runTeam({
                         && (architectureMode === 'always' || plan.complexity !== 'trivial')) {
                         const role = roles.resolve('architect');
                         const model = paced?.roles.architect?.model ?? role.model;
-                        const effort = paced?.roles.architect?.effort ?? role.effort;
+                        const effort = paced?.roles.architect?.effort
+                            ?? stageEffort(role.effort, defaultFineQuality(paceSettings.speed, paceSettings.quality), fineQuality(paceSettings, 'architectQuality'));
                         const stepsBrief = plan.steps.map((step) => `${step.id ?? '(no id)'}: ${step.goal}\n  details: ${step.details || '(none)'}\n  files: ${(step.files ?? []).join(', ') || '(none)'}`).join('\n\n');
                         const references = referencePaths.length ? `\n\n# Reference image paths\n${referencePaths.map((item) => `- ${item}`).join('\n')}` : '';
                         const architectureText = `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Plan steps to design for\n${stepsBrief}${references}`;
@@ -1182,7 +1189,11 @@ export async function runTeam({
                             ctx.set('imageAssets', 'Prepared images and visual assets', previous.report, { priority: 9 });
                             for (const image of previous.images ?? []) result.images.push(path.resolve(root, image));
                         } else {
-                            const model = roles.resolve('image-processor').model;
+                            const imageRole = roles.resolve('image-processor');
+                            const model = imageRole.model;
+                            const imageEffort = paced?.ready
+                                ? stageEffort(imageRole.effort, defaultFineQuality(paceSettings.speed, paceSettings.quality), paced.qualities.image)
+                                : imageRole.effort;
                             progress.stage = 'image-processing';
                             progress.imageProcessing = { status: 'running', report: '', images: [] };
                             work.progress = progress;
@@ -1197,6 +1208,7 @@ export async function runTeam({
                                 toolset: imageProcessorTools, builtin: imageProcessorBuiltin,
                                 schema: IMAGE_PROCESSOR_SCHEMA, schemaName: 'image_assets',
                                 maxTurns: config.agent.workerMaxTurnsPerStep, imageTarget: path.join(root, 'assets'),
+                                effort: imageEffort,
                             });
                             if (processed.status !== 'completed' || !processed.data) {
                                 notify({ type: 'stage.done', stage: 'image-processing', status: processed.status });
@@ -1254,6 +1266,10 @@ export async function runTeam({
                     const model = encodeRoute || !paced?.ready
                         ? decoratorRole.model
                         : clampModel(decoratorRole.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.decorator?.model));
+                    const decorBaselineEffort = roles.resolve('decorator').effort;
+                    const decorEffort = encodeRoute || !paced?.ready
+                        ? decorBaselineEffort
+                        : stageEffort(decorBaselineEffort, defaultFineQuality(paceSettings.speed, paceSettings.quality), paced.qualities.decor);
                     progress.stage = 'decor';
                     progress.decorations = { status: 'running', report: '', files: [] };
                     work.progress = progress;
@@ -1268,7 +1284,7 @@ export async function runTeam({
                         parts: parts.filter((part) => part?.type === 'input_image'),
                         instructions: withAgents(ROLE_INSTRUCTIONS.decorator),
                         toolset: decoratorTools, schema: DECORATOR_SCHEMA, schemaName: 'decorations',
-                        maxTurns: config.agent.decoratorMaxTurns ?? 12,
+                        maxTurns: config.agent.decoratorMaxTurns ?? 12, effort: decorEffort,
                     });
                     if (HARD_STOP.has(decorated.status)) return { exit: stop(decorated, 'декоративные элементы') };
                     if (!decorated.data) {
