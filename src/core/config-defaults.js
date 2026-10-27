@@ -244,10 +244,10 @@ export const defaults = Object.freeze({
         }),
         clicker: r({ effort: 'low' }),
         typer: r({ effort: 'low' }),
-        encoder: r({ effort: 'high' }),
+        encoder: r({ model: "gpt-6-luna", effort: 'xhigh' }),
         tester: r({ effort: 'high' }),
         classifier: r({ effort: 'high' }),
-        extractor: r({ effort: 'high', verbosity: 'low' }),
+        extractor: r({ model: "gpt-6-luna", effort: 'xhigh', verbosity: 'low' }),
         coder: r({
             tiers: [
                 { model: 'gpt-6-luna', effort: ['medium', 'high', 'xhigh'] },
@@ -266,7 +266,7 @@ export const defaults = Object.freeze({
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
-        'image-processor': r({ effort: 'high' }),
+        'image-processor': r({ model: "gpt-6.1-sol", effort: 'high' }),
     },
     /** Multi-role orchestration used by `ai run`. */
     agent: {
