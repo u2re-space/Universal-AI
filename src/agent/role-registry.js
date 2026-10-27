@@ -58,6 +58,10 @@ export const EXECUTORS = Object.freeze({
         tools: 'all', turns: 50, schema: null,
         description: 'Code for one self-contained piece of work: edits the files the task names, follows the stack it finds, and checks the result.',
     },
+    styler: {
+        tools: 'all', turns: 50, schema: null,
+        description: 'Implement one focused CSS or SCSS task: inspect the consuming markup and project style conventions, edit the named stylesheets, and verify the result.',
+    },
     worker: {
         tools: 'all', turns: 50, schema: null,
         description: 'General doer for one self-contained task of any kind: reads, edits, runs commands, and reports what changed.',

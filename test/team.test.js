@@ -68,6 +68,7 @@ function roleOf(body) {
     if (format === 'measure') return 'measurer';
     if (format === 'decorations') return 'decorator';
     if (format === 'image_assets') return 'image-processor';
+    if (detectCoder && typeof body.instructions === 'string' && body.instructions.includes('You are the styler.')) return 'styler';
     if (detectCoder && typeof body.instructions === 'string' && body.instructions.includes('You are the coder.')) return 'coder';
     if (typeof body.instructions === 'string' && body.instructions.includes('route: encode')) return 'answer';
     if (body.input.some((i) => i.type === 'message' && i.content?.some?.((c) => c.type === 'input_image'))) return 'vision';
@@ -103,7 +104,7 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.throws(() => overridesFrom({ role: ['Bad Name=x'] }), /--role/);
     assert.throws(() => overridesFrom({ role: ['UPPER=x'] }), /--role/);
     assert.deepEqual(overridesFrom({ role: ['image-processor=gpt-6.1-terra:medium'] }).roles, { 'image-processor': { model: 'gpt-6.1-terra', effort: 'medium' } });
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 20);
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 21);
     assert.equal(overridesFrom({ extract: 'always' }).agent.extract, 'always');
     assert.equal(overridesFrom({ 'no-extract': true }).agent.extract, 'off');
     assert.throws(() => overridesFrom({ extract: 'nope' }), /--extract/);
@@ -1429,12 +1430,12 @@ test('an interrupted image stage resumes before implementation', async () => {
     }
 });
 
-test('measurer stage runs before collector and gives CSS-ready values to the coder', async () => {
+test('measurer stage runs before collector and gives CSS-ready values to the styler', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-'));
     const events = [];
     const seen = [];
     const measureBodies = [];
-    const coderBodies = [];
+    const stylerBodies = [];
     detectCoder = true;
     script = (body) => {
         const role = roleOf(body);
@@ -1469,8 +1470,9 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
             }) };
         }
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [{ question: 'Какой стиль?', answer: 'минимализм' }], conventions: [], notes: '' }) };
-        if (role === 'coder') {
-            coderBodies.push(body);
+        if (role === 'styler') {
+            stylerBodies.push(body);
+            assert.equal(body.model, 'gpt-6.1-sol');
             const prompt = JSON.stringify(body.input);
             assert.match(prompt, /Reference measurements/);
             assert.match(prompt, /left 12\.5%; top 20%; width 50%; height 53\.33%/);
@@ -1479,8 +1481,9 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
             assert.match(prompt, /gap: 8 px/);
             assert.match(prompt, /spacing: 8 px/);
             assert.match(prompt, /typography: heading, size 28 px, weight 600, line-height 34 px, letter-spacing 0 px/);
-            assert.match(body.instructions, /canvas-relative percentages/);
-            assert.match(body.instructions, /selected family, CSS stack, role, weights/);
+            assert.match(body.instructions, /You are the styler/);
+            assert.match(body.instructions, /canvas-relative boxes/);
+            assert.match(body.instructions, /CSS or SCSS/);
             return { text: 'styles.scss построен по sheet' };
         }
         if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
@@ -1510,7 +1513,7 @@ test('measurer stage runs before collector and gives CSS-ready values to the cod
     assert.ok(events.some((e) => e.type === 'measure.pass' && e.pass === 1 && e.phase === 'overview'));
     assert.ok(events.some((e) => e.type === 'measure.pass' && e.pass === 2 && e.phase === 'fragments'));
     assert.ok(events.some((e) => e.type === 'measure.conclusion' && e.elements === 1));
-    assert.ok(coderBodies.length > 0, 'the SCSS step is assigned to coder');
+    assert.ok(stylerBodies.length > 0, 'the SCSS step is assigned to styler');
     const savedSheet = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.json'), 'utf8'));
     assert.equal(savedSheet.elements[0].box.width, 200);
     assert.equal(savedSheet.units.rootFontSize, 16);

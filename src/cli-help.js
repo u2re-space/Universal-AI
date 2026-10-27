@@ -75,7 +75,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   При tools.fetch доступны download_font (Google Fonts или URL) и download_icons (Phosphor, Lucide с CDN).
   При tools.subagents доступны run_subagent и delegate_role: отдельный агент со своим контекстом, своими инструментами
   и лимитом ходов. delegate_role с context=true прикладывает общий контекст команды (план, находки, отчёты, diff),
-  context=false запускает роль на чистом контексте. coder, worker, writer правят файлы; reviewer и tester только
+  context=false запускает роль на чистом контексте. coder, styler, worker, writer правят файлы; reviewer и tester только
   проверяют; vision описывает картинки; solver отвечает по экрану или картинке; image-processor готовит ассеты.
   Вложенный запуск не видит переписку — задачу пишут целиком; свой суб-агент ему недоступен, и правит он лишь
   то, что разрешено вызвавшему.
@@ -86,7 +86,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 
 Команда (run и gen):
-  --role <роль=модель[:effort[:max-effort]]>  модель для роли: planner, architect, orchestrator, worker, coder, writer, reviewer, vision,
+  --role <роль=модель[:effort[:max-effort]]>  модель для роли: planner, architect, orchestrator, worker, coder, styler, writer, reviewer, vision,
                          summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, image-processor, default, all.
                          Своё имя-слаг создаёт роль в roles.<имя> (инструкции и инструменты задаются в конфигурации)
                          (например: --role planner=gpt-6.1-terra:high --role worker=gpt-6.1-terra:medium:high --role vision=gpt-6.1-terra)
@@ -128,9 +128,9 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
    --architect-quality <0..200>  качество архитектора (по умолчанию quality + speed)
    Тонкие настройки качества двигают только свою стадию: effort роли смещается на один
    уровень каждые 34 пункта относительно --quality. Общий бюджет speed + quality не меняется,
-   100 — оптимальный уровень, выше — допустимое завышение.
-   Шаги coder и worker никогда не опускаются ниже gpt-6.1-terra; writer и остальные роли
-   следуют общему --quality. Явный --role worker=… или coder=… переопределяет этот предел.
+    100 — оптимальный уровень, выше — допустимое завышение.
+    Шаги coder и worker никогда не опускаются ниже gpt-6.1-terra; styler использует gpt-6.1-sol.
+    writer и остальные роли следуют общему --quality. Явный --role worker=…, coder=… или styler=… переопределяет модель роли.
   --max-steps <n>        потолок шагов плана. Закрепляет число и заменяет расчёт pace
   --creativity <0..100>  сколько можно добавить сверх референсов (по умолчанию 20)
   --platform <id>        профиль платформы (по умолчанию chrome-157-beta)

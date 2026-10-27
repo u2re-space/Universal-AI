@@ -252,6 +252,16 @@ test('a per-stage dial moves only its own stage', () => {
     assert.equal(pace.ceilingModel, resolvePace({ ...base, label: 'normal' }).ceilingModel);
 });
 
+test('styler steps keep their author and the gpt-6.1-sol model', () => {
+    const pace = resolvePace({ ...base, label: 'normal', steps: [{ complexity: 'trivial', author: 'styler', files: ['styles/app.css'], goal: 'write styles', details: '', verify: '' }] });
+    assert.equal(pace.steps[0].author, 'styler');
+    assert.equal(pace.steps[0].model, 'gpt-6.1-sol');
+
+    const single = resolvePace({ ...base, mode: 'c', label: 'trivial', author: 'styler', task: 'write styles' }).steps[0];
+    assert.equal(single.author, 'styler');
+    assert.equal(single.model, 'gpt-6.1-sol');
+});
+
 test('the code dial lifts step effort without touching the model ceiling', () => {
     const quiet = resolvePace({ ...base, label: 'normal', steps: [{ complexity: 'normal', author: 'coder', files: [], goal: 'g', details: '', verify: '' }] });
     const loud = resolvePace({ ...base, label: 'normal', codeQuality: 150, steps: [{ complexity: 'normal', author: 'coder', files: [], goal: 'g', details: '', verify: '' }] });

@@ -4,12 +4,13 @@
  * @purpose Choose policy, model rung, effort, stages, and step merge from speed and quality.
  * @depends generate/fidelity, openai/model-profiles
  * @usedBy agent/team, core/config, commands/flags
- * @exports ceilingIndex, mergeSteps, acceptanceParagraph, guaranteesParagraph, assertPaceBudget, resolvePace, applyPins, clampModel, FINE_QUALITY_FLAGS, FINE_QUALITY_KEYS, CODER_FLOOR_MODEL, defaultFineQuality, fineQuality, stageEffort
+ * @exports ceilingIndex, mergeSteps, acceptanceParagraph, guaranteesParagraph, assertPaceBudget, resolvePace, applyPins, clampModel, FINE_QUALITY_FLAGS, FINE_QUALITY_KEYS, CODER_FLOOR_MODEL, STYLER_FLOOR_MODEL, defaultFineQuality, fineQuality, stageEffort
  * @ai.tags team, pace
  * @ai.hint pure
  * @changed 2026-10-26 Every effort the directive carries is snapped to the ladder and ceiling of its model.
  * @changed 2026-10-27 Per-stage quality dials (code, decor, image, measurer, architect) shift only their own effort.
  * @changed 2026-10-27 Coder and worker steps never fall below the gpt-6.1-terra rung.
+ * @changed 2026-10-28 Styler steps stay on gpt-6.1-sol when the model ladder includes it.
  */
 
 import { effectiveFidelity } from '../generate/fidelity.js';
@@ -39,9 +40,10 @@ const QUALITY_BAND = 34;
 /**
  * Code authors never fall below this rung: writing code on the cheapest model
  * wastes a raised code-quality dial, so the floor keeps them on the senior model.
- * A ladder without this model simply keeps no floor.
+ * A ladder without this model simply keeps no floor. Styling has its own gpt-6.1-sol floor below.
  */
 export const CODER_FLOOR_MODEL = 'gpt-6.1-terra';
+export const STYLER_FLOOR_MODEL = 'gpt-6.1-sol';
 
 /**
  * @param {string[]} models
@@ -51,6 +53,16 @@ export const CODER_FLOOR_MODEL = 'gpt-6.1-terra';
 function coderFloor(models) {
     const index = models.indexOf(CODER_FLOOR_MODEL);
     return index < 0 ? 0 : index;
+}
+
+/**
+ * @param {string[]} models
+ * @returns {number}
+ * @ai.hint pure
+ */
+function stylerFloor(models) {
+    const index = models.indexOf(STYLER_FLOOR_MODEL);
+    return index < 0 ? coderFloor(models) : index;
 }
 
 /**
@@ -299,18 +311,20 @@ function knownComplexity(value, fallback = 'normal') {
 
 /**
  * @param {object[]} steps
- * @param {{ modelSpeed: number, paceSpeed: number, modelQuality: number, models: string[], adjusted: number, recklessExtra: number, bounded: Function }} context
+ * @param {{ modelSpeed: number, paceSpeed: number, modelQuality: number, codeQuality: number, models: string[], adjusted: number, recklessExtra: number, bounded: Function }} context
  * @returns {object[]}
  * @ai.hint pure
  */
 function decorate(steps, { modelSpeed, paceSpeed, modelQuality, fineBaseline, codeQuality, models, adjusted, recklessExtra, bounded }) {
     const floor = coderFloor(models);
+    const stylesFloor = stylerFloor(models);
     return steps.map((step) => {
         const complexity = knownComplexity(step.complexity);
-        const isCode = step.author === 'coder' || step.author === 'worker';
-        const rung = Math.max(authorRung(complexity, modelSpeed, adjusted), isCode ? floor : 0);
+        const isCode = step.author === 'coder' || step.author === 'styler' || step.author === 'worker';
+        const authorFloor = step.author === 'styler' ? stylesFloor : floor;
+        const rung = Math.max(authorRung(complexity, modelSpeed, adjusted), isCode ? authorFloor : 0);
         const base = complexity === 'trivial' ? 'low' : complexity === 'complex' ? 'high' : 'medium';
-        const author = step.author === 'coder' || step.author === 'writer' ? step.author : 'worker';
+        const author = step.author === 'styler' ? 'styler' : step.author === 'coder' || step.author === 'writer' ? step.author : 'worker';
         const model = models[rung];
         const level = effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra);
         return {
@@ -404,8 +418,9 @@ export function resolvePace({
     if (!directive.ready) return directive;
     if (policy === 'c' && !Array.isArray(steps)) {
         const complexity = knownComplexity(label);
-        const singleAuthor = author === 'coder' || author === 'writer' ? author : 'worker';
-        const rung = Math.max(singleRung(label, adjusted), singleAuthor === 'writer' ? 0 : coderFloor(models));
+        const singleAuthor = author === 'coder' || author === 'styler' || author === 'writer' ? author : 'worker';
+        const authorFloor = singleAuthor === 'styler' ? stylerFloor(models) : singleAuthor === 'writer' ? 0 : coderFloor(models);
+        const rung = Math.max(singleRung(label, adjusted), authorFloor);
         const base = complexity === 'trivial' ? 'low' : complexity === 'complex' ? 'high' : 'medium';
         const model = models[rung];
         const level = effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra);

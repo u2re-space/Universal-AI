@@ -2,7 +2,7 @@
  * @file src/roles/index.js
  * @module roles/index
  * @purpose Collect the prompt of every named role.
- * @depends roles/default, roles/planner, roles/architect, roles/orchestrator, roles/worker, roles/coder, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer, roles/decorator, roles/image-processor
+ * @depends roles/default, roles/planner, roles/architect, roles/orchestrator, roles/worker, roles/coder, roles/styler, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer, roles/decorator, roles/image-processor
  * @usedBy commands/instructions, agent/team
  * @exports ROLE_INSTRUCTIONS
  * @ai.tags roles, prompts
@@ -16,6 +16,7 @@ import * as architect from './architect.js';
 import * as orchestrator from './orchestrator.js';
 import * as worker from './worker.js';
 import * as coder from './coder.js';
+import * as styler from './styler.js';
 import * as writer from './writer.js';
 import * as reviewer from './reviewer.js';
 import * as vision from './vision.js';
@@ -45,6 +46,7 @@ export const ROLE_INSTRUCTIONS = {
     orchestrator: orchestrator.instructions,
     worker: worker.instructions,
     coder: coder.instructions,
+    styler: styler.instructions,
     writer: writer.instructions,
     reviewer: reviewer.instructions,
     vision: vision.instructions,

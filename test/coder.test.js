@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isCodingStep } from '../src/roles/coder.js';
+import { isStylingStep } from '../src/roles/styler.js';
 import { defaults, resolveRole } from '../src/core/config.js';
 
 const pinned = (overrides) => ({
@@ -35,9 +36,24 @@ test('an explicit coder model and effort replace the tier', () => {
 test('code steps use the coder, documents do not', () => {
     assert.equal(isCodingStep(['src/app.tsx']), true);
     assert.equal(isCodingStep([], 'Создать src/sum.js'), true);
+    assert.equal(isCodingStep(['src/app.css']), false);
+    assert.equal(isCodingStep(['src/app.scss']), false);
     assert.equal(isCodingStep(['README.md']), false);
     assert.equal(isCodingStep(['docs/guide.md']), false);
     assert.equal(isCodingStep(['.rules/stack.md']), false);
     assert.equal(isCodingStep(['vite.config.js']), false);
     assert.equal(isCodingStep(['package.json']), false);
+});
+
+test('CSS and SCSS steps use the styler', () => {
+    assert.equal(isStylingStep(['src/app.css']), true);
+    assert.equal(isStylingStep([], 'Обновить styles/theme.scss'), true);
+    assert.equal(isStylingStep(['src/App.tsx']), false);
+    assert.equal(isStylingStep(['README.md']), false);
+});
+
+test('styler uses gpt-6.1-sol at every plan complexity', () => {
+    for (const complexity of ['trivial', 'normal', 'complex']) {
+        assert.equal(resolveRole(defaults, 'styler', complexity).model, 'gpt-6.1-sol');
+    }
 });

@@ -29,7 +29,7 @@ A trivial step stays small. A complex step may add the structure the plan names,
 When the step is done, reply with a brief summary: files changed, how you checked them, and what the next step must know. Do not start other steps.
 ${DESKTOP_NOTE} ${UNTRUSTED}`;
 
-const CODE_FILE = /\.(?:js|mjs|cjs|ts|tsx|jsx|scss|css|html|vue|svelte|py|rs|go|java)$/i;
+const CODE_FILE = /\.(?:js|mjs|cjs|ts|tsx|jsx|html|vue|svelte|py|rs|go|java)$/i;
 
 /**
  * True when the step is code, not a document, rule, skill, or manifest.

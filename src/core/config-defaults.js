@@ -116,6 +116,7 @@ export const defaults = Object.freeze({
             orchestrator: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
             worker: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
             coder: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
+            styler: ['mdnCss', 'sass', 'canIUse', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'stylelint', 'prettier', 'googleFonts'],
         },
     },
     reasoning: { effort: "low", summary: 'auto' },
@@ -194,6 +195,7 @@ export const defaults = Object.freeze({
      *                  findings, and recent diff after every stage and decides what to do next
      *   worker     — executes plan steps that are not code generation
      *   coder      — writes code; model and effort follow plan complexity unless config pins them
+     *   styler     — writes CSS and SCSS; uses gpt-6.1-sol while effort follows complexity
      *   writer     — writes documents, reports, and Markdown; stays on the cheaper model, effort follows complexity
      *   reviewer   — verifies the result (read-only tools, may run tests)
      *   vision     — describes images; model and effort follow the long side, unless config pins them
@@ -206,10 +208,10 @@ export const defaults = Object.freeze({
      *   classifier — labels a task as trivial, normal, or complex
      *   extractor  — cleans a verbose answer and writes clean file bodies to .tmp
      *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
-     *   decorator  — builds complex decorative elements (ornaments, flourishes, dividers, patterns) as HTML+CSS or SVG
+     *   decorator  — builds complex decorative elements (ornaments, flourishes, dividers, patterns, frames) as HTML+CSS or SVG
      *                before the first page markup is written
      *   image-processor — generates, edits, and prepares requested images and visual assets before implementation
-     * worker, coder, writer, reviewer, tester, vision, solver, and image-processor double as the
+     * worker, coder, styler, writer, reviewer, tester, vision, solver, and image-processor double as the
      * sub-agents of run_subagent (tools.subagents): same prompt, same model settings, own context.
      */
 
@@ -251,6 +253,12 @@ export const defaults = Object.freeze({
         coder: r({
             tiers: [
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
+            ],
+        }),
+        styler: r({
+            model: 'gpt-6.1-sol',
+            tiers: [
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),

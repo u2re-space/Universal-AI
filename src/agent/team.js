@@ -22,6 +22,7 @@ import { clipMiddle, errorMessage } from '../util/text.js';
 import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { executorSpec, executorToolNames, executorNames } from './role-registry.js';
 import { isCodingStep } from '../roles/coder.js';
+import { isStylingStep } from '../roles/styler.js';
 import { isWritingStep } from '../roles/writer.js';
 import { createToolset, enabledToolNames, READ_ONLY_TOOLS } from './tools.js';
 import { createSubagentRunner } from './subagents.js';
@@ -51,13 +52,14 @@ import { createPipeline } from './pipeline.js';
 import { encodeToon } from '../util/toon.js';
 
 /**
- * Coder for source files, writer for documents, worker for everything else.
+ * Styler for CSS/SCSS, coder for other source files, writer for documents, worker for everything else.
  * @param {string[]} files
  * @param {string} goal
- * @returns {'coder'|'writer'|'worker'}
+ * @returns {'styler'|'coder'|'writer'|'worker'}
  * @ai.hint pure
  */
 function authorFor(files, goal) {
+    if (isStylingStep(files, goal)) return 'styler';
     if (isCodingStep(files, goal)) return 'coder';
     if (isWritingStep(files, goal)) return 'writer';
     return 'worker';

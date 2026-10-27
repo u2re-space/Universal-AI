@@ -67,6 +67,12 @@ test('the shipped coder tiers keep the old values in the ladder form', () => {
     assert.deepEqual([complex.model, complex.effort], ['gpt-6.1-sol', 'xhigh']);
 });
 
+test('the shipped styler tiers stay on gpt-6.1-sol', () => {
+    for (const complexity of ['trivial', 'normal', 'complex']) {
+        assert.equal(resolveRole(defaults, 'styler', complexity).model, 'gpt-6.1-sol');
+    }
+});
+
 test('the shipped writer tiers stay on one model', () => {
     assert.equal(resolveRole(defaults, 'writer', 'trivial').effort, 'medium');
     assert.equal(resolveRole(defaults, 'writer', 'normal').effort, 'high');

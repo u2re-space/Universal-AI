@@ -4,7 +4,7 @@ import { ROLE_INSTRUCTIONS } from '../src/roles/index.js';
 import { EXECUTORS } from '../src/agent/role-registry.js';
 import { defaults } from '../src/core/config.js';
 
-const NAMES = ['default', 'planner', 'architect', 'orchestrator', 'worker', 'coder', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer', 'decorator', 'image-processor'];
+const NAMES = ['default', 'planner', 'architect', 'orchestrator', 'worker', 'coder', 'styler', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer', 'decorator', 'image-processor'];
 
 test('role modules match config role names', () => {
     assert.deepEqual(Object.keys(defaults.roles).sort(), NAMES.slice().sort());
@@ -25,6 +25,9 @@ test('existing role instructions keep their job', () => {
     assert.match(ROLE_INSTRUCTIONS.orchestrator, /planUpdate/);
     assert.match(ROLE_INSTRUCTIONS.worker, /ONE step/);
     assert.match(ROLE_INSTRUCTIONS.coder, /generate code/);
+    assert.match(ROLE_INSTRUCTIONS.styler, /You are the styler/);
+    assert.match(ROLE_INSTRUCTIONS.styler, /CSS or SCSS/);
+    assert.match(ROLE_INSTRUCTIONS.styler, /Keep the change focused on stylesheets/);
     assert.match(ROLE_INSTRUCTIONS.writer, /documents, documentation, reports, and Markdown/);
     assert.match(ROLE_INSTRUCTIONS.worker, /delegate_role/);
     assert.match(ROLE_INSTRUCTIONS.reviewer, /independent reviewer/);
@@ -67,6 +70,7 @@ test('font selection instructions distinguish research, pairing, measured appear
 
 test('desktop helpers keep their tool slices and never delegate', () => {
     assert.equal(EXECUTORS.solver.tools, 'screen');
+    assert.equal(EXECUTORS.styler.tools, 'all');
     assert.deepEqual(EXECUTORS.clicker.tools, ['click', 'screenshot']);
     assert.deepEqual(EXECUTORS.typer.tools, ['type', 'screenshot']);
     assert.deepEqual(EXECUTORS.encoder.tools, ['screenshot']);
