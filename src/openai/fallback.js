@@ -19,6 +19,9 @@ import { MODEL_FALLBACKS } from './model-map.js';
 /** Default stand-ins. Keys may be bare or prefixed with openai/. */
 export { MODEL_FALLBACKS };
 
+//
+const triedMap = new Map();
+
 /**
  * Substitute model id, or null when this id has no stand-in.
  * @param {string} model
@@ -27,13 +30,13 @@ export { MODEL_FALLBACKS };
  * @exports
  * @ai.hint pure
  */
-export function fallbackModel(model, map = MODEL_FALLBACKS) {
+export function fallbackModel(model, map = MODEL_FALLBACKS, host = null) {
     const name = String(model ?? '').trim();
     if (!name || !map) return null;
     if (typeof map[name] === 'string' && map[name].trim() && map[name] !== name) return map[name].trim();
     const bare = name.replace(/^openai\//, '');
     const prefixed = bare === name ? `openai/${name}` : bare;
-    const alt = map[prefixed];
+    const alt = (((bare?.startsWith?.("gpt-") || prefixed?.startsWith?.("openai/")) && !triedMap.get(host)?.has?.(model)) ? (bare === name ? `openai/${name}` : bare) : null) || map[name];
     if (typeof alt === 'string' && alt.trim() && alt !== name) return alt.trim();
     return null;
 }
@@ -61,7 +64,7 @@ export function modelMissing(error) {
  */
 export function providerDown(error) {
     if (['NETWORK_ERROR', 'TIMEOUT', 'CONNECT_TIMEOUT'].includes(error?.code)) return true;
-    return [401, 402, 403, 408, 425, 429, 500, 502, 503, 504].includes(error?.status);
+    return [401, 402, 403, 404, 408, 425, 429, 500, 502, 503, 504].includes(error?.status);
 }
 
 /**
@@ -159,7 +162,10 @@ export async function attemptChain({ endpoints, model, map, send, onWarn = () =>
             const candidate = alts[index];
             try {
                 const result = await send(endpoints[host], candidate, host > 0);
-                if (candidate !== model) onWarn(`Модель ${model} недоступна. Запрос ушёл в ${candidate}.`);
+                if (candidate !== model) {
+                    if (!triedMap?.has?.(host)) { triedMap.set(host, new Set([])); triedMap.get(host).add(model); };
+                    onWarn(`Модель ${model} недоступна. Запрос ушёл в ${candidate}.`);
+                }
                 else if (host > 0) onWarn(`Основной провайдер недоступен. Запрос ушёл на ${endpoints[host].label}.`);
                 return result;
             } catch (error) {

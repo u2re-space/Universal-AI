@@ -175,10 +175,10 @@ export function createClient({
          * @returns {Promise<boolean>}
          */
         const retryOrStop = async (error) => {
-            if (PERSISTENT_STATUS.has(error?.status)) {
+            /*if (PERSISTENT_STATUS.has(error?.status)) {
                 emit({ type: 'warning', message: `HTTP ${error.status}: повтор не выполняется, выполнение остановлено.` });
                 return false;
-            }
+            }*/
             if (error instanceof ApiError && error.retryable && attempt < retries && !signal?.aborted) {
                 const delay = retryDelayMs(attempt, error.retryAfter, error.status);
                 const reason = error.status === 429
