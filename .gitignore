@@ -163,3 +163,6 @@ ai-image-*.webp
 .ai
 .tmp
 .temp
+
+#
+package-lock.json
