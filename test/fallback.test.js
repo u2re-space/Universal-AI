@@ -5,8 +5,8 @@ import { attemptChain, fallbackModel, modelMissing, providerDown, providerList }
 import { defaults } from '../src/core/config.js';
 
 test('known models fall back to another channel', () => {
-    assert.equal(fallbackModel('gpt-6.1-terra'), 'anthropic/claude-haiku-5-5');
-    assert.equal(fallbackModel('openai/gpt-6.1-sol'), 'anthropic/claude-sonnet-5.5');
+    assert.equal(fallbackModel('gpt-6.1-terra'), 'openai/gpt-6.1-terra');
+    assert.equal(fallbackModel('openai/gpt-6.1-sol'), 'anthropic/claude-opus-5.5');
     assert.equal(fallbackModel('openai/gpt-6-luna-decisions'), 'typesafe/jev-1.14');
     assert.equal(modelMissing(new ApiError('missing', { status: 404, apiCode: 'model_not_found' })), true);
     assert.equal(modelMissing(new ApiError('bad temperature', { status: 400 })), false);
@@ -23,7 +23,7 @@ test('a missing model is tried on the same host, then on the next host', async (
         map: defaults.fallback.models,
         send: async (endpoint, model) => {
             seen.push(`${endpoint.label}:${model}`);
-            if (model !== 'anthropic/claude-haiku-5-5' || endpoint.label === 'primary') {
+            if (model !== 'anthropic/claude-haiku-5-5' && model !== 'openai/gpt-6.1-terra' || endpoint.label === 'primary') {
                 throw new ApiError('missing', { status: 404, apiCode: 'model_not_found' });
             }
             return { ok: true };
@@ -32,9 +32,9 @@ test('a missing model is tried on the same host, then on the next host', async (
     assert.equal(result.ok, true);
     assert.deepEqual(seen, [
         'primary:gpt-6.1-terra',
-        'primary:anthropic/claude-haiku-5-5',
+        'primary:openai/gpt-6.1-terra',
         'https://sprutdock.ru/v1:gpt-6.1-terra',
-        'https://sprutdock.ru/v1:anthropic/claude-haiku-5-5',
+        'https://sprutdock.ru/v1:openai/gpt-6.1-terra'
     ]);
 });
 

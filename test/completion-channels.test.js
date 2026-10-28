@@ -202,8 +202,8 @@ test('a missing model retries the stand-in on the fastest channel', async () => 
     try {
         const result = await completeCode({ channels, config, request: { content: 'const a = |' } });
         assert.equal(result.text, 'fast-fallback()');
-        assert.equal(result.model, 'anthropic/claude-haiku-5-5');
-        assert.equal(callsOf(fast).completions.at(-1).body.model, 'anthropic/claude-haiku-5-5');
+        assert.equal(result.model, 'openai/gpt-6-luna');
+        assert.equal(callsOf(fast).completions.at(-1).body.model, 'openai/gpt-6-luna');
     } finally { channels.close(); }
 });
 
