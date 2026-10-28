@@ -35,13 +35,12 @@
     "@toon-format/toon": "^4.4.0",
     "@types/node": "^26.6.5",
     "really-relaxed-json": "^0.4.0",
-    "zod": "^4.6.7"
-  },
-  "optionalDependencies": {
-    "sharp": "^0.35.5",
-    "canvas": "^3.2.3"
+    "zod": "^4.6.7",
+    "canvas": "^4.0.0-rc3",
+    "sharp": "^0.35.5"
   },
   "allowScripts": {
-    "canvas@3.2.3": true
+    "canvas@3.2.3": true,
+    "canvas@4.0.0-rc3": true
   }
 }
