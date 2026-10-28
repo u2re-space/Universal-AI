@@ -131,7 +131,6 @@ const KNOWN = Object.freeze({
     bootstrap: { kind: 'css', docs: 'https://getbootstrap.com/docs/', types: null },
     bulma: { kind: 'css', docs: 'https://bulma.io/documentation/', types: null },
     'open-props': { kind: 'css', docs: 'https://open-props.style/', types: null },
-    lucide: { kind: 'icons', docs: 'https://lucide.dev/guide/', types: null },
     '@fortawesome/fontawesome-free': { kind: 'icons', docs: 'https://fontawesome.com/docs', types: null },
     heroicons: { kind: 'icons', docs: 'https://heroicons.com/', types: null },
     '@phosphor-icons/web': { kind: 'icons', docs: 'https://phosphoricons.com/', types: null },
@@ -153,6 +152,16 @@ const KNOWN = Object.freeze({
     koa: { kind: 'runtime', docs: 'https://koajs.com/', types: '@types/koa' },
     '@types/express': { kind: 'types', docs: 'https://www.npmjs.com/package/@types/express', types: null },
     '@types/koa': { kind: 'types', docs: 'https://www.npmjs.com/package/@types/koa', types: null },
+    'lucide': { kind: 'icons', docs: 'https://lucide.dev/guide/lucide/getting-started', types: null },
+    'lucide-icons': { kind: 'icons', docs: 'https://lucide.dev/icons/', types: null },
+    'lucide-npm': { kind: 'icons', docs: 'https://www.npmjs.com/package/lucide', types: null },
+    'lucide-static': { kind: 'icons', docs: 'https://www.npmjs.com/package/lucide-static', types: null },
+    'lucide-github': { kind: 'icons', docs: 'https://github.com/lucide-icons/lucide', types: null },
+    'phosphor-homepage': { kind: 'icons', docs: 'https://github.com/phosphor-icons/homepage', types: null },
+    'phosphor-core': { kind: 'icons', docs: 'https://github.com/phosphor-icons/core', types: null },
+    'phosphor-web': { kind: 'icons', docs: 'https://github.com/phosphor-icons/web', types: null },
+    'phosphor-webcomponents': { kind: 'icons', docs: 'https://github.com/phosphor-icons/webcomponents', types: null },
+    'phosphor-icons': { kind: 'icons', docs: 'https://phosphoricons.com/', types: null }
 });
 
 const CSS_PACKS = [
@@ -164,11 +173,13 @@ const CSS_PACKS = [
 const ICON_PACKS = [
     { test: /font\s*awesome|fontawesome/i, name: '@fortawesome/fontawesome-free' },
     { test: /heroicons?/i, name: 'heroicons' },
-    { test: /phosphor/i, name: '@phosphor-icons/web' },
+    { test: /phosphor/i, name: '@phosphor-icons/core' },
     { test: /tabler/i, name: '@tabler/icons' },
     { test: /material symbols|material icons/i, name: 'material-symbols' },
+    { test: /lucide/i, name: 'lucide-static' },
 ];
 const SERVERS = [
+    { test: /\bfastify\b/i, name: 'fastify' },
     { test: /\bexpress\b/i, name: 'express' },
     { test: /\bhono\b/i, name: 'hono' },
     { test: /\bkoa\b/i, name: 'koa' },
