@@ -189,6 +189,22 @@ export const TOOL_SPECS = {
             max_bytes: nullableInt('Maximum number of bytes to return (default and cap: configured limit).'),
         }),
     },
+    compare_images: {
+        category: 'write', group: 'images',
+        description: 'Локально сравнить 2–12 существующих растровых/SVG-файлов без генерации изображения, SVG-снимка и браузерной растеризации. mode=sheet сохраняет одну PNG-таблицу с общими пропорциональными ячейками, difference — карту абсолютных различий для ровно двух файлов и оценку similarity, both — оба результата. Использует sharp (SVG читается как растр через локальный librsvg) или node-canvas; ImageMagick и ИИ-запрос не требуются.',
+        parameters: schema({
+            files: { type: 'array', items: { type: 'string' }, description: 'От 2 до 12 путей к локальным изображениям в рабочем каталоге (PNG, JPEG, WebP, GIF, TIFF, BMP, AVIF или SVG).' },
+            output: str('Путь выходного PNG в рабочем каталоге. Пустая строка создаёт .tmp/compare-<timestamp>.png; для both рядом появится -diff.png.'),
+            mode: { type: 'string', enum: ['sheet', 'difference', 'both'], description: 'sheet: таблица; difference: карта различий двух файлов; both: таблица и карта различий.' },
+            layout: { type: 'string', enum: ['row', 'column', 'grid'], description: 'Раскладка таблицы: в ряд, колонкой или сеткой.' },
+            frame: str('Общий размер каждой ячейки WIDTHxHEIGHT или square/landscape/portrait. Пусто — подобрать по самым крупным входам с ограничением размера.'),
+            gap: nullableInt('Промежуток между ячейками в пикселях, 0–64. Null = 8.'),
+            background: str('Цвет полей ячейки: transparent, white, black или #RRGGBB. Для прозрачных исходников сохраняйте transparent.'),
+            max_side: nullableInt('Максимальная длинная сторона автоматически выбранной ячейки, 64–2048. Null = 768.'),
+            labels: bool('Подписать ячейки именами файлов через node-canvas, когда он доступен.'),
+            reason: str('Одно предложение: зачем нужно локальное сравнение (показывается при подтверждении).'),
+        }),
+    },
     view_image: {
         category: 'read', group: 'fs',
         description: 'Look at a local image file (PNG/JPEG/GIF/WebP). Either the image is attached to the conversation, or a dedicated vision model describes it and answers your question.',
@@ -424,7 +440,7 @@ export const READ_ONLY_TOOLS = ['list_files', 'read_file', 'search_files', 'view
 export const SHELL_TOOL_NAMES = ['run_command', 'run_script', 'ssh'];
 
 /** Image and asset tools of the image-processor role and sub-agent. */
-export const IMAGE_TOOL_NAMES = ['view_image', 'crop_image', 'split_image', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons'];
+export const IMAGE_TOOL_NAMES = ['view_image', 'crop_image', 'split_image', 'compare_images', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons'];
 
 /**
  * Strict function-tool definitions for names that exist in `TOOL_SPECS`.
@@ -464,7 +480,7 @@ export function enabledToolNames(tools, { interactive = false, memory = false, s
     if (memory) names.push('recall', 'remember');
     if (tools.askUser && interactive) names.push('ask_user');
     if (tools.images && imageApi) names.push('generate_image', 'edit_image', 'vectorize_image');
-    if (tools.images && images) names.push('split_image', 'crop_image', 'generate_svg');
+    if (tools.images && images) names.push('split_image', 'crop_image', 'compare_images', 'generate_svg');
     if (tools.fetch) names.push('download_font', 'download_icons');
     if (tools.channels) names.push('decide', 'moderate_text', 'channel_reply', 'telegram_call');
     if (tools.subagents) names.push('run_subagent', 'delegate_role');

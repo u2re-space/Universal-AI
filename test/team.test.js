@@ -78,12 +78,12 @@ function roleOf(body) {
 }
 
 test('image processor only sees enabled image, asset, and documentation-fetch tools', () => {
-    const enabled = ['list_files', 'write_file', 'run_command', 'fetch_url', 'view_image', 'crop_image', 'split_image', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons', 'image_generation'];
-    assert.deepEqual(toolNamesForRole(enabled, 'image-processor'), ['fetch_url', 'view_image', 'crop_image', 'split_image', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons']);
+    const enabled = ['list_files', 'write_file', 'run_command', 'fetch_url', 'view_image', 'crop_image', 'split_image', 'compare_images', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons', 'image_generation'];
+    assert.deepEqual(toolNamesForRole(enabled, 'image-processor'), ['fetch_url', 'view_image', 'crop_image', 'split_image', 'compare_images', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons']);
     const api = enabledToolNames({ ...defaults.tools, images: true, fetch: true }, { imageApi: true });
-    assert.deepEqual(toolNamesForRole(api, 'image-processor'), ['view_image', 'fetch_url', 'generate_image', 'edit_image', 'vectorize_image', 'split_image', 'crop_image', 'generate_svg', 'download_font', 'download_icons']);
+    assert.deepEqual(toolNamesForRole(api, 'image-processor'), ['view_image', 'fetch_url', 'generate_image', 'edit_image', 'vectorize_image', 'split_image', 'crop_image', 'compare_images', 'generate_svg', 'download_font', 'download_icons']);
     const noFetch = enabledToolNames({ ...defaults.tools, images: true, fetch: false }, { imageApi: false });
-    assert.deepEqual(toolNamesForRole(noFetch, 'image-processor'), ['view_image', 'split_image', 'crop_image', 'generate_svg']);
+    assert.deepEqual(toolNamesForRole(noFetch, 'image-processor'), ['view_image', 'split_image', 'crop_image', 'compare_images', 'generate_svg']);
     const noImages = enabledToolNames({ ...defaults.tools, images: false, fetch: false }, { imageApi: false });
     assert.deepEqual(toolNamesForRole(noImages, 'image-processor'), ['view_image']);
     const iconifierEnabled = enabledToolNames({ ...defaults.tools, desktop: true, images: true });
@@ -1304,7 +1304,7 @@ test('image processing runs before implementation and passes prepared assets in 
         assert.ok(processor.tools.some((tool) => tool.name === 'fetch_url'));
         assert.ok(processor.tools.some((tool) => tool.name === 'download_font'));
         assert.ok(processor.tools.some((tool) => tool.type === 'web_search'));
-        assert.deepEqual(toolNames.filter(Boolean), ['view_image', 'fetch_url', 'generate_image', 'edit_image', 'vectorize_image', 'split_image', 'crop_image', 'generate_svg', 'download_font', 'download_icons']);
+        assert.deepEqual(toolNames.filter(Boolean), ['view_image', 'fetch_url', 'generate_image', 'edit_image', 'vectorize_image', 'split_image', 'crop_image', 'compare_images', 'generate_svg', 'download_font', 'download_icons']);
         assert.equal(toolNames.some((name) => ['write_file', 'replace_text', 'run_command'].includes(name)), false);
         const worker = seen.find((item) => item.role === 'worker').body;
         assert.match(worker.input[0].content[0].text, /Prepared images and visual assets/);

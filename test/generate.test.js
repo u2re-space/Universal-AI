@@ -109,9 +109,9 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
     assert.match(brief.instructions, /prefer a PNG that already has a real alpha channel/);
     assert.match(brief.task, /Do not call generate_image, edit_image, or image_generation to make comparison variants/);
     assert.match(brief.task, /Compare candidates in a common frame with the same aspect ratio/);
-    assert.match(brief.task, /never stretch either image/);
+    assert.match(brief.task, /never stretch an image/);
     assert.match(brief.task, /If any existing stage produced a PNG with a real alpha channel, keep that file/);
-    assert.match(brief.task, /Atlas packing and comparison are local image operations/);
+    assert.match(brief.task, /Compare existing files with compare_images: it reads pixels locally/);
     assert.match(brief.task, /convert it locally and keep the PNG/);
     assert.match(brief.instructions, /Do not pass --force/);
     assert.match(brief.instructions, /at most 4 steps/);

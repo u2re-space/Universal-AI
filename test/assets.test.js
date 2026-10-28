@@ -2,16 +2,22 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { createCanvas } from 'canvas';
 import { generateSvg } from '../src/agent/assets.js';
-import { detectMagick, magickIdentify } from '../src/agent/image-magick.js';
 import { enabledToolNames, TOOL_SPECS } from '../src/agent/tool-specs.js';
 import { createToolset } from '../src/agent/tools.js';
-import { runProgram } from '../src/agent/shell.js';
 import { defaults } from '../src/core/config.js';
+import { rasterInfo } from '../src/agent/image-raster.js';
 
 let root;
 after(async () => { if (root) await rm(root, { recursive: true, force: true }); });
+
+const createPng = async (width, height, draw) => {
+    const canvas = createCanvas(width, height);
+    draw(canvas.getContext('2d'));
+    return canvas.toBuffer('image/png');
+};
 
 test('generate_svg writes a complete SVG document', async () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'ai-agent-svg-'));
@@ -36,6 +42,7 @@ test('image tools are enabled with images and asset downloads with fetch', () =>
     const images = enabledToolNames({ images: true }, { images: true });
     assert.ok(images.includes('split_image'));
     assert.ok(images.includes('crop_image'));
+    assert.ok(images.includes('compare_images'));
     assert.ok(images.includes('generate_svg'));
     assert.equal(images.includes('download_font'), false);
 
@@ -46,25 +53,23 @@ test('image tools are enabled with images and asset downloads with fetch', () =>
     assert.equal(fetch.includes('split_image'), false);
 });
 
+import { detectMagick } from '../src/agent/image-magick.js';
+
 test('detectMagick answers with an executable path or null and never throws', async () => {
     const found = await detectMagick();
     assert.ok(found === null || typeof found === 'string');
 });
 
-test('crop_image is the one tool for both a box and a padding trim', async (t) => {
+test('crop_image is the one tool for both a box and a padding trim', async () => {
     assert.ok(TOOL_SPECS.crop_image.parameters.properties.trim);
     assert.match(TOOL_SPECS.crop_image.description, /trim=true/);
 
-    const exe = await detectMagick();
-    if (!exe) return t.skip('ImageMagick is not installed');
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-crop-trim-'));
     try {
-        // White 200x200 canvas with a 41x41 red square: the trim result is known in advance.
-        await runProgram({
-            file: exe,
-            args: ['-size', '200x200', 'xc:white', '-fill', 'red', '-draw', 'rectangle 60,60 100,100', 'subject.png'],
-            cwd: dir, timeoutMs: 15000, maxOutputBytes: 4096,
-        });
+        await writeFile(path.join(dir, 'subject.png'), await createPng(200, 200, (ctx) => {
+            ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 200, 200);
+            ctx.fillStyle = 'red'; ctx.fillRect(60, 60, 41, 41);
+        }));
         const toolset = createToolset({ root: dir, config: defaults, names: ['crop_image'], approvalLevel: 'all' });
         const call = (args) => toolset.execute({ name: 'crop_image', call_id: 'c1', arguments: JSON.stringify(args) });
 
@@ -72,13 +77,13 @@ test('crop_image is the one tool for both a box and a padding trim', async (t) =
         assert.equal(trimmed.ok, true, trimmed.output);
         assert.match(trimmed.output, /Снят padding/);
         assert.equal(trimmed.summary, 'assets/subject.png');
-        const cut = await magickIdentify({ exe, input: 'assets/subject.png', cwd: dir });
+        const cut = await rasterInfo(path.join(dir, 'assets/subject.png'), { cwd: dir });
         assert.equal(cut.width, 41);
         assert.equal(cut.height, 41);
 
         const box = await call({ path: 'subject.png', x: 10, y: 10, width: 50, height: 40, trim: false, output: 'assets/box.png', reason: 'кроп детали' });
         assert.equal(box.ok, true, box.output);
-        const cropped = await magickIdentify({ exe, input: 'assets/box.png', cwd: dir });
+        const cropped = await rasterInfo(path.join(dir, 'assets/box.png'), { cwd: dir });
         assert.equal(cropped.width, 50);
         assert.equal(cropped.height, 40);
 

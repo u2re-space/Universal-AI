@@ -28,6 +28,7 @@ import { DESKTOP_TOOL_NAMES, createDesktopHandlers } from './desktop.js';
 import { createImageHandlers } from './image-tools.js';
 import { createChannelHandlers } from '../channels/tool-handlers.js';
 import { detectMagick, magickSplit, magickCrop, magickTrimImage, magickIdentify } from './image-magick.js';
+import { rasterEngine, rasterCompare, rasterCrop, rasterSplit, rasterTrim, rasterInfo } from './image-raster.js';
 import { generateSvg, downloadFont, downloadIcons } from './assets.js';
 import {
     TOOL_SPECS,
@@ -48,7 +49,7 @@ const TRIM_REFUSED = {
     'no-padding': 'ни прозрачного, ни равномерного padding по краям нет',
     'too-small': 'trim снял бы больше 90 % кадра',
     'unreadable': 'размеры изображения не читаются',
-    'failed': 'ImageMagick отклонил trim',
+    'failed': 'растровый движок или ImageMagick отклонил trim',
 };
 
 /**
@@ -270,6 +271,7 @@ export function createToolset({
             case 'run_batch': return `Пакет: ${truncate(batchSource(args), 400)}`;
             case 'split_image': return `Разбить ${args.path} на ${args.rows ?? 1}×${args.cols ?? 1} плиток\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
             case 'crop_image': return `${args.trim ? `Снять padding ${args.path}` : `Обрезать ${args.path}: ${args.width ?? '?'}×${args.height ?? '?'} в (${args.x ?? 0},${args.y ?? 0}) `}\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
+            case 'compare_images': return `Сравнить ${args.files?.join(', ') || 'изображения'} (${args.mode || 'sheet'})\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
             case 'generate_svg': return `SVG ${args.width ?? 512}×${args.height ?? 512}: ${truncate(args.prompt ?? '', 400)}\nФайл: ${args.path || 'авто'}\nПричина: ${args.reason ?? '—'}`;
             case 'vectorize_image': return `Векторизовать ${args.image || 'кроп из замеров'} в SVG`;
             case 'run_subagent': return `Суб-агент ${args.kind}: ${truncate(args.task ?? '', 400)}`;
@@ -570,6 +572,45 @@ export function createToolset({
             const answer = await askUser(String(args.question ?? ''));
             return { output: answer === null || answer === '' ? '(оператор не ответил)' : answer, summary: truncate(answer ?? '', 60) };
         },
+        /** Locally compare existing images, producing a labelled sheet and/or a per-pixel difference map. */
+        async compare_images(args) {
+            const paths = Array.isArray(args.files) ? args.files : [];
+            if (paths.some((file) => typeof file !== 'string' || !file.trim())) throw new Error('Каждый путь в files должен быть непустой строкой.');
+            if (paths.length < 2 || paths.length > 12) throw new Error('Для сравнения передайте от 2 до 12 файлов.');
+            const mode = ['sheet', 'difference', 'both'].includes(args.mode) ? args.mode : 'sheet';
+            if (args.layout && !['row', 'column', 'grid'].includes(args.layout)) throw new Error('layout должен быть row, column или grid.');
+            if (args.gap != null && (!Number.isSafeInteger(args.gap) || args.gap < 0 || args.gap > 64)) throw new Error('gap должен быть целым числом от 0 до 64.');
+            if (mode !== 'sheet' && paths.length !== 2) throw new Error('Режим difference поддерживает ровно два изображения.');
+            const files = [];
+            for (const file of paths) {
+                const located = await resolveInside(root, file, { allowRoot: false });
+                const info = await stat(located.abs).catch(() => null);
+                if (!info?.isFile()) throw new Error(`Файл не найден: ${file}`);
+                if (info.size > limits.maxImageBytes) throw new Error(`${file}: изображение больше лимита ${formatBytes(limits.maxImageBytes)}.`);
+                files.push(located);
+            }
+            const requested = String(args.output ?? '').trim() || `.tmp/compare-${Date.now()}.png`;
+            guardTemporaryOutput('compare_images', requested);
+            const output = (await resolveInside(root, requested, { forWrite: true, allowRoot: false })).rel;
+            const rawSide = args.max_side ?? 768;
+            if (!Number.isSafeInteger(rawSide) || rawSide < 64 || rawSide > 2048) throw new Error('max_side должен быть целым числом от 64 до 2048.');
+            const engine = config.image?.rasterEngine ?? 'auto';
+            const maxSide = rawSide;
+            const result = await rasterCompare({
+                files, output, cwd: root, mode,
+                layout: ['row', 'column', 'grid'].includes(args.layout) ? args.layout : 'row',
+                frame: args.frame ?? '', gap: args.gap ?? 8,
+                background: args.background || 'transparent', maxSide,
+                labels: Boolean(args.labels), engine, signal,
+            });
+            const lines = [`Движок: ${result.engine}. Ячейка: ${result.cell.width}×${result.cell.height}; таблица: ${result.width}×${result.height}.`];
+            for (const item of result.items) lines.push(`${item.rel} — ${item.sourceWidth}×${item.sourceHeight} → ${item.width}×${item.height} в (${item.x},${item.y}), масштаб ${item.scale}.`);
+            if (result.rel) lines.unshift(`Таблица: ${result.rel}`);
+            if (result.labelsDrawn) lines.push('Подписи отрисованы локально через node-canvas.');
+            if (result.diff) lines.push(`Difference: ${result.diff.rel} (${result.diff.width}×${result.diff.height}); средняя разница ${result.diff.meanError}/255; сходство ${result.diff.similarity}%.`);
+            else if (args.labels) lines.push('Подписи пропущены: node-canvas недоступен.');
+            return { output: lines.join('\n'), summary: [result.rel, result.diff?.rel].filter(Boolean).join(', ') };
+        },
         /** Split an image into a grid of tiles. Returns coordinates and source dimensions for each tile. */
         async split_image(args) {
             const { abs, rel } = await resolveInside(root, args.path, { allowRoot: false });
@@ -582,6 +623,14 @@ export function createToolset({
             const requested = String(args.output ?? '').trim() || `.tmp/split-${Date.now()}`;
             guardTemporaryOutput('split_image', requested);
             const outputDir = (await resolveInside(root, requested, { forWrite: true, allowRoot: false })).rel;
+            const engine = config.image?.rasterEngine ?? 'auto';
+            const activeEngine = engine !== 'magick' ? await rasterEngine(engine) : null;
+            if (activeEngine) {
+                const info = await rasterInfo(abs, { cwd: root, engine });
+                const tiles = await rasterSplit({ input: abs, outputDir, rows, cols, cwd: root, signal, baseName: 'tile', engine });
+                const lines = tiles.map((t) => `${t.rel} (${t.width}×${t.height}, x=${t.x}, y=${t.y}, ${formatBytes(t.bytes)})`);
+                return { output: `Разбито ${rel} (исходный: ${info.width}×${info.height}) на ${rows}×${cols} (${tiles.length} плиток, ${activeEngine}):\n${lines.join('\n')}`, summary: `${rows}×${cols} → ${outputDir}/` };
+            }
             const exe = await detectMagick({ magickPath: config.magickPath ?? null });
             if (exe) {
                 // Get source dimensions for planning
@@ -594,7 +643,7 @@ export function createToolset({
                 const lines = tiles.map((t) => `${t.rel} (${t.width}×${t.height}, x=${t.x}, y=${t.y}, ${formatBytes(t.bytes)})`);
                 return { output: `Разбито ${rel}${srcDims} на ${rows}×${cols} (${tiles.length} плиток):\n${lines.join('\n')}`, summary: `${rows}×${cols} → ${outputDir}/` };
             }
-            throw new Error('ImageMagick не найден. Установите ImageMagick (magick или convert) или используйте generate_image/edit_image для работы с изображениями.');
+            throw new Error('Не найден raster engine sharp/canvas или ImageMagick (magick/convert).');
         },
         /** Crop a box from an image, or cut its padding off when `trim` is set. Reports source dimensions. */
         async crop_image(args) {
@@ -610,6 +659,19 @@ export function createToolset({
             const requested = String(args.output ?? '').trim() || `.tmp/${trim ? 'trim' : 'crop'}-${Date.now()}.png`;
             guardTemporaryOutput('crop_image', requested);
             const output = (await resolveInside(root, requested, { forWrite: true, allowRoot: false })).rel;
+            const engine = config.image?.rasterEngine ?? 'auto';
+            const activeEngine = engine !== 'magick' ? await rasterEngine(engine) : null;
+            if (activeEngine) {
+                const info = await rasterInfo(abs, { cwd: root, engine });
+                if (trim) {
+                    const cut = await rasterTrim({ input: abs, output, cwd: root, signal, fuzz: 6, engine });
+                    if (!cut.changed) return { output: `Padding не снят (${TRIM_REFUSED[cut.reason] ?? cut.reason}): ${rel} (исходный: ${info.width}×${info.height})`, summary: rel };
+                    const size = await stat(path.join(root, output)).catch(() => null);
+                    return { output: `Снят padding ${rel} (исходный: ${info.width}×${info.height}) → ${output} (${cut.before.width}×${cut.before.height} → ${cut.after.width}×${cut.after.height}, ${formatBytes(size?.size ?? 0)}, ${activeEngine})`, summary: output };
+                }
+                const result = await rasterCrop({ input: abs, output, x, y, width, height, cwd: root, signal, engine });
+                return { output: `Обрезано ${rel} (исходный: ${info.width}×${info.height}) → ${result.rel} (${result.width}×${result.height} в ${x},${y}, ${formatBytes(result.bytes)}, ${activeEngine})`, summary: result.rel };
+            }
             const exe = await detectMagick({ magickPath: config.magickPath ?? null });
             if (exe) {
                 // Get source dimensions for planning
@@ -629,7 +691,7 @@ export function createToolset({
                 const result = await magickCrop({ exe, input: abs, output, x, y, width, height, cwd: root, signal });
                 return { output: `Обрезано ${rel}${srcDims} → ${result.rel} (${width}×${height} в ${x},${y}, ${formatBytes(result.bytes)})`, summary: result.rel };
             }
-            throw new Error('ImageMagick не найден. Установите ImageMagick (magick или convert).');
+            throw new Error('Не найден raster engine sharp/canvas или ImageMagick (magick/convert).');
         },
         /** Generate an SVG file from a prompt. */
         async generate_svg(args) {

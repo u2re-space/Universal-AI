@@ -64,7 +64,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   search_files scope=path|symbol|content|all читает карту проекта.
   --web                  поиск web_search на /v1/responses (ProxyAPI), включён по умолчанию; --no-web выключает
                          запросы и страницы печатаются под ответом
-  --images               генерация картинок в ответах; вместе с tools.images — split_image, crop_image, generate_svg
+  --images               генерация картинок в ответах; вместе с tools.images — split_image, crop_image, compare_images, generate_svg
   --desktop              включает экран Windows, мышь, клавиатуру и AutoHotkey v2
   --unsafe-screenshot    разрешить снимок рабочего стола. Без флага screenshot и снимок после клика выключены
   --approve ask|read|write|all   политика подтверждений (по умолчанию: ask в терминале, read без него)
@@ -80,8 +80,9 @@ context=false запускает роль на чистом контексте. 
   Вложенный запуск не видит переписку — задачу пишут целиком; свой суб-агент ему недоступен, и правит он лишь
   то, что разрешено вызвавшему.
 
-  split_image и crop_image требуют ImageMagick (magick или convert); путь задаётся полем magickPath.
+  split_image и crop_image сначала используют локальный sharp/canvas (image.rasterEngine: auto|sharp|canvas|magick); ImageMagick — резерв.
   crop_image режет коробку x/y/width/height, а с trim=true снимает padding по краям.
+  compare_images локально собирает PNG-таблицу из 2–12 растров/SVG и карту различий двух файлов; браузер и повторная генерация не нужны.
   При tools.shell агент может: run_command (оболочка на вызов), run_script (.ps1 .cmd .bat .sh .bash), ssh (команда или файл, scp put/get).
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 
@@ -155,8 +156,10 @@ context=false запускает роль на чистом контексте. 
   Для api.proxyapi.ru картинки идут через /images/generations и /images/edits (openai/gpt-image-2.5-sunburst для генерации по тексту,
   openai/gpt-image-2.5-sunburst для правки и генерации по картинке, если не задана --image-model).
   transparent: gpt-image-* (кроме gpt-image-2) получают нативную альфу; у recraft и подобных моделей
-  модель рисует чёрно-белую маску, и ImageMagick вливает её в RGB+A (заливка от углов — запасной путь).
-  GPT Image 2.5 дополняет входной растр прозрачными пикселями справа/снизу до кратности 16 без масштабирования и снимает padding после правки.
+  модель рисует чёрно-белую маску, и локальный растровый движок (sharp/canvas) вливает её в RGB+A —
+  ImageMagick подключается только если оба движка недоступны.
+  GPT Image 2.5 дополняет входной растр прозрачными пикселями справа/снизу до кратности 16 без масштабирования,
+  а после правки снимает padding тем же движком, что и добавлял.
   PNG с настоящей альфой сохраняется; если нужен WebP, используйте локальную конверсию, а не повторную генерацию.
   Инструмент vectorize_image конвертирует плоские PNG/WebP (логотипы, бейджи, иконки) в SVG через
   recraft/recraft-v4.1-pro-vector: удаляет фон, проверяет палитру, сохраняет .svg вместо .png.

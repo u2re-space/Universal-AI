@@ -166,3 +166,7 @@ ai-image-*.webp
 
 #
 package-lock.json
+.tmp-*
+.dbg-*
+.debug-*
+test/*.png

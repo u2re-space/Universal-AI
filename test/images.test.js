@@ -4,9 +4,10 @@ import http from 'node:http';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createCanvas } from 'canvas';
 import { createClient } from '../src/openai/client.js';
 import { TINY_PNG } from './helpers/mock-server.js';
-import { detectMagick, magickIdentify, magickIsOpaque, magickPadImageBytes } from '../src/agent/image-magick.js';
+import { rasterInfo, rasterIsOpaque, rasterPadImageBytes } from '../src/agent/image-raster.js';
 import { runProgram } from '../src/agent/shell.js';
 import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFor, imagePayloads, imageRequestSize, imageSizeAttempts, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL, VECTOR_RATIOS } from '../src/openai/images.js';
 import { builtinTools } from '../src/agent/loop.js';
@@ -249,23 +250,22 @@ test('GPT Image 2.5 retries invalid dimensions in order and does not retry other
     }
 });
 
-test('GPT Image 2.5 pads non-multiple input edges without scaling and removes returned padding', async (t) => {
-    const exe = await detectMagick();
-    if (!exe) return t.skip('ImageMagick is not installed');
+test('GPT Image 2.5 pads non-multiple input edges without scaling and removes returned padding', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'ai-image-pad-'));
     const source = path.join(root, 'source.png');
     const paddedReply = path.join(root, 'reply.png');
     const generatePng = async (file, width, height) => {
-        const result = await runProgram({ file: exe, args: ['-size', `${width}x${height}`, 'xc:none', '-fill', '#cc2222', '-draw', `rectangle 16,16 ${width - 16},${height - 16}`, file], cwd: root, timeoutMs: 10000, maxOutputBytes: 4096 });
-        assert.equal(result.exitCode, 0, result.stderr);
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#cc2222';
+        ctx.fillRect(16, 16, width - 32, height - 32);
+        await writeFile(file, canvas.toBuffer('image/png'));
     };
     const pixelAt = async (file, x, y) => {
-        const result = await runProgram({
-            file: exe, args: [file, '-format', `%[fx:round(255*p{${x},${y}}.r)],%[fx:round(255*p{${x},${y}}.g)],%[fx:round(255*p{${x},${y}}.b)],%[fx:round(255*p{${x},${y}}.a)]`, 'info:'],
-            cwd: root, timeoutMs: 10000, maxOutputBytes: 4096,
-        });
-        assert.equal(result.exitCode, 0, result.stderr);
-        return result.stdout.trim().split(',').map(Number);
+        const sharp = (await import('sharp')).default;
+        const { data, info } = await sharp(file).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        const at = (y * info.width + x) * 4;
+        return [...data.subarray(at, at + 4)];
     };
     try {
         await generatePng(source, 1000, 600);
@@ -284,33 +284,32 @@ test('GPT Image 2.5 pads non-multiple input edges without scaling and removes re
         });
         await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
         const { port } = server.address();
-        const client = createClient({ apiKey: 'sk-test', baseURL: `http://127.0.0.1:${port}/v1/`, retries: 0 });
+        const client = createClient({ apiKey: 'sk-test', baseURL: `http://127.0.0.1:${port}/v1/`, retries: 0, rasterEngine: 'sharp' });
         try {
             const payloads = await client.images.edit({
                 model: 'gpt-image-2.5-sunburst', prompt: 'preserve', format: 'png',
                 files: [{ filename: 'source.png', mime: 'image/png', bytes: sourceBytes }],
             });
-            const { width, height } = await magickIdentify({ exe, input: source, cwd: root });
-            const original = await magickPadImageBytes({ exe, bytes: sourceBytes });
+            const original = await rasterPadImageBytes({ bytes: sourceBytes, engine: 'sharp' });
             assert.deepEqual(seen.map(({ size, file }) => ({ size, file })), [{ size: '1008x608', file: true }]);
             assert.equal(original.width, 1008);
             assert.equal(original.height, 608);
-            assert.equal(original.originalWidth, width);
-            assert.equal(original.originalHeight, height);
+            assert.equal(original.originalWidth, 1000);
+            assert.equal(original.originalHeight, 600);
             assert.equal(original.padded, true);
             const sentPath = path.join(root, 'sent.png');
             await writeFile(sentPath, Buffer.from(seen[0].image, 'latin1'));
-            const sentInfo = await magickIdentify({ exe, input: sentPath, cwd: root });
+            const sentInfo = await rasterInfo(sentPath, { cwd: root, engine: 'sharp' });
             assert.equal(sentInfo.width, 1008);
             assert.equal(sentInfo.height, 608);
             assert.deepEqual(await pixelAt(sentPath, 20, 20), await pixelAt(source, 20, 20));
             assert.deepEqual(await pixelAt(sentPath, 1004, 604), [0, 0, 0, 0]);
             const resultPath = path.join(root, 'result.png');
             await writeFile(resultPath, Buffer.from(payloads[0], 'base64'));
-            const info = await magickIdentify({ exe, input: resultPath, cwd: root });
+            const info = await rasterInfo(resultPath, { cwd: root, engine: 'sharp' });
             assert.equal(info.width, 1000);
             assert.equal(info.height, 600);
-            assert.equal(await magickIsOpaque({ exe, input: resultPath, cwd: root }), false);
+            assert.equal(await rasterIsOpaque(resultPath, { cwd: root, engine: 'sharp' }), false);
             assert.deepEqual(await pixelAt(resultPath, 16, 16), [204, 34, 34, 255]);
             assert.deepEqual(await pixelAt(resultPath, 20, 20), [204, 34, 34, 255]);
         } finally {

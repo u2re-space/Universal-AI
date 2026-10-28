@@ -173,6 +173,7 @@ export const defaults = Object.freeze({
     image: {
         size: 'auto', quality: 'auto', format: 'png', background: 'auto', partialImages: 2, outputDir: '.', transport: null,
         maskModel: null,             // null → the edit model draws the alpha matte (openai/gpt-image-2.5-sunburst)
+        rasterEngine: 'auto',        // auto | sharp | canvas | magick; auto prefers sharp, then node-canvas, then ImageMagick
         alphaMode: 'auto',           // auto: native alpha, then paint→mask, then contour, then corner fill; mask | contour | flat | off
         paintBackground: true,       // fill the background with the subject color before the matte is drawn (kills the halo)
         alphaFeather: 1,             // px of anti-aliasing on the matte edge; 0 keeps the matte as drawn

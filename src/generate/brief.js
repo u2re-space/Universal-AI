@@ -103,10 +103,10 @@ export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', f
             '',
             '# Reference artwork workflow',
             '1. Use view_image to inspect the reference and crop_image or split_image only to extract the needed existing artwork regions.',
-            '2. Reuse existing artwork candidates. Do not call generate_image, edit_image, or image_generation to make comparison variants or to assemble an atlas/sprite sheet. Atlas packing and comparison are local image operations, not image-generation tasks.',
+            '2. Reuse existing artwork candidates. Do not call generate_image, edit_image, or image_generation to make comparison variants or to assemble an atlas/sprite sheet. Compare existing files with compare_images: it reads pixels locally via sharp/node-canvas and writes a PNG sheet and optional pixel-difference map, without an SVG snapshot, browser rasterization, ImageMagick pipeline, or another AI request.',
             '3. If any existing stage produced a PNG with a real alpha channel, keep that file as the preferred candidate. Do not regenerate, repaint, or flatten it; an optional SVG conversion may be tried on a copy. If a WebP copy is useful, convert it locally and keep the PNG; never use image generation or editing just to change the format.',
-            '4. Compare candidates in a common frame with the same aspect ratio. Fit each image proportionally using transparent/neutral padding or a deliberate crop; never stretch either image to match the frame. Keep the original files unchanged.',
-            '5. Verify with view_image: compare the proportion-preserving candidates side by side and use the best existing result.',
+            '4. Compare candidates in a common frame with the same aspect ratio. compare_images fits each image proportionally using transparent/neutral padding or a deliberate crop; never stretch an image. Keep the original files unchanged.',
+            '5. Inspect the result with view_image only when visual judgment is needed, then keep the best existing candidate.'
         ] : []),
         '',
         'Customer task:',

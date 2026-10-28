@@ -168,11 +168,11 @@ ai --image chart.png --web "что это за график и актуальн�
 ai image --image logo.png "сделай фон прозрачным" --image-background transparent --out logo2.png
 # прозрачность: gpt-image-* (кроме gpt-image-2) получают background=transparent и output_format=png нативно;
 # у recraft и подобных моделей модель рисует чёрно-белую маску (белое — объект, чёрное — фон),
-# а ImageMagick вливает её в RGB+A: -colorspace Gray -compose CopyOpacity -composite.
-# если маска не удалась, остаётся запасной путь — заливка от углов по цвету фона.
+# а локальный растровый движок (sharp или node-canvas) вливает её в RGB+A без запуска браузера.
+# если маска не удалась, остаётся запасной путь — заливка от углов по цвету фона; ImageMagick подключается только когда оба движка недоступны.
 # по умолчанию для растра берутся openai/gpt-image-2.5-sunburst (генерация) и openai/gpt-image-2.5-sunburst
 # (правка): они держат палитру источника, тогда как recraft v4.1 сдвигает нейтральные цвета в сине-фиолетовый.
-# Для GPT Image 2.5 входные изображения дополняются прозрачными пикселями справа и снизу до кратности 16 без масштабирования; после правки padding снимается локально.
+# Для GPT Image 2.5 входной растр дополняется прозрачными пикселями справа и снизу до кратности 16, а после ответа те же добавленные поля снимаются одной локальной операцией sharp/canvas (ImageMagick — только резерв).
 # Готовый PNG с настоящим alpha сохраняется; при необходимости WebP делается локальной конверсией, повторная генерация не нужна.
 
 # команда агентов с подтверждением каждой записи/команды (по умолчанию в терминале)
@@ -590,6 +590,7 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   "approve": "ask",
   "shell": null,
   "magickPath": null,
+  "image": { "rasterEngine": "auto" },
   "tools": { "fs": true, "shell": true, "fetch": true, "web": true, "images": false, "askUser": true, "desktop": false, "mcp": true, "channels": false },
   "desktop": { "ahkPath": null },
   "limits": { "maxTurns": 60, "extendTurns": 10, "budgetUsd": null, "budgetTokens": null, "commandTimeoutMs": 180000 },
@@ -771,12 +772,16 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 `--tools none` либо `tools.subagents: false` в конфигурации. В `ai run` (команда ролей) суб-агенты доступны worker
 и reviewer; в `--single` — основному агенту. В `ask` и `chat` их нет: там нет ролевого раннера.
 
-`split_image` и `crop_image` используют ImageMagick (`magick` или `convert` из `PATH`; явный путь —
-`magickPath` в конфигурации) и возвращают координаты плиток, чтобы их можно было передать в `view_image`.
-`crop_image` работает в двух режимах: коробка `x`/`y`/`width`/`height` или `trim=true` — снятие равномерного
-и прозрачного padding по всем краям (отдельного инструмента для trim нет, роль `image-processor` снимает
-padding именно вызовом `crop_image`).
-Без ImageMagick инструменты отвечают ошибкой, остальной агент работает как обычно. `download_font` берёт файл
+`split_image`, `crop_image` и `compare_images` по умолчанию используют локальные растровые движки: сначала
+sharp, затем node-canvas. `image.rasterEngine` может явно выбрать `sharp`, `canvas` или `magick`; ImageMagick
+(`magickPath`) остаётся резервом для crop/split, если оба нативных движка недоступны. Инструменты возвращают
+координаты плиток и кропов, чтобы их можно было передать в `view_image`. `crop_image` работает в двух режимах:
+коробка `x`/`y`/`width`/`height` или `trim=true` — снятие равномерного и прозрачного padding по всем краям
+(отдельного инструмента для trim нет, роль `image-processor` снимает padding именно вызовом `crop_image`).
+`compare_images` строит PNG-таблицу из 2–12 существующих растров или SVG и, для двух входов, карту попиксельных
+различий с оценкой сходства; SVG растеризуется тем же локальным движком, а браузер и повторный ИИ-запрос не нужны.
+При отсутствии sharp/canvas/ImageMagick эти инструменты отвечают ошибкой, остальной агент работает как обычно.
+`download_font` берёт файл
 Google Fonts или прямой URL, `download_icons` — набор иконок или одну иконку с jsDelivr/unpkg.
 
 Политика подтверждений `--approve`:
@@ -846,7 +851,8 @@ src/core/images.js        сохранение итоговых и промеж�
 src/agent/tool-specs.js   схемы и список включённых инструментов
 src/agent/tools.js        политика подтверждений и исполнение (память, vision, сводки)
 src/agent/assets.js       SVG, шрифты Google Fonts, наборы иконок с CDN
-src/agent/image-magick.js поиск ImageMagick, обрезка и разбивка изображений
+src/agent/image-magick.js поиск ImageMagick и резервная обрезка/разбивка изображений
+src/agent/image-raster.js локальные растровые операции на sharp/canvas: сравнение, маски, кропы, padding
 src/agent/image-alpha.js  маска модели → альфа-канал (CopyOpacity), запасная заливка от углов
 src/agent/map.js          `.ai/map.json` и кеш в памяти
 src/agent/map-scan.js     символы, JSDoc-метки и относительные импорты

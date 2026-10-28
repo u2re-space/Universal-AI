@@ -229,8 +229,9 @@ export function createFallbackClient(config, { create = createClient } = {}) {
         organization: config.organization, project: config.project,
     };
     const primarySpec = primaryBackend(config);
+    const rasterOptions = { magickPath: config.magickPath ?? null, rasterEngine: config.image?.rasterEngine ?? 'auto' };
     const primary = create({
-        apiKey: primarySpec.apiKey, baseURL: primarySpec.baseURL, headers: primarySpec.headers, ...timeouts,
+        apiKey: primarySpec.apiKey, baseURL: primarySpec.baseURL, headers: primarySpec.headers, ...timeouts, ...rasterOptions,
     });
     const opened = [];
     const map = config.fallback?.models ?? MODEL_FALLBACKS;
@@ -259,7 +260,7 @@ export function createFallbackClient(config, { create = createClient } = {}) {
                     ...item,
                     client: create({
                         apiKey: item.apiKey, baseURL: item.baseURL, headers: item.headers, retries: config.retries,
-                        idleTimeoutMs: timeouts.idleTimeoutMs, connectTimeoutMs: timeouts.connectTimeoutMs,
+                        idleTimeoutMs: timeouts.idleTimeoutMs, connectTimeoutMs: timeouts.connectTimeoutMs, ...rasterOptions,
                     }),
                 };
                 opened.push(found);

@@ -15,6 +15,7 @@
 import path from 'node:path';
 import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { detectMagick, ensureTransparentBackground, magickApplyAlphaMask, magickContourAlphaMask, magickDetectFakeTransparency, magickIdentify, magickIsOpaque, magickSaturationAlphaMask } from './image-magick.js';
+import { rasterApplyAlphaMask, rasterDetectFakeTransparency, rasterEngine, rasterInfo, rasterIsOpaque, rasterLocalAlphaMatte } from './image-raster.js';
 import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, sniffImage } from '../openai/images.js';
 
 /**
@@ -81,8 +82,12 @@ async function askModel({ client, config = null, file, prompt, signal, model = n
     const bytes = await readFile(abs).catch(() => null);
     if (!bytes) return null;
     const kind = sniffImage(bytes);
-    const exe = await detectMagick({ magickPath: config?.magickPath ?? null });
-    const info = exe ? await magickIdentify({ exe, input: abs, cwd: path.dirname(abs), signal }).catch(() => null) : null;
+    const engine = config?.image?.rasterEngine ?? 'auto';
+    const raster = engine !== 'magick' ? await rasterEngine(engine) : null;
+    const exe = raster ? null : await detectMagick({ magickPath: config?.magickPath ?? null });
+    const info = raster
+        ? await rasterInfo(abs, { cwd: path.dirname(abs), engine }).catch(() => null)
+        : exe ? await magickIdentify({ exe, input: abs, cwd: path.dirname(abs), signal }).catch(() => null) : null;
     const configured = config?.imageModel && !isVectorModel(config.imageModel) ? config.imageModel : null;
     const techModel = model || config?.image?.maskModel || configured || PROXY_IMAGE_EDIT_MODEL;
     try {
@@ -146,10 +151,14 @@ export async function applyGeneratedAlphaMask({
     const abs = path.resolve(file);
     const ext = path.extname(abs).toLowerCase();
     if (ext === '.jpg' || ext === '.jpeg') return { changed: false, reason: 'format' };
+    const engine = config?.image?.rasterEngine ?? 'auto';
+    const raster = engine !== 'magick' ? await rasterEngine(engine) : null;
     const exe = await detectMagick({ magickPath: config?.magickPath ?? null });
-    if (!exe) return { changed: false, reason: 'no-magick' };
+    if (!raster && !exe) return { changed: false, reason: 'no-raster-engine' };
     const cwd = path.dirname(abs);
-    const opaque = await magickIsOpaque({ exe, input: abs, cwd, signal }).catch(() => null);
+    const opaque = raster
+        ? await rasterIsOpaque(abs, { cwd, engine })
+        : await magickIsOpaque({ exe, input: abs, cwd, signal }).catch(() => null);
     if (opaque === false) return { changed: false, reason: 'already' };
     if (opaque === null) return { changed: false, reason: 'unknown' };
 
@@ -179,74 +188,119 @@ export async function applyGeneratedAlphaMask({
         }
     }
     const matteBase = paintedPath || base;
-
-    // 2. The model matte from the clean source, then the local contour matte, then the corner fill.
-    // The matte is the geometry of the subject: it is drawn from `base`, never from the painted
-    // picture, whose edge the paint pass may have moved or repainted.
-    if (MODEL_MATES.has(alphaMode) && client?.images) {
-        const matte = await askModel({ client, config, file: base, prompt: ALPHA_MASK_PROMPT, signal, model });
-        if (isRaster(matte)) {
-            const maskPath = path.join(cwd, `.tmp-alpha-mask-${process.pid}-${Date.now()}.${matte.ext}`);
-            await writeFile(maskPath, matte.bytes);
-            try {
-                // The alpha is applied to the painted picture, so the anti-aliased rim carries the
-                // subject color instead of the plate color; without a paint pass the source is used.
-                const applied = await magickApplyAlphaMask({ exe, input: matteBase, mask: maskPath, output: abs, cwd, signal, feather });
-                // A fully white matte means the model found nothing to cut: keep the picture as it is
-                // instead of letting the corner fill eat a corner of the subject.
-                if (applied.reason === 'full-mask') return { changed: false, reason: 'opaque', model: matte.model };
-                if (applied.changed) return { ...merged, ...applied, model: matte.model };
-            } finally {
-                await unlink(maskPath).catch(() => {});
+    try {
+        // 2. The model matte from the clean source, then the local contour matte, then the corner fill.
+        // The matte is the geometry of the subject: it is drawn from `base`, never from the painted
+        // picture, whose edge the paint pass may have moved or repainted.
+        if (MODEL_MATES.has(alphaMode) && client?.images) {
+            const matte = await askModel({ client, config, file: base, prompt: ALPHA_MASK_PROMPT, signal, model });
+            if (isRaster(matte)) {
+                const maskPath = path.join(cwd, `.tmp-alpha-mask-${process.pid}-${Date.now()}.${matte.ext}`);
+                await writeFile(maskPath, matte.bytes);
+                try {
+                    // The alpha is applied to the painted picture, so the anti-aliased rim carries the
+                    // subject color instead of the plate color; without a paint pass the source is used.
+                    const applied = raster
+                        ? await rasterApplyAlphaMask({ input: matteBase, mask: maskPath, output: abs, cwd, signal, feather, engine })
+                        : await magickApplyAlphaMask({ exe, input: matteBase, mask: maskPath, output: abs, cwd, signal, feather });
+                    // A fully white matte means the model found nothing to cut: keep the picture as it is
+                    // instead of letting the corner fill eat a corner of the subject.
+                    if (applied.reason === 'full-mask') return { changed: false, reason: 'opaque', model: matte.model };
+                    if (applied.changed) return { ...merged, ...applied, model: matte.model };
+                } finally {
+                    await unlink(maskPath).catch(() => {});
+                }
+            } else {
+                lastError = matte?.error ?? lastError;
             }
-        } else {
-            lastError = matte?.error ?? lastError;
         }
+
+        if (alphaMode !== 'mask') {
+            const local = await localMatte({
+                raster, engine, exe, base: matteBase, cwd, signal,
+                fake: await isFakePlate({ raster, engine, exe, base: matteBase, cwd, signal }),
+            });
+            if (local) {
+                let applied = null;
+                if (raster) {
+                    applied = await rasterApplyAlphaMask({ input: matteBase, mask: local.mask, output: abs, cwd, signal, feather, engine });
+                } else if (exe) {
+                    applied = await magickApplyAlphaMask({ exe, input: matteBase, mask: local.mask, output: abs, cwd, signal, feather });
+                }
+                await unlink(local.mask).catch(() => {});
+                if (applied?.changed) return { ...merged, ...applied, reason: local.reason, model: merged.model, error: lastError };
+            }
+        }
+    } finally {
+        if (paintedPath) await unlink(paintedPath).catch(() => {});
     }
 
-    if (alphaMode !== 'mask') {
-        const local = await localMatte({ exe, base: matteBase, cwd, signal, fake: await isFakePlate({ exe, base: matteBase, cwd, signal }) });
-        if (local) {
-            const applied = await magickApplyAlphaMask({ exe, input: matteBase, mask: local.mask, output: abs, cwd, signal, feather });
-            await unlink(local.mask).catch(() => {});
-            if (applied.changed) return { ...merged, ...applied, reason: local.reason, model: merged.model, error: lastError };
-        }
+    if (raster) {
+        const flat = await flatAlphaFallback({ raster, engine, file: abs, cwd, signal, feather });
+        return { ...merged, ...flat, reason: flat.changed ? 'flat' : flat.reason, error: lastError ?? flat.error };
     }
-
-    if (paintedPath) await unlink(paintedPath).catch(() => {});
     const flat = await ensureTransparentBackground({ file: abs, magickPath: config?.magickPath ?? null, signal });
     return { ...merged, ...flat, reason: flat.changed ? 'flat' : flat.reason, error: lastError ?? flat.error };
+}
+
+/**
+ * Remove a flat background without an API request and without ImageMagick: the four-corner flood
+ * matte is written to a temporary file and merged as alpha, then removed.
+ * @param {{ raster: string, engine: string, file: string, cwd: string, signal?: AbortSignal, feather: number }} options
+ * @returns {Promise<{ changed: boolean, reason: string }>}
+ * @ai.hint io
+ */
+async function flatAlphaFallback({ raster, engine, file, cwd, signal, feather }) {
+    const mask = path.join(cwd, `.tmp-alpha-flat-${process.pid}-${Date.now()}.png`);
+    try {
+        const built = await rasterLocalAlphaMatte({ input: file, output: mask, cwd, signal, mode: 'contour', engine });
+        if (!built.changed) return { changed: false, reason: built.reason };
+        const applied = await rasterApplyAlphaMask({ input: file, mask, output: file, cwd, signal, feather, engine });
+        return { changed: applied.changed, reason: applied.reason };
+    } catch {
+        return { changed: false, reason: 'failed' };
+    } finally {
+        await unlink(mask).catch(() => {});
+    }
 }
 
 /**
  * True when the picture imitates transparency with a neutral checkerboard or a gray plate instead of
  * carrying an alpha channel. Such a file must never be used as the RGB base, and its matte has to be
  * drawn from saturation rather than from a corner color.
- * @param {{ exe: string, base: string, cwd: string, signal?: AbortSignal }} options
+ * @param {{ raster?: string|null, engine?: string, exe?: string|null, base: string, cwd: string, signal?: AbortSignal }} options
  * @returns {Promise<boolean>}
  * @ai.hint io
  */
-async function isFakePlate({ exe, base, cwd, signal }) {
+async function isFakePlate({ raster, engine = 'auto', exe, base, cwd, signal }) {
+    if (raster) {
+        const local = await rasterDetectFakeTransparency({ input: base, cwd, engine, signal }).catch(() => null);
+        if (local) return local.fake;
+    }
+    if (!exe) return false;
     const check = await magickDetectFakeTransparency({ exe, input: base, cwd, signal }).catch(() => null);
     return Boolean(check?.fake);
 }
 
 /**
- * Draw a matte without an API request. A painted checkerboard is separated by saturation (the plate
- * is neutral, the artwork is not); any other flat plate is separated by its own contour. When the
- * first choice covers nothing, the other one is tried.
- * @param {{ exe: string, config?: object|null, base: string, cwd: string, signal?: AbortSignal, fake?: boolean }} options
+ * Draw a matte without an API request. Prefers the local raster engine (sharp/node-canvas) and falls
+ * back to ImageMagick when both native engines are unavailable. A painted checkerboard is separated
+ * by saturation (the plate is neutral, the artwork is not); any other flat plate is separated by its
+ * own contour. When the first choice covers nothing, the other one is tried.
+ * @param {{ raster?: string|null, engine?: string, exe?: string|null, base: string, cwd: string, signal?: AbortSignal, fake?: boolean }} options
  * @returns {Promise<{ mask: string, reason: string }|null>}
  * @ai.hint io
  */
-async function localMatte({ exe, base, cwd, signal, fake = false }) {
+async function localMatte({ raster, engine = 'auto', exe, base, cwd, signal, fake = false }) {
     const order = fake
-        ? [['saturation', magickSaturationAlphaMask], ['contour', magickContourAlphaMask]]
-        : [['contour', magickContourAlphaMask], ['saturation', magickSaturationAlphaMask]];
+        ? [['saturation', raster ? rasterLocalAlphaMatte : magickSaturationAlphaMask], ['contour', raster ? rasterLocalAlphaMatte : magickContourAlphaMask]]
+        : [['contour', raster ? rasterLocalAlphaMatte : magickContourAlphaMask], ['saturation', raster ? rasterLocalAlphaMatte : magickSaturationAlphaMask]];
     for (const [reason, make] of order) {
         const mask = path.join(cwd, `.tmp-alpha-${reason}-${process.pid}-${Date.now()}.png`);
         try {
-            const built = await make({ exe, input: base, output: mask, cwd, signal });
+            const built = raster
+                ? await make({ input: base, output: mask, cwd, signal, mode: reason, engine })
+                : await make({ exe, input: base, output: mask, cwd, signal });
             if (built.changed) return { mask, reason };
             await unlink(mask).catch(() => {});
         } catch {

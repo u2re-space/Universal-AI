@@ -18,6 +18,7 @@ import { parseSSE } from './sse.js';
 import { createStreamReducer, outputText } from './stream.js';
 import { envValue } from '../core/runtime-env.js';
 import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
+import { rasterPadImageBytes, rasterRemoveImagePadding } from '../agent/image-raster.js';
 import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imagePayloads, imageRequestSize, imageSizeAttempts, isImageSizeError, isVectorModel, normalizeVectorRatio, resolveImageFormat } from './images.js';
 
 export { ApiError };
@@ -102,6 +103,7 @@ export function createClient({
     headers = null,
     http, retries = defaults.retries, idleTimeoutMs, connectTimeoutMs, maxErrorBytes = defaults.maxErrorBytes,
     maxResponseBytes = defaults.maxResponseBytes, maxEventBytes = defaults.maxEventBytes,
+    magickPath = null, rasterEngine = 'auto',
     onEvent: globalOnEvent,
 } = {}) {
     if (typeof apiKey !== 'string' || !apiKey.trim() || /[\r\n]/.test(apiKey)) {
@@ -330,18 +332,25 @@ export function createClient({
             let padding = null;
             let requestedFrame = size;
             if (!vector && /^(?:openai\/)?gpt-image-2\.5(?:-|$)/i.test(String(model ?? '')) && files?.length) {
-                const exe = await detectMagick();
-                if (!exe) throw new ApiError('Для добавления прозрачного padding к входному изображению GPT Image 2.5 требуется ImageMagick.', { code: 'IMAGE_PADDING_UNAVAILABLE' });
                 const prepared = [];
                 for (const file of files) {
-                    const frame = await magickPadImageBytes({ exe, bytes: file.bytes, signal });
+                    let frame = null;
+                    try { frame = await rasterPadImageBytes({ bytes: file.bytes, engine: rasterEngine }); }
+                    catch { frame = null; }
+                    if (!frame) {
+                        const exe = await detectMagick({ magickPath });
+                        if (!exe) throw new ApiError('Для добавления прозрачного padding к входному изображению GPT Image 2.5 требуется sharp, canvas или ImageMagick.', { code: 'IMAGE_PADDING_UNAVAILABLE' });
+                        frame = await magickPadImageBytes({ exe, bytes: file.bytes, signal });
+                        frame.engine = 'magick';
+                        frame.exe = exe;
+                    }
                     prepared.push({
                         file: frame.padded ? { ...file, filename: `${path.parse(file.filename || 'image.png').name}.png`, mime: 'image/png', bytes: frame.bytes } : file,
                         frame,
                     });
                 }
                 requestFiles = prepared.map((item) => item.file);
-                padding = { exe, ...prepared[0].frame };
+                padding = prepared[0].frame;
                 requestedFrame = `${padding.width}x${padding.height}`;
             }
             const attempts = vector ? [] : imageSizeAttempts(requestedFrame, model);
@@ -376,8 +385,11 @@ export function createClient({
             if (!payloads.length) throw new ApiError('Ответ images/edits не содержит b64_json.', { code: 'INVALID_RESPONSE' });
             if (!padding) return payloads;
             return Promise.all(payloads.map(async (payload) => {
-                const bytes = await magickRemoveImagePadding({ ...padding, bytes: Buffer.from(payload, 'base64'), signal });
-                return bytes.toString('base64');
+                const bytes = Buffer.from(payload, 'base64');
+                const restored = padding.engine === 'magick'
+                    ? await magickRemoveImagePadding({ ...padding, bytes, signal })
+                    : await rasterRemoveImagePadding({ ...padding, bytes, engine: padding.engine });
+                return restored.toString('base64');
             }));
         },
         /**
