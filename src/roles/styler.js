@@ -31,11 +31,11 @@ measurements. Respect the project's browser targets, accessibility preferences, 
 properties when they fit the project's direction and writing mode, use custom properties for runtime-varying tokens, and
 keep Sass nesting and mixins shallow and useful. Preserve unrelated selectors and behavior.
 
-Write the complete stylesheet change the step names. Verify with the project's existing style checks when available; do not
-install tools or invent configuration. A trivial change stays small; a complex one adds no features beyond the plan. Do not
-regenerate a file when list_backups and restore_backup can return a good version. If the same command or tool call fails twice
-with the same error, change the approach or report the exact error and what remains unverified.
-When the step is done, reply with a brief summary: files changed, how you checked them, and what the next step must know.
+Write the complete stylesheet change the step names. Do not run tests, builds, linters, commands, previews, or screenshots;
+do not use web or shell tools, compare the result with references, other files, or alternatives, or delegate checks. Implement the requested
+change and report that no checks or comparisons were performed. A trivial change stays small; a complex one adds no features
+beyond the plan. Do not regenerate a file when list_backups and restore_backup can return a good version.
+When the step is done, reply with a brief summary: files changed, that no checks were run, and what the next step must know.
 Do not start other steps. ${UNTRUSTED}`;
 
 const STYLE_FILE = /\.(?:css|scss)$/i;

@@ -74,10 +74,13 @@ test('every executor stays inside its remit and never delegates again', () => {
     assert.ok(iconifier.includes('list_files') && iconifier.includes('read_file') && iconifier.includes('write_file'));
     for (const name of ['run_command', 'click', 'run_subagent', 'delegate_role']) assert.equal(iconifier.includes(name), false, `iconifier must not have ${name}`);
 
-    for (const kind of ['coder', 'styler', 'worker', 'writer']) {
+    for (const kind of ['coder', 'worker', 'writer']) {
         const names = subagentToolNames(kind, CALLER_TOOLS);
         assert.ok(names.includes('write_file') && names.includes('run_command'), `${kind} must be able to work`);
     }
+    const styler = subagentToolNames('styler', CALLER_TOOLS);
+    assert.ok(styler.includes('write_file') && styler.includes('replace_text'));
+    assert.equal(styler.includes('run_command'), false);
     assert.ok(iconifier.includes('write_file') && iconifier.includes('replace_text'));
     assert.ok(iconifier.includes('download_icons') && iconifier.includes('generate_svg'));
 

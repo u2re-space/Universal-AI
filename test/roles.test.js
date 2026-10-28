@@ -84,7 +84,16 @@ test('font selection instructions distinguish research, pairing, measured appear
 
 test('desktop helpers keep their tool slices and never delegate', () => {
     assert.equal(EXECUTORS.solver.tools, 'screen');
-    assert.equal(EXECUTORS.styler.tools, 'all');
+    assert.deepEqual(EXECUTORS.styler.tools, ['list_files', 'read_file', 'search_files', 'list_backups', 'write_file', 'replace_text', 'restore_backup']);
+    for (const name of ['run_command', 'run_script', 'ssh', 'compare_images', 'click', 'type', 'screenshot', 'run_batch', 'run_ahk', 'run_subagent', 'delegate_role']) {
+        assert.equal(EXECUTORS.styler.tools.includes(name), false, name);
+    }
+    assert.match(ROLE_INSTRUCTIONS.styler, /Do not run tests, builds, linters, commands, previews, or screenshots/);
+    assert.match(ROLE_INSTRUCTIONS.styler, /compare the result with references/);
+    assert.match(ROLE_INSTRUCTIONS.measurer, /one compact JSON measurement sheet/);
+    assert.doesNotMatch(ROLE_INSTRUCTIONS.measurer, /JSON and TOON files/);
+    assert.match(ROLE_INSTRUCTIONS.measurer, /no duplicate TOON or summary document/);
+    assert.match(ROLE_INSTRUCTIONS.measurerFragment, /one compact JSON sheet/);
     assert.deepEqual(EXECUTORS.clicker.tools, ['click', 'screenshot']);
     assert.deepEqual(EXECUTORS.typer.tools, ['type', 'screenshot']);
     assert.deepEqual(EXECUTORS.encoder.tools, ['screenshot']);

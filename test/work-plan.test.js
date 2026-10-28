@@ -132,6 +132,7 @@ test('continuation text keeps the unfinished phase and forbids rewriting finishe
     assert.match(text, /do not regenerate an image/);
     assert.match(text, /src\/app\.scss/);
     assert.match(text, /сетка уже есть/);
+    assert.doesNotMatch(continuationText({ goal: 'styles', verify: 'run tests' }, {}, { author: 'styler' }), /Verify:/);
     assert.match(continuationText({ goal: 'дописать' }, {}, { resumeSession: true }), /conversation above/);
 });
 

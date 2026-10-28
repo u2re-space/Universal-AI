@@ -86,6 +86,12 @@ test('image processor only sees enabled image, asset, and documentation-fetch to
     assert.deepEqual(toolNamesForRole(noFetch, 'image-processor'), ['view_image', 'split_image', 'crop_image', 'compare_images', 'generate_svg']);
     const noImages = enabledToolNames({ ...defaults.tools, images: false, fetch: false }, { imageApi: false });
     assert.deepEqual(toolNamesForRole(noImages, 'image-processor'), ['view_image']);
+    const stylerEnabled = enabledToolNames({ ...defaults.tools, desktop: true, images: true, shell: true, subagents: true });
+    const styler = toolNamesForRole(stylerEnabled, 'styler');
+    assert.ok(styler.includes('read_file') && styler.includes('write_file'));
+    for (const name of ['run_command', 'run_script', 'ssh', 'compare_images', 'click', 'type', 'screenshot', 'run_batch', 'run_ahk', 'run_subagent', 'delegate_role', 'fetch_url', 'view_image']) {
+        assert.equal(styler.includes(name), false, name);
+    }
     const iconifierEnabled = enabledToolNames({ ...defaults.tools, desktop: true, images: true });
     const iconifier = toolNamesForRole(iconifierEnabled, 'iconifier', { tools: ['run_command', 'write_file'] });
     assert.deepEqual(iconifier, ['write_file']);
@@ -396,6 +402,20 @@ test('team run stops on budget and reports the stage', async () => {
     const result = await runTeam({ client: client(), config: baseConfig(), ledger: createLedger({ budgetTokens: 150 }), task: 'x', root, approvalLevel: 'read' });
     assert.equal(result.status, 'budget');
     assert.match(result.error.message, /лимит токенов/i);
+});
+
+test('styler context omits external checks and documentation instructions', async () => {
+    let request;
+    script = (body) => { request = body; return { text: 'done' }; };
+    const config = baseConfig();
+    config.documentation.roles.styler = ['mdnCss'];
+    config.documentation.sources.mdnCss = 'https://example.com/mdn';
+    const roles = createRoleRunner({ client: client(), config, ledger: createLedger() });
+    const result = await roles.run('styler', { text: 'write CSS' });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.match(request.instructions, /do not run tests, builds, linters, commands, previews, or screenshots/i);
+    assert.doesNotMatch(request.instructions, /browser-support-check instructions/);
+    assert.doesNotMatch(request.instructions, /example\.com\/mdn/);
 });
 
 test('role runner adds web conventions and configured documentation to coding roles', async () => {
@@ -1557,6 +1577,11 @@ test('measurer stage runs before collector and gives CSS-ready values to the sty
             assert.match(prompt, /spacing: 8 px/);
             assert.match(prompt, /typography: heading, size 28 px, weight 600, line-height 34 px, letter-spacing 0 px/);
             assert.match(body.instructions, /You are the styler/);
+            for (const name of ['run_command', 'run_script', 'ssh', 'compare_images', 'click', 'type', 'screenshot', 'run_batch', 'run_ahk', 'run_subagent', 'delegate_role']) {
+                assert.equal((body.tools ?? []).some((tool) => tool.name === name), false, name);
+            }
+            assert.equal((body.tools ?? []).some((tool) => tool.type === 'image_generation'), false);
+            assert.match(body.instructions, /Do not run tests, builds, linters, commands, previews, or screenshots/);
             assert.match(body.instructions, /canvas-relative boxes/);
             assert.match(body.instructions, /CSS or SCSS/);
             return { text: 'styles.scss построен по sheet' };
@@ -1592,10 +1617,10 @@ test('measurer stage runs before collector and gives CSS-ready values to the sty
     const savedSheet = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.json'), 'utf8'));
     assert.equal(savedSheet.elements[0].box.width, 200);
     assert.equal(savedSheet.units.rootFontSize, 16);
-    const savedConclusion = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.conclusion.json'), 'utf8'));
-    assert.equal(savedConclusion.counts.elements, 1);
-    assert.match(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.toon'), 'utf8'), /elements\[1\]/);
-    assert.match(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.conclusion.toon'), 'utf8'), /counts/);
+    for (const name of ['measurements.toon', 'measurements.conclusion.json', 'measurements.conclusion.toon']) {
+        await assert.rejects(readFile(path.join(dir, '.tmp', result.workId, name), 'utf8'), { code: 'ENOENT' });
+    }
+    assert.equal((await readFile(path.join(dir, '.tmp', result.workId, 'measurements.json'), 'utf8')).trim().startsWith('{'), true);
     await rm(dir, { recursive: true, force: true });
 });
 
@@ -1791,9 +1816,9 @@ test('the fragment pass replaces the overview sheet and reuses its crops', async
         assert.equal(saved.elements.length, 2);
         assert.equal(saved.elements[0].crop, saved.elements[1].crop, 'the shared box reuses one crop');
         assert.equal(saved.regions[0].crop, saved.elements[0].crop);
-        const conclusion = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.conclusion.json'), 'utf8'));
-        assert.equal(conclusion.counts.crops, 1);
-        assert.match(await readFile(path.join(dir, '.tmp', result.workId, 'measurements.toon'), 'utf8'), /summary: fragments/);
+        for (const name of ['measurements.toon', 'measurements.conclusion.json', 'measurements.conclusion.toon']) {
+            await assert.rejects(readFile(path.join(dir, '.tmp', result.workId, name), 'utf8'), { code: 'ENOENT' });
+        }
         assert.ok(events.some((event) => event.type === 'measure.crops' && event.count === 1));
     } finally {
         await rm(dir, { recursive: true, force: true });

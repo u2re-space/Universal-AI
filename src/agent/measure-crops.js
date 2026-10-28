@@ -2,13 +2,13 @@
  * @file src/agent/measure-crops.js
  * @module agent/measure-crops
  * @purpose Cut ready reference crops for regions and reusable elements in a measurement sheet,
- *          and build the compact TOON index and deterministic conclusion.
+ *          and build the compact run conclusion.
  * @depends node:path, node:fs/promises, agent/paths, agent/image-magick
  * @usedBy agent/team
- * @exports stageMeasurementCrops, measurementIndex, measurementConclusion
+ * @exports stageMeasurementCrops, measurementConclusion
  * @ai.tags images, measurement, crop
  * @ai.hint io
- * @changed 2026-10-25 Two-pass measurement, element crops, deduplication, and JSON/TOON conclusions.
+ * @changed 2026-10-25 Two-pass measurement with deduplicated element crops.
  */
 
 import path from 'node:path';
@@ -195,75 +195,8 @@ export async function stageMeasurementCrops({ root, workId, sheet, referencePath
 }
 
 /**
- * A TOON-friendly index of the sheet. The full nested sheet stays in JSON; this projection
- * keeps the canvas, units, counts, assumptions, and one flat row per element, region, rule,
- * and crop so another role can scan it without parsing the full document.
- * @param {object} sheet
- * @param {Array<{ kind?: string, name?: string, crop?: string, bytes?: number, box?: object }>} [crops]
- * @returns {object}
- * @exports
- * @ai.hint pure
- */
-export function measurementIndex(sheet, crops = []) {
-    const box = (value) => {
-        if (!value) return '';
-        const number = (item) => Number.isFinite(item) ? item : '?';
-        return `${number(value.x)},${number(value.y)} ${number(value.width)}x${number(value.height)}`;
-    };
-    const elements = Array.isArray(sheet?.elements) ? sheet.elements : [];
-    const regions = Array.isArray(sheet?.regions) ? sheet.regions : [];
-    const rules = Array.isArray(sheet?.rules) ? sheet.rules : [];
-    return {
-        note: 'Compact index; the full nested sheet is in measurements.json.',
-        summary: String(sheet?.summary ?? ''),
-        source: String(sheet?.source ?? ''),
-        unit: String(sheet?.unit ?? 'px'),
-        confidence: String(sheet?.confidence ?? 'unknown'),
-        canvas: sheet?.canvas ?? null,
-        units: sheet?.units ?? null,
-        counts: {
-            elements: elements.length,
-            regions: regions.length,
-            rules: rules.length,
-            crops: crops.length,
-        },
-        assumptions: Array.isArray(sheet?.assumptions) ? sheet.assumptions.map(String) : [],
-        notes: String(sheet?.notes ?? ''),
-        elements: elements.map((item) => ({
-            name: String(item?.name ?? ''),
-            kind: String(item?.kind ?? ''),
-            box: box(item?.box),
-            crop: String(item?.crop ?? ''),
-            confidence: String(item?.confidence ?? 'unknown'),
-            use: String(item?.use ?? ''),
-            css: String(item?.css ?? ''),
-        })),
-        regions: regions.map((item) => ({
-            name: String(item?.name ?? ''),
-            kind: String(item?.kind ?? ''),
-            box: box(item?.box),
-            how: String(item?.how ?? ''),
-            crop: String(item?.crop ?? ''),
-            use: String(item?.use ?? ''),
-        })),
-        rules: rules.map((item) => ({
-            name: String(item?.name ?? ''),
-            value: Number.isFinite(item?.value) ? item.value : null,
-            unit: String(item?.unit ?? ''),
-            css: String(item?.css ?? ''),
-            from: String(item?.from ?? ''),
-        })),
-        crops: crops.map((item) => ({
-            kind: String(item?.kind ?? ''),
-            name: String(item?.name ?? ''),
-            crop: String(item?.crop ?? ''),
-        })),
-    };
-}
-
-/**
- * Build the compact conclusion written next to the full measurement sheet. It is deterministic:
- * it counts what was measured, keeps the unit strategy and assumptions, and lists the shared crops.
+ * Build the compact conclusion for context and run events. It counts what was measured, keeps
+ * the unit strategy and assumptions, and lists the shared crops.
  * @param {object} sheet
  * @param {Array<{ kind?: string, name?: string, crop?: string, bytes?: number }>} [crops]
  * @returns {object}
@@ -298,11 +231,5 @@ export function measurementConclusion(sheet, crops = []) {
             crop: String(item?.crop ?? ''),
             bytes: Number.isFinite(item?.bytes) ? item.bytes : null,
         })),
-        files: {
-            sheetJson: 'measurements.json',
-            sheetToon: 'measurements.toon',
-            conclusionJson: 'measurements.conclusion.json',
-            conclusionToon: 'measurements.conclusion.toon',
-        },
     };
 }

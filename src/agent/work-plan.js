@@ -367,14 +367,14 @@ export function recordStep(progress, { index, status, report, files = [], phase 
  * Prompt for a step that already started. A saved session only needs the short form.
  * @param {object} step
  * @param {object} [progressStep]
- * @param {{ resumeSession?: boolean }} [options]
+ * @param {{ resumeSession?: boolean, revision?: string, author?: string }} [options]
  * @returns {string}
  * @exports
  * @ai.hint pure
  */
-export function continuationText(step, progressStep = {}, { resumeSession = false, revision = '' } = {}) {
+export function continuationText(step, progressStep = {}, { resumeSession = false, revision = '', author = null } = {}) {
     const rules = 'Finish only what is still missing. Do not repeat a finished tool call, do not regenerate an image that already exists, and do not rewrite a file that already satisfies the step.';
-    const goal = `Goal: ${step?.goal ?? ''}\nDetails: ${step?.details ?? ''}\nVerify: ${step?.verify ?? ''}`;
+    const goal = `Goal: ${step?.goal ?? ''}\nDetails: ${step?.details ?? ''}${author === 'styler' ? '' : `\nVerify: ${step?.verify ?? ''}`}`;
     const extra = revisionClause(revision);
     if (resumeSession) return `Continue this step from the interrupted turn. The conversation above is the work already done.\n${rules}\n${goal}${extra}`;
     const files = (progressStep?.files ?? []).join(', ') || '(none)';

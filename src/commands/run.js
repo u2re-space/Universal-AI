@@ -241,6 +241,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         renderer.line('ok', `Отчёт сохранён: ${outFile} (${formatBytes(Buffer.byteLength(result.text))})`);
     }
     const worker = result.stats?.worker;
+    const styler = result.stats?.styler;
     const toolCalls = result.stats ? Object.values(result.stats).reduce((sum, s) => sum + s.calls, 0) : 0;
     renderer.summary({
         title: 'итог задачи',
@@ -251,9 +252,11 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
             ...(result.workId ? [['план на диске', `.tmp/${result.workId}/`]] : []),
             ['шагов', result.steps.length ? `${result.steps.length} (${result.steps.map((s) => `${s.index}: ${s.status}`).join(', ')})` : '0'],
             ...(result.review ? [['ревью', `${result.review.verdict === 'accept' ? 'принято' : 'правки'} после ${result.reviewRounds} раунд(а/ов) · ${truncate(result.review.summary, 200)}`]] : []),
-            ['вызовов инструментов', toolCalls ? `${toolCalls} (worker ${worker.calls}, architect ${result.stats.architect.calls}, orchestrator ${result.stats.orchestrator.calls}, image-processor ${result.stats['image-processor'].calls}, reviewer ${result.stats.reviewer.calls})${worker.denied || result.stats['image-processor'].denied ? `, отклонено ${worker.denied + result.stats['image-processor'].denied}` : ''}` : '0'],
+            ['вызовов инструментов', toolCalls ? `${toolCalls} (worker ${worker.calls}, styler ${styler?.calls ?? 0}, architect ${result.stats.architect.calls}, orchestrator ${result.stats.orchestrator.calls}, image-processor ${result.stats['image-processor'].calls}, reviewer ${result.stats.reviewer.calls})${worker.denied || styler?.denied || result.stats['image-processor'].denied ? `, отклонено ${worker.denied + (styler?.denied ?? 0) + result.stats['image-processor'].denied}` : ''}` : '0'],
             ...backupSummaryRows(result.changes, ctx.backupDir),
-            ...(worker?.commands?.length ? [['команды', worker.commands.map((c) => `${c.command} → ${c.exitCode ?? '?'}`).join('; ')]] : []),
+            ...([...worker?.commands ?? [], ...styler?.commands ?? []].length
+                ? [['команды', [...worker?.commands ?? [], ...styler?.commands ?? []].map((c) => `${c.command} → ${c.exitCode ?? '?'}`).join('; ')]]
+                : []),
             ...(result.images.length ? [['изображения', result.images.join(', ')]] : []),
             ...(store ? [['память', `найдено ${result.recalled.length}, сохранено ${result.memoriesSaved.length}`]] : []),
             ['токены', usageRow(ledger)],

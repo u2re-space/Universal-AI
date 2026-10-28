@@ -60,8 +60,8 @@ export const EXECUTORS = Object.freeze({
         description: 'Code for one self-contained piece of work: edits the files the task names, follows the stack it finds, and checks the result.',
     },
     styler: {
-        tools: 'all', turns: 50, schema: null,
-        description: 'Implement one focused CSS or SCSS task: inspect the consuming markup and project style conventions, edit the named stylesheets, and verify the result.',
+        tools: ['list_files', 'read_file', 'search_files', 'list_backups', 'write_file', 'replace_text', 'restore_backup'], turns: 50, schema: null,
+        description: 'Implement one focused CSS or SCSS task: inspect the consuming markup and project style conventions, edit the named stylesheets, and report without running checks or comparisons.',
     },
     iconifier: {
         tools: ['list_files', 'read_file', 'search_files', 'view_image', 'write_file', 'replace_text', 'fetch_url', 'download_font', 'download_icons', 'generate_svg', 'vectorize_image'], turns: 12, schema: null,

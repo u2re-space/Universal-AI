@@ -5,10 +5,9 @@ import path from 'node:path';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { runProgram } from '../src/agent/shell.js';
 import { detectMagick, ensureTransparentBackground, magickIsOpaque, assessVectorSuitability, magickColorCount, magickPaletteStats } from '../src/agent/image-magick.js';
-import { stageMeasurementCrops, measurementConclusion, measurementIndex } from '../src/agent/measure-crops.js';
+import { stageMeasurementCrops, measurementConclusion } from '../src/agent/measure-crops.js';
 import { renderMeasurements } from '../src/agent/team-text.js';
 import { MEASURER_SCHEMA } from '../src/agent/schemas.js';
-import { encodeToon, decodeDocument } from '../src/util/toon.js';
 import { TINY_PNG } from './helpers/mock-server.js';
 
 /** Create a flat PNG with a red square on white using ImageMagick. */
@@ -97,13 +96,7 @@ test('measurement crops are cut once and rendered as ready generate_image refere
         const conclusion = measurementConclusion(sheet, first.crops);
         assert.deepEqual(conclusion.counts, { elements: 2, textElements: 0, regions: 3, rules: 1, crops: 3, lowConfidence: 1 });
         assert.equal(conclusion.units.rootFontSize, 16);
-        assert.equal(conclusion.files.conclusionToon, 'measurements.conclusion.toon');
-        assert.deepEqual(decodeDocument(encodeToon(conclusion)), conclusion);
-        const index = measurementIndex(sheet, first.crops);
-        assert.deepEqual(index.counts, { elements: 2, regions: 3, rules: 1, crops: 3 });
-        assert.equal(index.elements[0].box, '10,10 50x50');
-        assert.equal(index.elements[0].crop, '.tmp/work-1/crops/01-region-hero-image.png');
-        assert.deepEqual(decodeDocument(encodeToon(index)), index);
+        assert.equal(Object.hasOwn(conclusion, 'files'), false);
         assert.match(text, /PNG with a real alpha channel/);
         assert.match(text, /convert it locally and keep the PNG/);
         assert.match(text, /vectorize_image \/ Recraft/);

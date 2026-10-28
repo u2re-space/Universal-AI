@@ -21,7 +21,7 @@ import { discoverAgents } from '../core/agents-md.js';
 import { isAbortError, CancelledError, BudgetError } from '../openai/errors.js';
 import { clipMiddle, errorMessage } from '../util/text.js';
 import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
-import { executorSpec, executorToolNames, executorNames } from './role-registry.js';
+import { EXECUTORS, executorSpec, executorToolNames, executorNames } from './role-registry.js';
 import { isCodingStep } from '../roles/coder.js';
 import { isStylingStep } from '../roles/styler.js';
 import { isWritingStep } from '../roles/writer.js';
@@ -48,10 +48,9 @@ import { neutralPlan, neutralProgress, neutralSession } from './neutral.js';
 import { CommandBatchError, executeFileCommands, FILE_COMMANDS_SCHEMA } from './file-commands.js';
 import { EXTRACT_MAX_BYTES, EXTRACT_MAX_FILES, extractHandoff, hasExtractableArtifacts } from './extract.js';
 import { assessQuality, assessmentImages } from './quality.js';
-import { stageMeasurementCrops, measurementConclusion, measurementIndex } from './measure-crops.js';
+import { stageMeasurementCrops, measurementConclusion } from './measure-crops.js';
 import { createPipeline } from './pipeline.js';
 import { resolveInside } from './paths.js';
-import { encodeToon } from '../util/toon.js';
 
 /**
  * Styler for CSS/SCSS, coder for other source files, writer for documents, worker for everything else.
@@ -102,9 +101,7 @@ function measurementReport(sheet, conclusion, dir) {
         `${counts.rules ?? 0} rule(s), ${counts.crops ?? 0} crop(s); overall confidence ${conclusion.confidence ?? 'unknown'}; ` +
         `${counts.lowConfidence ?? 0} low/unknown element(s).`
         : '';
-    const files = `Measurement files: ${dir}/measurements.json (full sheet), ${dir}/measurements.toon, ` +
-        `${dir}/measurements.conclusion.json, ${dir}/measurements.conclusion.toon.`;
-    return [renderMeasurements(sheet), line, files].filter(Boolean).join('\n\n');
+    return [renderMeasurements(sheet), line, `Measurement JSON: ${dir}/measurements.json.`].filter(Boolean).join('\n\n');
 }
 
 
@@ -124,6 +121,10 @@ function measurementReport(sheet, conclusion, dir) {
 export function toolNamesForRole(allNames, role, spec = null) {
     if (role === 'iconifier') {
         const allowed = new Set(['list_files', 'read_file', 'search_files', 'view_image', 'write_file', 'replace_text', 'fetch_url', 'download_font', 'download_icons', 'generate_svg', 'vectorize_image']);
+        return allNames.filter((name) => allowed.has(name) && (!Array.isArray(spec?.tools) || !spec.tools.length || spec.tools.includes(name)));
+    }
+    if (role === 'styler') {
+        const allowed = new Set(EXECUTORS.styler.tools);
         return allNames.filter((name) => allowed.has(name) && (!Array.isArray(spec?.tools) || !spec.tools.length || spec.tools.includes(name)));
     }
     if (Array.isArray(spec?.tools) && spec.tools.length) {
@@ -278,6 +279,12 @@ export async function runTeam({
         ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker'), editPaths: () => taskMarks.edit,
         describeScreen: roles.describeScreen, delegate, subagent, extras: mcp.extras, toolEnums,
     });
+    const stylerTools = createToolset({
+        ...toolBase, names: toolNamesForRole(enabled, 'styler', config.roles?.styler), approvalLevel,
+        editPaths: () => taskMarks.edit,
+    });
+    const workerToolsFor = (author) => author === 'styler' ? stylerTools : workerTools;
+    const workerChanges = () => [...workerTools.stats().changes, ...stylerTools.stats().changes];
     const orchestratorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('orchestrator'), extras: mcpRead });
     const architectTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('architect'), extras: mcpRead });
     const reviewerTools = createToolset({
@@ -296,11 +303,19 @@ export async function runTeam({
     /** Copy tool stats onto the team result and return it. */
     const fileChanges = [];
     let work = null;
-    const allChanges = () => [...fileChanges, ...workerTools.stats().changes, ...iconifierTools.stats().changes];
+    const allChanges = () => [...fileChanges, ...workerChanges(), ...iconifierTools.stats().changes];
+    const takeWorkerChanges = (seen) => {
+        const worker = workerTools.stats().changes;
+        const styler = stylerTools.stats().changes;
+        const changes = [...worker.slice(seen.worker), ...styler.slice(seen.styler)];
+        seen.worker = worker.length;
+        seen.styler = styler.length;
+        return changes;
+    };
     const finish = () => {
         result.changes = allChanges();
         result.stats = {
-            worker: workerTools.stats(), architect: architectTools.stats(), orchestrator: orchestratorTools.stats(),
+            worker: workerTools.stats(), styler: stylerTools.stats(), architect: architectTools.stats(), orchestrator: orchestratorTools.stats(),
             reviewer: reviewerTools.stats(), 'image-processor': imageProcessorTools.stats(), decorator: decoratorTools.stats(),
             iconifier: iconifierTools.stats(),
         };
@@ -462,17 +477,13 @@ export async function runTeam({
             type: 'plan.ready', summary: plan.summary, complexity: plan.complexity, steps: plan.steps.map((step) => step.goal),
             acceptanceCriteria: plan.acceptanceCriteria, needsReview: plan.needsReview, risks: plan.risks,
         });
-        let seenChanges = workerTools.stats().changes.length;
+        const seenChanges = { worker: 0, styler: 0 };
         /** Paths written since the previous worker pass. */
-        const takeFiles = () => {
-            const paths = workerTools.stats().changes.slice(seenChanges).map((change) => change.path);
-            seenChanges = workerTools.stats().changes.length;
-            return paths;
-        };
+        const takeFiles = () => takeWorkerChanges(seenChanges).map((change) => change.path);
         const orchestratorSettings = config.agent.orchestrator ?? {};
         const orchestratorOn = Boolean(orchestratorSettings.enabled);
         const orchestratorAfter = new Set(Array.isArray(orchestratorSettings.after) ? orchestratorSettings.after : []);
-        let orchestratorSeenChanges = 0;
+        const orchestratorSeenChanges = { worker: 0, styler: 0 };
         const orchestratorLog = [];
         let orchestratorGuidance = '';
         /**
@@ -485,8 +496,7 @@ export async function runTeam({
          */
         const orchestrate = async (stage, { step = null, status = '', report = '', review = null } = {}) => {
             if (!orchestratorOn || !orchestratorAfter.has(stage) || !plan || !progress) return null;
-            const recent = workerTools.stats().changes.slice(orchestratorSeenChanges);
-            orchestratorSeenChanges = workerTools.stats().changes.length;
+            const recent = takeWorkerChanges(orchestratorSeenChanges);
             let diff = '(no file changes since the previous stage)';
             if (recent.length) {
                 try { diff = await describeChangeSet({ root, changes: recent, maxBytes: orchestratorSettings.diffMaxBytes ?? 256 * 1024 }); }
@@ -587,7 +597,7 @@ export async function runTeam({
             const header = contextSent ? `# Context updates\n${ctx.get('progress') ? clipMiddle(ctx.get('progress'), 12 * 1024) : '(none)'}` : ctx.render({ maxBytes, exclude: ['tree'] });
             contextSent = true;
             const outcome = await roles.run(author, {
-                text: `${header}\n\n# ${title}\n${body}`, instructions: withAgents(ROLE_INSTRUCTIONS[author]), toolset: workerTools, builtin,
+                text: `${header}\n\n# ${title}\n${body}`, instructions: withAgents(ROLE_INSTRUCTIONS[author]), toolset: workerToolsFor(author), builtin: author === 'styler' ? [] : builtin,
                 maxTurns, session: workerSession, imageTarget: config.image.outputDir,
                 model, effort, onMaxTurns,
             });
@@ -676,17 +686,11 @@ export async function runTeam({
             const findings = await readFile(path.join(root, '.tmp', work.id, 'findings.md'), 'utf8').catch(() => '');
             if (findings.trim()) ctx.set('findings', 'Collected context (by the orchestrator)', findings, { priority: 6 });
             const sheet = await readFile(path.join(root, '.tmp', work.id, 'measurements.json'), 'utf8').catch(() => null);
-            const sheetConclusion = await readFile(path.join(root, '.tmp', work.id, 'measurements.conclusion.json'), 'utf8').catch(() => null);
             if (sheet) {
                 try {
                     const parsedSheet = JSON.parse(sheet);
-                    let parsedConclusion = null;
-                    if (sheetConclusion) {
-                        try { parsedConclusion = JSON.parse(sheetConclusion); }
-                        catch { /* a damaged conclusion is skipped, the full sheet is still useful */ }
-                    }
                     ctx.set('metrics', 'Reference measurements (by the measurer)',
-                        measurementReport(parsedSheet, parsedConclusion, `.tmp/${work.id}`), { priority: 8 });
+                        measurementReport(parsedSheet, measurementConclusion(parsedSheet), `.tmp/${work.id}`), { priority: 8 });
                 } catch { /* a damaged sheet is skipped, the run continues on the plan */ }
             }
             const imageReport = await readFile(path.join(root, '.tmp', work.id, 'image-assets.json'), 'utf8').catch(() => '');
@@ -1089,22 +1093,9 @@ export async function runTeam({
                             if (stagedCrops.crops.length) notify({ type: 'measure.crops', count: stagedCrops.crops.length, crops: stagedCrops.crops });
                             const conclusion = measurementConclusion(sheet, stagedCrops.crops);
                             const dir = `.tmp/${work.id}`;
-                            const toon = (value) => {
-                                try { return `${encodeToon(value)}\n`; }
-                                catch (error) {
-                                    notify({ type: 'warning', message: `TOON замеров не закодирован: ${errorMessage(error)}` });
-                                    return null;
-                                }
-                            };
-                            const files = [
-                                ['measurements.json', `${JSON.stringify(sheet, null, 2)}\n`],
-                                ['measurements.toon', toon(measurementIndex(sheet, stagedCrops.crops))],
-                                ['measurements.conclusion.json', `${JSON.stringify(conclusion, null, 2)}\n`],
-                                ['measurements.conclusion.toon', toon(conclusion)],
-                            ].filter(([, text]) => typeof text === 'string');
-                            await Promise.all(files.map(([name, text]) => writeFile(path.join(root, dir, name), text, 'utf8').catch((error) => {
-                                notify({ type: 'warning', message: `Файл замеров ${name} не сохранён: ${errorMessage(error)}` });
-                            })));
+                            await writeFile(path.join(root, dir, 'measurements.json'), `${JSON.stringify(sheet)}\n`, 'utf8').catch((error) => {
+                                notify({ type: 'warning', message: `Файл замеров measurements.json не сохранён: ${errorMessage(error)}` });
+                            });
                             ctx.set('metrics', 'Reference measurements (by the measurer)', measurementReport(sheet, conclusion, dir), { priority: 8 });
                             notify({ type: 'measure.conclusion', ...conclusion.counts, confidence: conclusion.confidence });
                         } else if (measured.status !== 'completed') {
@@ -1366,12 +1357,13 @@ export async function runTeam({
                         const extra = index === revisionAt ? revisionClause(revision) : '';
                         if (extra) revisionUsed = true;
                         const advice = orchestratorGuidance ? `\n\nOrchestrator guidance (from the previous stage):\n${orchestratorGuidance}` : '';
-                        const base = `Goal: ${step.goal}\nDetails: ${step.details}\nVerify: ${step.verify}${extra}${advice}${architectureAdvice(step)}${paced?.guarantees === 'broken' ? `\n\n${guaranteesParagraph('broken')}` : ''}`;
+                        const base = `Goal: ${step.goal}\nDetails: ${step.details}\n${chosen.author === 'styler' ? '' : `
+Verify: ${step.verify}`}${extra}${advice}${architectureAdvice(step)}${paced?.guarantees === 'broken' ? `\n\n${guaranteesParagraph('broken')}` : ''}`;
                         const passes = [];
                         if (interrupted) {
                             const phase = prior.phase === 'surface' ? 'surface' : 'body';
                             passes.push({
-                                body: `${continuationText(step, prior, { resumeSession, revision: index === revisionAt ? revision : '' })}${architectureAdvice(step)}`,
+                                body: `${continuationText(step, prior, { resumeSession, revision: index === revisionAt ? revision : '', author: chosen.author })}${architectureAdvice(step)}`,
                                 maxTurns: phase === 'surface' ? allowance.surfaceTurns : (allowance.maxTurns ?? allowance.bodyTurns),
                                 phase, resume: resumeSession,
                             });
@@ -1401,7 +1393,7 @@ export async function runTeam({
                         for (const pass of passes) {
                             lastPhase = pass.phase;
                             progress.steps[index].phase = pass.phase;
-                            workerTools.setBackupSlot?.(`${step.id ?? `s${number}`}-${pass.phase}`);
+                            workerToolsFor(chosen.author).setBackupSlot?.(`${step.id ?? `s${number}`}-${pass.phase}`);
                             outcome = await runWorker(title, pass.body, pass.maxTurns, chosen.author, { stepId: step.id, phase: pass.phase, resume: pass.resume, complexity: step.complexity });
                             result.images.push(...outcome.images);
                             reports.push(outcome.text.trim());
@@ -1418,7 +1410,7 @@ export async function runTeam({
                         // A generation step often spends its last turns on the same failing check.
                         // One short pass on the cheapest rung gives verification a fresh budget without
                         // keeping the expensive model for the rest of the plan.
-                        if (generation && outcome?.status === 'max_turns' && files.length > 0) {
+                        if (generation && chosen.author !== 'styler' && outcome?.status === 'max_turns' && files.length > 0) {
                             const verifyTurns = Math.min(8, Math.max(1, config.agent.workerMaxTurnsPerStep));
                             const verifyChoice = encodeRoute || !paced?.ready ? legacyChoice(chosen.author, 'trivial') : paceChoice(chosen.author, 'trivial');
                             notify({ type: 'stage.start', stage: 'verify', role: chosen.author, model: verifyChoice.model ?? roles.resolve(chosen.author).model });
@@ -1427,7 +1419,7 @@ export async function runTeam({
                                 `Verify: ${step.verify || 'Re-read the files and run the project check.'}`,
                                 '',
                                 `The previous attempt ran out of turns before verification. Files already written: ${files.join(', ')}.`,
-                                'Run the verification now. Fix only errors that block it. Do not rewrite files that already work, do not add features, and do not start a dev or preview server.',
+                                'Run the verification now. Fix only errors that block it. Do not rewrite files that already work, add features, or start a dev or preview server.',
                                 'If the check still fails, report the exact error and what remains unverified.',
                             ].join('\n');
                             const repaired = await runWorker(`${title} — verify`, verifyBody, verifyTurns, chosen.author,
@@ -1517,7 +1509,7 @@ export async function runTeam({
                         if (outcome.status !== 'completed') workIncomplete = true;
                         revisionUsed = true;
                     }
-                    const currentChanges = [...workerTools.stats().changes, ...fileChanges];
+                    const currentChanges = [...workerChanges(), ...fileChanges];
                     const changedFiles = new Set(progress.iconification?.status === 'completed'
                         ? currentChanges.map((item) => item.path)
                         : [...progress.files.map((item) => item.path), ...currentChanges.map((item) => item.path)]);
@@ -1593,7 +1585,7 @@ export async function runTeam({
                                     report: clipMiddle(step.report ?? '', 4000),
                                 })),
                                 changes: allChanges().map((change) => change.path),
-                                commands: workerTools.stats().commands.map((command) => ({ command: command.command, exitCode: command.exitCode ?? null })),
+                                commands: [...workerTools.stats().commands, ...stylerTools.stats().commands].map((command) => ({ command: command.command, exitCode: command.exitCode ?? null })),
                                 tree: directoryTree,
                             },
                             images: await assessmentImages({ root, parts, produced: result.images }),
