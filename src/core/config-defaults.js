@@ -260,12 +260,16 @@ export const defaults = Object.freeze({
             ],
         }),
         styler: r({
-            model: 'gpt-6.1-sol',
+            model: 'gpt-6.1-sol', effort: 'xhigh',
             tiers: [
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
-        iconifier: r({ model: 'gpt-6.1-sol' }),
+        iconifier: r({
+            model: 'gpt-6.1-sol', effort: 'xhigh', tiers: [
+                { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
+            ]
+        }),
         measurer: r({
             tiers: [
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
@@ -273,7 +277,7 @@ export const defaults = Object.freeze({
             ],
         }),
         decorator: r({
-           tiers: [
+            tiers: [
                 { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
                 { model: 'gpt-6.1-sol', effort: ['high', 'xhigh', 'max'] },
             ],
