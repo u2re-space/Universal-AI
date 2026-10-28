@@ -191,7 +191,7 @@ export const TOOL_SPECS = {
     },
     compare_images: {
         category: 'write', group: 'images',
-        description: 'Локально сравнить 2–12 существующих растровых/SVG-файлов без генерации изображения, SVG-снимка и браузерной растеризации. mode=sheet сохраняет одну PNG-таблицу с общими пропорциональными ячейками, difference — карту абсолютных различий для ровно двух файлов и оценку similarity, both — оба результата. Использует sharp (SVG читается как растр через локальный librsvg) или node-canvas; ImageMagick и ИИ-запрос не требуются.',
+        description: 'Локально сравнить 2–12 существующих растровых/SVG-файлов без генерации изображения, SVG-снимка и браузерной растеризации. mode=sheet сохраняет одну PNG-таблицу с общими пропорциональными ячейками, difference — карту абсолютных различий для ровно двух файлов и оценку similarity, both — оба результата. Растры читает sharp или node-canvas, SVG рендерит ReSVG (@resvg/resvg-js), затем sharp или node-canvas; ImageMagick и ИИ-запрос не требуются.',
         parameters: schema({
             files: { type: 'array', items: { type: 'string' }, description: 'От 2 до 12 путей к локальным изображениям в рабочем каталоге (PNG, JPEG, WebP, GIF, TIFF, BMP, AVIF или SVG).' },
             output: str('Путь выходного PNG в рабочем каталоге. Пустая строка создаёт .tmp/compare-<timestamp>.png; для both рядом появится -diff.png.'),

@@ -18,6 +18,7 @@ import {
     rasterRemoveImagePadding,
     rasterSplit,
     rasterTrim,
+    rasterizeSvg,
 } from '../src/agent/image-raster.js';
 import { createToolset } from '../src/agent/tools.js';
 import { defaults } from '../src/core/config.js';
@@ -69,7 +70,7 @@ test('comparison writes a direct local raster sheet and pixel difference map', a
     }
 });
 
-test('SVG comparison input is rasterized locally through sharp', async () => {
+test('SVG comparison input is rasterized locally through ReSVG', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'ai-raster-svg-'));
     try {
         const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="16"><rect width="32" height="16" fill="#3157d5"/></svg>';
@@ -174,6 +175,26 @@ test('a painted checkerboard is detected locally without ImageMagick', async () 
 
         await writeFile(path.join(root, 'clear.png'), await png(64, 48, (ctx) => { ctx.clearRect(0, 0, 64, 48); }));
         assert.equal((await rasterDetectFakeTransparency({ input: 'clear.png', cwd: root })).reason, 'already');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('SVG rasterizes through ReSVG, keeps the aspect ratio, and is measured locally', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-raster-resvg-'));
+    try {
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#3157d5"/></svg>';
+        await writeFile(path.join(root, 'mark.svg'), svg);
+        assert.deepEqual(await rasterInfo('mark.svg', { cwd: root }), { width: 40, height: 20, format: 'svg', hasAlpha: true });
+
+        const fitted = await rasterizeSvg({ input: 'mark.svg', output: 'mark.png', width: 80, cwd: root });
+        assert.equal(fitted.engine, 'resvg');
+        assert.deepEqual([fitted.width, fitted.height], [80, 40]);
+        assert.deepEqual(await pixel(path.join(root, 'mark.png'), 40, 20), [49, 87, 213, 255]);
+
+        const original = await rasterizeSvg({ input: 'mark.svg', output: 'mark-full.png', cwd: root });
+        assert.equal(original.engine, 'resvg');
+        assert.deepEqual([original.width, original.height], [40, 20]);
     } finally {
         await rm(root, { recursive: true, force: true });
     }

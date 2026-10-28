@@ -82,7 +82,7 @@ context=false запускает роль на чистом контексте. 
 
   split_image и crop_image сначала используют локальный sharp/canvas (image.rasterEngine: auto|sharp|canvas|magick); ImageMagick — резерв.
   crop_image режет коробку x/y/width/height, а с trim=true снимает padding по краям.
-  compare_images локально собирает PNG-таблицу из 2–12 растров/SVG и карту различий двух файлов; браузер и повторная генерация не нужны.
+  compare_images локально собирает PNG-таблицу из 2–12 растров/SVG и карту различий двух файлов; SVG рендерит ReSVG, браузер и повторная генерация не нужны.
   При tools.shell агент может: run_command (оболочка на вызов), run_script (.ps1 .cmd .bat .sh .bash), ssh (команда или файл, scp put/get).
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 

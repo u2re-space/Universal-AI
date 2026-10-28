@@ -773,13 +773,15 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 и reviewer; в `--single` — основному агенту. В `ask` и `chat` их нет: там нет ролевого раннера.
 
 `split_image`, `crop_image` и `compare_images` по умолчанию используют локальные растровые движки: сначала
-sharp, затем node-canvas. `image.rasterEngine` может явно выбрать `sharp`, `canvas` или `magick`; ImageMagick
+sharp, затем node-canvas. SVG во всех этих операциях рендерит ReSVG (`@resvg/resvg-js`), если он установлен.
+`image.rasterEngine` может явно выбрать `sharp`, `canvas` или `magick`; ImageMagick
 (`magickPath`) остаётся резервом для crop/split, если оба нативных движка недоступны. Инструменты возвращают
 координаты плиток и кропов, чтобы их можно было передать в `view_image`. `crop_image` работает в двух режимах:
 коробка `x`/`y`/`width`/`height` или `trim=true` — снятие равномерного и прозрачного padding по всем краям
 (отдельного инструмента для trim нет, роль `image-processor` снимает padding именно вызовом `crop_image`).
 `compare_images` строит PNG-таблицу из 2–12 существующих растров или SVG и, для двух входов, карту попиксельных
-различий с оценкой сходства; SVG растеризуется тем же локальным движком, а браузер и повторный ИИ-запрос не нужны.
+различий с оценкой сходства; SVG рендерит локальный ReSVG (`@resvg/resvg-js`), при его отсутствии — sharp или
+node-canvas, а браузер и повторный ИИ-запрос не нужны.
 При отсутствии sharp/canvas/ImageMagick эти инструменты отвечают ошибкой, остальной агент работает как обычно.
 `download_font` берёт файл
 Google Fonts или прямой URL, `download_icons` — набор иконок или одну иконку с jsDelivr/unpkg.
@@ -852,7 +854,7 @@ src/agent/tool-specs.js   схемы и список включённых инс
 src/agent/tools.js        политика подтверждений и исполнение (память, vision, сводки)
 src/agent/assets.js       SVG, шрифты Google Fonts, наборы иконок с CDN
 src/agent/image-magick.js поиск ImageMagick и резервная обрезка/разбивка изображений
-src/agent/image-raster.js локальные растровые операции на sharp/canvas: сравнение, маски, кропы, padding
+src/agent/image-raster.js локальные растровые операции на sharp/canvas и SVG через ReSVG: сравнение, маски, кропы, padding
 src/agent/image-alpha.js  маска модели → альфа-канал (CopyOpacity), запасная заливка от углов
 src/agent/map.js          `.ai/map.json` и кеш в памяти
 src/agent/map-scan.js     символы, JSDoc-метки и относительные импорты

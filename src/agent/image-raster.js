@@ -2,19 +2,19 @@
  * @file src/agent/image-raster.js
  * @module agent/image-raster
  * @purpose Local raster operations on sharp with a node-canvas fallback: comparison sheets, pixel
- *          differences, alpha masks, crops, trims, splits, and SVG-to-raster conversion.
+ *          differences, alpha masks, crops, trims, splits, and SVG-to-raster conversion through ReSVG.
  * @depends node:path, node:fs/promises
  * @usedBy agent/tools, agent/image-alpha
  * @exports rasterEngine, rasterInfo, rasterCompare, rasterApplyAlphaMask, rasterLocalAlphaMatte, rasterDetectFakeTransparency, rasterCrop, rasterTrim, rasterSplit, rasterizeSvg, fitBox, frameFor
- * @ai.tags sharp, canvas, image, compare, alpha, crop, svg
+ * @ai.tags sharp, canvas, resvg, image, compare, alpha, crop, svg
  * @ai.hint io
  * @changed 2026-10-28 First version: comparison and matte work moved off the browser and off ImageMagick.
  *
  * Why this module exists: a comparison built as an SVG document and rasterized by a browser engine
  * loses the input rasters — the snapshot comes back empty, and the agent repeats the request. sharp
- * reads the pixels directly (PNG, WebP, JPEG, and SVG through librsvg), so a comparison sheet is one
- * local call with no browser, no ImageMagick spawn, and no second AI request. node-canvas covers the
- * same operations when the native sharp binary is unavailable.
+ * reads the pixels directly, and SVG goes through ReSVG first (librsvg through sharp as the second
+ * choice), so a comparison sheet is one local call with no browser, no ImageMagick spawn, and no
+ * second AI request. node-canvas covers the same operations when the native binaries are unavailable.
  */
 
 import path from 'node:path';
@@ -23,6 +23,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 /** Cached module handles. null = not tried yet, false = unavailable, object = the module. */
 let _sharp = null;
 let _canvas = null;
+let _resvg = null;
 
 /** Longest side of a comparison sheet when the caller does not ask for a frame. */
 const DEFAULT_MAX_SIDE = 768;
@@ -59,6 +60,63 @@ async function canvasLib() {
         catch { _canvas = false; }
     }
     return _canvas || null;
+}
+
+/**
+ * Load the ReSVG renderer once. Returns the `Resvg` constructor or null when the native binary is
+ * missing. ReSVG is the most faithful local SVG rasterizer here: it is a dedicated renderer, not a
+ * side feature of a raster library.
+ * @returns {Promise<object|null>}
+ * @ai.hint io
+ */
+async function resvgLib() {
+    if (_resvg === null) {
+        try {
+            const module = await import('@resvg/resvg-js');
+            _resvg = module.Resvg ?? module.default?.Resvg ?? false;
+        } catch { _resvg = false; }
+    }
+    return _resvg || null;
+}
+
+/**
+ * True when the buffer is an SVG document rather than a raster picture.
+ * @param {Buffer} bytes
+ * @returns {boolean}
+ * @ai.hint pure
+ */
+function isSvgBytes(bytes) {
+    // A raster signature settles the question before any text scan.
+    if (bytes[0] === 0x89 && bytes[1] === 0x50) return false;
+    if (bytes[0] === 0xff && bytes[1] === 0xd8) return false;
+    if (bytes.subarray(0, 4).toString('latin1') === 'RIFF') return false;
+    if (bytes.subarray(0, 4).toString('latin1') === 'GIF8') return false;
+    const head = bytes.subarray(0, 1024).toString('utf8').replace(/^\uFEFF/, '').trimStart();
+    return head.startsWith('<') && /<svg[\s>]/i.test(head);
+}
+
+/**
+ * Render SVG bytes to PNG bytes with ReSVG, optionally fitted into a box with the aspect ratio kept.
+ * @param {Buffer} bytes
+ * @param {{ width?: number|null, height?: number|null }} [options]
+ * @returns {Promise<{ png: Buffer, width: number, height: number }|null>}
+ * @ai.hint io
+ */
+async function resvgPng(bytes, { width = null, height = null } = {}) {
+    const Resvg = await resvgLib();
+    if (!Resvg) return null;
+    const render = (options) => {
+        const image = new Resvg(bytes, { background: 'rgba(0,0,0,0)', ...options }).render();
+        return { png: Buffer.from(image.asPng()), width: image.width, height: image.height };
+    };
+    const base = render({});
+    // One named side means "fit that side and keep the ratio", so the other side stays free.
+    if (width && !height) return render({ fitTo: { mode: 'width', value: Math.max(1, Math.round(width)) } });
+    if (height && !width) return render({ fitTo: { mode: 'height', value: Math.max(1, Math.round(height)) } });
+    if (!width && !height) return base;
+    const box = fitBox(base.width, base.height, width, height);
+    if (box.width === base.width && box.height === base.height) return base;
+    return render({ fitTo: { mode: 'zoom', value: box.scale } });
 }
 
 /**
@@ -195,9 +253,10 @@ function sheetLayout({ count, cell, layout, gap }) {
 }
 
 /**
- * Metadata of one local picture, read without a browser and without ImageMagick.
+ * Metadata of one local picture, read without a browser and without ImageMagick. SVG is measured
+ * through ReSVG, so the answer does not depend on librsvg being built into sharp.
  * @param {string} file Absolute path or a path inside `cwd`.
- * @param {{ cwd?: string }} [options]
+ * @param {{ cwd?: string, engine?: 'auto'|'sharp'|'canvas'|'magick' }} [options]
  * @returns {Promise<{ width: number, height: number, format: string, hasAlpha: boolean }>}
  * @exports
  * @ai.hint io
@@ -205,6 +264,10 @@ function sheetLayout({ count, cell, layout, gap }) {
 export async function rasterInfo(file, { cwd = process.cwd(), engine = 'auto' } = {}) {
     const abs = toAbs(cwd, file);
     const bytes = await readFile(abs);
+    if (engine !== 'canvas' && isSvgBytes(bytes)) {
+        const rendered = await resvgPng(bytes).catch(() => null);
+        if (rendered) return { width: rendered.width, height: rendered.height, format: 'svg', hasAlpha: true };
+    }
     const active = await getEngine(engine);
     if (active?.name === 'sharp') {
         const meta = await active.lib(bytes).metadata();
@@ -248,6 +311,12 @@ export async function rasterIsOpaque(file, { cwd = process.cwd(), engine = 'auto
  * @ai.hint io
  */
 async function decodeRgba(bytes, preferred = 'auto', maxSide = null) {
+    // SVG is rendered by ReSVG first: a dedicated renderer keeps gradients, masks, and text metrics
+    // closer to the document than a raster library's SVG side feature. node-canvas stays the fallback.
+    if (preferred !== 'canvas' && isSvgBytes(bytes)) {
+        const rendered = await resvgPng(bytes, { width: maxSide, height: maxSide }).catch(() => null);
+        if (rendered) return await decodeRgba(rendered.png, preferred, null);
+    }
     const active = await getEngine(preferred);
     if (active?.name === 'sharp') {
         let pipe = active.lib(bytes).rotate();
@@ -680,9 +749,11 @@ export async function rasterSplit({ input, outputDir, rows, cols, cwd, signal, b
 }
 
 /**
- * Rasterize an SVG document locally: librsvg through sharp, or node-canvas. No browser is started.
- * @param {{ input: string, output: string, width?: number|null, height?: number|null, cwd: string, signal?: AbortSignal }} options
- * @returns {Promise<{ rel: string, bytes: number, width: number, height: number }>}
+ * Pad an image with transparent pixels on the right and bottom edges until both sides are multiples
+ * of 16, without scaling. Providers that reject other sizes get a valid frame and the original box is
+ * restored from the returned padding.
+ * @param {{ bytes: Buffer, engine?: 'auto'|'sharp'|'canvas'|'magick' }} options
+ * @returns {Promise<{ bytes: Buffer, width: number, height: number, originalWidth: number, originalHeight: number, padded: boolean, engine: string }|null>}
  * @exports
  * @ai.hint io
  */
@@ -739,27 +810,34 @@ async function rasterInfoFromBytes(bytes, active) {
 }
 
 /**
- * Rasterize an SVG document locally: librsvg through sharp, or node-canvas. No browser is started.
- * @param {{ input: string, output: string, width?: number|null, height?: number|null, cwd: string, signal?: AbortSignal }} options
- * @returns {Promise<{ rel: string, bytes: number, width: number, height: number }>}
+ * Rasterize an SVG document locally: ReSVG first, then librsvg through sharp, then node-canvas.
+ * No browser is started.
+ * @param {{ input: string, output: string, width?: number|null, height?: number|null, cwd: string, signal?: AbortSignal, engine?: 'auto'|'sharp'|'canvas'|'magick' }} options
+ * @returns {Promise<{ rel: string, bytes: number, width: number, height: number, engine: string }>}
  * @exports
  * @ai.hint io
  */
 export async function rasterizeSvg({ input, output, width = null, height = null, cwd, signal, engine = 'auto' }) {
     const bytes = await readFile(toAbs(cwd, input));
     signal?.throwIfAborted();
+    const outAbs = toAbs(cwd, output);
+    await mkdir(path.dirname(outAbs), { recursive: true });
+    if (engine !== 'canvas') {
+        const rendered = await resvgPng(bytes, { width, height }).catch(() => null);
+        if (rendered) {
+            await writeFile(outAbs, rendered.png);
+            return { rel: String(output).split(path.sep).join('/'), bytes: rendered.png.length, width: rendered.width, height: rendered.height, engine: 'resvg' };
+        }
+    }
     const active = await getEngine(engine);
     if (active?.name === 'sharp') {
         let pipe = active.lib(bytes, { density: 96 });
         if (width || height) pipe = pipe.resize(width || undefined, height || undefined, { fit: 'inside' });
-        const out = pipe.png();
-        const outAbs = toAbs(cwd, output);
-        await mkdir(path.dirname(outAbs), { recursive: true });
-        await out.toFile(outAbs);
+        await pipe.png().toFile(outAbs);
         const info = await active.lib(await readFile(outAbs)).metadata();
-        return { rel: String(output).split(path.sep).join('/'), bytes: (await stat(outAbs)).size, width: info.width, height: info.height };
+        return { rel: String(output).split(path.sep).join('/'), bytes: (await stat(outAbs)).size, width: info.width, height: info.height, engine: 'sharp' };
     }
-    if (active?.name !== 'canvas') throw new Error('Нет локального растрового движка: установите sharp или canvas.');
+    if (active?.name !== 'canvas') throw new Error('Нет локального растрового движка: установите sharp, canvas или @resvg/resvg-js.');
     const image = await active.lib.loadImage(bytes);
     const box = width || height
         ? fitBox(image.width, image.height, width ?? image.width, height ?? image.height)
@@ -767,10 +845,8 @@ export async function rasterizeSvg({ input, output, width = null, height = null,
     const surface = active.lib.createCanvas(box.width, box.height);
     surface.getContext('2d').drawImage(image, 0, 0, box.width, box.height);
     const png = surface.toBuffer('image/png');
-    const outAbs = toAbs(cwd, output);
-    await mkdir(path.dirname(outAbs), { recursive: true });
     await writeFile(outAbs, png);
-    return { rel: String(output).split(path.sep).join('/'), bytes: png.length, width: box.width, height: box.height };
+    return { rel: String(output).split(path.sep).join('/'), bytes: png.length, width: box.width, height: box.height, engine: 'canvas' };
 }
 
 /**
