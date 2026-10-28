@@ -197,7 +197,8 @@ export const defaults = Object.freeze({
      *   worker     — executes plan steps that are not code generation
      *   coder      — writes code; model and effort follow plan complexity unless config pins them
      *   styler     — writes CSS and SCSS; uses gpt-6.1-sol while effort follows complexity
-     *   iconifier  — selects and integrates icons in generated HTML and component markup
+      *   iconifier  — selects and integrates icons in generated HTML and component markup; default model gpt-6.1-sol
+
      *   writer     — writes documents, reports, and Markdown; stays on the cheaper model, effort follows complexity
      *   reviewer   — verifies the result (read-only tools, may run tests)
      *   vision     — describes images; model and effort follow the long side, unless config pins them
@@ -390,6 +391,8 @@ export const defaults = Object.freeze({
         imageQuality: null,
         measurerQuality: null,
         architectQuality: null,
+        iconifierQuality: null,
+
     },
     /** User MCP servers. stdio is spawned here. http is sent to the API as type mcp. */
     mcp: {

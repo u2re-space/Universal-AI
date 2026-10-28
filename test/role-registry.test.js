@@ -31,7 +31,7 @@ const customConfig = () => ({
 test('the registry is the union of the old specialist and sub-agent lists', () => {
     // delegate_role had solver, clicker, typer, encoder, tester, measurer.
     // run_subagent had coder, worker, writer, reviewer, tester, vision, solver, image-processor.
-    const union = ['coder', 'styler', 'worker', 'writer', 'reviewer', 'tester', 'vision', 'solver', 'measurer', 'decorator', 'image-processor', 'clicker', 'typer', 'encoder'];
+    const union = ['coder', 'styler', 'iconifier', 'worker', 'writer', 'reviewer', 'tester', 'vision', 'solver', 'measurer', 'decorator', 'image-processor', 'clicker', 'typer', 'encoder'];
     assert.deepEqual(EXECUTOR_NAMES, union);
     assert.deepEqual(SUBAGENT_NAMES, union);
 });
@@ -136,7 +136,7 @@ test('toolDefinitions narrows a field to the given values', () => {
 
 test('toolDefinitions keeps the static enum without overrides', () => {
     const [definition] = toolDefinitions(['delegate_role']);
-    assert.deepEqual(definition.parameters.properties.role.enum, ['solver', 'clicker', 'typer', 'encoder', 'tester', 'measurer', 'decorator', 'styler']);
+    assert.deepEqual(definition.parameters.properties.role.enum, ['solver', 'clicker', 'typer', 'encoder', 'tester', 'measurer', 'decorator', 'styler', 'iconifier']);
 });
 
 test('createToolset passes the dynamic enum into definitions', () => {

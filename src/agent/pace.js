@@ -9,8 +9,10 @@
  * @ai.hint pure
  * @changed 2026-10-26 Every effort the directive carries is snapped to the ladder and ceiling of its model.
  * @changed 2026-10-27 Per-stage quality dials (code, decor, image, measurer, architect) shift only their own effort.
+ * @changed 2026-10-28 Iconifier effort follows its own fine-quality dial.
  * @changed 2026-10-27 Coder and worker steps never fall below the gpt-6.1-terra rung.
  * @changed 2026-10-28 Styler steps stay on gpt-6.1-sol when the model ladder includes it.
+ * @changed 2026-10-28 Iconifier effort follows its own fine-quality dial.
  */
 
 import { effectiveFidelity } from '../generate/fidelity.js';
@@ -31,6 +33,7 @@ export const FINE_QUALITY_FLAGS = Object.freeze({
     'image-quality': 'imageQuality',
     'measurer-quality': 'measurerQuality',
     'architect-quality': 'architectQuality',
+    'iconifier-quality': 'iconifierQuality',
 });
 export const FINE_QUALITY_KEYS = Object.freeze(Object.values(FINE_QUALITY_FLAGS));
 
@@ -347,12 +350,12 @@ function decorate(steps, { modelSpeed, paceSpeed, modelQuality, fineBaseline, co
 export function resolvePace({
     speed, quality, mode, models, label = null, steps = null, generation = false,
     fidelity = null, stepCapOverride = null, task = '', author = 'worker', modelProfiles = null,
-    codeQuality = null, decorQuality = null, imageQuality = null, measurerQuality = null, architectQuality = null,
+    codeQuality = null, decorQuality = null, imageQuality = null, measurerQuality = null, architectQuality = null, iconifierQuality = null,
 } = {}) {
     assertPaceBudget(speed, quality);
     /** Snap one effort onto the ladder and ceiling of the model that would carry it. */
     const bounded = (model, level) => snapEffort(level, profileFor(model, modelProfiles));
-    const fineInputs = { codeQuality, decorQuality, imageQuality, measurerQuality, architectQuality };
+    const fineInputs = { codeQuality, decorQuality, imageQuality, measurerQuality, architectQuality, iconifierQuality };
     for (const [key, value] of Object.entries(fineInputs)) {
         if (value != null && !(Number.isInteger(value) && value >= 0 && value <= 200)) throw new Error(`pace.${key}: целое 0..200`);
     }
@@ -363,6 +366,7 @@ export function resolvePace({
         image: fineInputs.imageQuality ?? baseFine,
         measurer: fineInputs.measurerQuality ?? baseFine,
         architect: fineInputs.architectQuality ?? baseFine,
+        iconifier: fineInputs.iconifierQuality ?? baseFine,
     });
     const modelQuality = Math.min(quality, 100);
     const modelSpeed = Math.min(100, speed + Math.max(0, quality - 100));

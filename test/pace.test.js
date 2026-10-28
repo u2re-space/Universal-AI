@@ -262,6 +262,15 @@ test('styler steps keep their author and the gpt-6.1-sol model', () => {
     assert.equal(single.model, 'gpt-6.1-sol');
 });
 
+test('the iconifier dial is isolated from other roles and exposed in qualities', () => {
+    const quiet = resolvePace({ ...base, label: 'normal' });
+    const loud = resolvePace({ ...base, label: 'normal', iconifierQuality: 150 });
+    assert.equal(loud.qualities.iconifier, 150);
+    assert.equal(loud.roles.architect.effort, quiet.roles.architect.effort);
+    assert.equal(loud.roles.reviewer.effort, quiet.roles.reviewer.effort);
+    assert.equal(loud.ceilingModel, quiet.ceilingModel);
+});
+
 test('the code dial lifts step effort without touching the model ceiling', () => {
     const quiet = resolvePace({ ...base, label: 'normal', steps: [{ complexity: 'normal', author: 'coder', files: [], goal: 'g', details: '', verify: '' }] });
     const loud = resolvePace({ ...base, label: 'normal', codeQuality: 150, steps: [{ complexity: 'normal', author: 'coder', files: [], goal: 'g', details: '', verify: '' }] });

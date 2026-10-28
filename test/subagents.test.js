@@ -26,12 +26,12 @@ const SLICE_NAMES = ['all', 'read', 'check', 'screen', 'images'];
 
 const CALLER_TOOLS = [
     ...READ_ONLY_TOOLS, ...SHELL_TOOL_NAMES, 'screenshot', 'click', 'type', 'run_ahk',
-    'write_file', 'fetch_url', 'crop_image', 'ask_user', 'run_subagent', 'delegate_role', 'run_batch',
+    'write_file', 'replace_text', 'fetch_url', 'download_icons', 'generate_svg', 'crop_image', 'ask_user', 'run_subagent', 'delegate_role', 'run_batch',
 ];
 
 test('every executor is an existing role, and the registry and the tool enum stay in step', () => {
     // 0.2.0: one registry serves both delegation tools, so it holds the union of the old lists.
-    assert.deepEqual(SUBAGENT_NAMES, ['coder', 'styler', 'worker', 'writer', 'reviewer', 'tester', 'vision', 'solver', 'measurer', 'decorator', 'image-processor', 'clicker', 'typer', 'encoder']);
+    assert.deepEqual(SUBAGENT_NAMES, ['coder', 'styler', 'iconifier', 'worker', 'writer', 'reviewer', 'tester', 'vision', 'solver', 'measurer', 'decorator', 'image-processor', 'clicker', 'typer', 'encoder']);
     for (const name of SUBAGENT_NAMES) {
         assert.ok(ROLE_INSTRUCTIONS[name], `${name} needs a registered role prompt`);
         assert.ok(defaults.roles[name], `${name} needs role settings so its model is configurable`);
@@ -70,10 +70,16 @@ test('every executor stays inside its remit and never delegates again', () => {
         }
     }
 
+    const iconifier = subagentToolNames('iconifier', CALLER_TOOLS);
+    assert.ok(iconifier.includes('list_files') && iconifier.includes('read_file') && iconifier.includes('write_file'));
+    for (const name of ['run_command', 'click', 'run_subagent', 'delegate_role']) assert.equal(iconifier.includes(name), false, `iconifier must not have ${name}`);
+
     for (const kind of ['coder', 'styler', 'worker', 'writer']) {
         const names = subagentToolNames(kind, CALLER_TOOLS);
         assert.ok(names.includes('write_file') && names.includes('run_command'), `${kind} must be able to work`);
     }
+    assert.ok(iconifier.includes('write_file') && iconifier.includes('replace_text'));
+    assert.ok(iconifier.includes('download_icons') && iconifier.includes('generate_svg'));
 
     for (const kind of ['reviewer', 'tester']) {
         const names = subagentToolNames(kind, CALLER_TOOLS);

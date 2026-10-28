@@ -8,6 +8,7 @@
  * @ai.tags team, roles
  * @ai.hint keep
  * @changed 2026-10-27 The decorator stage builds the decorative layer before the page markup.
+ * @changed 2026-10-28 The iconifier conditionally integrates icons after changed page markup.
  * @changed 2026-10-26 Stages run from a data-driven pipeline; the plan and the config choose the order.
  */
 
@@ -81,7 +82,8 @@ export function isIconifierMarkup(file, source = '') {
     if (MARKUP_EXTENSIONS.test(String(file ?? ''))) return true;
     if (!JS_EXTENSIONS.test(String(file ?? ''))) return false;
     return /<\/?[A-Za-z][\w:.-]*(?:\s|\/?>)/.test(String(source))
-        || /\b(?:ReactDOM|React\.createElement|createElement|createRoot)\b/.test(String(source));
+        || /\b(?:ReactDOM|React\.createElement|createElement|createRoot|document\.createElement(?:NS)?)\b/.test(String(source))
+        || /\.(?:innerHTML|outerHTML|insertAdjacentHTML)\b/.test(String(source));
 }
 
 /**
@@ -120,6 +122,10 @@ function measurementReport(sheet, conclusion, dir) {
  * @ai.hint pure
  */
 export function toolNamesForRole(allNames, role, spec = null) {
+    if (role === 'iconifier') {
+        const allowed = new Set(['list_files', 'read_file', 'search_files', 'view_image', 'write_file', 'replace_text', 'fetch_url', 'download_font', 'download_icons', 'generate_svg', 'vectorize_image']);
+        return allNames.filter((name) => allowed.has(name) && (!Array.isArray(spec?.tools) || !spec.tools.length || spec.tools.includes(name)));
+    }
     if (Array.isArray(spec?.tools) && spec.tools.length) {
         return allNames.filter((name) => spec.tools.includes(name));
     }
@@ -127,15 +133,12 @@ export function toolNamesForRole(allNames, role, spec = null) {
     if (role === 'reviewer') {
         return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || name === 'run_subagent' || name === 'delegate_role');
     }
-    if (role === 'image-processor' || role === 'measurer' || role === 'decorator' || role === 'iconifier') {
+    if (role === 'image-processor' || role === 'measurer' || role === 'decorator') {
         const allowed = new Set(role === 'image-processor'
             ? [...IMAGE_TOOL_NAMES, 'fetch_url']
             : role === 'measurer'
                 ? ['view_image', 'crop_image', 'split_image', 'fetch_url']
-                : role === 'decorator'
-                    // The decorator writes its own stylesheet and SVG files and never touches application markup.
-                    ? [...READ_ONLY_TOOLS, 'write_file', 'replace_text', 'generate_svg', 'fetch_url']
-                    : ['list_files', 'read_file', 'search_files', 'view_image', 'write_file', 'replace_text', 'fetch_url', 'download_font', 'download_icons', 'generate_svg', 'vectorize_image']);
+                : [...READ_ONLY_TOOLS, 'write_file', 'replace_text', 'generate_svg', 'fetch_url']);
         return allNames.filter((name) => allowed.has(name));
     }
     return allNames;
@@ -173,6 +176,7 @@ export async function runTeam({
         speed: paceSettings.speed, quality: paceSettings.quality, mode: paceSettings.mode, models: paceSettings.models,
         codeQuality: paceSettings.codeQuality, decorQuality: paceSettings.decorQuality, imageQuality: paceSettings.imageQuality,
         measurerQuality: paceSettings.measurerQuality, architectQuality: paceSettings.architectQuality,
+        iconifierQuality: paceSettings.iconifierQuality,
         generation, fidelity: generation ? config.generate?.fidelity : null,
         stepCapOverride: config.stepCapPinned ? config.agent.maxSteps : null,
         modelProfiles: config.models ?? null,
@@ -1534,7 +1538,9 @@ export async function runTeam({
                     const paths = [...iconifierMarkup];
                     const role = roles.resolve('iconifier');
                     const model = role.model;
-                    const effort = role.effort;
+                    const effort = paced?.ready
+                        ? stageEffort(role.effort, defaultFineQuality(paceSettings.speed, paceSettings.quality), paced.qualities.iconifier)
+                        : role.effort;
                     progress.stage = 'iconify';
                     progress.iconification = { status: 'running', files: paths, report: '' };
                     work.progress = progress;

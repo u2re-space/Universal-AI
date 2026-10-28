@@ -10,7 +10,7 @@ import { openMemory, projectKey } from '../src/core/memory.js';
 import { createSharedContext } from '../src/core/context.js';
 import { createRoleRunner } from '../src/agent/roles.js';
 import { CLASSIFIER_SCHEMA } from '../src/agent/schemas.js';
-import { runTeam, toolNamesForRole } from '../src/agent/team.js';
+import { isIconifierMarkup, runTeam, toolNamesForRole } from '../src/agent/team.js';
 import { enabledToolNames } from '../src/agent/tool-specs.js';
 import { diffHunk, describeChangeSet } from '../src/agent/diff.js';
 import { overridesFrom } from '../src/commands/shared.js';
@@ -68,6 +68,7 @@ function roleOf(body) {
     if (format === 'measure') return 'measurer';
     if (format === 'decorations') return 'decorator';
     if (format === 'image_assets') return 'image-processor';
+    if (typeof body.instructions === 'string' && body.instructions.includes('You are the iconifier,')) return 'iconifier';
     if (detectCoder && typeof body.instructions === 'string' && body.instructions.includes('You are the styler.')) return 'styler';
     if (detectCoder && typeof body.instructions === 'string' && body.instructions.includes('You are the coder.')) return 'coder';
     if (typeof body.instructions === 'string' && body.instructions.includes('route: encode')) return 'answer';
@@ -85,6 +86,80 @@ test('image processor only sees enabled image, asset, and documentation-fetch to
     assert.deepEqual(toolNamesForRole(noFetch, 'image-processor'), ['view_image', 'split_image', 'crop_image', 'generate_svg']);
     const noImages = enabledToolNames({ ...defaults.tools, images: false, fetch: false }, { imageApi: false });
     assert.deepEqual(toolNamesForRole(noImages, 'image-processor'), ['view_image']);
+    const iconifierEnabled = enabledToolNames({ ...defaults.tools, desktop: true, images: true });
+    const iconifier = toolNamesForRole(iconifierEnabled, 'iconifier', { tools: ['run_command', 'write_file'] });
+    assert.deepEqual(iconifier, ['write_file']);
+    assert.equal(toolNamesForRole(iconifierEnabled, 'iconifier').includes('run_command'), false);
+    assert.equal(toolNamesForRole(iconifierEnabled, 'iconifier').includes('click'), false);
+});
+
+test('iconifier markup detection recognizes HTML, JSX, and DOM writes only', () => {
+    assert.equal(isIconifierMarkup('index.html', 'plain text'), true);
+    assert.equal(isIconifierMarkup('src/App.tsx', 'export const App = () => <button>Save</button>;'), true);
+    assert.equal(isIconifierMarkup('src/app.js', 'node.innerHTML = "<b>Hi</b>";'), true);
+    assert.equal(isIconifierMarkup('src/app.js', 'export const sum = (a, b) => a + b;'), false);
+    assert.equal(isIconifierMarkup('src/app.css', '.button { color: red; }'), false);
+});
+
+test('iconifier runs after changed HTML markup and skips ordinary JavaScript', async () => {
+    const runs = [];
+    for (const scenario of [
+        { file: 'index.html', content: '<button>Save</button>\n', expectedIconifier: true },
+        { file: 'src/sum.js', content: 'export const sum = (a, b) => a + b;\n', expectedIconifier: false },
+    ]) {
+        const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-iconifier-stage-'));
+        const seen = [];
+        let iconifierRequest = null;
+        script = (body) => {
+            const role = roleOf(body);
+            seen.push(role);
+            if (role === 'classifier') return { text: JSON.stringify({ label: 'trivial' }) };
+            if (role === 'planner') return { text: JSON.stringify({
+                summary: 'страница', complexity: 'trivial', pipeline: ['plan', 'work', 'review', 'outcome'],
+                steps: [{ goal: `Create ${scenario.file}`, details: '', verify: `Read ${scenario.file}`, complexity: 'trivial' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, imageTasks: [], decorationTasks: [], risks: [],
+            }) };
+            if (role === 'worker') {
+                const outputs = body.input.filter((item) => item.type === 'function_call_output');
+                return outputs.length
+                    ? { text: 'Файл создан.' }
+                    : { calls: [{ name: 'write_file', arguments: { path: scenario.file, content: scenario.content, overwrite: true } }] };
+            }
+            if (role === 'iconifier') {
+                iconifierRequest = body;
+                return { text: 'Подходящая дополнительная иконка не требуется.' };
+            }
+            return { text: 'ok' };
+        };
+        const config = baseConfig();
+        config.agent = { ...config.agent, architect: 'off', chain: false, resume: false };
+        config.memory = { ...defaults.memory, enabled: false };
+        config.pace = { ...config.pace, iconifierQuality: 150 };
+        const events = [];
+        try {
+            const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'создать страницу', root: dir, approvalLevel: 'all', emit: (event) => events.push(event) });
+            assert.equal(result.status, 'completed', result.error?.message);
+            assert.equal(Boolean(iconifierRequest), scenario.expectedIconifier);
+            assert.equal(seen.includes('iconifier'), scenario.expectedIconifier);
+            if (scenario.expectedIconifier) {
+                assert.ok(seen.indexOf('iconifier') > seen.lastIndexOf('worker'));
+                assert.equal(iconifierRequest.model, 'gpt-6.1-sol');
+                const toolNames = iconifierRequest.tools.map((tool) => tool.name);
+                assert.ok(toolNames.includes('read_file') && toolNames.includes('replace_text'));
+                for (const name of ['run_command', 'run_script', 'ssh', 'click', 'type', 'run_ahk', 'run_subagent', 'delegate_role']) {
+                    assert.equal(toolNames.includes(name), false, `iconifier must not have ${name}`);
+                }
+                assert.ok(events.some((event) => event.type === 'stage.start' && event.stage === 'iconify'));
+            } else {
+                assert.ok(events.some((event) => event.type === 'stage.skip' && event.stage === 'iconify'));
+            }
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+        runs.push(scenario.file);
+    }
+    assert.equal(runs.length, 2);
 });
 
 test('resolveRole merges role, default role and top-level settings; --role flags parse', () => {

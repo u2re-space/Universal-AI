@@ -17,6 +17,8 @@ test('catalog: unique ids, default order matches the catalog, tail stages exist'
     assert.deepEqual([...DEFAULT_PIPELINE], ids);
     assert.deepEqual([...PIPELINE_STAGE_IDS], ids);
     assert.ok(ids.indexOf('decor') < ids.indexOf('work'), 'decor runs before the page markup');
+    assert.ok(ids.indexOf('work') < ids.indexOf('iconify'), 'icons are integrated after the page markup');
+    assert.ok(ids.indexOf('iconify') < ids.indexOf('review'), 'the result is reviewed after icon integration');
     for (const id of TAIL_STAGES) assert.ok(ids.includes(id), `${id} is a catalog stage`);
     for (const stage of STAGE_CATALOG) {
         for (const dependency of stage.after) assert.ok(ids.includes(dependency), `${stage.id} depends on a known stage`);
@@ -35,11 +37,11 @@ test('normalizePipeline accepts strings and objects, drops unknown and duplicate
 test('resolvePipeline: the plan wins, then the config, then the catalog', () => {
     const fromPlan = resolvePipeline({ planPipeline: ['plan', 'work'], configPipeline: ['answer', 'plan', 'work'] });
     assert.equal(fromPlan.source, 'plan');
-    assert.deepEqual(fromPlan.order, ['plan', 'work', 'outcome', 'memory']);
+    assert.deepEqual(fromPlan.order, ['plan', 'work', 'iconify', 'outcome', 'memory']);
 
     const fromConfig = resolvePipeline({ planPipeline: [], configPipeline: ['plan', 'work'] });
     assert.equal(fromConfig.source, 'config');
-    assert.deepEqual(fromConfig.order, ['plan', 'work', 'outcome', 'memory']);
+    assert.deepEqual(fromConfig.order, ['plan', 'work', 'iconify', 'outcome', 'memory']);
 
     const fallback = resolvePipeline({ planPipeline: ['nope'], configPipeline: ['also-nope'] });
     assert.equal(fallback.source, 'default');
@@ -54,17 +56,18 @@ test('resolvePipeline always appends the tail stages exactly once', () => {
 });
 
 test('resolvePipeline pulls a dependency in front of its dependent, keeping the rest in place', () => {
-    assert.deepEqual(resolvePipeline({ planPipeline: ['work', 'plan'] }).order, ['plan', 'work', 'outcome', 'memory']);
-    assert.deepEqual(resolvePipeline({ planPipeline: ['review', 'work'] }).order, ['plan', 'work', 'review', 'outcome', 'memory']);
+    assert.deepEqual(resolvePipeline({ planPipeline: ['work', 'plan'] }).order, ['plan', 'work', 'iconify', 'outcome', 'memory']);
+    assert.deepEqual(resolvePipeline({ planPipeline: ['review', 'work'] }).order, ['plan', 'work', 'iconify', 'review', 'outcome', 'memory']);
     assert.deepEqual(resolvePipeline({ planPipeline: ['memory', 'outcome'] }).order, ['plan', 'outcome', 'memory']);
     assert.deepEqual(resolvePipeline({ planPipeline: ['collect', 'plan', 'architect'] }).order, ['plan', 'architect', 'collect', 'outcome', 'memory']);
-    assert.deepEqual(resolvePipeline({ planPipeline: ['work', 'decor', 'plan'] }).order, ['plan', 'decor', 'work', 'outcome', 'memory']);
+    assert.deepEqual(resolvePipeline({ planPipeline: ['work', 'decor', 'plan'] }).order, ['plan', 'decor', 'work', 'iconify', 'outcome', 'memory']);
 });
 
 test('resolvePipeline adds a hard dependency a caller forgot', () => {
-    assert.deepEqual(resolvePipeline({ planPipeline: ['work'] }).order, ['plan', 'work', 'outcome', 'memory']);
-    assert.deepEqual(resolvePipeline({ planPipeline: ['review'] }).order, ['plan', 'work', 'review', 'outcome', 'memory']);
+    assert.deepEqual(resolvePipeline({ planPipeline: ['work'] }).order, ['plan', 'work', 'iconify', 'outcome', 'memory']);
+    assert.deepEqual(resolvePipeline({ planPipeline: ['review'] }).order, ['plan', 'work', 'iconify', 'review', 'outcome', 'memory']);
     assert.deepEqual(resolvePipeline({ planPipeline: ['measure'] }).order, ['plan', 'measure', 'outcome', 'memory']);
+    assert.deepEqual(resolvePipeline({ planPipeline: ['work', 'iconify', 'review'] }).order, ['plan', 'work', 'iconify', 'review', 'outcome', 'memory']);
 });
 
 test('resolvePipeline reports unknown ids and a stable signature', () => {
@@ -82,6 +85,7 @@ test('createPipeline runs stages in order and skips a stage whose when() is fals
         stages: [
             { id: 'plan', run: async () => { seen.push('plan'); } },
             { id: 'work', when: () => false, run: async () => { seen.push('work'); } },
+            { id: 'iconify', when: () => false, run: async () => { seen.push('iconify'); } },
             { id: 'outcome', run: async () => { seen.push('outcome'); } },
             { id: 'memory', run: async () => { seen.push('memory'); } },
         ],
@@ -89,7 +93,7 @@ test('createPipeline runs stages in order and skips a stage whose when() is fals
     });
     await pipeline.run();
     assert.deepEqual(seen, ['plan', 'outcome', 'memory']);
-    assert.deepEqual(events.filter((e) => e.type === 'stage.skip').map((e) => e.stage), ['work']);
+    assert.deepEqual(events.filter((e) => e.type === 'stage.skip').map((e) => e.stage), ['work', 'iconify']);
 });
 
 test('createPipeline stops on an exit value and runs no further stage', async () => {

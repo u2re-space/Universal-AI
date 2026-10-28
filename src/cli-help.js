@@ -75,8 +75,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   При tools.fetch доступны download_font (Google Fonts или URL) и download_icons (Phosphor, Lucide с CDN).
   При tools.subagents доступны run_subagent и delegate_role: отдельный агент со своим контекстом, своими инструментами
   и лимитом ходов. delegate_role с context=true прикладывает общий контекст команды (план, находки, отчёты, diff),
-  context=false запускает роль на чистом контексте. coder, styler, worker, writer правят файлы; reviewer и tester только
-  проверяют; vision описывает картинки; solver отвечает по экрану или картинке; image-processor готовит ассеты.
+context=false запускает роль на чистом контексте. coder, styler, iconifier, worker, writer правят только файлы по своему назначению;
+   reviewer и tester только проверяют; vision описывает картинки; solver отвечает по экрану или картинке; image-processor готовит ассеты.
   Вложенный запуск не видит переписку — задачу пишут целиком; свой суб-агент ему недоступен, и правит он лишь
   то, что разрешено вызвавшему.
 
@@ -87,7 +87,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
 
 Команда (run и gen):
   --role <роль=модель[:effort[:max-effort]]>  модель для роли: planner, architect, orchestrator, worker, coder, styler, writer, reviewer, vision,
-                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, image-processor, default, all.
+                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, iconifier, image-processor, default, all.
                          Своё имя-слаг создаёт роль в roles.<имя> (инструкции и инструменты задаются в конфигурации)
                          (например: --role planner=gpt-6.1-terra:high --role worker=gpt-6.1-terra:medium:high --role vision=gpt-6.1-terra)
                          --role collector=... и --role coordinator=... принимают orchestrator (объединённая роль)
@@ -111,8 +111,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
                           auto — только для нетривиального плана (по умолчанию), always — всегда, --no-architect выключает.
                           Структура уходит в общий контекст и в .tmp/<id>/architecture.json
    Порядок этапов задаёт план (поле pipeline) и agent.pipeline в конфигурации: answer, classify, plan, measure,
-   architect, collect, images, decor, work, review, outcome, memory. Пропущенный этап не выполняется; зависимость
-   (например, review после work) всё равно встаёт раньше.
+    architect, collect, images, decor, work, iconify, review, outcome, memory. После work этап iconify добавляется автоматически
+    и пропускается без изменений HTML/JSX/DOM-разметки; review выполняется после интеграции иконок.
   --no-resume            не продолжать незавершённый шаг, фазу и ход из .tmp (по умолчанию тот же текст задачи продолжается с места остановки)
   --route encoder|planner|decisions  куда отдать первый ответ. decisions спрашивает модель решений. Без флага решает метка ответа
   В каталоге Node.js или фронтенда сканер (до ответа, encoder и planner) кладёт в контекст package.json, tsconfig.json или jsconfig.json, import map и найденные по ним файлы. Корневой index.html целиком — если он до 8 КиБ или задача про страницу.
@@ -125,7 +125,9 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
    --decor-quality <0..200>      качество декоратора (по умолчанию quality + speed)
    --image-quality <0..200>      качество подготовки изображений (по умолчанию quality + speed)
    --measurer-quality <0..200>   качество измерителя по референсам (по умолчанию quality + speed)
-   --architect-quality <0..200>  качество архитектора (по умолчанию quality + speed)
+    --architect-quality <0..200>  качество архитектора (по умолчанию quality + speed)
+    --iconifier-quality <0..200>  качество iconifier (по умолчанию quality + speed)
+
    Тонкие настройки качества двигают только свою стадию: effort роли смещается на один
    уровень каждые 34 пункта относительно --quality. Общий бюджет speed + quality не меняется,
     100 — оптимальный уровень, выше — допустимое завышение.

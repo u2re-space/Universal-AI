@@ -68,7 +68,7 @@ const OPTIONS = {
     fidelity: { type: 'string' }, creativity: { type: 'string' }, platform: { type: 'string' },
     speed: { type: 'string' }, pace: { type: 'string' }, 'max-steps': { type: 'string' }, context: { type: 'string' },
     'code-quality': { type: 'string' }, 'decor-quality': { type: 'string' }, 'image-quality': { type: 'string' },
-    'measurer-quality': { type: 'string' }, 'architect-quality': { type: 'string' },
+    'measurer-quality': { type: 'string' }, 'architect-quality': { type: 'string' }, 'iconifier-quality': { type: 'string' },
     template: { type: 'string', multiple: true }, example: { type: 'string', multiple: true },
     'mcp-command': { type: 'string' }, 'mcp-arg': { type: 'string', multiple: true },
     'mcp-url': { type: 'string' }, 'mcp-description': { type: 'string' }, 'mcp-approval': { type: 'string' },

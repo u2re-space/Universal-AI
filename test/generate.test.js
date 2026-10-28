@@ -196,6 +196,7 @@ test('per-stage quality flags do not move the shared budget', () => {
     assert.equal(overridesFrom({ 'image-quality': '120' }, { command: 'run' }).pace.imageQuality, 120);
     assert.equal(overridesFrom({ 'measurer-quality': '120' }, { command: 'run' }).pace.measurerQuality, 120);
     assert.equal(overridesFrom({ 'architect-quality': '120' }, { command: 'run' }).pace.architectQuality, 120);
+    assert.equal(overridesFrom({ 'iconifier-quality': '120' }, { command: 'run' }).pace.iconifierQuality, 120);
     assert.equal(overridesFrom({ 'architect-quality': '200' }, { command: 'run' }).pace.quality, undefined);
     assert.deepEqual(overridesFrom({ speed: '100', quality: '60', 'code-quality': '180' }, { command: 'run' }).pace, { speed: 100, quality: 60, codeQuality: 180 });
     assert.throws(() => overridesFrom({ 'code-quality': '201' }, { command: 'run' }), /--code-quality: целое 0\.\.200/);
@@ -232,15 +233,18 @@ test('config accepts a per-stage dial and rejects it out of range', async () => 
         ensureHome: false,
     });
     try {
-        await writeFile(file, JSON.stringify({ pace: { codeQuality: 150, architectQuality: 200 } }));
+        await writeFile(file, JSON.stringify({ pace: { codeQuality: 150, architectQuality: 200, iconifierQuality: 120 } }));
         const config = await load();
         assert.equal(config.pace.codeQuality, 150);
         assert.equal(config.pace.architectQuality, 200);
+        assert.equal(config.pace.iconifierQuality, 120);
         assert.equal(config.pace.quality, 40);
         await writeFile(file, JSON.stringify({ pace: { decorQuality: 201 } }));
         await assert.rejects(() => load(), /pace\.decorQuality: целое 0\.\.200/);
         await writeFile(file, JSON.stringify({ pace: { imageQuality: -1 } }));
         await assert.rejects(() => load(), /pace\.imageQuality: целое 0\.\.200/);
+        await writeFile(file, JSON.stringify({ pace: { iconifierQuality: 201 } }));
+        await assert.rejects(() => load(), /pace\.iconifierQuality: целое 0\.\.200/);
     } finally {
         await rm(home, { recursive: true, force: true });
     }
