@@ -8,6 +8,7 @@
  * @ai.hint pure
  * @changed 2026-10-26 Stages are a list, not a fixed sequence: the planner and the config may reorder or skip them.
  * @changed 2026-10-27 `decor` builds the decorative layer before `work` writes the page.
+ * @changed 2026-10-28 `iconify` reviews generated markup after `work` and before `review`.
  */
 
 /**
@@ -26,8 +27,9 @@ export const STAGE_CATALOG = Object.freeze([
     { id: 'images', title: 'Visual assets', after: ['plan', 'measure'], requires: ['plan'] },
     { id: 'decor', title: 'Decorative elements', after: ['plan', 'measure', 'architect', 'images'], requires: ['plan'] },
     { id: 'work', title: 'Plan steps', after: ['plan', 'decor'], requires: ['plan'] },
-    { id: 'review', title: 'Review and fixes', after: ['plan', 'work'], requires: ['work'] },
-    { id: 'outcome', title: 'Outcome', after: ['plan', 'work', 'review'], requires: ['plan'] },
+    { id: 'iconify', title: 'Icon integration', after: ['work'], requires: ['work'] },
+    { id: 'review', title: 'Review and fixes', after: ['plan', 'work', 'iconify'], requires: ['work'] },
+    { id: 'outcome', title: 'Outcome', after: ['plan', 'work', 'iconify', 'review'], requires: ['plan'] },
     { id: 'memory', title: 'Memory', after: ['outcome'], requires: ['outcome'] },
 ]);
 
@@ -109,6 +111,8 @@ export function resolvePipeline({ planPipeline, configPipeline, defaults = DEFAU
     };
     for (const id of chosen.ids) add(id);
     for (const id of TAIL_STAGES) add(id);
+    // Every planned work pass gets a conditional markup pass, even if a generated plan omits it.
+    if (order.includes('work')) add('iconify');
     // One pass may expose a soft dependency of a stage that was pulled earlier; repeat until stable.
     for (let pass = 0; pass < order.length; pass++) {
         let moved = false;

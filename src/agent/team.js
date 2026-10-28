@@ -49,6 +49,7 @@ import { EXTRACT_MAX_BYTES, EXTRACT_MAX_FILES, extractHandoff, hasExtractableArt
 import { assessQuality, assessmentImages } from './quality.js';
 import { stageMeasurementCrops, measurementConclusion, measurementIndex } from './measure-crops.js';
 import { createPipeline } from './pipeline.js';
+import { resolveInside } from './paths.js';
 import { encodeToon } from '../util/toon.js';
 
 /**
@@ -72,6 +73,16 @@ import { safeReviewerModel } from '../roles/reviewer.js';
 
 import { bullets, renderArchitecture, renderDecorations, renderFindings, renderMeasurements } from './team-text.js';
 const HARD_STOP = new Set(['cancelled', 'budget', 'failed']);
+const MARKUP_EXTENSIONS = /\.(?:html?|jsx|tsx|vue|svelte|astro)$/i;
+const JS_EXTENSIONS = /\.(?:js|mjs|cjs|ts|mts|cts)$/i;
+
+/** Whether a changed source file contains page or component markup. */
+export function isIconifierMarkup(file, source = '') {
+    if (MARKUP_EXTENSIONS.test(String(file ?? ''))) return true;
+    if (!JS_EXTENSIONS.test(String(file ?? ''))) return false;
+    return /<\/?[A-Za-z][\w:.-]*(?:\s|\/?>)/.test(String(source))
+        || /\b(?:ReactDOM|React\.createElement|createElement|createRoot)\b/.test(String(source));
+}
 
 /**
  * Render the measurement sheet, its deterministic conclusion, and the saved file paths.
@@ -116,13 +127,15 @@ export function toolNamesForRole(allNames, role, spec = null) {
     if (role === 'reviewer') {
         return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || name === 'run_subagent' || name === 'delegate_role');
     }
-    if (role === 'image-processor' || role === 'measurer' || role === 'decorator') {
+    if (role === 'image-processor' || role === 'measurer' || role === 'decorator' || role === 'iconifier') {
         const allowed = new Set(role === 'image-processor'
             ? [...IMAGE_TOOL_NAMES, 'fetch_url']
             : role === 'measurer'
                 ? ['view_image', 'crop_image', 'split_image', 'fetch_url']
-                // The decorator writes its own stylesheet and SVG files and never touches application markup.
-                : [...READ_ONLY_TOOLS, 'write_file', 'replace_text', 'generate_svg', 'fetch_url']);
+                : role === 'decorator'
+                    // The decorator writes its own stylesheet and SVG files and never touches application markup.
+                    ? [...READ_ONLY_TOOLS, 'write_file', 'replace_text', 'generate_svg', 'fetch_url']
+                    : ['list_files', 'read_file', 'search_files', 'view_image', 'write_file', 'replace_text', 'fetch_url', 'download_font', 'download_icons', 'generate_svg', 'vectorize_image']);
         return allNames.filter((name) => allowed.has(name));
     }
     return allNames;
@@ -271,17 +284,21 @@ export async function runTeam({
     const imageProcessorTools = createToolset({ ...toolBase, names: imageProcessorNames, approvalLevel });
     const decoratorNames = toolNamesForRole(enabled, 'decorator', config.roles?.decorator);
     const decoratorTools = createToolset({ ...toolBase, names: decoratorNames, approvalLevel });
+    const iconifierNames = toolNamesForRole(enabled, 'iconifier', config.roles?.iconifier);
+    const iconifierTools = createToolset({ ...toolBase, names: iconifierNames, approvalLevel });
     const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi });
     const imageProcessorBuiltin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi })
         .filter((tool) => tool.type === 'image_generation' || tool.type === 'web_search');
     /** Copy tool stats onto the team result and return it. */
     const fileChanges = [];
     let work = null;
+    const allChanges = () => [...fileChanges, ...workerTools.stats().changes, ...iconifierTools.stats().changes];
     const finish = () => {
-        result.changes = [...fileChanges, ...workerTools.stats().changes];
+        result.changes = allChanges();
         result.stats = {
             worker: workerTools.stats(), architect: architectTools.stats(), orchestrator: orchestratorTools.stats(),
             reviewer: reviewerTools.stats(), 'image-processor': imageProcessorTools.stats(), decorator: decoratorTools.stats(),
+            iconifier: iconifierTools.stats(),
         };
         return result;
     };
@@ -715,6 +732,7 @@ export async function runTeam({
         let revisionOnly = false;
         let review = null;
         let decisionsAccepted = false;
+        const iconifierMarkup = new Set();
         const referenceParts = parts.filter((part) => part?.type === 'input_image');
         const stages = [
             {
@@ -1495,6 +1513,53 @@ export async function runTeam({
                         if (outcome.status !== 'completed') workIncomplete = true;
                         revisionUsed = true;
                     }
+                    const currentChanges = [...workerTools.stats().changes, ...fileChanges];
+                    const changedFiles = new Set(progress.iconification?.status === 'completed'
+                        ? currentChanges.map((item) => item.path)
+                        : [...progress.files.map((item) => item.path), ...currentChanges.map((item) => item.path)]);
+                    for (const file of changedFiles) {
+                        if (!MARKUP_EXTENSIONS.test(file) && !JS_EXTENSIONS.test(file)) continue;
+                        try {
+                            const { abs, rel } = await resolveInside(root, file, { allowRoot: false });
+                            const source = await readFile(abs, 'utf8');
+                            if (isIconifierMarkup(rel, source)) iconifierMarkup.add(rel);
+                        } catch { /* a removed or unreadable file is not iconifier input */ }
+                    }
+                },
+            },
+            {
+                id: 'iconify',
+                when: () => iconifierMarkup.size > 0,
+                run: async () => {
+                    const paths = [...iconifierMarkup];
+                    const role = roles.resolve('iconifier');
+                    const model = role.model;
+                    const effort = role.effort;
+                    progress.stage = 'iconify';
+                    progress.iconification = { status: 'running', files: paths, report: '' };
+                    work.progress = progress;
+                    await persist('running');
+                    notify({ type: 'stage.start', stage: 'iconify', role: 'iconifier', model });
+                    const web = config.tools.web ? builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search') : [];
+                    const iconified = await roles.run('iconifier', {
+                        text: `${ctx.render({ maxBytes })}\n\n# Changed markup files\n${paths.map((file) => `- ${file}`).join('\n')}\n\nInspect these files and integrate suitable icons only where the page needs them.`,
+                        instructions: withAgents(ROLE_INSTRUCTIONS.iconifier), toolset: iconifierTools,
+                        builtin: web, maxTurns: 12, model, effort, silent: true,
+                    });
+                    if (HARD_STOP.has(iconified.status)) return { exit: stop(iconified, 'иконки') };
+                    const report = iconified.text.trim() || '(отчёт отсутствует)';
+                    const changes = iconifierTools.stats().changes;
+                    for (const change of changes) {
+                        if (!progress.files.some((item) => item.path === change.path)) progress.files.push({ path: change.path, stepId: null });
+                    }
+                    progress.iconification = { status: iconified.status === 'completed' ? 'completed' : 'incomplete', files: paths, report };
+                    progress.notes ??= [];
+                    progress.notes.push({ kind: 'iconify', status: iconified.status, report });
+                    work.progress = progress;
+                    publish();
+                    await persist('running');
+                    if (iconified.status !== 'completed') notify({ type: 'warning', message: `Подбор иконок не завершён (${iconified.status}${iconified.error ? `: ${errorMessage(iconified.error)}` : ''}); продолжаем без дальнейшей обработки разметки.` });
+                    notify({ type: 'stage.done', stage: 'iconify', status: iconified.status, files: paths, changes: changes.map((change) => change.path) });
                 },
             },
             {
@@ -1521,7 +1586,7 @@ export async function runTeam({
                                     index: step.index, goal: step.goal, status: step.status,
                                     report: clipMiddle(step.report ?? '', 4000),
                                 })),
-                                changes: workerTools.stats().changes.map((change) => change.path),
+                                changes: allChanges().map((change) => change.path),
                                 commands: workerTools.stats().commands.map((command) => ({ command: command.command, exitCode: command.exitCode ?? null })),
                                 tree: directoryTree,
                             },
@@ -1544,7 +1609,7 @@ export async function runTeam({
                     }
                     for (let round = 1; shouldReview && !decisionsAccepted; round++) {
                         notify({ type: 'stage.start', stage: 'review', role: 'reviewer', model: safeReviewerModel(paced.roles.reviewer.model), round });
-                        ctx.set('diff', 'Changes made by the worker (diff)', await describeChangeSet({ root, changes: workerTools.stats().changes, maxBytes: 48 * 1024 }), { priority: 5 });
+                        ctx.set('diff', 'Changes made by the worker (diff)', await describeChangeSet({ root, changes: allChanges(), maxBytes: 48 * 1024 }), { priority: 5 });
                         const commands = workerTools.stats().commands.map((c) => `- ${c.command} → exit ${c.exitCode ?? '?'}`).join('\n') || '- (none)';
                         const reviewed = await roles.run('reviewer', {
                             text: `${ctx.render({ maxBytes })}\n\n# Review request (round ${round})\nAcceptance criteria:\n${bullets(plan.acceptanceCriteria)}\nCommands run by the worker:\n${commands}`,
@@ -1622,7 +1687,7 @@ export async function runTeam({
                         }
                         memory.recordTask({
                             project: projectKey, projectName, task, status: result.status, summary: result.taskSummary ?? plan.summary,
-                            changes: workerTools.stats().changes.map((c) => c.path), usage: ledger.snapshot()
+                            changes: allChanges().map((c) => c.path), usage: ledger.snapshot()
                         });
                     }
                 },

@@ -116,6 +116,7 @@ export const defaults = Object.freeze({
             orchestrator: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
             worker: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
             coder: ['mdnCss', 'mdnJavaScript', 'ecma262', 'typescript', 'sass', 'canIUse', 'cssTricks', 'chromeStatus', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'eslint', 'stylelint', 'prettier', 'phosphorIcons', 'lucideIcons', 'googleFonts'],
+            iconifier: ['phosphorIcons', 'lucideIcons', 'googleFonts'],
             styler: ['mdnCss', 'sass', 'canIUse', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'stylelint', 'prettier', 'googleFonts'],
         },
     },
@@ -196,6 +197,7 @@ export const defaults = Object.freeze({
      *   worker     — executes plan steps that are not code generation
      *   coder      — writes code; model and effort follow plan complexity unless config pins them
      *   styler     — writes CSS and SCSS; uses gpt-6.1-sol while effort follows complexity
+     *   iconifier  — selects and integrates icons in generated HTML and component markup
      *   writer     — writes documents, reports, and Markdown; stays on the cheaper model, effort follows complexity
      *   reviewer   — verifies the result (read-only tools, may run tests)
      *   vision     — describes images; model and effort follow the long side, unless config pins them
@@ -262,6 +264,7 @@ export const defaults = Object.freeze({
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
+        iconifier: r({ model: 'gpt-6.1-sol' }),
         measurer: r({
             tiers: [
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
@@ -281,7 +284,7 @@ export const defaults = Object.freeze({
         mode: 'team',                   // team (planner → architect → orchestrator → worker → reviewer) | single (one model, one loop)
         /**
          * Stage order for team runs. null = the catalog order; a list reorders or drops stages
-         * (answer, classify, plan, measure, architect, collect, images, decor, work, review, outcome, memory).
+         * (answer, classify, plan, measure, architect, collect, images, decor, work, iconify, review, outcome, memory).
          * The plan may supply its own order, which wins over this list for that task.
          */
         pipeline: null,

@@ -4,7 +4,7 @@ import { ROLE_INSTRUCTIONS } from '../src/roles/index.js';
 import { EXECUTORS } from '../src/agent/role-registry.js';
 import { defaults } from '../src/core/config.js';
 
-const NAMES = ['default', 'planner', 'architect', 'orchestrator', 'worker', 'coder', 'styler', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer', 'decorator', 'image-processor'];
+const NAMES = ['default', 'planner', 'architect', 'orchestrator', 'worker', 'coder', 'styler', 'iconifier', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'measurer', 'decorator', 'image-processor'];
 
 test('role modules match config role names', () => {
     assert.deepEqual(Object.keys(defaults.roles).sort(), NAMES.slice().sort());
@@ -28,6 +28,10 @@ test('existing role instructions keep their job', () => {
     assert.match(ROLE_INSTRUCTIONS.styler, /You are the styler/);
     assert.match(ROLE_INSTRUCTIONS.styler, /CSS or SCSS/);
     assert.match(ROLE_INSTRUCTIONS.styler, /Keep the change focused on stylesheets/);
+    assert.match(ROLE_INSTRUCTIONS.iconifier, /after page and component markup has been generated/);
+    assert.match(ROLE_INSTRUCTIONS.iconifier, /Unicode symbol/);
+    assert.match(ROLE_INSTRUCTIONS.iconifier, /SVG from a supplied source image only as a last resort/);
+    assert.match(ROLE_INSTRUCTIONS.iconifier, /Keep stylesheet edits to the styler/);
     assert.match(ROLE_INSTRUCTIONS.writer, /documents, documentation, reports, and Markdown/);
     assert.match(ROLE_INSTRUCTIONS.worker, /delegate_role/);
     assert.match(ROLE_INSTRUCTIONS.reviewer, /independent reviewer/);
@@ -50,6 +54,14 @@ test('the decorator builds CSS or SVG before the page markup', () => {
     assert.match(ROLE_INSTRUCTIONS.decorator, /Do not edit application HTML/);
     assert.match(ROLE_INSTRUCTIONS.decorator, /styles\/decor\//);
     assert.match(ROLE_INSTRUCTIONS.decorator, /assets\/decor\//);
+});
+
+test('the iconifier chooses icons and edits markup without taking over styles', () => {
+    assert.match(ROLE_INSTRUCTIONS.iconifier, /after page and component markup has been generated/);
+    assert.match(ROLE_INSTRUCTIONS.iconifier, /Unicode symbol/);
+    assert.match(ROLE_INSTRUCTIONS.iconifier, /SVG from a supplied source image only as a last resort/);
+    assert.match(ROLE_INSTRUCTIONS.iconifier, /Keep stylesheet edits to the styler/);
+    assert.equal(defaults.roles.iconifier.model, 'gpt-6.1-sol');
 });
 
 test('the image processor trims padding through crop_image', () => {

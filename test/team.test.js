@@ -104,7 +104,7 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.throws(() => overridesFrom({ role: ['Bad Name=x'] }), /--role/);
     assert.throws(() => overridesFrom({ role: ['UPPER=x'] }), /--role/);
     assert.deepEqual(overridesFrom({ role: ['image-processor=gpt-6.1-terra:medium'] }).roles, { 'image-processor': { model: 'gpt-6.1-terra', effort: 'medium' } });
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 21);
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 22);
     assert.equal(overridesFrom({ extract: 'always' }).agent.extract, 'always');
     assert.equal(overridesFrom({ 'no-extract': true }).agent.extract, 'off');
     assert.throws(() => overridesFrom({ extract: 'nope' }), /--extract/);

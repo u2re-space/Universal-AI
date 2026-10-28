@@ -9,6 +9,7 @@
  * @ai.tags roles, subagent, delegation
  * @ai.hint pure
  * @changed 2026-10-26 Version 0.2.0: one registry for delegate_role and run_subagent, plus custom roles.
+ * @changed 2026-10-28 Added iconifier for markup and icon integration.
  */
 
 import { READ_ONLY_TOOLS, SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES } from './tool-specs.js';
@@ -61,6 +62,10 @@ export const EXECUTORS = Object.freeze({
     styler: {
         tools: 'all', turns: 50, schema: null,
         description: 'Implement one focused CSS or SCSS task: inspect the consuming markup and project style conventions, edit the named stylesheets, and verify the result.',
+    },
+    iconifier: {
+        tools: ['list_files', 'read_file', 'search_files', 'view_image', 'write_file', 'replace_text', 'fetch_url', 'download_font', 'download_icons', 'generate_svg', 'vectorize_image'], turns: 12, schema: null,
+        description: 'Choose suitable project icons, Unicode symbols, or verified icon fonts and integrate them accessibly into generated HTML or component markup without taking over styles.',
     },
     worker: {
         tools: 'all', turns: 50, schema: null,

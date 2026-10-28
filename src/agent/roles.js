@@ -22,7 +22,7 @@ import { runTurn } from './loop.js';
 import { SCREEN_SCHEMA } from './schemas.js';
 import { imageLongSide, imageTier } from '../roles/vision.js';
 
-const WEB_STACK_ROLES = new Set(['planner', 'architect', 'orchestrator', 'worker', 'coder', 'styler', 'measurer', 'image-processor']);
+const WEB_STACK_ROLES = new Set(['planner', 'architect', 'orchestrator', 'worker', 'coder', 'styler', 'iconifier', 'measurer', 'image-processor']);
 const WEB_STACK_INSTRUCTIONS = `Web development conventions (apply when relevant to the project's stack):
 - Treat ECMAScript 2025 (ES2025) as the baseline for JavaScript. Use ES2026 features only when the configured runtime, browsers, and build toolchain support them; verify current support instead of assuming it. For TypeScript, inspect tsconfig and the actual compiler/runtime targets rather than confusing TypeScript syntax with JavaScript runtime support.
 - Read the existing package scripts and project configuration before choosing tools. Respect package.json, tsconfig.json/jsconfig.json, bundler, Browserslist, and existing lint/format configuration; do not replace project choices with personal preferences.
