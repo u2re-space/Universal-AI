@@ -409,8 +409,8 @@ export function resolvePace({
             planner, architect: role(plannerRung(label, modelSpeed, adjusted), 'high', true, fine.architect),
             orchestrator: role(1, 'high', false),
             reviewer: role(reviewerRung(models, modelQuality >= 67 ? adjusted : Math.min(adjusted, 1)), reviewerBase, true),
-            summarizer: role(0, 'max', false),
-            extractor: role(0, 'high', false),
+            summarizer: role(1, 'xhigh', false),
+            extractor: role(1, 'high', false),
         },
         steps: null,
     };

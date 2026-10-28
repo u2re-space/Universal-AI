@@ -44,7 +44,7 @@ test('default pace keeps a complex author on the coder floor and the planner on 
     assert.equal(pace.steps[0].effort, 'high');
     assert.equal(pace.roles.classifier.model, 'gpt-6.1-terra');
     assert.equal(pace.roles.classifier.effort, 'xhigh');
-    assert.equal(pace.roles.extractor.model, 'gpt-6-luna');
+    assert.equal(pace.roles.extractor.model, 'gpt-6.1-terra');
     assert.equal(pace.roles.extractor.effort, 'high');
     assert.equal(pace.reviewRounds, 1);
     assert.equal(pace.reviewMode, 'force');
@@ -137,7 +137,7 @@ test('rungs and review rounds follow the tables', () => {
     // gpt-6-astra is forbidden for the reviewer: the ladder steps down to the previous rung.
     assert.equal(high.roles.reviewer.model, 'gpt-6.1-sol');
     assert.equal(high.roles.orchestrator.rung, 1);
-    assert.equal(high.roles.summarizer.model, 'gpt-6-luna');
+    assert.equal(high.roles.summarizer.model, 'gpt-6.1-terra');
     const normalAuthor = resolvePace({
         ...base, speed: 90, quality: 80, label: 'normal',
         steps: [{ complexity: 'normal', author: 'coder', files: [], goal: 'g', details: '', verify: '' }],

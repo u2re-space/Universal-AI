@@ -99,8 +99,8 @@ test('a null ceiling in models.<id> removes the registry limit', () => {
 test('resolvePace never hands a role an effort above its model ceiling', () => {
     // summarizer sits on rung 0 with base max; the ladder of the model decides what it gets.
     const pace = resolvePace({ ...paceBase, label: 'normal', modelProfiles: { 'gpt-6-luna': { ceiling: 'medium' } } });
-    assert.equal(pace.roles.summarizer.model, 'gpt-6-luna');
-    assert.equal(pace.roles.summarizer.effort, 'medium');
+    assert.equal(pace.roles.summarizer.model, 'gpt-6.1-terra');
+    assert.equal(pace.roles.summarizer.effort, 'xhigh');
 });
 
 test('resolvePace caps an author step to the model it lands on', () => {
