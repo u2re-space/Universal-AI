@@ -103,7 +103,10 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
                 let data = extractJson(result.text);
                 if (data === null) {
                     notify({ type: 'warning', message: `Роль ${name} вернула ответ не в JSON, запрошен исправленный формат.` });
-                    conversation.addUserMessage(buildUserMessage({ text: 'The last reply is not valid JSON. Send the answer again as one valid JSON object only — no Markdown fences, no comments, no extra text.' }));
+                    // Some backends ignore text.format, so name the required fields in the retry itself.
+                    const required = Array.isArray(schema?.required) ? schema.required : Object.keys(schema?.properties ?? {});
+                    const shape = required.length ? ` Required top-level fields: ${required.join(', ')}.` : '';
+                    conversation.addUserMessage(buildUserMessage({ text: `The last reply is not valid JSON. Send the answer again as one valid JSON object only — no Markdown fences, no comments, no extra text.${shape}` }));
                     const retry = await runTurn({
                         client, config: roleConfig, session: conversation, ledger, toolset, builtin, instructions: fullInstructions, model,
                         textFormat: { type: 'json_schema', name: schemaName, strict: true, schema }, maxTurns, signal, emit: roleEmit, imageTarget, onMaxTurns,

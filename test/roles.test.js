@@ -71,6 +71,13 @@ test('the image processor trims padding through crop_image', () => {
     assert.match(ROLE_INSTRUCTIONS['image-processor'], /trim=true/);
 });
 
+test('the image processor answers in the JSON schema shape', () => {
+    assert.match(ROLE_INSTRUCTIONS['image-processor'], /Reply in JSON only/);
+    for (const field of ['summary', 'assets', 'typography', 'notes']) {
+        assert.ok(ROLE_INSTRUCTIONS['image-processor'].includes(field), field);
+    }
+});
+
 test('font selection instructions distinguish research, pairing, measured appearance, and downloading', () => {
     assert.match(ROLE_INSTRUCTIONS.planner, /font-research task/);
     assert.match(ROLE_INSTRUCTIONS['image-processor'], /language coverage/);

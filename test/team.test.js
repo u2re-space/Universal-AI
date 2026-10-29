@@ -467,6 +467,7 @@ test('role runner asks once for valid JSON when the reply is prose', async () =>
     assert.match(events.filter((e) => e.type === 'warning').map((e) => e.message).join(' '), /не в JSON/);
     const retry = server.requests.filter((r) => r.method === 'POST' && r.path === '/v1/responses').at(-1);
     assert.match(JSON.stringify(retry.body.input.at(-1)), /not valid JSON/);
+    assert.match(JSON.stringify(retry.body.input.at(-1)), /Required top-level fields: label/);
 });
 
 test('role runner fails when the restated reply is not JSON either', async () => {
