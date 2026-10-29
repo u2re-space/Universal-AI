@@ -159,6 +159,15 @@ export function estimateTokens(value) {
  * @ai.hint pure
  */
 export function extractJson(text) {
+    if (typeof text == "object") return text;
+
+    //
+    try {
+        const jsonAlready = JSON.parse(text);
+        if (jsonAlready) return jsonAlready;
+    } catch(e) {}
+
+    //
     const raw = String(text ?? '').trim();
     if (!raw) return null;
     const tries = [raw];
