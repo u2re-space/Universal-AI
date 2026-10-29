@@ -484,7 +484,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             // No reference: pure text-to-image generation.
             const model = imageModelFor(config);
             const payloads = await client.images.generate({
-                model, prompt: args.prompt, size: args.size || null, quality: args.quality || null,
+                model, response_format: "b64_json", prompt: args.prompt, size: args.size || null, quality: args.quality || null,
                 format, background: effectiveBackground(model, requested), signal,
             });
             return saveAll(payloads, args.path, { transparent, model, toSvg, frame: Boolean(args.size?.trim()) });

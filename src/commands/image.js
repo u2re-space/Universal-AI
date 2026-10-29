@@ -77,14 +77,14 @@ async function runImagesEndpoint(ctx, prompt, count) {
     try {
         const payloads = sources.length
             ? await client.images.edit({
-                model, prompt, size: config.image.size, format, background, signal,
+                model, response_format: "b64_json", prompt, size: config.image.size, format, background, signal,
                 files: await Promise.all(sources.map(async (file) => {
                     const located = await resolveInside(ctx.cwd, file, { allowRoot: false });
                     const bytes = await readFile(located.abs);
                     return { filename: path.basename(located.rel), mime: sniffImage(bytes).mime, bytes };
                 })),
             })
-            : await client.images.generate({ model, prompt, size: config.image.size, quality: config.image.quality, n: count, format, background, signal });
+            : await client.images.generate({ model, response_format: "b64_json", prompt, size: config.image.size, quality: config.image.quality, n: count, format, background, signal });
         const saved = [];
         for (const [index, b64] of payloads.entries()) {
             const buffer = Buffer.from(b64, 'base64');

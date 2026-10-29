@@ -315,7 +315,7 @@ export function createClient({
             for (let index = 0; ; index++) {
                 const requestedSize = attempts[index] ?? size;
                 try {
-                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, quality, n, format, background }), signal });
+                    result = await call('images/generations', { body: generationBody({ model, response_format: "b64_json", prompt, size: requestedSize, quality, n, format, background }), signal });
                     break;
                 } catch (error) {
                     if (index >= attempts.length - 1 || !isImageSizeError(error)) throw error;
@@ -361,6 +361,7 @@ export function createClient({
                 if (isVectorModel(model)) {
                     const aspect = normalizeVectorRatio(attemptSize);
                     if (aspect) fields.aspect_ratio = aspect;
+                    fields['response_format'] = "b64_json";
                     fields[imageFormatField(model)] = 'svg';
                 } else {
                     const frame = imageRequestSize(attemptSize, model);
@@ -369,6 +370,7 @@ export function createClient({
                     if (fmt) fields[imageFormatField(model)] = fmt;
                     const backgroundField = backgroundValue({ model, format: fmt, background });
                     if (backgroundField) fields.background = backgroundField;
+                    fields['response_format'] = "b64_json";
                 }
                 const form = encodeMultipart({
                     fields,

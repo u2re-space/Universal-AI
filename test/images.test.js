@@ -24,15 +24,15 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }, { hasImage: true }), 'openai/gpt-image-2.5-sunburst');
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/', imageModel: 'custom/model' }, { hasImage: true }), 'custom/model');
     const body = generationBody({ model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', size: 'auto', quality: 'auto', n: 1, format: 'png', background: 'transparent' });
-    assert.deepEqual(body, { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png' });
+    assert.deepEqual(body, { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png', response_format: 'b64_json' });
     assert.deepEqual(
         generationBody({ model: 'gpt-image-2.5-sunburst', prompt: 'маяк', size: 'auto', quality: 'auto', n: 1, format: 'png', background: 'transparent' }),
-        { model: 'gpt-image-2.5-sunburst', prompt: 'маяк', output_format: 'png', background: 'transparent' },
+        { model: 'gpt-image-2.5-sunburst', prompt: 'маяк', output_format: 'png', background: 'transparent', response_format: 'b64_json' },
     );
     assert.equal('partial_images' in body, false);
     assert.deepEqual(
         generationBody({ model: 'gpt-image-1', prompt: 'маяк', format: 'png', background: 'transparent' }),
-        { model: 'gpt-image-1', prompt: 'маяк', output_format: 'png', background: 'transparent' },
+        { model: 'gpt-image-1', prompt: 'маяк', output_format: 'png', background: 'transparent', response_format: 'b64_json' },
     );
     assert.equal(supportsTransparentBackground('gpt-image-2.5-sunburst'), true);
     assert.equal(supportsTransparentBackground('gpt-image-1'), true);
@@ -53,7 +53,7 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(backgroundValue({ model: 'recraft/recraft-v4.1-utility', format: 'png', background: 'transparent' }), null);
     assert.deepEqual(
         generationBody({ model: 'gpt-image-2.5-sunburst', prompt: 'маяк', format: 'jpeg', background: 'transparent' }),
-        { model: 'gpt-image-2.5-sunburst', prompt: 'маяк', output_format: 'jpeg' },
+        { model: 'gpt-image-2.5-sunburst', prompt: 'маяк', output_format: 'jpeg', response_format: 'b64_json' },
     );
     assert.equal(normalizeImageFormat('auto'), null);
     assert.equal(normalizeImageFormat('jpg'), 'jpeg');
@@ -118,7 +118,7 @@ test('vector model uses aspect_ratio and svg output', () => {
     const vectorBody = generationBody({
         model: 'recraft/recraft-v4.1-pro-vector', prompt: 'логотип', size: '1024x1024', format: 'png', quality: 'high', background: 'transparent',
     });
-    assert.deepEqual(vectorBody, { model: 'recraft/recraft-v4.1-pro-vector', prompt: 'логотип', aspect_ratio: '1:1', image_format: 'svg' });
+    assert.deepEqual(vectorBody, { model: 'recraft/recraft-v4.1-pro-vector', prompt: 'логотип', aspect_ratio: '1:1', image_format: 'svg', response_format: 'b64_json' });
     assert.equal('size' in vectorBody, false);
     assert.equal('quality' in vectorBody, false);
     assert.equal('background' in vectorBody, false);
@@ -359,7 +359,7 @@ test('images client posts generations and edits and the tool saves the file', as
         assert.match(edited.output, /assets\/edited\.png/);
 
         // The direct recraft call keeps the vendor-specific format field and gets no OpenAI-only background.
-        assert.deepEqual(generations[0], { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png' });
+        assert.deepEqual(generations[0], { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png', response_format: 'b64_json' });
         // The tool defaults to gpt-image-2.5 for raster work.
         assert.equal(generations[1].model, 'openai/gpt-image-2.5-sunburst');
         assert.equal(generations[1].output_format, 'png');

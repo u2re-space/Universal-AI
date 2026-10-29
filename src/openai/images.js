@@ -320,6 +320,7 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
         if (aspect) body.aspect_ratio = aspect;
         if (Number.isInteger(n) && n > 1) body.n = n;
         body[imageFormatField(model)] = 'svg';
+        body['response_format'] = "b64_json";
         return body;
     }
     const frame = imageRequestSize(size, model);
@@ -332,6 +333,7 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
     if (fmt) body[imageFormatField(model)] = fmt;
     const backgroundField = backgroundValue({ model, format: fmt, background });
     if (backgroundField) body.background = backgroundField;
+    body['response_format'] = "b64_json";
     return body;
 }
 

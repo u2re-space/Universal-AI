@@ -56,7 +56,7 @@ test('sprutdock is used only when its key is present', () => {
     const config = { baseURL: 'https://api.proxyapi.ru/v1', fallback: defaults.fallback };
     assert.deepEqual(providerList(config, {}), [
         { baseURL: 'https://api.proxyapi.ru/v1', apiKey: "{{env:PROXYAPI_API_KEY}}" },
-        { baseURL: 'https://sprutdock.ru/v1', apiKey: "{{env:SPRUTDOCK_API_KEY}}", supports: { decisionAPI: false, imageAPI: false } },
+        { baseURL: 'https://sprutdock.ru/v1', apiKey: "{{env:SPRUTDOCK_API_KEY}}", supports: { decisionAPI: false } },
         { baseURL: 'https://gptunnel.ru/', apiKey: '{{env:GPTUNNEL_API_KEY}}', headers: { useWalletBalance: false } }
     ]);
     assert.equal(providerList(config, { PROXYAPI_API_KEY: '{{env:PROXYAPI_API_KEY}}' })[0].baseURL, 'https://api.proxyapi.ru/v1');
