@@ -16,13 +16,13 @@
 import { randomBytes } from 'node:crypto';
 
 /** Default ProxyAPI text-to-image model when imageModel is unset. See https://proxyapi.ru/models/browse/image */
-export const PROXY_IMAGE_MODEL = 'gpt-image-2.5-sunburst';
+export const PROXY_IMAGE_MODEL = 'openai/gpt-image-2.5-sunburst';
 
 /**
  * Default ProxyAPI model for edits and image-conditioned generation. Same gpt-image-2.5 family as
  * the generation default; both ids accept a source image and are interchangeable through --image-model.
  */
-export const PROXY_IMAGE_EDIT_MODEL = 'gpt-image-2.5-sunburst';
+export const PROXY_IMAGE_EDIT_MODEL = 'openai/gpt-image-2.5-sunburst';
 
 /** Default ProxyAPI vector (SVG) model. See https://proxyapi.ru/models/recraft/recraft-v4.1-pro-vector */
 export const PROXY_VECTOR_MODEL = 'recraft/recraft-v4.1-pro-vector';

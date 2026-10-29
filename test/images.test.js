@@ -20,8 +20,8 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(imageTransport({ baseURL: 'https://api.proxyapi.ru/v1/' }), 'images');
     assert.equal(imageTransport({ baseURL: 'https://api.openai.com/v1/' }), 'responses');
     assert.equal(imageTransport({ baseURL: 'https://api.proxyapi.ru/v1/', image: { transport: 'responses' } }), 'responses');
-    assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }), 'gpt-image-2.5-sunburst');
-    assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }, { hasImage: true }), 'gpt-image-2.5-sunburst');
+    assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }), 'openai/gpt-image-2.5-sunburst');
+    assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }, { hasImage: true }), 'openai/gpt-image-2.5-sunburst');
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/', imageModel: 'custom/model' }, { hasImage: true }), 'custom/model');
     const body = generationBody({ model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', size: 'auto', quality: 'auto', n: 1, format: 'png', background: 'transparent' });
     assert.deepEqual(body, { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png' });
@@ -361,10 +361,10 @@ test('images client posts generations and edits and the tool saves the file', as
         // The direct recraft call keeps the vendor-specific format field and gets no OpenAI-only background.
         assert.deepEqual(generations[0], { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png' });
         // The tool defaults to gpt-image-2.5 for raster work.
-        assert.equal(generations[1].model, 'gpt-image-2.5-sunburst');
+        assert.equal(generations[1].model, 'openai/gpt-image-2.5-sunburst');
         assert.equal(generations[1].output_format, 'png');
         assert.equal('image_format' in generations[1], false);
-        assert.equal(edits[0].model, 'gpt-image-2.5-sunburst');
+        assert.equal(edits[0].model, 'openai/gpt-image-2.5-sunburst');
         assert.match(edits[0].text, /name="output_format"\r\n\r\npng\r\n/);
         assert.doesNotMatch(edits[0].text, /name="background"/);
     } finally {

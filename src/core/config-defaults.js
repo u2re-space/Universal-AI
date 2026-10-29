@@ -55,7 +55,7 @@ const r = (overrides) => ({ ...ROLE_FIELDS, ...overrides });
  */
 export const defaults = Object.freeze({
     model: 'gpt-6.1-terra',
-    imageModel: 'gpt-image-2.5-sunburst',                 // null → gpt-image-2.5 (flare for generation, sunburst for edits) on the images API
+    imageModel: 'openai/gpt-image-2.5-sunburst',                 // null → gpt-image-2.5 (flare for generation, sunburst for edits) on the images API
     baseURL: "https://api.proxyapi.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
     apiKey: "{{env:PROXYAPI_API_KEY}}",                     // prefer the OPENAI_API_KEY environment variable
     /**
