@@ -155,15 +155,17 @@ export function providerList(config, env = liveEnv()) {
  * @ai.hint io
  */
 export async function attemptChain({ endpoints, model, map, send, onWarn = () => {} }) {
-    const alts = [...new Set([model, fallbackModel(model, map)].filter(Boolean))];
     let last = null;
     for (let host = 0; host < endpoints.length; host++) {
+        const url = endpoints[host]?.baseURL || endpoints[host]?.baseUrl || endpoints[host]?.label;
+        const alts = [...new Set([model, fallbackModel(model, map, url)].filter(Boolean))];
         for (let index = 0; index < alts.length; index++) {
             const candidate = alts[index];
             try {
                 const result = await send(endpoints[host], candidate, host > 0);
                 if (candidate !== model) {
-                    if (!triedMap?.has?.(host)) { triedMap.set(host, new Set([])); triedMap.get(host).add(model); };
+                    if (!triedMap?.has?.(url)) { triedMap.set(url, new Set([])); };
+                    triedMap.get(url)?.add?.(model);
                     onWarn(`Модель ${model} недоступна. Запрос ушёл в ${candidate}.`);
                 }
                 else if (host > 0) onWarn(`Основной провайдер недоступен. Запрос ушёл на ${endpoints[host].label}.`);
