@@ -349,7 +349,7 @@ function createCompletion(transport, body, signal) {
  * @ai.hint pure
  */
 function fallbackCompletionBody({ model, prompt, prepared, config }) {
-    const alt = fallbackModel(model, config.fallback?.models);
+    const alt = fallbackModel(model, config.fallback?.models, config?.baseURL || config?.baseUrl || config?.label || "default");
     if (!alt || alt === model) return null;
     const row = resolveCompletionModel(alt);
     const effort = row ? (row.clampNone && row.reasoning === 'none' ? 'low' : row.reasoning) : null;

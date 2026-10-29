@@ -22,6 +22,20 @@ export { MODEL_FALLBACKS };
 //
 const triedMap = new Map();
 
+//
+function unprefixModel(name) {
+    const parts = name.split('/');
+    if (parts?.[1]) return parts?.[1];
+    return name?.replace?.(/^openai\//, '') || name;
+}
+
+//
+function makePrefixed(bare) {
+    if (bare?.startsWith?.("gpt-")) return `openai/${bare}`;
+    if (bare?.startsWith?.("claude-")) return `anthropic/${bare}`;
+    return bare;
+}
+
 /**
  * Substitute model id, or null when this id has no stand-in.
  * @param {string} model
@@ -30,13 +44,13 @@ const triedMap = new Map();
  * @exports
  * @ai.hint pure
  */
-export function fallbackModel(model, map = MODEL_FALLBACKS, host = null) {
+export function fallbackModel(model, map = MODEL_FALLBACKS, host = "default") {
     const name = String(model ?? '').trim();
     if (!name || !map) return null;
     if (typeof map[name] === 'string' && map[name].trim() && map[name] !== name) return map[name].trim();
-    const bare = name.replace(/^openai\//, '');
-    const prefixed = bare === name ? `openai/${name}` : bare;
-    const alt = (((bare?.startsWith?.("gpt-") || prefixed?.startsWith?.("openai/")) && !triedMap.get(host)?.has?.(model)) ? (bare === name ? `openai/${name}` : bare) : null) || map[name];
+    const bare = unprefixModel(name);
+    const prefixed = bare === name ? makePrefixed(name) : bare;
+    const alt = ((!triedMap.get(host || "default")?.has?.(name)) ? prefixed : null) || map[name];
     if (typeof alt === 'string' && alt.trim() && alt !== name) return alt.trim();
     return null;
 }
