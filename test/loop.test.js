@@ -9,7 +9,8 @@ import { createLedger } from '../src/core/usage.js';
 import { defaults } from '../src/core/config.js';
 import { buildUserMessage } from '../src/core/attachments.js';
 import { createToolset, enabledToolNames } from '../src/agent/tools.js';
-import { runTurn, buildRequestBody, builtinTools, shrinkHistory } from '../src/agent/loop.js';
+import { runTurn, buildRequestBody, builtinTools, shrinkHistory, trimHistoryImages, stripHistoryImages, isContextWindowError } from '../src/agent/loop.js';
+import { ApiError } from '../src/openai/errors.js';
 import { startMockServer, TINY_PNG } from './helpers/mock-server.js';
 
 let server;
@@ -269,6 +270,59 @@ test('shrinkHistory drops older screenshots and clips old tool output', () => {
     assert.equal(first.items[2].output[0].image_url, 'data:image/png;base64,BBBB');
     const second = shrinkHistory(first.items, { clipNewest: true });
     assert.equal(typeof second.items[2].output, 'string');
+});
+
+test('trimHistoryImages keeps the newest tool screenshots and notes the rest', () => {
+    const image = (name) => ({ type: 'input_image', image_url: `data:image/png;base64,${name}` });
+    const items = [
+        { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'task' }, image('USER')] },
+        ...['a', 'b', 'c', 'd'].map((name) => ({ type: 'function_call_output', call_id: name, output: [{ type: 'input_text', text: `look ${name}` }, image(name)] })),
+    ];
+    const trimmed = trimHistoryImages(items, { keep: 2 });
+    assert.equal(trimmed.changed, true);
+    assert.deepEqual(trimmed.items[0], items[0], 'the user attachment stays');
+    const images = trimmed.items.flatMap((item) => (Array.isArray(item.output) ? item.output.filter((part) => part?.type === 'input_image') : []));
+    assert.deepEqual(images.map((part) => part.image_url.split(',')[1]), ['c', 'd']);
+    assert.match(JSON.stringify(trimmed.items[1]), /убрано из истории/);
+    assert.match(JSON.stringify(trimmed.items[1]), /look a/);
+    assert.equal(trimHistoryImages(items.slice(0, 2), { keep: 2 }).changed, false);
+});
+
+test('stripHistoryImages removes attachments too and never leaves an empty message', () => {
+    const items = [
+        { type: 'message', role: 'user', content: [{ type: 'input_image', image_url: 'data:image/png;base64,AAAA' }] },
+        { type: 'function_call_output', call_id: 'x', output: [{ type: 'input_image', image_url: 'data:image/png;base64,BBBB' }] },
+    ];
+    const stripped = stripHistoryImages(items);
+    assert.equal(stripped.changed, true);
+    assert.equal(stripped.items[0].content.length, 1);
+    assert.equal(stripped.items[0].content[0].type, 'input_text');
+    assert.equal(JSON.stringify(stripped.items).includes('input_image'), false);
+});
+
+test('isContextWindowError reads the wording of a backend without an error code', () => {
+    assert.equal(isContextWindowError(new ApiError('OpenAI API: Responses request exceeds the model context window.', { status: 400 })), true);
+    assert.equal(isContextWindowError(new ApiError('maximum context length is 128000 tokens', { status: 400, apiCode: 'context_length_exceeded' })), true);
+    assert.equal(isContextWindowError(new ApiError('invalid api key', { status: 401 })), false);
+    assert.equal(isContextWindowError(new Error('exceeds the model context window')), false);
+});
+
+test('a context window rejection shrinks the history and retries the same turn', async () => {
+    script = (body, index) => {
+        if (index === 0) {
+            assert.ok(JSON.stringify(body.input).includes('input_image'), 'the first request carries the attachment');
+            return { httpStatus: 400, httpBody: { error: { message: 'Responses request exceeds the model context window.', type: 'invalid_request_error' } } };
+        }
+        assert.equal(JSON.stringify(body.input).includes('input_image'), false, 'images are gone on the retry');
+        return { text: 'assets prepared' };
+    };
+    const ctx = setup();
+    ctx.session.addUserMessage(buildUserMessage({ text: 'reference', parts: [{ type: 'input_image', image_url: `data:image/png;base64,${TINY_PNG}` }] }));
+    const result = await runTurn({ client: client(), config: ctx.cfg, session: ctx.session, ledger: ctx.ledger, emit: ctx.emit });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(result.turns, 1, 'the retry belongs to the same turn');
+    assert.equal(server.requests.filter((r) => r.method === 'POST' && r.path === '/v1/responses').length, 2);
+    assert.match(ctx.events.filter((e) => e.type === 'warning').map((e) => e.message).join(' '), /окно модели/);
 });
 
 test('web_search is sent without search_context_size and sources stay in the next turn', async () => {

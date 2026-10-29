@@ -4,10 +4,11 @@
  * @purpose Send one conversation turn, run requested local tools, and record images and usage.
  * @depends openai/errors, openai/stream, openai/web-search, core/config, core/images, core/background, util/text
  * @usedBy commands/chat, commands/flow, commands/image, agent/roles, agent/team, index.js
- * @exports builtinTools, buildRequestBody, compactSession, shrinkHistory, runTurn
+ * @exports builtinTools, buildRequestBody, compactSession, shrinkHistory, trimHistoryImages, stripHistoryImages, isContextWindowError, runTurn
  * @ai.tags loop, tools
  * @ai.hint hot
  * @changed 2026-10-22 onMaxTurns lets the operator extend the turn budget.
+ * @changed 2026-10-29 Old tool screenshots leave the replayed history, and a context-window rejection is retried once without images.
  */
 
 import { ApiError, BudgetError, CancelledError, isAbortError } from '../openai/errors.js';
@@ -79,6 +80,9 @@ export function buildRequestBody({
 const OUTPUT_KEEP_BYTES = 16 * 1024;
 const REPEATED_FAILURE_HINT = 2;
 const REPEATED_FAILURE_LIMIT = 3;
+/** How many tool-result images stay in a replayed history; older ones become a one-line note. */
+const HISTORY_IMAGE_KEEP = 6;
+const IMAGE_DROPPED_NOTE = '[изображение убрано из истории, чтобы уложиться в окно модели]';
 
 /**
  * Drop older screenshots and clip old tool output so the next request can fit maxRequestBytes.
@@ -110,6 +114,80 @@ export function shrinkHistory(items, { clipNewest = false } = {}) {
         return item;
     });
     return { items: next, changed };
+}
+
+/**
+ * Keep only the newest `keep` tool-result images in a replayed history, replacing the rest with a note.
+ * Every turn resends the whole stateless history, so screenshots and crops are the fastest way to
+ * push a long tool loop past the model window. The user's own attachments are left untouched.
+ * @param {object[]} items
+ * @param {{ keep?: number }} [options]
+ * @returns {{ items: object[], changed: boolean }}
+ * @exports
+ * @ai.hint pure
+ */
+export function trimHistoryImages(items, { keep = HISTORY_IMAGE_KEEP } = {}) {
+    const positions = [];
+    items.forEach((item, index) => {
+        if (item?.type !== 'function_call_output' || !Array.isArray(item.output)) return;
+        item.output.forEach((part, partIndex) => { if (part?.type === 'input_image') positions.push({ index, partIndex }); });
+    });
+    const drop = new Set(positions.slice(0, Math.max(0, positions.length - keep)).map((spot) => `${spot.index}:${spot.partIndex}`));
+    if (!drop.size) return { items, changed: false };
+    const next = items.map((item, index) => {
+        if (item?.type !== 'function_call_output' || !Array.isArray(item.output)) return item;
+        if (!item.output.some((part, partIndex) => drop.has(`${index}:${partIndex}`))) return item;
+        const kept = item.output.filter((part, partIndex) => !drop.has(`${index}:${partIndex}`));
+        const text = kept.filter((part) => part?.type === 'input_text').map((part) => part.text).join('\n');
+        const others = kept.filter((part) => part?.type !== 'input_text' && part?.type !== 'input_image');
+        return { ...item, output: [...(text ? [{ type: 'input_text', text }] : []), ...others, { type: 'input_text', text: IMAGE_DROPPED_NOTE }] };
+    });
+    return { items: next, changed: true };
+}
+
+/**
+ * Remove every image from the history, including the user's attachments, and leave a note where one was.
+ * This is the last resort before the API rejects a request for exceeding the model window.
+ * @param {object[]} items
+ * @returns {{ items: object[], changed: boolean }}
+ * @exports
+ * @ai.hint pure
+ */
+export function stripHistoryImages(items) {
+    let changed = false;
+    const next = items.map((item) => {
+        if (item?.type === 'function_call_output' && Array.isArray(item.output)) {
+            if (!item.output.some((part) => part?.type === 'input_image')) return item;
+            changed = true;
+            const text = item.output.filter((part) => part?.type === 'input_text').map((part) => part.text).join('\n');
+            const others = item.output.filter((part) => part?.type !== 'input_text' && part?.type !== 'input_image');
+            return { ...item, output: [...(text ? [{ type: 'input_text', text }] : []), ...others, { type: 'input_text', text: IMAGE_DROPPED_NOTE }] };
+        }
+        if (item?.type === 'message' && Array.isArray(item.content)) {
+            if (!item.content.some((part) => part?.type === 'input_image')) return item;
+            changed = true;
+            const kept = item.content.filter((part) => part?.type !== 'input_image');
+            const content = kept.length ? kept : [{ type: 'input_text', text: IMAGE_DROPPED_NOTE }];
+            return { ...item, content };
+        }
+        return item;
+    });
+    return { items: next, changed };
+}
+
+/**
+ * Whether the API refused the request because it does not fit the model's context window.
+ * Backends word this differently and some send no error code, so the message is checked too.
+ * @param {Error} error
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function isContextWindowError(error) {
+    if (!(error instanceof ApiError)) return false;
+    if (error.status && ![400, 413, 422].includes(error.status)) return false;
+    return /context[ _-]?(length|window)|maximum context|too many tokens|prompt is too long|exceeds the (model|maximum) context/i
+        .test(`${error.apiCode ?? ''} ${error.message}`);
 }
 
 /** Server-side compaction of a stateless history (POST /responses/compact). */
@@ -197,15 +275,27 @@ export async function runTurn({
             if (guarded.changed) notify({ type: 'warning', message: `Запрос со скриптом или командой переформулирован перед отправкой: ${guarded.reasons.join('; ')}.` });
             let body = buildRequestBody({ config, model, instructions, input, previousResponseId, tools, toolChoice, textFormat, background });
             let requestBytes = byteSize(body);
+            const rebuild = () => {
+                ({ input, previous_response_id: previousResponseId } = session.requestInput());
+                body = buildRequestBody({ config, model, instructions, input, previousResponseId, tools, toolChoice, textFormat, background });
+                requestBytes = byteSize(body);
+            };
+            // A stateless turn replays the whole history, so old screenshots and crops are dropped early.
+            if (!session.store) {
+                const trimmed = trimHistoryImages(session.toJSON().items);
+                if (trimmed.changed) {
+                    session.replace(trimmed.items);
+                    rebuild();
+                    notify({ type: 'warning', message: `Старые изображения убраны из истории: осталось ${HISTORY_IMAGE_KEEP}.` });
+                }
+            }
             if (requestBytes > config.limits.maxRequestBytes && !session.store) {
                 const before = requestBytes;
                 const apply = (clipNewest) => {
                     const shrunk = shrinkHistory(session.toJSON().items, { clipNewest });
                     if (!shrunk.changed) return false;
                     session.replace(shrunk.items);
-                    ({ input, previous_response_id: previousResponseId } = session.requestInput());
-                    body = buildRequestBody({ config, model, instructions, input, previousResponseId, tools, toolChoice, textFormat, background });
-                    requestBytes = byteSize(body);
+                    rebuild();
                     return true;
                 };
                 apply(false);
@@ -218,7 +308,21 @@ export async function runTurn({
             ledger.assertBudget({ estimatedTokens: estimateTokens(input), model });
             notify({ type: 'turn.start', turn: result.turns, maxTurns, requestBytes, tools: tools.length });
             const startedAt = Date.now();
-            const response = await request(body);
+            let response;
+            try {
+                response = await request(body);
+            } catch (error) {
+                // The byte estimate is not tokens: a backend may reject a request that fits the configured
+                // limit. Drop every image and clip all tool output once, then send the same turn again.
+                if (session.store || !isContextWindowError(error)) throw error;
+                const stripped = stripHistoryImages(session.toJSON().items);
+                const shrunk = shrinkHistory(stripped.items, { clipNewest: true });
+                if (!stripped.changed && !shrunk.changed) throw error;
+                session.replace(shrunk.items);
+                rebuild();
+                notify({ type: 'warning', message: 'Запрос не уложился в окно модели: изображения убраны из истории, повтор.' });
+                response = await request(body);
+            }
             const elapsedMs = Date.now() - startedAt;
             const entry = ledger.record({ model: response.model ?? model, usage: response.usage, elapsedMs, responseId: response.id ?? null });
             session.recordUsage(entry);
