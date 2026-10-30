@@ -261,28 +261,29 @@ export const defaults = Object.freeze({
             ],
         }),
         styler: r({
-            model: 'gpt-6.1-sol', effort: 'xhigh',
+            /*model: 'gpt-6.1-sol', effort: 'xhigh',*/
             tiers: [
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
         iconifier: r({
-            model: 'gpt-6.1-sol', effort: 'xhigh', tiers: [
+            /*model: 'gpt-6.1-sol', effort: 'xhigh',*/ tiers: [
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ]
         }),
         measurer: r({
-            tiers: [
-                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
+            /*model: 'gpt-6.1-sol', effort: 'xhigh',*/ tiers: [
+                { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
         decorator: r({
+            /*model: 'gpt-6.1-terra', effort: 'xhigh',*/
             tiers: [
                 { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
-                { model: 'gpt-6.1-sol', effort: ['high', 'xhigh', 'max'] },
+                { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
         'image-processor': r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
