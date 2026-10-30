@@ -252,7 +252,7 @@ export const defaults = Object.freeze({
         typer: r({ model: "gpt-6.1-terra", effort: 'low' }),
         encoder: r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
         tester: r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
-        classifier: r({ effort: 'high' }),
+        classifier: r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
         extractor: r({ model: "gpt-6.1-terra", effort: 'xhigh', verbosity: 'low' }),
         coder: r({
             tiers: [
