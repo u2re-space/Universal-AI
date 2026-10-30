@@ -276,7 +276,7 @@ export const defaults = Object.freeze({
         measurer: r({
             /*model: 'gpt-6.1-sol', effort: 'xhigh',*/ tiers: [
                 { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
-                { model: 'gpt-6.1-sol', effort: ['high', 'xhigh', 'max'] },
+                { model: 'gpt-6.1-sol', effort: ['low', 'medium', 'high'] },
             ],
         }),
         decorator: r({
@@ -297,11 +297,11 @@ export const defaults = Object.freeze({
          * The plan may supply its own order, which wins over this list for that task.
          */
         pipeline: null,
-        maxSteps: 12,                   // plan steps accepted from the planner
+        maxSteps: 16,                   // plan steps accepted from the planner
         maxReviewRounds: 2,             // reviewer → worker fix cycles
-        orchestratorMaxTurns: 12,       // tool turns the orchestrator may spend collecting context
-        workerMaxTurnsPerStep: 50,
-        reviewerMaxTurns: 10,
+        orchestratorMaxTurns: 16,       // tool turns the orchestrator may spend collecting context
+        workerMaxTurnsPerStep: 40,
+        reviewerMaxTurns: 12,
         maxContextBytes: 'normal',      // small | normal | large | max | auto
         visionDelegate: 'auto',         // auto (when roles.vision has its own model) | always | never
         chain: true,                    // first answer, then encoder or planner

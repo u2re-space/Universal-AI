@@ -56,11 +56,11 @@ export const SLICES = {
  */
 export const EXECUTORS = Object.freeze({
     coder: {
-        tools: 'all', turns: 50, schema: null,
+        tools: 'all', turns: 40, schema: null,
         description: 'Code for one self-contained piece of work: edits the files the task names, follows the stack it finds, and checks the result.',
     },
     styler: {
-        tools: ['list_files', 'read_file', 'search_files', 'list_backups', 'write_file', 'replace_text', 'restore_backup'], turns: 50, schema: null,
+        tools: ['list_files', 'read_file', 'search_files', 'list_backups', 'write_file', 'replace_text', 'restore_backup'], turns: 40, schema: null,
         description: 'Implement one focused CSS or SCSS task: inspect the consuming markup and project style conventions, edit the named stylesheets, and report without running checks or comparisons.',
     },
     iconifier: {
@@ -68,15 +68,15 @@ export const EXECUTORS = Object.freeze({
         description: 'Choose suitable project icons, Unicode symbols, or verified icon fonts and integrate them accessibly into generated HTML or component markup without taking over styles.',
     },
     worker: {
-        tools: 'all', turns: 50, schema: null,
+        tools: 'all', turns: 40, schema: null,
         description: 'General doer for one self-contained task of any kind: reads, edits, runs commands, and reports what changed.',
     },
     writer: {
-        tools: 'all', turns: 20, schema: null,
+        tools: 'all', turns: 24, schema: null,
         description: 'Documents, README, report, or Markdown built only from the facts the task provides.',
     },
     reviewer: {
-        tools: 'check', turns: 12, schema: null,
+        tools: 'check', turns: 16, schema: null,
         description: 'Independent review of a result: reads the changed files, runs the project checks, lists findings with evidence. Changes nothing.',
     },
     tester: {
@@ -84,7 +84,7 @@ export const EXECUTORS = Object.freeze({
         description: 'Pass or fail one claim from evidence: runs the command or looks at the screen, then reports what was observed and what stayed unverified.',
     },
     vision: {
-        tools: 'read', turns: 6, schema: null,
+        tools: 'read', turns: 8, schema: null,
         description: 'Describes the image files the task names in plain text, so their full description never enters this context.',
     },
     solver: {
@@ -92,15 +92,15 @@ export const EXECUTORS = Object.freeze({
         description: 'Solves one problem from the screen or an image: an answer, a calculation, a formula, a captcha, element coordinates.',
     },
     measurer: {
-        tools: ['view_image', 'crop_image', 'split_image', 'fetch_url'], turns: 8, schema: 'measure',
+        tools: ['view_image', 'crop_image', 'split_image', 'fetch_url'], turns: 16, schema: 'measure',
         description: 'Re-measures a crop or a layer and returns a measurement sheet: boxes, angles, borders, spacing, and CSS-ready values.',
     },
     decorator: {
-        tools: ['list_files', 'read_file', 'search_files', 'view_image', 'write_file', 'replace_text', 'generate_svg', 'fetch_url'], turns: 12, schema: 'decorations',
+        tools: ['list_files', 'read_file', 'search_files', 'view_image', 'write_file', 'replace_text', 'generate_svg', 'fetch_url'], turns: 16, schema: 'decorations',
         description: 'Builds complex decorative elements (ornaments, flourishes, dividers, patterns, frames) as native HTML+CSS or standalone SVG and returns ready snippets.',
     },
     'image-processor': {
-        tools: 'images', turns: 12, schema: null,
+        tools: 'images', turns: 16, schema: null,
         description: 'Prepares images and visual assets: crops, splits, trims padding, generates or edits artwork, saves them under assets/.',
     },
     clicker: {
