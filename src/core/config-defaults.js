@@ -263,8 +263,8 @@ export const defaults = Object.freeze({
         styler: r({
             /*model: 'gpt-6.1-sol', effort: 'xhigh',*/
             tiers: [
-                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
-                { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
+                { model: 'gpt-6.1-sol', effort: ['high', 'xhigh', 'max'] },
             ],
         }),
         iconifier: r({
