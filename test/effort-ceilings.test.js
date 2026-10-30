@@ -173,7 +173,7 @@ test('models section accepts ceilings and ladders', async () => {
         ensureHome: false,
     });
     assert.deepEqual(config.models['gpt-6.1-sol'], { ceiling: 'medium', efforts: ['low', 'medium'] });
-    assert.equal(resolveRole(config, 'planner').effort, 'medium');
+    assert.equal(resolveRole(config, 'planner').effort, 'xhigh');
 });
 
 test('an unknown ceiling in models is rejected', async () => {

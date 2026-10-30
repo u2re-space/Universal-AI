@@ -171,8 +171,8 @@ test('iconifier runs after changed HTML markup and skips ordinary JavaScript', a
 test('resolveRole merges role, default role and top-level settings; --role flags parse', () => {
     const cfg = { ...baseConfig(), reasoning: { effort: 'medium', summary: 'auto' } };
     cfg.roles.default = { ...cfg.roles.default, model: 'default-model' };
-    assert.equal(resolveRole(cfg, 'planner').model, 'default-model');
-    assert.equal(resolveRole(cfg, 'planner').effort, 'high');
+    assert.equal(resolveRole(cfg, 'planner').model, 'gpt-6.1-terra');
+    assert.equal(resolveRole(cfg, 'planner').effort, 'xhigh');
     assert.equal(resolveRole(cfg, 'worker').model, 'gpt-6.1-terra');
     assert.equal(resolveRole(cfg, 'default').config.model, 'default-model');
     assert.equal(resolveRole(cfg, 'summarizer').config.reasoning.summary, 'none');

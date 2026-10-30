@@ -221,17 +221,17 @@ export const defaults = Object.freeze({
 
     roles: {
         default: r({}),
-        planner: r({ effort: 'high' }),
-        architect: r({ effort: 'high' }),
-        orchestrator: r({ effort: 'high' }),
-        worker: r({ effort: 'high' }),
+        planner: r({ model: 'gpt-6.1-terra', effort: 'xhigh' }),
+        architect: r({ model: 'gpt-6.1-terra', effort: 'xhigh' }),
+        orchestrator: r({ model: 'gpt-6.1-terra', effort: 'xhigh' }),
+        worker: r({ model: 'gpt-6.1-terra', effort: 'high' }),
         writer: r({
             // Documents stay on the cheaper model; only the effort grows with the work.
             tiers: [
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
-        reviewer: r({ effort: 'high' }),
+        reviewer: r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
         vision: r({
             // A medium image keeps the cheap model; a screenshot or a large image moves to the senior one.
             tiers: {
@@ -240,7 +240,7 @@ export const defaults = Object.freeze({
                 complex: { model: 'gpt-6.1-terra', effort: 'xhigh' },
             },
         }),
-        summarizer: r({ effort: 'high', summary: 'none', verbosity: 'medium' }),
+        summarizer: r({ model: "gpt-6.1-terra", effort: 'xhigh', summary: 'none', verbosity: 'medium' }),
         solver: r({
             tiers: {
                 trivial: { model: 'gpt-6.1-terra', effort: 'high' },
@@ -248,12 +248,12 @@ export const defaults = Object.freeze({
                 complex: { model: 'gpt-6.1-sol', effort: 'xhigh' },
             },
         }),
-        clicker: r({ effort: 'low' }),
-        typer: r({ effort: 'low' }),
-        encoder: r({ model: "gpt-6.1-terra", effort: 'high' }),
-        tester: r({ effort: 'high' }),
+        clicker: r({ model: "gpt-6.1-terra", effort: 'low' }),
+        typer: r({ model: "gpt-6.1-terra", effort: 'low' }),
+        encoder: r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
+        tester: r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
         classifier: r({ effort: 'high' }),
-        extractor: r({ model: "gpt-6.1-terra", effort: 'high', verbosity: 'low' }),
+        extractor: r({ model: "gpt-6.1-terra", effort: 'xhigh', verbosity: 'low' }),
         coder: r({
             tiers: [
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
