@@ -163,6 +163,25 @@ test('run without approval in non-interactive mode is read-only', async () => {
     assert.match(stderr, /только читать/);
 });
 
+test('run: --url reaches the task and a Figma link adds the remote MCP server', async () => {
+    let seenBody = null;
+    script = (body) => { seenBody = body; return { text: 'ok' }; };
+    const { code, stderr } = await runCli(['run', 'собери страницу', '--url', 'https://www.figma.com/design/abc123?node-id=1-2', '--single', '--no-memory']);
+    assert.equal(code, 0, stderr);
+    const input = JSON.stringify(seenBody.input);
+    assert.match(input, /Source URLs/);
+    assert.match(input, /https:\/\/www\.figma\.com\/design\/abc123/);
+    const figma = (seenBody.tools ?? []).find((tool) => tool.type === 'mcp' && tool.server_label === 'figma');
+    assert.ok(figma, 'the Figma MCP server is offered to the model');
+    assert.equal(figma.server_url, 'https://mcp.figma.com/mcp');
+});
+
+test('run: --url rejects a non-HTTP source', async () => {
+    const { code, stderr } = await runCli(['run', 'задача', '--url', 'file:///etc/passwd', '--single']);
+    assert.equal(code, 2);
+    assert.match(stderr, /--url/);
+});
+
 test('image: forces the image_generation tool and saves files to --out', async () => {
     const { code, stdout, stderr } = await runCli(['image', 'кот', '--out', 'pics/cat.png', '--json']);
     assert.equal(code, 0, stderr);

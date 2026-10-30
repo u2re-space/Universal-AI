@@ -91,6 +91,10 @@ export const EXECUTORS = Object.freeze({
         tools: 'screen', turns: 8, schema: null,
         description: 'Solves one problem from the screen or an image: an answer, a calculation, a formula, a captcha, element coordinates.',
     },
+    decomposer: {
+        tools: ['view_image', 'fetch_url'], turns: 8, schema: 'decompose',
+        description: 'Splits visual references and Figma files into ordered screens, frames, and reusable fragments before measurement.',
+    },
     measurer: {
         tools: ['view_image', 'crop_image', 'split_image', 'fetch_url'], turns: 16, schema: 'measure',
         description: 'Re-measures a crop or a layer and returns a measurement sheet: boxes, angles, borders, spacing, and CSS-ready values.',

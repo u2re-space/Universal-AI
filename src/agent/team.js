@@ -34,7 +34,7 @@ import { createRoleRunner } from './roles.js';
 import { builtinTools } from './loop.js';
 import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
-import { PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, DECORATOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
+import { PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, DECORATOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, DECOMPOSER_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
 import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace, stageEffort, fineQuality, defaultFineQuality } from './pace.js';
 import { contextBytes, profileFor } from '../openai/model-profiles.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
@@ -134,12 +134,14 @@ export function toolNamesForRole(allNames, role, spec = null) {
     if (role === 'reviewer') {
         return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || name === 'run_subagent' || name === 'delegate_role');
     }
-    if (role === 'image-processor' || role === 'measurer' || role === 'decorator') {
+    if (role === 'image-processor' || role === 'measurer' || role === 'decomposer' || role === 'decorator') {
         const allowed = new Set(role === 'image-processor'
             ? [...IMAGE_TOOL_NAMES, 'fetch_url']
             : role === 'measurer'
                 ? ['view_image', 'crop_image', 'split_image', 'fetch_url']
-                : [...READ_ONLY_TOOLS, 'write_file', 'replace_text', 'generate_svg', 'fetch_url']);
+                : role === 'decomposer'
+                    ? ['view_image', 'fetch_url']
+                    : [...READ_ONLY_TOOLS, 'write_file', 'replace_text', 'generate_svg', 'fetch_url']);
         return allNames.filter((name) => allowed.has(name));
     }
     return allNames;
@@ -243,9 +245,11 @@ export async function runTeam({
             allowWrite: role === 'measurer' ? ['crop_image', 'split_image'] : [],
             describeScreen: roles.describeScreen,
         });
-        const builtin = role === 'measurer' && config.tools.web
-            ? builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search')
-            : [];
+        const builtin = role === 'decomposer'
+            ? builtinTools(config, { web: config.tools.web })
+            : role === 'measurer' && config.tools.web
+                ? builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search')
+                : [];
         const known = stepState.complexity === 'trivial' || stepState.complexity === 'complex' ? stepState.complexity : 'normal';
         const tier = role === 'solver' || role === 'measurer' ? roles.resolve(role, known) : null;
         let model = tier?.model ?? null;
@@ -260,6 +264,7 @@ export async function runTeam({
             delegated: task,
             ...(spec.schema === 'batch' ? { schema: BATCH_SCHEMA, schemaName: 'batch' } : {}),
             ...(spec.schema === 'measure' ? { schema: MEASURER_SCHEMA, schemaName: 'measure' } : {}),
+            ...(spec.schema === 'decompose' ? { schema: DECOMPOSER_SCHEMA, schemaName: 'decomposition' } : {}),
             ...(spec.schema === 'decorations' ? { schema: DECORATOR_SCHEMA, schemaName: 'decorations' } : {}),
             ...(model ? { model } : {}),
             ...(tier ? { effort: tier.effort } : {}),
@@ -749,6 +754,8 @@ export async function runTeam({
         let decisionsAccepted = false;
         const iconifierMarkup = new Set();
         const referenceParts = parts.filter((part) => part?.type === 'input_image');
+        const hasFigmaReference = /https?:\/\/(?:www\.)?figma\.com\//i.test(task);
+        let decomposition = null;
         const stages = [
             {
                 id: 'answer',
@@ -975,11 +982,50 @@ export async function runTeam({
                 },
             },
             {
+                id: 'decompose',
+                run: async () => {
+                    if (resumedWork || (!referenceParts.length && !/https?:\/\/(?:www\.)?figma\.com\//i.test(task))) return;
+                    const role = roles.resolve('decomposer', plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal');
+                    const model = paced?.ready
+                        ? clampModel(role.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.decomposer?.model))
+                        : role.model;
+                    const taskLines = [
+                        ...referencePaths.map((source) => `- ${source}`),
+                        ...[...task.matchAll(/https?:\/\/[^\s)]+/gi)].map(([source]) => `- ${source}`),
+                    ];
+                    notify({ type: 'stage.start', stage: 'decompose', role: 'decomposer', model });
+                    const result = await roles.run('decomposer', {
+                        text: `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Design sources\n${taskLines.join('\n') || '(attached image references)'}\n\n# Task\nIdentify screens and relationships before measurements.`,
+                        parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.decomposer),
+                        toolset: createToolset({ ...toolBase, names: toolNamesForRole(enabled, 'decomposer', config.roles?.decomposer), approvalLevel: 'read', extras: mcpRead }),
+                        builtin: builtinTools(config, { web: config.tools.web }).filter((tool) => tool.type === 'mcp' || (config.tools.web && tool.type === 'web_search')),
+                        schema: DECOMPOSER_SCHEMA, schemaName: 'decomposition',
+                        maxTurns: config.agent.decomposerMaxTurns ?? 8, model,
+                        ...(role.effort ? { effort: role.effort } : {}),
+                    });
+                    if (result.status === 'cancelled' || result.status === 'budget') return { exit: stop(result, 'разбиение экранов') };
+                    if (result.data) {
+                        decomposition = result.data;
+                        ctx.set('decomposition', 'Screen decomposition (before measurement)', JSON.stringify(decomposition, null, 2), { priority: 9 });
+                        await writeFile(path.join(root, '.tmp', work.id, 'decomposition.json'), `${JSON.stringify(decomposition, null, 2)}\n`, 'utf8').catch((error) => {
+                            notify({ type: 'warning', message: `Разбиение экранов не сохранено: ${errorMessage(error)}` });
+                        });
+                        progress.notes ??= [];
+                        progress.notes.push({ kind: 'decomposer', status: 'completed', report: decomposition.summary });
+                        work.progress = progress;
+                        await persist();
+                    } else {
+                        notify({ type: 'warning', message: `Decomposer не ответил (${result.status}${result.error ? `: ${errorMessage(result.error)}` : ''}); замеры продолжаются.` });
+                    }
+                    notify({ type: 'stage.done', stage: 'decompose', status: result.status });
+                },
+            },
+            {
                 id: 'measure',
                 run: async () => {
                     // 2. Measurer: numbers for the references before any style, SVG, or artwork is written.
                     const measureMode = config.agent.measure ?? 'auto';
-                    if (measureMode !== 'off' && !resumedWork && referenceParts.length && (measureMode === 'always' || plan.complexity !== 'trivial')) {
+                    if (measureMode !== 'off' && !resumedWork && (referenceParts.length || hasFigmaReference) && (measureMode === 'always' || plan.complexity !== 'trivial')) {
                         const tier = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
                         const measurerRole = roles.resolve('measurer', tier);
                         const model = encodeRoute || !paced?.ready
@@ -1013,9 +1059,8 @@ export async function runTeam({
                                 })
                                 : null;
                         };
-                        const measureBuiltin = config.tools.web
-                            ? builtinTools(config, { web: true }).filter((tool) => tool.type === 'web_search')
-                            : [];
+                        const measureBuiltin = builtinTools(config, { web: config.tools.web })
+                            .filter((tool) => tool.type === 'mcp' || (config.tools.web && tool.type === 'web_search'));
                         const measureContext = ctx.render({ maxBytes: measureMaxBytes, exclude: ['tree'] });
                         const measurePlan = `Plan: ${plan.summary}\nSteps:\n${bullets(plan.steps.map((step) => step.goal))}`;
                         /** One measurement pass, with a tool-less report when the turn budget is spent. */

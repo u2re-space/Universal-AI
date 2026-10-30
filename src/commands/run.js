@@ -54,6 +54,15 @@ export async function run(ctx) {
     const stdinText = await readStdin({ maxBytes: config.limits.maxStdinBytes, stdin: ctx.stdin ?? process.stdin });
     const prepared = await prepareTeamInvocation({ positionals, values, cwd: ctx.cwd, stdinText: stdinText ?? '' });
     let task = prepared.task;
+    const hasFigmaSource = [...(values.url ?? []), task].some((value) => /https?:\/\/(?:www\.)?figma\.com\//i.test(value));
+    if (hasFigmaSource) {
+        config.mcp ??= { servers: [] };
+        config.mcp.servers ??= [];
+        if (!config.mcp.servers.some((server) => server.id === 'figma')) {
+            config.mcp.servers.push({ id: 'figma', transport: 'http', server_url: 'https://mcp.figma.com/mcp', server_description: 'Figma design context for linked files and nodes.', require_approval: 'never', allowed_tools: null, authorization: null, headers: null, enabled: true });
+            renderer.line('info', 'Figma MCP подключён к запросу: https://mcp.figma.com/mcp (нужен доступ Responses API к Figma).', { dim: true });
+        }
+    }
     const parts = await loadAttachments({ images: values.image ?? [], files: values.file ?? [], detail: values.detail ?? 'auto', cwd: ctx.cwd, config, renderer });
     if (stdinText && task !== stdinText) parts.push({ type: 'input_text', text: stdinFence(stdinText) });
 
@@ -84,7 +93,7 @@ export async function run(ctx) {
             kind: prepared.kind, prompt: task, fidelity: config.generate.fidelity, creativity: config.generate.creativity,
             quality: config.pace.quality,
             platform: resolvePlatform(config.generate.platform),
-            references: { images: mockups, files: values.file ?? [], examples: values.example ?? [] },
+            references: { images: mockups, files: values.file ?? [], examples: values.example ?? [], urls: values.url ?? [] },
             stagedRefs,
             name: path.basename(ctx.cwd),
         });

@@ -141,6 +141,7 @@ export async function configCommand(ctx) {
                 vision: { model: null, effort: 'low' },
                 summarizer: { model: null, effort: 'low' },
                 extractor: { model: null, effort: 'low' },
+                decomposer: { model: null, effort: null },
                 measurer: { model: null, effort: null },
                 iconifier: { model: 'gpt-6.1-sol', effort: null },
                 'image-processor': { model: null, effort: 'high' },

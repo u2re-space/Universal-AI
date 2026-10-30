@@ -2,7 +2,7 @@
  * @file src/roles/index.js
  * @module roles/index
  * @purpose Collect the prompt of every named role.
- * @depends roles/default, roles/planner, roles/architect, roles/orchestrator, roles/worker, roles/coder, roles/styler, roles/iconifier, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/measurer, roles/decorator, roles/image-processor
+ * @depends roles/default, roles/planner, roles/architect, roles/orchestrator, roles/worker, roles/coder, roles/styler, roles/iconifier, roles/writer, roles/reviewer, roles/vision, roles/summarizer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/tester, roles/classifier, roles/extractor, roles/decomposer, roles/measurer, roles/decorator, roles/image-processor
  * @usedBy commands/instructions, agent/team
  * @exports ROLE_INSTRUCTIONS
  * @ai.tags roles, prompts
@@ -29,6 +29,7 @@ import * as encoder from './encoder.js';
 import * as tester from './tester.js';
 import * as classifier from './classifier.js';
 import * as extractor from './extractor.js';
+import * as decomposer from './decomposer.js';
 import * as measurer from './measurer.js';
 import * as decorator from './decorator.js';
 import * as imageProcessor from './image-processor.js';
@@ -60,6 +61,7 @@ export const ROLE_INSTRUCTIONS = {
     tester: tester.instructions,
     classifier: classifier.instructions,
     extractor: extractor.instructions,
+    decomposer: decomposer.instructions,
     measurer: measurer.instructions,
     decorator: decorator.instructions,
     'image-processor': imageProcessor.instructions,

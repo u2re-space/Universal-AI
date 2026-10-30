@@ -43,7 +43,7 @@ export { HELP };
 const OPTIONS = {
     model: { type: 'string', short: 'm' }, effort: { type: 'string' }, 'max-effort': { type: 'string' }, summary: { type: 'string' },
     reasoning: { type: 'boolean', default: true }, instructions: { type: 'string', short: 'i' },
-    image: { type: 'string', multiple: true }, file: { type: 'string', short: 'f', multiple: true }, detail: { type: 'string' },
+    image: { type: 'string', multiple: true }, file: { type: 'string', short: 'f', multiple: true }, url: { type: 'string', multiple: true }, detail: { type: 'string' },
     out: { type: 'string', short: 'o' }, session: { type: 'string', short: 's' }, store: { type: 'boolean', default: false },
     web: { type: 'boolean', default: false }, 'no-web': { type: 'boolean', default: false }, images: { type: 'boolean', default: false }, desktop: { type: 'boolean', default: false }, 'unsafe-screenshot': { type: 'boolean', default: false }, tools: { type: 'string' },
     'no-tools': { type: 'boolean', default: false }, agents: { type: 'boolean' }, 'agents-file': { type: 'string' }, approve: { type: 'string' }, yes: { type: 'boolean', short: 'y', default: false },

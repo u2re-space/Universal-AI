@@ -509,7 +509,7 @@ function validateConfig(c) {
     }
     if (!isRecord(c.documentation.roles)) fail('documentation.roles должен быть объектом');
     for (const [name, sources] of Object.entries(c.documentation.roles)) {
-        if (!['planner', 'architect', 'orchestrator', 'worker', 'coder', 'styler', 'iconifier', 'measurer', 'image-processor'].includes(name)) fail(`documentation.roles.${name}: неизвестная встроенная роль`);
+        if (!['planner', 'architect', 'orchestrator', 'worker', 'coder', 'styler', 'iconifier', 'decomposer', 'measurer', 'image-processor'].includes(name)) fail(`documentation.roles.${name}: неизвестная встроенная роль`);
         if (!Array.isArray(sources) || sources.some((source) => typeof source !== 'string' || !Object.hasOwn(c.documentation.sources, source))) {
             fail(`documentation.roles.${name}: список имён из documentation.sources`);
         }
@@ -569,7 +569,7 @@ function validateConfig(c) {
         }
     }
     if (!['team', 'single'].includes(c.agent.mode)) fail('agent.mode: team | single');
-    for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'architectMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'measurerPasses', 'decoratorMaxTurns', 'maxContextBytes']) {
+    for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'architectMaxTurns', 'decomposerMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'measurerPasses', 'decoratorMaxTurns', 'maxContextBytes']) {
         if (!Number.isSafeInteger(c.agent[key]) || c.agent[key] < (key === 'maxReviewRounds' ? 0 : 1)) fail(`agent.${key} должен быть целым числом`);
     }
     if (c.agent.measurerPasses > 2) fail('agent.measurerPasses: 1..2');

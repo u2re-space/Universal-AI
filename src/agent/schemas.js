@@ -31,6 +31,23 @@ export const CLASSIFIER_SCHEMA = object({
     label: { type: 'string', enum: ['trivial', 'normal', 'complex'], description: 'How large the task is.' },
 });
 
+export const DECOMPOSER_SCHEMA = object({
+    summary: { ...string, description: 'How the provided design divides into screens or meaningful fragments.' },
+    screens: {
+        type: 'array',
+        description: 'Ordered screens or reusable sections; keep each entry grounded in an image region or Figma node.',
+        items: object({
+            name: { ...string, description: 'Short screen or fragment name.' },
+            source: { ...string, description: 'Source image path or Figma URL/node link.' },
+            nodeId: { ...nullableString, description: 'Figma node id when available; null for raster-only references.' },
+            purpose: { ...string, description: 'What this screen or fragment represents and how it relates to the flow.' },
+            bounds: { ...nullableString, description: 'Image coordinates or Figma frame bounds when available; null when unavailable.' },
+            references: { ...strings, description: 'Other screens or nodes related to this one.' },
+        }),
+    },
+    notes: { ...strings, description: 'Ambiguities, inferred relationships, or inaccessible sources.' },
+});
+
 export const IMAGE_PROCESSOR_SCHEMA = object({
     summary: { ...string, description: 'What image and asset tasks were completed or could not be completed.' },
     assets: {
@@ -82,7 +99,7 @@ export const PLAN_SCHEMA = object({
     complexity: { type: 'string', enum: ['trivial', 'normal', 'complex'] },
     pipeline: {
         type: 'array',
-        description: 'Stage order for this task. Omit a stage to skip it. Empty means the default order. Known stages: answer, classify, plan, measure, architect, collect, images, decor, work, iconify, review, outcome, memory.',
+        description: 'Stage order for this task. Omit a stage to skip it. Empty means the default order. Known stages: answer, classify, plan, decompose, measure, architect, collect, images, decor, work, iconify, review, outcome, memory.',
         items: { type: 'string', enum: [...PIPELINE_STAGE_IDS] },
     },
     steps: {

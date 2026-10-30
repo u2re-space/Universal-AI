@@ -66,7 +66,7 @@ test('resolvePipeline pulls a dependency in front of its dependent, keeping the 
 test('resolvePipeline adds a hard dependency a caller forgot', () => {
     assert.deepEqual(resolvePipeline({ planPipeline: ['work'] }).order, ['plan', 'work', 'iconify', 'outcome', 'memory']);
     assert.deepEqual(resolvePipeline({ planPipeline: ['review'] }).order, ['plan', 'work', 'iconify', 'review', 'outcome', 'memory']);
-    assert.deepEqual(resolvePipeline({ planPipeline: ['measure'] }).order, ['plan', 'measure', 'outcome', 'memory']);
+    assert.deepEqual(resolvePipeline({ planPipeline: ['measure'] }).order, ['plan', 'decompose', 'measure', 'outcome', 'memory']);
     assert.deepEqual(resolvePipeline({ planPipeline: ['work', 'iconify', 'review'] }).order, ['plan', 'work', 'iconify', 'review', 'outcome', 'memory']);
 });
 

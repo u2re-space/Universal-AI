@@ -50,7 +50,7 @@ function formatStagedRef(ref) {
 
 /**
  * Build the task, the operator instructions, and the manifest that is written to disk.
- * @param {{ kind: string, prompt?: string, name?: string, fidelity: number, creativity: number, platform: object, references?: { images?: string[], files?: string[], templates?: string[], examples?: string[] }, stagedRefs?: object[] }} request
+     * @param {{ kind: string, prompt?: string, name?: string, fidelity: number, creativity: number, platform: object, references?: { images?: string[], files?: string[], templates?: string[], examples?: string[], urls?: string[] }, stagedRefs?: object[] }} request
  * @returns {{ task: string, instructions: string, manifest: object }}
  * @exports
  * @ai.hint pure
@@ -64,12 +64,14 @@ export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', f
         files: [...(references.files ?? [])],
         templates: [...(references.templates ?? [])],
         examples: [...(references.examples ?? [])],
+        urls: [...(references.urls ?? [])],
     };
     const listed = [
         ...referenceLines('Images and mockups', refs.images),
         ...referenceLines('Files', refs.files),
         ...referenceLines('Templates', refs.templates),
         ...referenceLines('Design examples', refs.examples),
+        ...referenceLines('Source URLs', refs.urls),
     ];
 
     // Staged reference bullets (project-relative paths with dimensions).

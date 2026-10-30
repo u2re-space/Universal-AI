@@ -104,9 +104,16 @@ export async function prepareTeamInvocation({ positionals, values, cwd, stdinTex
     }
     if (!inline && stdinText) inline = stdinText;
     const template = await readTemplates(values.template, cwd);
-    const task = await renderPlaceholders(applyTemplate(template, inline), {
+    let task = await renderPlaceholders(applyTemplate(template, inline), {
         env: liveEnv(), root: cwd, namespaces: ['env', 'fs'],
     });
+    const urls = values.url ?? [];
+    for (const source of urls) {
+        let parsed;
+        try { parsed = new URL(source); } catch { throw new UsageError(`--url: некорректный адрес: ${source}`); }
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new UsageError(`--url: поддерживаются только http и https: ${source}`);
+    }
+    if (urls.length) task = [task, `Source URLs:\n${urls.map((source) => `- ${source}`).join('\n')}`].filter(Boolean).join('\n\n');
     const kind = resolveKind({ flag: values.kind ?? null, token: split.kindToken, task });
     const wantsProfile = Boolean(kind) || values.fidelity !== undefined || values.creativity !== undefined || Boolean(values.platform) || Boolean(values.example?.length);
     const images = values.image ?? [];

@@ -316,7 +316,7 @@ export const TOOL_SPECS = {
         category: 'read', group: 'desktop',
         description: 'Send one task to another role and return its answer. Unlike run_subagent it may carry the shared context of this run with the task (context=true), so the role does not have to rediscover what this run already knows. encoder returns a batch and does not run it; pass that batch to run_batch. measurer re-measures a crop or a layer and returns its measurement sheet. decorator builds a decorative element as HTML+CSS or SVG and returns its snippet. iconifier selects existing or verified icons and integrates them into markup. User-defined roles from roles.<name> are accepted too.',
         parameters: schema({
-            role: { type: 'string', enum: ['solver', 'clicker', 'typer', 'encoder', 'tester', 'measurer', 'decorator', 'styler', 'iconifier'], description: 'Role to call: a built-in executor or a name from roles.<name>.' },
+            role: { type: 'string', enum: ['solver', 'clicker', 'typer', 'encoder', 'tester', 'decomposer', 'measurer', 'decorator', 'styler', 'iconifier'], description: 'Role to call: a built-in executor or a name from roles.<name>.' },
             task: str('One task for that role. Say what to return; a self-contained task is still better.'),
             context: bool('True includes the shared context of this run (task, plan, progress, findings, diff) with the task. False sends the task alone, like run_subagent.'),
         }),

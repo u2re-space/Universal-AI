@@ -222,6 +222,28 @@ test('a directory is a nested tree or a flat list, and a seeded directory enters
     }
 });
 
+test('prepareTeamInvocation appends --url sources and rejects non-HTTP ones', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-url-task-'));
+    try {
+        const prepared = await prepareTeamInvocation({
+            positionals: ['собери страницу'], values: { url: ['https://example.com/a', 'https://www.figma.com/design/abc'] }, cwd: root, stdinText: '',
+        });
+        assert.match(prepared.task, /Source URLs:/);
+        assert.match(prepared.task, /- https:\/\/example\.com\/a/);
+        assert.match(prepared.task, /- https:\/\/www\.figma\.com\/design\/abc/);
+        await assert.rejects(
+            () => prepareTeamInvocation({ positionals: ['x'], values: { url: ['file:///etc/passwd'] }, cwd: root, stdinText: '' }),
+            /--url/,
+        );
+        await assert.rejects(
+            () => prepareTeamInvocation({ positionals: ['x'], values: { url: ['not a url'] }, cwd: root, stdinText: '' }),
+            /--url/,
+        );
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test('prepareTeamInvocation reads a template and does not require a generation profile', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'ai-handoff-task-'));
     try {

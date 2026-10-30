@@ -66,6 +66,7 @@ function roleOf(body) {
     if (format === 'task_label') return 'classifier';
     if (format === 'extraction') return 'extractor';
     if (format === 'measure') return 'measurer';
+    if (format === 'decomposition') return 'decomposer';
     if (format === 'decorations') return 'decorator';
     if (format === 'image_assets') return 'image-processor';
     if (typeof body.instructions === 'string' && body.instructions.includes('You are the iconifier,')) return 'iconifier';
@@ -185,7 +186,7 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.throws(() => overridesFrom({ role: ['Bad Name=x'] }), /--role/);
     assert.throws(() => overridesFrom({ role: ['UPPER=x'] }), /--role/);
     assert.deepEqual(overridesFrom({ role: ['image-processor=gpt-6.1-terra:medium'] }).roles, { 'image-processor': { model: 'gpt-6.1-terra', effort: 'medium' } });
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 22);
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 23);
     assert.equal(overridesFrom({ extract: 'always' }).agent.extract, 'always');
     assert.equal(overridesFrom({ 'no-extract': true }).agent.extract, 'off');
     assert.throws(() => overridesFrom({ extract: 'nope' }), /--extract/);
@@ -1568,6 +1569,69 @@ test('a styler revision uses terra only after a completed sol SCSS pass', async 
     } finally {
         await rm(dir, { recursive: true, force: true });
     }
+});
+
+test('decomposer splits the reference into screens before the measurer', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-'));
+    const events = [];
+    const decomposeBodies = [];
+    const measureBodies = [];
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'три экрана по референсу', complexity: 'normal',
+                steps: [{ goal: 'Создать styles.scss', details: '', verify: 'прочитать styles.scss' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, risks: [], imageTasks: [],
+            }) };
+        }
+        if (role === 'decomposer') {
+            decomposeBodies.push(body);
+            return { text: JSON.stringify({
+                summary: 'Коллаж делится на три экрана.',
+                screens: [
+                    { name: 'Landing', source: 'mockup.png', nodeId: null, purpose: 'Первый экран потока.', bounds: '0,0 400x300', references: [] },
+                    { name: 'Catalog', source: 'mockup.png', nodeId: null, purpose: 'Список карточек.', bounds: '400,0 400x300', references: ['Landing'] },
+                ],
+                notes: [],
+            }) };
+        }
+        if (role === 'measurer') {
+            measureBodies.push(body);
+            return { text: JSON.stringify({
+                summary: 'Карточка', source: 'mockup.png', unit: 'px',
+                units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '' },
+                confidence: 'high', assumptions: [], canvas: { x: 0, y: 0, width: 400, height: 300 },
+                elements: [], regions: [], rules: [], notes: '',
+            }) };
+        }
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    const result = await runTeam({
+        client: client(), config, ledger: createLedger(), task: 'сверстай три экрана',
+        root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+        emit: (event) => events.push(event),
+    });
+    assert.equal(result.status, 'completed', result.error?.message);
+    const stages = events.filter((e) => e.type === 'stage.start').map((e) => e.stage);
+    const decomposeIdx = stages.indexOf('decompose');
+    const measureIdx = stages.indexOf('measure');
+    assert.ok(decomposeIdx >= 0, 'decompose stage present: ' + stages.join(', '));
+    assert.ok(measureIdx > decomposeIdx, `decompose(${decomposeIdx}) runs before measure(${measureIdx})`);
+    assert.ok(events.some((e) => e.type === 'stage.start' && e.stage === 'decompose' && e.role === 'decomposer'));
+    assert.equal(decomposeBodies.length, 1);
+    assert.equal(decomposeBodies[0].model, defaults.roles.decomposer.model);
+    assert.equal((decomposeBodies[0].tools ?? []).some((tool) => tool.name === 'crop_image'), false, 'the decomposer only looks at whole references');
+    assert.match(JSON.stringify(measureBodies[0].input), /Screen decomposition/);
+    assert.match(JSON.stringify(measureBodies[0].input), /Landing/);
+    const saved = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'decomposition.json'), 'utf8'));
+    assert.equal(saved.screens.length, 2);
+    assert.equal(saved.screens[1].name, 'Catalog');
+    await rm(dir, { recursive: true, force: true });
 });
 
 test('measurer stage runs before collector and gives CSS-ready values to the styler', async () => {

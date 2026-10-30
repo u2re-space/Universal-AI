@@ -273,6 +273,7 @@ export const defaults = Object.freeze({
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ]
         }),
+        decomposer: r({ model: 'gpt-6.1-terra', effort: 'xhigh' }),
         measurer: r({
             /*model: 'gpt-6.1-sol', effort: 'xhigh',*/ tiers: [
                 { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
@@ -293,7 +294,7 @@ export const defaults = Object.freeze({
         mode: 'team',                   // team (planner → architect → orchestrator → worker → reviewer) | single (one model, one loop)
         /**
          * Stage order for team runs. null = the catalog order; a list reorders or drops stages
-         * (answer, classify, plan, measure, architect, collect, images, decor, work, iconify, review, outcome, memory).
+         * (answer, classify, plan, decompose, measure, architect, collect, images, decor, work, iconify, review, outcome, memory).
          * The plan may supply its own order, which wins over this list for that task.
          */
         pipeline: null,
@@ -315,8 +316,9 @@ export const defaults = Object.freeze({
          */
         architect: 'auto',              // off | auto | always
         architectMaxTurns: 8,           // read-only tool turns the architect may spend inspecting the project
+        decomposerMaxTurns: 8,           // tool turns used to identify screens and frames before measurements
         /**
-         * Reference measurements taken by the `measurer` role right after the plan and before the worker
+         * Reference measurements taken by the `measurer` role right after decomposition and before the worker
          * writes styles or artwork. auto = only when reference images are attached and the plan is not
          * trivial; always = whenever references are attached; off = never. The sheet goes to the shared
          * context and to `.tmp/<id>/measurements.json`.

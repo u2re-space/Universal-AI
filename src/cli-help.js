@@ -7,6 +7,7 @@
  * @ai.tags cli
  * @ai.hint pure
  * @changed 2026-10-26 0.2.0: --max-effort, --context, role ceilings, delegate_role, and the stage pipeline.
+ * @changed 2026-10-31 --url for run/gen, the decomposer role and decompose stage, Figma MCP, and decomposition examples.
  */
 export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
 
@@ -29,7 +30,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai map [path]                     карта проекта .ai/map.json (файлы и символы). Черновик read/edit/scan подтверждает planner; запись вне edit выполняется и помечается
   ai complete                       вставка в месте курсора (JSON из stdin), учитывает AGENTS.md. Модель gpt-6.1-terra, effort none
   ai complete --listen [--port n]   HTTP POST и WebSocket /v1/complete на 127.0.0.1 (для редактора)
-  ai mcp [list|add|remove|probe]    пользовательские MCP-серверы (stdio)
+  ai mcp [list|add|remove|probe]    пользовательские MCP-серверы (stdio или https)
   ai decide [набор] "текст"         вероятности Decisions API (community, support, smm, guard, route)
   ai moderate [набор] "текст"       модерация: omni-moderation-latest или decisions, если /moderations нет
   ai channels --listen [--port n]   HTTP и WebSocket: /v1/decisions, /v1/moderate, /v1/chats/reply, /v1/channels
@@ -88,7 +89,8 @@ context=false запускает роль на чистом контексте. 
 
 Команда (run и gen):
   --role <роль=модель[:effort[:max-effort]]>  модель для роли: planner, architect, orchestrator, worker, coder, styler, writer, reviewer, vision,
-                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, measurer, iconifier, image-processor, default, all.
+                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, decomposer, measurer, iconifier,
+                         image-processor, default, all.
                          Своё имя-слаг создаёт роль в roles.<имя> (инструкции и инструменты задаются в конфигурации)
                          (например: --role planner=gpt-6.1-terra:high --role worker=gpt-6.1-terra:medium:high --role vision=gpt-6.1-terra)
                          --role collector=... и --role coordinator=... принимают orchestrator (объединённая роль)
@@ -111,13 +113,17 @@ context=false запускает роль на чистом контексте. 
                           и пошаговый бриф для остальных ролей; его вопросы получает orchestrator.
                           auto — только для нетривиального плана (по умолчанию), always — всегда, --no-architect выключает.
                           Структура уходит в общий контекст и в .tmp/<id>/architecture.json
-   Порядок этапов задаёт план (поле pipeline) и agent.pipeline в конфигурации: answer, classify, plan, measure,
-    architect, collect, images, decor, work, iconify, review, outcome, memory. После work этап iconify добавляется автоматически
+   Порядок этапов задаёт план (поле pipeline) и agent.pipeline в конфигурации: answer, classify, plan, decompose,
+    measure, architect, collect, images, decor, work, iconify, review, outcome, memory. decompose (decomposer) разбирает
+    скриншоты на экраны, секции и элементы до замеров; measure снимает метрики. После work этап iconify добавляется автоматически
     и пропускается без изменений HTML/JSX/DOM-разметки; review выполняется после интеграции иконок.
   --no-resume            не продолжать незавершённый шаг, фазу и ход из .tmp (по умолчанию тот же текст задачи продолжается с места остановки)
   --route encoder|planner|decisions  куда отдать первый ответ. decisions спрашивает модель решений. Без флага решает метка ответа
   В каталоге Node.js или фронтенда сканер (до ответа, encoder и planner) кладёт в контекст package.json, tsconfig.json или jsconfig.json, import map и найденные по ним файлы. Корневой index.html целиком — если он до 8 КиБ или задача про страницу.
   --template <файл>      текст задачи из файла. {{message}} заменяется целью. Можно несколько
+  --url <http(s)://…>    исходный адрес для run/gen (можно несколько, только http/https). Попадает в task
+                         как Source URLs, а при профиле генерации — в .ai/generation.json.
+                         Ссылка figma.com (в --url или в тексте задачи) сама добавляет MCP figma
   --fidelity <0..100>    цель соответствия референсам (по умолчанию 87). Процент не измеряется
    --speed <0..200>       скорость работы (по умолчанию 10). Сумма со --quality до 100 стабильна. Выше 100 скорость срывает гарантии
    --quality <0..200>     качество работы (по умолчанию 40). Выше 200 и сумма больше 200 — отказ
@@ -137,7 +143,7 @@ context=false запускает роль на чистом контексте. 
   --max-steps <n>        потолок шагов плана. Закрепляет число и заменяет расчёт pace
   --creativity <0..100>  сколько можно добавить сверх референсов (по умолчанию 20)
   --platform <id>        профиль платформы (по умолчанию chrome-157-beta)
-  --example <путь|url>   пример или шаблон оформления, можно несколько
+  --example <путь|url>   пример или шаблон оформления, можно несколько; для decompose — ./examples/for-decompose/*.png
   --kind landing|site|backend|app  вид генерации. У memory --kind по-прежнему вид записи
   --no-memory            не использовать долговременную память (SQLite в ~/.ai-agent/memory.db)
   --global               memory: работать с глобальными записями   --tags a,b
@@ -184,6 +190,10 @@ MCP:
   ai mcp remove <id>     ai mcp probe <id>
   Локальный сервер — stdio. Сторонний https-адрес уходит в API как type mcp, процесс не запускается.
   add/remove правят ~/.ai-agent/config.json. Вызовы локальных инструментов MCP подтверждаются как сеть.
+  Figma: ссылка figma.com в --url или в тексте задачи сама добавляет сервер figma
+  (transport http, https://mcp.figma.com/mcp, require_approval never) в запрос и в .ai/generation.json —
+  отдельный ai mcp add не нужен. Decomposer и measurer читают макет через этот сервер; сервер требует
+  авторизацию Figma на стороне API, поэтому без неё остаются только приложенные картинки.
 
 Чаты и решения:
   ai decide и POST /v1/decisions — модель openai/gpt-6.1-terra-decisions (или decisions.model). Если маршрута нет, шаг решений пропускается.
