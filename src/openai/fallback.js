@@ -96,7 +96,9 @@ export function routeMissing(error) {
 
 /**
  * Whether a backend serves a route. A missing `supports` map means every route is on.
- * `images-edit` and `images-vector` share the `images` switch.
+ * `images-edit` and `images-vector` share the `images` switch. Both the plain route name and the
+ * `decisionAPI` / `imageAPI` spellings a backend entry may use are honored, because a switch that
+ * silently matched nothing left an unsupported host in the chain.
  * @param {object|null|undefined} supports
  * @param {string} kind
  * @returns {boolean}
@@ -107,6 +109,7 @@ export function supportsRoute(supports, kind) {
     if (!supports || typeof supports !== 'object') return true;
     const key = kind === 'images-edit' || kind === 'images-vector' ? 'images' : kind;
     if (key === 'decisions' && Object.hasOwn(supports, 'decisionAPI')) return supports.decisionAPI !== false;
+    if (key === 'images' && Object.hasOwn(supports, 'imageAPI')) return supports.imageAPI !== false;
     return supports[key] !== false;
 }
 

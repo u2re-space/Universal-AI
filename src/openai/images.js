@@ -7,10 +7,11 @@
  * @exports PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, IMAGE_SIZES, VECTOR_RATIOS,
  *   imageTransport, imageModelFor, normalizeImageSize, normalizeImageFormat, resolveImageFormat, normalizeVectorRatio,
  *   isVectorModel, supportsTransparentBackground, backgroundValue, imageFormatField, generationBody, encodeMultipart,
- *   imagePayloads, pngHasAlphaChannel, sniffImage
+ *   imagePayloads, imageSources, acceptsResponseFormat, pngHasAlphaChannel, sniffImage
  * @ai.tags images, proxyapi
  * @ai.hint pure
  * @changed 2026-10-22 gpt-image-2.5 defaults for raster, gpt-image-2 alpha exception, vector model support.
+ * @changed 2026-10-30 response_format only where the model takes it; imageSources reads b64_json or url.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -152,8 +153,10 @@ export function imageSizeAttempts(size, model) {
 
 /**
  * `images` uses /images/generations and /images/edits. `responses` uses the Responses image_generation tool.
- * A proxyapi.ru host selects `images` unless image.transport is set.
- * @param {{ baseURL?: string, image?: { transport?: string | null } }} config
+ * A proxyapi.ru host selects `images` unless image.transport is set. Any other gateway only gets the
+ * images route when its own backend entry declares it, because the Responses image tool is a
+ * server-side feature most OpenAI-compatible hosts do not implement, while /images/generations is.
+ * @param {{ baseURL?: string, apiKey?: string, backends?: object[], image?: { transport?: string | null } }} config
  * @returns {'images' | 'responses'}
  * @exports
  * @ai.hint pure
@@ -161,11 +164,17 @@ export function imageSizeAttempts(size, model) {
 export function imageTransport(config) {
     const chosen = config?.image?.transport;
     if (chosen === 'images' || chosen === 'responses') return chosen;
+    const declared = Array.isArray(config?.backends) ? config.backends : [];
+    const primary = String(config?.baseURL ?? '').replace(/\/+$/, '');
+    const entry = declared.find((item) => String(item?.baseURL ?? '').replace(/\/+$/, '') === primary);
+    const wants = (supports) => supports?.images === true || supports?.imageAPI === true;
+    if (wants(entry?.supports)) return 'images';
     try {
         const host = new URL(config?.baseURL ?? '').hostname;
         if (host === 'proxyapi.ru' || host.endsWith('.proxyapi.ru')) return 'images';
     } catch { /* an unusable base URL stays on the Responses tool */ }
-    return 'responses';
+    if (primary.startsWith('https://api.openai.com')) return 'responses';
+    return 'images';
 }
 
 /**
@@ -301,6 +310,22 @@ export function backgroundValue({ model, format = null, background = null }) {
 }
 
 /**
+ * Whether a model accepts the `response_format` field. `gpt-image-1` rejects it and always answers
+ * in base64, and vendor models that take `image_format` do not document it at all, so a strict
+ * gateway answers 400 for the whole request. Only the newer OpenAI image models are asked for it.
+ * @param {string | null | undefined} model
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function acceptsResponseFormat(model) {
+    const name = String(model ?? '').trim();
+    if (!/^(?:openai\/)?gpt-image-/i.test(name)) return false;
+    const version = /^(?:openai\/)?gpt-image-(\d+(?:\.\d+)?)/i.exec(name)?.[1];
+    return Boolean(version) && version !== '1';
+}
+
+/**
  * JSON body for POST /images/generations. `auto` size and quality are omitted; partial frames
  * are never sent. An unsupported size is snapped to the nearest supported frame. `background`
  * and the format field are sent only where the model understands them, so a Recraft request
@@ -320,7 +345,7 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
         if (aspect) body.aspect_ratio = aspect;
         if (Number.isInteger(n) && n > 1) body.n = n;
         body[imageFormatField(model)] = 'svg';
-        body['response_format'] = "b64_json";
+        if (acceptsResponseFormat(model)) body.response_format = 'b64_json';
         return body;
     }
     const frame = imageRequestSize(size, model);
@@ -333,7 +358,7 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
     if (fmt) body[imageFormatField(model)] = fmt;
     const backgroundField = backgroundValue({ model, format: fmt, background });
     if (backgroundField) body.background = backgroundField;
-    body['response_format'] = "b64_json";
+    if (acceptsResponseFormat(model)) body.response_format = 'b64_json';
     return body;
 }
 
@@ -363,6 +388,8 @@ export function encodeMultipart({ fields, files }) {
 
 /**
  * Base64 payloads from an images response. The documented field is data[0].b64_json.
+ * A gateway that ignores `response_format` answers with `url` instead; those rows are skipped here,
+ * so use `imageSources` when both shapes have to work.
  * @param {object} body
  * @returns {string[]}
  * @exports
@@ -371,6 +398,26 @@ export function encodeMultipart({ fields, files }) {
 export function imagePayloads(body) {
     const rows = Array.isArray(body?.data) ? body.data : [];
     return rows.map((row) => row?.b64_json).filter((value) => typeof value === 'string' && value);
+}
+
+/**
+ * Every image a response carries, in the order returned, as either inline base64 or a URL to
+ * fetch. Gateways differ here: OpenAI and ProxyAPI honor `response_format: b64_json`, while many
+ * OpenAI-compatible hosts always return `data[].url`. Reading only one of the two fields made the
+ * same call succeed on one backend and fail with "нет b64_json" on another.
+ * @param {object} body
+ * @returns {Array<{ kind: 'b64' | 'url', value: string }>}
+ * @exports
+ * @ai.hint pure
+ */
+export function imageSources(body) {
+    const rows = Array.isArray(body?.data) ? body.data : [];
+    const out = [];
+    for (const row of rows) {
+        if (typeof row?.b64_json === 'string' && row.b64_json.trim()) out.push({ kind: 'b64', value: row.b64_json.trim() });
+        else if (typeof row?.url === 'string' && row.url.trim()) out.push({ kind: 'url', value: row.url.trim() });
+    }
+    return out;
 }
 
 /**

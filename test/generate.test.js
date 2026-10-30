@@ -271,7 +271,7 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
     let sawImageTool = false;
     const server = await startMockServer({
         script: (body) => {
-            if (body.tools?.some((tool) => tool.type === 'image_generation')) sawImageTool = true;
+            if (body.tools?.some((tool) => tool.type === 'image_generation' || tool.name === 'generate_image')) sawImageTool = true;
             const role = body.text?.format?.name ?? 'worker';
             if (role === 'task_label') return { text: JSON.stringify({ label: 'trivial' }) };
             if (role === 'plan') {

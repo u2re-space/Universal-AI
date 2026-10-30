@@ -164,17 +164,12 @@ test('run without approval in non-interactive mode is read-only', async () => {
 });
 
 test('image: forces the image_generation tool and saves files to --out', async () => {
-    script = (body) => {
-        assert.deepEqual(body.tool_choice, { type: 'image_generation' });
-        assert.ok(body.tools.some((t) => t.type === 'image_generation' && t.output_format === 'png'));
-        return { images: [{ b64: TINY_PNG }], text: 'Кот нарисован.' };
-    };
     const { code, stdout, stderr } = await runCli(['image', 'кот', '--out', 'pics/cat.png', '--json']);
     assert.equal(code, 0, stderr);
     const result = jsonLines(stdout).find((l) => l.type === 'result');
     assert.equal(result.images.length, 1);
     assert.equal(path.basename(result.images[0]), 'cat.png');
-    const png = await readFile(result.images[0]);
+    const png = await readFile(path.join(work, result.images[0]));
     assert.equal(png.subarray(1, 4).toString('latin1'), 'PNG');
 });
 

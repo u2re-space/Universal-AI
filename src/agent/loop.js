@@ -28,7 +28,9 @@ export function builtinTools(config, { web = false, images = false } = {}) {
     if (web) tools.push(webSearchTool(config.webSearch?.contextSize));
     if (config.tools?.mcp !== false) tools.push(...remoteMcpTools(config.mcp?.servers));
     if (images) {
-        const image = { type: 'image_generation', response_format: "b64_json", output_format: config.image.format, partial_images: config.image.partialImages };
+        // The Responses image tool object has no `response_format`: that field belongs to the
+        // /images/generations body. Sending it here makes a strict gateway reject the whole request.
+        const image = { type: 'image_generation', output_format: config.image.format, partial_images: config.image.partialImages };
         if (config.imageModel) image.model = config.imageModel;
         if (config.image.size !== 'auto') image.size = config.image.size;
         if (config.image.quality !== 'auto') image.quality = config.image.quality;

@@ -94,7 +94,6 @@ async function askModel({ client, config = null, file, prompt, signal, model = n
         const payloads = await client.images.edit({
             model: techModel,
             prompt,
-            response_format: "b64_json",
             size: frameFor(info),
             format: 'png',
             signal,

@@ -19,7 +19,7 @@ import { createStreamReducer, outputText } from './stream.js';
 import { envValue } from '../core/runtime-env.js';
 import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
 import { rasterPadImageBytes, rasterRemoveImagePadding } from '../agent/image-raster.js';
-import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imagePayloads, imageRequestSize, imageSizeAttempts, isImageSizeError, isVectorModel, normalizeVectorRatio, resolveImageFormat } from './images.js';
+import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageRequestSize, imageSources, imageSizeAttempts, isImageSizeError, isVectorModel, normalizeVectorRatio, resolveImageFormat } from './images.js';
 
 export { ApiError };
 
@@ -288,6 +288,52 @@ export function createClient({
     const withText = (response) => (response && typeof response === 'object'
         ? Object.assign(response, { output_text: outputText(response) }) : response);
 
+    /**
+     * Download one image a gateway handed back as a URL instead of inline base64.
+     * @param {string} url
+     * @param {AbortSignal} [signal]
+     * @returns {Promise<Buffer>}
+     * @ai.hint io
+     */
+    async function fetchImageBytes(url, signal) {
+        let target;
+        try { target = new URL(url); }
+        catch { throw new ApiError(`Некорректный URL изображения: ${url}`, { code: 'INVALID_RESPONSE' }); }
+        const res = await transport.request({ url: target, method: 'GET', signal });
+        if (res.status < 200 || res.status >= 300) {
+            res.destroy();
+            throw new ApiError(`Не удалось скачать изображение: HTTP ${res.status}`, {
+                code: 'HTTP_ERROR', status: res.status, retryable: RETRYABLE_STATUS.has(res.status),
+            });
+        }
+        const raw = await readBody(res.body, maxResponseBytes);
+        if (!raw.length) throw new ApiError('Скачанное изображение пусто.', { code: 'INVALID_RESPONSE' });
+        return raw;
+    }
+
+    /**
+     * Base64 payloads from an images response. Inline `b64_json` is used as is; a `url` row is
+     * downloaded, because many OpenAI-compatible hosts ignore `response_format` and always answer
+     * with a link.
+     * @param {object} result
+     * @param {AbortSignal} [signal]
+     * @param {string} route Route name, for the error text.
+     * @returns {Promise<string[]>}
+     * @ai.hint io
+     */
+    async function payloadList(result, signal, route) {
+        const sources = imageSources(result);
+        if (!sources.length) {
+            throw new ApiError(`Ответ ${route} не содержит ни b64_json, ни url.`, { code: 'INVALID_RESPONSE' });
+        }
+        const out = [];
+        for (const source of sources) {
+            if (source.kind === 'b64') { out.push(source.value); continue; }
+            out.push((await fetchImageBytes(source.value, signal)).toString('base64'));
+        }
+        return out;
+    }
+
     const responses = {
         /** POST /responses — streams when body.stream is true; resolves with the final response. */
         async create(body, options = {}) {
@@ -308,22 +354,20 @@ export function createClient({
         inputItems: (id, options = {}) => call(`responses/${encodeURIComponent(id)}/input_items`, { method: 'GET', ...options }),
     };
     const images = {
-        /** POST /images/generations. Returns base64 payloads from data[].b64_json. */
+        /** POST /images/generations. Returns base64 payloads from data[].b64_json or data[].url. */
         async generate({ model, prompt, size, quality, n, format, background, signal } = {}) {
             const attempts = imageSizeAttempts(size, model);
             let result;
             for (let index = 0; ; index++) {
                 const requestedSize = attempts[index] ?? size;
                 try {
-                    result = await call('images/generations', { body: generationBody({ model, response_format: "b64_json", prompt, size: requestedSize, quality, n, format, background }), signal });
+                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, quality, n, format, background }), signal });
                     break;
                 } catch (error) {
                     if (index >= attempts.length - 1 || !isImageSizeError(error)) throw error;
                 }
             }
-            const payloads = imagePayloads(result);
-            if (!payloads.length) throw new ApiError('Ответ images/generations не содержит b64_json.', { code: 'INVALID_RESPONSE' });
-            return payloads;
+            return await payloadList(result, signal, 'images/generations');
         },
         /** POST /images/edits as multipart form data. `files` are { filename, mime, bytes }. */
         async edit({ model, prompt, files, size, format, background, signal } = {}) {
@@ -361,7 +405,7 @@ export function createClient({
                 if (isVectorModel(model)) {
                     const aspect = normalizeVectorRatio(attemptSize);
                     if (aspect) fields.aspect_ratio = aspect;
-                    fields['response_format'] = "b64_json";
+                    if (acceptsResponseFormat(model)) fields.response_format = 'b64_json';
                     fields[imageFormatField(model)] = 'svg';
                 } else {
                     const frame = imageRequestSize(attemptSize, model);
@@ -370,7 +414,7 @@ export function createClient({
                     if (fmt) fields[imageFormatField(model)] = fmt;
                     const backgroundField = backgroundValue({ model, format: fmt, background });
                     if (backgroundField) fields.background = backgroundField;
-                    fields['response_format'] = "b64_json";
+                    if (acceptsResponseFormat(model)) fields.response_format = 'b64_json';
                 }
                 const form = encodeMultipart({
                     fields,
@@ -383,8 +427,7 @@ export function createClient({
                     if (index >= attempts.length - 1 || !isImageSizeError(error)) throw error;
                 }
             }
-            const payloads = imagePayloads(result);
-            if (!payloads.length) throw new ApiError('Ответ images/edits не содержит b64_json.', { code: 'INVALID_RESPONSE' });
+            const payloads = await payloadList(result, signal, 'images/edits');
             if (!padding) return payloads;
             return Promise.all(payloads.map(async (payload) => {
                 const bytes = Buffer.from(payload, 'base64');

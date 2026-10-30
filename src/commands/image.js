@@ -16,6 +16,7 @@ import { IMAGE_BASE } from './instructions.js';
 import { runOnce } from './flow.js';
 import { UsageError, readStdin, loadAttachments, composeInstructions, resolveTextArg, createClientFor } from './shared.js';
 import { imageModelFor, imageTransport, sniffImage } from '../openai/images.js';
+import { createImageSink } from '../core/images.js';
 import { applyGeneratedAlphaMask } from '../agent/image-alpha.js';
 import { resolveInside } from '../agent/paths.js';
 
@@ -77,42 +78,42 @@ async function runImagesEndpoint(ctx, prompt, count) {
     try {
         const payloads = sources.length
             ? await client.images.edit({
-                model, response_format: "b64_json", prompt, size: config.image.size, format, background, signal,
+                model, prompt, size: config.image.size, format, background, signal,
                 files: await Promise.all(sources.map(async (file) => {
                     const located = await resolveInside(ctx.cwd, file, { allowRoot: false });
                     const bytes = await readFile(located.abs);
                     return { filename: path.basename(located.rel), mime: sniffImage(bytes).mime, bytes };
                 })),
             })
-            : await client.images.generate({ model, response_format: "b64_json", prompt, size: config.image.size, quality: config.image.quality, n: count, format, background, signal });
+            : await client.images.generate({ model, prompt, size: config.image.size, quality: config.image.quality, n: count, format, background, signal });
+        const sink = createImageSink({ target: path.resolve(ctx.cwd, target), format, prefix: 'image' });
         const saved = [];
         for (const [index, b64] of payloads.entries()) {
-            const buffer = Buffer.from(b64, 'base64');
-            const kind = sniffImage(buffer);
-            const rel = payloads.length > 1 ? `image-${index + 1}.${kind.ext}` : `image.${kind.ext}`;
-            const dest = path.resolve(ctx.cwd, target, rel);
-            await mkdir(path.dirname(dest), { recursive: true });
-            await writeFile(dest, buffer);
-            saved.push(path.relative(ctx.cwd, dest));
+            const written = await sink.saveFinal(`gen-${index}`, b64, format);
+            if (!written) continue;
+            const rel = path.relative(ctx.cwd, written.file);
+            saved.push(rel);
             if (wantsTransparent) {
-                const alpha = await applyGeneratedAlphaMask({ client, config, file: dest, signal, alphaSource: sources[0] });
+                const alpha = await applyGeneratedAlphaMask({ client, config, file: written.file, signal, alphaSource: sources[0] });
                 if (alpha.reason === 'already') {
-                    renderer.line('info', `Альфа-канал настоящий: модель отдала прозрачный фон, маска не потребовалась (${saved.at(-1)})`, { dim: true });
+                    renderer.line('info', `Альфа-канал настоящий: модель отдала прозрачный фон, маска не потребовалась (${rel})`, { dim: true });
                 } else if (alpha.changed) {
                     const how = alpha.reason === 'mask'
                         ? `по anti-aliased маске ${alpha.model}${alpha.painted ? ' после заливки фона цветом объекта' : ''}`
                         : alpha.reason === 'contour' ? 'по локальному контуру' : 'заливкой от углов';
-                    renderer.line('info', `Альфа-канал собран ${how}: ${saved.at(-1)}`, { dim: true });
-                } else if (alpha.reason === 'opaque') renderer.line('info', `Прозрачность ${saved.at(-1)}: фоном оказался сам объект, файл оставлен непрозрачным.`, { dim: true });
-                else if (alpha.reason === 'no-magick') renderer.line('warn', `Прозрачность ${saved.at(-1)}: ImageMagick не найден.`);
-                else if (alpha.reason === 'format') renderer.line('warn', `Прозрачность ${saved.at(-1)}: JPEG не хранит альфа-канал, нужен PNG.`);
+                    renderer.line('info', `Альфа-канал собран ${how}: ${rel}`, { dim: true });
+                } else if (alpha.reason === 'opaque') renderer.line('info', `Прозрачность ${rel}: фоном оказался сам объект, файл оставлен непрозрачным.`, { dim: true });
+                else if (alpha.reason === 'no-magick') renderer.line('warn', `Прозрачность ${rel}: ImageMagick не найден.`);
+                else if (alpha.reason === 'format') renderer.line('warn', `Прозрачность ${rel}: JPEG не хранит альфа-канал, нужен PNG.`);
             }
-            renderer.line('ok', `Изображение сохранено: ${saved.at(-1)}`);
+            renderer.line('ok', `Изображение сохранено: ${rel}`);
         }
         renderer.line('ok', `Готово: ${saved.join(', ')}`);
+        if (values.json) renderer.json({ type: 'result', status: 'completed', text: `Готово: ${saved.join(', ')}`, images: saved });
         return saved.length ? 0 : 1;
     } catch (error) {
         renderer.line('fail', error.message);
+        if (values.json) renderer.json({ type: 'result', status: 'failed', text: '', images: [], error: { message: error.message, code: null } });
         return 1;
     } finally {
         client.close();
