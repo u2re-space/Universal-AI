@@ -1,0 +1,478 @@
+@use 'decorations';
+
+:root {
+  font-family: 'Roboto', Helvetica, Arial, sans-serif;
+  color: #f4f4f4;
+  background: #141414;
+  --panel-gap: 0.625rem;
+  --panel-radius: 21px;
+  --rail-content-size: 16.875rem;
+  --hero-text-inset: 2.5rem;
+  --copy-leading: 2rem;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  display: block;
+  max-inline-size: 100%;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+:focus-visible {
+  outline: 2px solid #ff8c85;
+  outline-offset: 4px;
+}
+
+// Desktop tracks and artwork anchors follow the supplied approximate measurements.
+.page-shell {
+  display: grid;
+  grid-template-columns: 22rem minmax(0, 1fr) 9.6875rem;
+  column-gap: var(--panel-gap);
+  min-block-size: max(48rem, 100dvh);
+  padding-block-start: 0.5625rem;
+  padding-inline-end: 0.75rem;
+}
+
+.contact-panel {
+  position: relative;
+  z-index: 5;
+  inline-size: 22rem;
+  min-inline-size: 0;
+  min-block-size: 48rem;
+  margin-block-start: -0.5625rem;
+}
+
+.contact-header {
+  position: relative;
+  inline-size: var(--rail-content-size);
+  block-size: 3.9375rem;
+  margin-inline-start: 3.25rem;
+}
+
+.wordmark {
+  position: absolute;
+  inset-block-start: 1.6875rem;
+  inset-inline-start: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  inline-size: 7.5625rem;
+  block-size: 2.25rem;
+  padding-inline: 0.75rem;
+  border-radius: 18px;
+  background: #fff;
+  color: #111;
+  font-family: 'Inter', Helvetica, Arial, sans-serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.5rem;
+}
+
+.wordmark sup {
+  align-self: flex-start;
+  margin-block-start: 0.5rem;
+  font-size: 0.625rem;
+  font-weight: 400;
+  line-height: 0.625rem;
+}
+
+.menu-trigger {
+  position: absolute;
+  inset-block-start: 1.4375rem;
+  inset-inline-end: -0.875rem;
+  display: grid;
+  place-items: center;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #f5f5f5;
+  cursor: pointer;
+}
+
+.menu-trigger:hover,
+.menu-trigger[aria-expanded='true'] {
+  background: #292929;
+}
+
+.site-menu {
+  position: absolute;
+  z-index: 10;
+  inset-block-start: 4.6875rem;
+  inset-inline-start: 0;
+  display: grid;
+  inline-size: 100%;
+  padding: 0.5rem;
+  border: 1px solid #444;
+  border-radius: 1rem;
+  background: #222;
+  box-shadow: 0 0.75rem 2rem #0006;
+}
+
+.site-menu a {
+  display: flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.5rem;
+}
+
+.site-menu a:hover,
+.site-menu a:focus-visible {
+  background: #353535;
+}
+
+.contact-content {
+  inline-size: var(--rail-content-size);
+  margin-inline-start: 3.25rem;
+  padding-block-start: 3rem;
+  text-align: center;
+}
+
+.award {
+  inline-size: 13.75rem;
+  max-inline-size: 100%;
+  margin-inline: auto;
+}
+
+.award img {
+  inline-size: 100%;
+  block-size: auto;
+}
+
+.contact-details {
+  display: grid;
+  margin-block-start: 2.4375rem;
+  font-size: 1.125rem;
+  font-style: normal;
+  font-weight: 400;
+  line-height: var(--copy-leading);
+}
+
+.contact-details a:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.copyright {
+  margin-block: 1.625rem 0;
+  color: #808080;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.socials {
+  display: flex;
+  justify-content: center;
+  gap: 0.5625rem;
+  margin-block-start: 2.6875rem;
+}
+
+.social-icon {
+  display: grid;
+  place-items: center;
+  inline-size: 3.125rem;
+  block-size: 3.125rem;
+  border: 1px solid #2d2d2d;
+  border-radius: 50%;
+  color: #f2f2f2;
+}
+
+.social-x {
+  font-family: 'Noto Sans Math', 'Cambria Math', 'Segoe UI Symbol', sans-serif;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.contact-cta {
+  position: absolute;
+  inset-block-end: 1.0625rem;
+  inset-inline-start: 3.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  inline-size: var(--rail-content-size);
+  min-block-size: 3rem;
+  padding: 0.625rem 1rem;
+  border: 1px solid #555;
+  border-radius: 24px;
+  color: #fff;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.contact-cta:hover {
+  border-color: #aaa;
+  background: #222;
+}
+
+// main.js adds is-loaded only after the CDN image has loaded successfully.
+.icon {
+  --icon-size: 1rem;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  inline-size: var(--icon-size);
+  block-size: var(--icon-size);
+  line-height: 1;
+}
+
+.icon img,
+.icon-fallback {
+  grid-area: 1 / 1;
+}
+
+.icon img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
+  filter: invert(1);
+  opacity: 0;
+}
+
+.icon-fallback {
+  font-size: var(--icon-size);
+}
+
+.icon.is-loaded img {
+  opacity: 1;
+}
+
+.icon.is-loaded .icon-fallback {
+  visibility: hidden;
+}
+
+.menu-trigger .icon {
+  --icon-size: 1.25rem;
+}
+
+.social-icon:nth-child(2) .icon,
+.contact-cta .icon {
+  --icon-size: 0.875rem;
+}
+
+.hero-panel {
+  position: relative;
+  isolation: isolate;
+  container-type: inline-size;
+  min-inline-size: 0;
+  min-block-size: 47.4375rem;
+  overflow: hidden;
+  border-start-start-radius: var(--panel-radius);
+  border-start-end-radius: var(--panel-radius);
+  background: linear-gradient(180deg, #645f5d 0%, #c2c2c2 100%);
+}
+
+.hero-heading {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: 2.4375rem;
+  inset-inline-start: var(--hero-text-inset);
+  inline-size: calc(100% - var(--hero-text-inset));
+  margin: 0;
+  color: #faf9f8;
+  font-family: 'Inter', Helvetica, Arial, sans-serif;
+  font-size: min(8rem, 26.4cqi);
+  font-weight: 500;
+  line-height: 1;
+}
+
+.chess-piece {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: 15.3125rem;
+  inset-inline-start: min(6rem, 19.8%);
+  inline-size: min(17.0625rem, 56.3%);
+  block-size: 20.1875rem;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.hero-subtitle {
+  position: absolute;
+  z-index: 3;
+  inset-block-start: 30.25rem;
+  inset-inline-start: var(--hero-text-inset);
+  margin: 0;
+  color: #fafafa;
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: var(--copy-leading);
+}
+
+.chessboard {
+  position: absolute;
+  z-index: 4;
+  inset-block-end: 0px;
+  inset-inline-end: 0px;
+  inline-size: 16.375rem;
+  max-inline-size: 54.1%;
+  block-size: auto;
+  margin: 0;
+  padding: 0;
+  object-fit: contain;
+  object-position: 100% 100%;
+  pointer-events: none;
+}
+
+.services-panel {
+  position: relative;
+  isolation: isolate;
+  inline-size: 9.6875rem;
+  min-inline-size: 0;
+  min-block-size: 47.25rem;
+  margin-block-end: 0.1875rem;
+  overflow: hidden;
+  border-radius: var(--panel-radius);
+  background: #fff;
+  color: #090909;
+}
+
+.services-intro {
+  position: absolute;
+  inset-block-start: 1.25rem;
+  inset-inline-start: 1.25rem;
+  inline-size: 7.1875rem;
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: var(--copy-leading);
+}
+
+// Responsive choices below are not measurements from the desktop reference.
+// Keep the panel order and allow the services statement to read in full.
+@media (width < 64rem) {
+  .page-shell {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--panel-gap);
+    min-block-size: 100dvh;
+    padding: 0.75rem;
+  }
+
+  .contact-panel {
+    inline-size: 100%;
+    min-block-size: 0;
+    margin-block-start: 0;
+    padding-inline: 0.5rem;
+  }
+
+  .contact-header,
+  .contact-content {
+    inline-size: min(var(--rail-content-size), 100%);
+    margin-inline: auto;
+  }
+
+  .menu-trigger {
+    inset-inline-end: 0;
+  }
+
+  .contact-cta {
+    position: static;
+    inline-size: min(var(--rail-content-size), 100%);
+    margin-block: 3rem 1.5rem;
+    margin-inline: auto;
+  }
+
+  .hero-panel,
+  .services-panel {
+    justify-self: center;
+    inline-size: 100%;
+    max-inline-size: 40rem;
+    min-block-size: 0;
+  }
+
+  .hero-panel {
+    --hero-text-inset: 8.25%;
+    aspect-ratio: 485 / 759;
+  }
+
+  .hero-heading {
+    inset-block-start: 5.14%;
+    font-size: 26.4cqi;
+  }
+
+  .chess-piece {
+    inset-block-start: 32.3%;
+    inset-inline-start: 19.8%;
+    inline-size: 56.3%;
+    block-size: 42.56%;
+  }
+
+  .hero-subtitle {
+    inset-block-start: 63.77%;
+    font-size: clamp(1rem, 4.12cqi, 1.5rem);
+    line-height: 1.6;
+  }
+
+  .chessboard {
+    inline-size: 54.1%;
+  }
+
+  .services-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25rem;
+    margin-block-end: 0;
+    padding: 2rem 1.25rem;
+  }
+
+  .services-intro {
+    position: static;
+    flex-basis: 100%;
+    inline-size: auto;
+    margin-block-end: 1rem;
+  }
+  
+  .services-intro br {
+    word-break: keep-all;
+    line-break: anywhere;
+    white-space: pre;
+    white-space-collapse: collapse;
+    display: none;
+  }
+
+  .services-panel > :is(.deco-branding, .deco-uiux, .deco-code, .deco-network, .deco-seo, .deco-motion) {
+    position: relative;
+    inset: auto;
+    flex: none;
+  }
+
+  .services-panel > .deco-branding,
+  .services-panel > .deco-uiux {
+    inset-block-start: 0px;
+    inset-inline-start: 0px;
+  }
+}

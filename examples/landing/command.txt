@@ -1,0 +1,1 @@
+ai gen landing --image landing.jpg --fidelity 80 --creativity 30 --speed 20 --quality 80 --yes --config config.json --template what-needs.md --file what-needs.md

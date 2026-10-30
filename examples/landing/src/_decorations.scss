@@ -1,0 +1,101 @@
+// Service ornaments are positioned relative to their services panel.
+// The reference desktop panel is 155px wide and clips its contents.
+.deco-branding,
+.deco-uiux,
+.deco-code,
+.deco-network,
+.deco-seo,
+.deco-motion {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+}
+
+.deco-branding,
+.deco-uiux,
+.deco-seo,
+.deco-motion {
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.25rem;
+  white-space: nowrap;
+}
+
+.deco-branding {
+  inset-block-start: 205px;
+  inset-inline-start: 28px;
+  inline-size: 6.25rem;
+  block-size: 2.125rem;
+  border-radius: 18px;
+  background: #f0eff7;
+  color: #111;
+  transform: rotate(-28deg);
+  z-index: 2;
+}
+
+.deco-uiux {
+  inset-block-start: 267px;
+  inset-inline-start: 4px;
+  inline-size: 9.25rem;
+  block-size: 2.25rem;
+  border-radius: 20px;
+  background: #ff433c;
+  color: #fff;
+  transform: rotate(-5deg);
+  z-index: 3;
+}
+
+.deco-code {
+  inset-inline-start: 4.5rem;
+  inset-block-end: 175px;
+  inline-size: 2.8125rem;
+  block-size: 2.8125rem;
+  border: 1px solid #d6d6d6;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.deco-code img {
+  inline-size: 1.125rem;
+  block-size: 1.125rem;
+  transform: rotate(-35deg);
+}
+
+.deco-network {
+  inset-inline-start: 4.25rem;
+  inset-block-end: 112px;
+  inline-size: 3.1875rem;
+  block-size: 3.1875rem;
+  border: 1px solid #777;
+  border-radius: 50%;
+  background: #151515;
+}
+
+.deco-network img {
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  filter: invert(1);
+  transform: rotate(-22deg);
+}
+
+.deco-seo {
+  inset-inline-start: 2px;
+  inset-block-end: 66px;
+  inline-size: 9.375rem;
+  block-size: 2.375rem;
+  border-radius: 20px;
+  background: #f0eff7;
+  color: #111;
+  transform: rotate(7deg);
+}
+
+.deco-motion {
+  inset-inline-start: 1.25rem;
+  inset-block-end: 1.125rem;
+  inline-size: 6.25rem;
+  block-size: 2.5625rem;
+  border-radius: 21px;
+  background: #151515;
+  color: #fff;
+}

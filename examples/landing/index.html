@@ -1,49 +1,68 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#ededed">
-  <title>Émeric — See you soon</title>
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-  <main class="landing">
-    <div class="content">
-      <header class="header">
-        <a class="brand" href="./" aria-label="Émeric home">
-          <span class="brand-symbol" aria-hidden="true"></span>
-          <span>ÉMERIC</span>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#141414">
+    <meta name="description" content="Hubfolio is a small agency with big ideas for brand and design.">
+    <title>Hubfolio — Brand and Design</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Noto+Sans+Math&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <script type="module" src="/src/main.js"></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <aside class="contact-panel" id="contact" aria-label="Contact information">
+        <header class="contact-header">
+          <a class="wordmark" href="#home" aria-label="Hubfolio home">Hubfolio<sup>®</sup></a>
+          <button class="menu-trigger" type="button" aria-label="Menu" aria-controls="site-menu" aria-expanded="false">
+            <span class="icon" aria-hidden="true"><span class="icon-fallback">☰</span><img src="https://cdn.jsdelivr.net/npm/lucide-static@1.65.0/icons/text-align-end.svg" alt=""></span>
+          </button>
+          <nav class="site-menu" id="site-menu" aria-label="Main navigation" hidden>
+            <a href="#home">Home</a>
+            <a href="#services">Services</a>
+            <a href="#contact">Contact</a>
+          </nav>
+        </header>
+
+        <div class="contact-content">
+          <div class="award"><img src="/assets/award.svg" width="220" height="220" alt="" aria-hidden="true"></div>
+          <address class="contact-details">
+            <a href="mailto:hello@hubfolio.agency">hello@hubfolio.agency</a>
+            <span>(+010) 523 68 69</span>
+            <span>Based in Sanfrancisco, CA</span>
+          </address>
+          <p class="copyright">© 2024, All Rights Reserved</p>
+          <div class="socials" role="group" aria-label="Social media icons">
+            <span class="social-icon social-x" role="img" aria-label="X">𝕏</span>
+            <span class="social-icon" role="img" aria-label="Social media"><span class="icon" aria-hidden="true"><span class="icon-fallback">◉</span><img src="https://cdn.jsdelivr.net/npm/lucide-static@1.65.0/icons/scan-square.svg" alt=""></span></span>
+            <span class="social-icon" role="img" aria-label="Website"><span class="icon" aria-hidden="true"><span class="icon-fallback">◎</span><img src="https://cdn.jsdelivr.net/npm/lucide-static@1.65.0/icons/earth.svg" alt=""></span></span>
+          </div>
+        </div>
+
+        <a class="contact-cta" href="mailto:hello@hubfolio.agency">
+          <span class="icon" aria-hidden="true"><span class="icon-fallback">&#x2709;&#xFE0E;</span><img src="https://cdn.jsdelivr.net/npm/lucide-static@1.65.0/icons/mail.svg" alt=""></span>
+          <span>Work With Us</span>
         </a>
+      </aside>
 
-        <nav class="socials" aria-label="Social links">
-          <!-- Account destinations and notification service have not been supplied. -->
-          <a role="link" aria-disabled="true">DRIBBBLE</a>
-          <a role="link" aria-disabled="true">INSTAGRAM</a>
-          <a role="link" aria-disabled="true">BEHANCE</a>
-          <button type="button" class="pill pill-dark" aria-disabled="true">NOTIFY ME</button>
-        </nav>
-      </header>
+      <main class="hero-panel" id="home">
+        <h1 class="hero-heading">Brand<br>and<br>Design</h1>
+        <img class="chess-piece" src="/assets/chess-piece.png" alt="" aria-hidden="true">
+        <p class="hero-subtitle">Hubfolio, small agency<br>with big ideas.</p>
+        <img class="chessboard" src="/assets/chessboard-trimmed.png" alt="" aria-hidden="true">
+      </main>
 
-      <section class="announcement" aria-labelledby="headline">
-        <h1 id="headline">SEE YOU SOON.<br>WE’LL BE BACK IN<br>0 DAYS</h1>
-        <!-- No showreel media has been supplied. -->
-        <button type="button" class="showreel" aria-disabled="true">
-          <span class="play" aria-hidden="true">
-            <svg viewBox="0 0 40 44" fill="none">
-              <path d="M7 5 35 22 7 39Z" stroke="currentColor"/>
-            </svg>
-          </span>
-          <span>PLAY SHOWREEL</span>
-        </button>
+      <section class="services-panel" id="services" aria-label="Our services">
+        <p class="services-intro">Based in Boston, MA. We're an agency that focuses on<br> crafting<br><br> design &amp; development digital products.</p>
+        <span class="deco-branding">Branding</span>
+        <span class="deco-uiux">UI/UX Design</span>
+        <span class="deco-code" aria-hidden="true"><img src="https://cdn.jsdelivr.net/npm/lucide-static@1.65.0/icons/code-xml.svg" alt=""></span>
+        <span class="deco-network" aria-hidden="true"><img src="https://cdn.jsdelivr.net/npm/lucide-static@1.65.0/icons/network.svg" alt=""></span>
+        <span class="deco-seo">SEO/Marketing</span>
+        <span class="deco-motion">Motion</span>
       </section>
     </div>
-
-    <aside class="portrait">
-      <img class="portrait-image" src="assets/hero-portrait-final.png" width="1024" height="1536" alt="Pale female android with blue-gray eyes, an ornate ivory biomechanical crown and sculpted armor.">
-      <!-- No additional menu content has been supplied. -->
-      <button type="button" class="pill menu-button" aria-disabled="true">MENU</button>
-    </aside>
-  </main>
-</body>
+  </body>
 </html>

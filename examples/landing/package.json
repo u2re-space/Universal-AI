@@ -1,0 +1,28 @@
+{
+  "name": "hard-mode",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test",
+    "generate": "node scripts/generate.js",
+    "setup": "node scripts/install.js"
+  },
+  "dependencies": {
+    "lucide": "^1.65.0",
+    "lucide-static": "^1.65.0"
+  },
+  "devDependencies": {
+    "sass": "*",
+    "vite": "*"
+  },
+  "generate": {
+    "command": "",
+    "protect": []
+  }
+}
