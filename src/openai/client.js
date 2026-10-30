@@ -405,7 +405,7 @@ export function createClient({
                 if (isVectorModel(model)) {
                     const aspect = normalizeVectorRatio(attemptSize);
                     if (aspect) fields.aspect_ratio = aspect;
-                    if (acceptsResponseFormat(model)) fields.response_format = 'b64_json';
+                    //if (acceptsResponseFormat(model)) fields.response_format = 'b64_json';
                     fields[imageFormatField(model)] = 'svg';
                 } else {
                     const frame = imageRequestSize(attemptSize, model);
@@ -414,7 +414,7 @@ export function createClient({
                     if (fmt) fields[imageFormatField(model)] = fmt;
                     const backgroundField = backgroundValue({ model, format: fmt, background });
                     if (backgroundField) fields.background = backgroundField;
-                    if (acceptsResponseFormat(model)) fields.response_format = 'b64_json';
+                    //if (acceptsResponseFormat(model)) fields.response_format = 'b64_json';
                 }
                 const form = encodeMultipart({
                     fields,

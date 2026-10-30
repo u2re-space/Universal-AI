@@ -27,7 +27,7 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.deepEqual(body, { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png' });
     assert.deepEqual(
         generationBody({ model: 'gpt-image-2.5-sunburst', prompt: 'маяк', size: 'auto', quality: 'auto', n: 1, format: 'png', background: 'transparent' }),
-        { model: 'gpt-image-2.5-sunburst', prompt: 'маяк', output_format: 'png', background: 'transparent', response_format: 'b64_json' },
+        { model: 'gpt-image-2.5-sunburst', prompt: 'маяк', output_format: 'png', background: 'transparent'/*, response_format: 'b64_json'*/ },
     );
     assert.equal('partial_images' in body, false);
     // gpt-image-1 always answers in base64 and rejects response_format, so the field stays out.
@@ -54,7 +54,7 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(backgroundValue({ model: 'recraft/recraft-v4.1-utility', format: 'png', background: 'transparent' }), null);
     assert.deepEqual(
         generationBody({ model: 'gpt-image-2.5-sunburst', prompt: 'маяк', format: 'jpeg', background: 'transparent' }),
-        { model: 'gpt-image-2.5-sunburst', prompt: 'маяк', output_format: 'jpeg', response_format: 'b64_json' },
+        { model: 'gpt-image-2.5-sunburst', prompt: 'маяк', output_format: 'jpeg'/*, response_format: 'b64_json'*/ },
     );
     assert.equal(normalizeImageFormat('auto'), null);
     assert.equal(normalizeImageFormat('jpg'), 'jpeg');
