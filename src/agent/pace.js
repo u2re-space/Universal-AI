@@ -396,7 +396,7 @@ export function resolvePace({
         const level = effortFor(base, paceSpeed, modelQuality, protect, recklessExtra);
         return { rung, model, effort: bounded(model, stageQuality === null ? level : stageEffort(level, baseFine, stageQuality)) };
     };
-    const planner = role(plannerRung(label, modelSpeed, adjusted), plannerRung(label, modelSpeed, adjusted) === 0 ? 'medium' : 'high', true);
+    const planner = role(plannerRung(label, modelSpeed, adjusted), plannerRung(label, modelSpeed, adjusted) === 0 ? 'high' : 'xhigh', true);
     const reviewerBase = modelQuality >= 67 ? 'xhigh' : 'high';
     const directive = {
         ready: label === 'trivial' || label === 'normal' || label === 'complex',
@@ -406,11 +406,11 @@ export function resolvePace({
         fidelity: Number.isInteger(fidelity) ? { stated: fidelity, effective: effectiveFidelity(fidelity, quality) } : null,
         roles: {
             classifier: role(1, 'xhigh', false),
-            planner, architect: role(plannerRung(label, modelSpeed, adjusted), 'high', true, fine.architect),
-            orchestrator: role(1, 'high', false),
-            reviewer: role(reviewerRung(models, modelQuality >= 67 ? adjusted : Math.min(adjusted, 1)), reviewerBase, true),
+            planner, architect: role(plannerRung(label, modelSpeed, adjusted), 'xhigh', true, fine.architect),
+            orchestrator: role(1, 'xhigh', false),
+            reviewer: role(reviewerRung(models, modelQuality >= 67 ? Math.min(adjusted, 1) : Math.min(adjusted, 0)), reviewerBase, true),
             summarizer: role(1, 'xhigh', false),
-            extractor: role(1, 'high', false),
+            extractor: role(1, 'xhigh', false),
         },
         steps: null,
     };

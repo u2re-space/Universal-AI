@@ -37,15 +37,15 @@ test('default pace keeps a complex author on the coder floor and the planner on 
     });
     assert.equal(pace.ceilingModel, 'gpt-6.1-terra');
     assert.equal(pace.roles.planner.model, 'gpt-6.1-terra');
-    assert.equal(pace.roles.planner.effort, 'high');
+    assert.equal(pace.roles.planner.effort, 'xhigh');
     assert.equal(pace.roles.architect.model, 'gpt-6.1-terra');
-    assert.equal(pace.roles.architect.effort, 'high');
+    assert.equal(pace.roles.architect.effort, 'xhigh');
     assert.equal(pace.steps[0].model, 'gpt-6.1-terra');
     assert.equal(pace.steps[0].effort, 'high');
     assert.equal(pace.roles.classifier.model, 'gpt-6.1-terra');
     assert.equal(pace.roles.classifier.effort, 'xhigh');
     assert.equal(pace.roles.extractor.model, 'gpt-6.1-terra');
-    assert.equal(pace.roles.extractor.effort, 'high');
+    assert.equal(pace.roles.extractor.effort, 'xhigh');
     assert.equal(pace.reviewRounds, 1);
     assert.equal(pace.reviewMode, 'force');
     assert.equal(pace.collect, 'allow');
@@ -65,10 +65,10 @@ test('trivial label lowers the ceiling and skips review', () => {
 
 test('effort shift matches the locked rows', () => {
     const planner = (speed, quality, label = 'normal') => resolvePace({ ...base, speed, quality, label }).roles.planner.effort;
-    assert.equal(planner(5, 50), 'xhigh');
-    assert.equal(planner(5, 20), 'medium');
-    assert.equal(planner(90, 80), 'medium');
-    assert.equal(planner(70, 80), 'high');
+    assert.equal(planner(5, 50), 'max');
+    assert.equal(planner(5, 20), 'high');
+    assert.equal(planner(90, 80), 'high');
+    assert.equal(planner(70, 80), 'xhigh');
     const author = (speed, quality, complexity) => resolvePace({
         ...base, speed, quality, label: 'normal',
         steps: [{ complexity, author: 'coder', files: [], goal: 'g', details: '', verify: '' }],
@@ -135,7 +135,7 @@ test('merge folds adjacent steps of the same author and rung', () => {
 test('rungs and review rounds follow the tables', () => {
     const high = resolvePace({ ...base, speed: 90, quality: 80, label: 'normal' });
     // gpt-6-astra is forbidden for the reviewer: the ladder steps down to the previous rung.
-    assert.equal(high.roles.reviewer.model, 'gpt-6.1-sol');
+    assert.equal(high.roles.reviewer.model, 'gpt-6.1-terra');
     assert.equal(high.roles.orchestrator.rung, 1);
     assert.equal(high.roles.summarizer.model, 'gpt-6.1-terra');
     const normalAuthor = resolvePace({
@@ -176,7 +176,7 @@ test('a shared budget of 200 splits stable, strained, and broken pace', () => {
     const steady = resolvePace({ ...base, speed: 10, quality: 40, label: 'normal' });
     assert.equal(steady.guarantees, 'steady');
     assert.equal(steady.ceilingModel, 'gpt-6.1-terra');
-    assert.equal(steady.roles.planner.effort, 'high');
+    assert.equal(steady.roles.planner.effort, 'xhigh');
     assert.equal(steady.stepCap, 12);
     assert.equal(guaranteesParagraph('steady'), '');
 
@@ -201,7 +201,7 @@ test('a shared budget of 200 splits stable, strained, and broken pace', () => {
     assert.equal(both.merge, true);
     assert.equal(both.ceilingModel, 'gpt-6.1-sol');
     assert.equal(both.roles.planner.model, 'gpt-6.1-sol');
-    assert.equal(both.roles.planner.effort, 'medium');
+    assert.equal(both.roles.planner.effort, 'high');
     assert.match(guaranteesParagraph('strained'), /Balance is not promised/);
 
     const reckless = resolvePace({ ...base, speed: 180, quality: 20, label: 'normal' });

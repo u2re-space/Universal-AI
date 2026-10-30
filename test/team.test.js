@@ -317,7 +317,7 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
     // Every role used its own model and effort.
     const planner = seen.find((s) => s.role === 'planner');
     assert.equal(planner.model, 'gpt-6.1-terra');
-    assert.equal(planner.effort, 'high');
+    assert.equal(planner.effort, 'xhigh');
     assert.ok(seen.filter((s) => s.role === 'worker').every((s) => s.model === 'gpt-6.1-terra' && s.effort === 'medium'));
     assert.equal(seen.find((s) => s.role === 'collector').model, 'gpt-6.1-terra');
     assert.equal(seen.find((s) => s.role === 'summarizer').model, 'gpt-6-luna-nano');
