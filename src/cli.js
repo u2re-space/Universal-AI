@@ -62,6 +62,8 @@ const OPTIONS = {
     measure: { type: 'string' }, 'no-measure': { type: 'boolean', default: false },
     decor: { type: 'string' }, 'no-decor': { type: 'boolean', default: false },
     architect: { type: 'string' }, 'no-architect': { type: 'boolean', default: false },
+    decompose: { type: 'string' }, 'no-decompose': { type: 'boolean', default: false },
+    subrefs: { type: 'string' }, 'no-subrefs': { type: 'boolean', default: false },
     memory: { type: 'boolean', default: true }, global: { type: 'boolean', default: false }, kind: { type: 'string' }, tags: { type: 'string' },
     listen: { type: 'boolean', default: false }, port: { type: 'string' }, line: { type: 'string' }, character: { type: 'string' },
     language: { type: 'string' }, token: { type: 'string' }, serve: { type: 'boolean', default: false },

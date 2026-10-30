@@ -1571,11 +1571,16 @@ test('a styler revision uses terra only after a completed sol SCSS pass', async 
     }
 });
 
-test('decomposer splits the reference into screens before the measurer', async () => {
+test('decomposer builds one clean sub-reference per screen before the measurer', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-'));
+    await writeFile(path.join(dir, 'mockup.png'), Buffer.from(TINY_PNG, 'base64'));
     const events = [];
     const decomposeBodies = [];
     const measureBodies = [];
+    const userText = (body) => body.input
+        .filter((item) => item.type === 'message' && item.role === 'user')
+        .flatMap((item) => (item.content ?? []).filter((part) => part.type === 'input_text').map((part) => part.text))
+        .join('\n');
     script = (body) => {
         const role = roleOf(body);
         if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
@@ -1589,11 +1594,27 @@ test('decomposer splits the reference into screens before the measurer', async (
         }
         if (role === 'decomposer') {
             decomposeBodies.push(body);
+            const outDir = /# Output directory\n([^\n]+)/.exec(userText(body))?.[1] ?.replace(/[/]+$/, '') ?? '.tmp/unknown/decomposition';
+            if (!body.input.some((item) => item.type === 'function_call_output')) {
+                return { calls: [
+                    { name: 'edit_image', arguments: {
+                        prompt: 'the same collage seen straight-on: remove the tilt, keep every panel, label, and colour',
+                        image: 'mockup.png', path: `${outDir}/00-restored.png`, size: '', quality: '', background: '', extra_images: '', to_svg: false,
+                    } },
+                    { name: 'crop_image', arguments: {
+                        path: `${outDir}/00-restored.png`, x: 0, y: 0, width: 8, height: 8, trim: false,
+                        output: `${outDir}/01-landing.png`, reason: 'первый экран',
+                    } },
+                ] };
+            }
             return { text: JSON.stringify({
                 summary: 'Коллаж делится на три экрана.',
                 screens: [
-                    { name: 'Landing', source: 'mockup.png', nodeId: null, purpose: 'Первый экран потока.', bounds: '0,0 400x300', references: [] },
-                    { name: 'Catalog', source: 'mockup.png', nodeId: null, purpose: 'Список карточек.', bounds: '400,0 400x300', references: ['Landing'] },
+                    { name: 'Landing', source: 'mockup.png', nodeId: null, purpose: 'Первый экран потока.', bounds: '0,0 400x300', references: [], subReference: `${outDir}/01-landing.png`, subReferenceKind: 'crop' },
+                    { name: 'Catalog', source: 'mockup.png', nodeId: null, purpose: 'Список карточек.', bounds: '400,0 400x300', references: ['Landing'], subReference: null, subReferenceKind: '' },
+                ],
+                subReferences: [
+                    { path: `${outDir}/00-restored.png`, screen: 'Landing', kind: 'restored', source: 'mockup.png', note: 'перспектива снята' },
                 ],
                 notes: [],
             }) };
@@ -1611,6 +1632,7 @@ test('decomposer splits the reference into screens before the measurer', async (
     };
     const config = baseConfig();
     config.memory = { ...defaults.memory, enabled: false };
+    config.tools = { ...defaults.tools, images: true };
     const result = await runTeam({
         client: client(), config, ledger: createLedger(), task: 'сверстай три экрана',
         root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
@@ -1622,15 +1644,126 @@ test('decomposer splits the reference into screens before the measurer', async (
     const measureIdx = stages.indexOf('measure');
     assert.ok(decomposeIdx >= 0, 'decompose stage present: ' + stages.join(', '));
     assert.ok(measureIdx > decomposeIdx, `decompose(${decomposeIdx}) runs before measure(${measureIdx})`);
-    assert.ok(events.some((e) => e.type === 'stage.start' && e.stage === 'decompose' && e.role === 'decomposer'));
-    assert.equal(decomposeBodies.length, 1);
     assert.equal(decomposeBodies[0].model, defaults.roles.decomposer.model);
-    assert.equal((decomposeBodies[0].tools ?? []).some((tool) => tool.name === 'crop_image'), false, 'the decomposer only looks at whole references');
+    const decomposerTools = (decomposeBodies[0].tools ?? []).map((tool) => tool.name);
+    for (const name of ['crop_image', 'split_image', 'compare_images', 'generate_image', 'edit_image']) {
+        assert.ok(decomposerTools.includes(name), `the decomposer must own ${name}: ${decomposerTools.join(', ')}`);
+    }
+    assert.match(userText(decomposeBodies[0]), /restore a flat front view/);
+    const workDir = `.tmp/${result.workId}/decomposition`;
+    const restored = await readFile(path.join(dir, workDir, '00-restored.png')).catch(() => null);
+    assert.ok(restored?.length, 'the restored reference is written under the work directory');
+    const landing = await readFile(path.join(dir, workDir, '01-landing.png')).catch(() => null);
+    assert.ok(landing?.length, 'the screen crop is written under the work directory');
+    const notice = events.find((e) => e.type === 'decompose.subreferences');
+    assert.equal(notice?.count, 2, JSON.stringify(notice ?? null));
+    assert.match(userText(measureBodies[0]), /Screen sub-references/);
+    assert.match(userText(measureBodies[0]), new RegExp(`${workDir.replace(/[./]/g, '\$&')}\/01-landing\.png`));
+    const measuredImages = measureBodies[0].input
+        .flatMap((item) => item.content ?? [])
+        .filter((part) => part.type === 'input_image');
+    assert.equal(measuredImages.length, 3, 'the originals stay attached next to both sub-references');
+    assert.ok(measuredImages.some((part) => String(part.image_url).startsWith('data:image/')), 'a sub-reference travels as an image');
     assert.match(JSON.stringify(measureBodies[0].input), /Screen decomposition/);
-    assert.match(JSON.stringify(measureBodies[0].input), /Landing/);
     const saved = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'decomposition.json'), 'utf8'));
-    assert.equal(saved.screens.length, 2);
-    assert.equal(saved.screens[1].name, 'Catalog');
+    assert.equal(saved.screens[0].subReference, `${workDir}/01-landing.png`);
+    assert.equal(saved.screens[1].subReferenceKind, '');
+    await rm(dir, { recursive: true, force: true });
+});
+
+test('decompose off skips the stage and subrefs off keeps the role read-only', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-decompose-off-'));
+    await writeFile(path.join(dir, 'mockup.png'), Buffer.from(TINY_PNG, 'base64'));
+    const events = [];
+    const bodies = [];
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'один экран', complexity: 'normal',
+                steps: [{ goal: 'Создать styles.scss', details: '', verify: 'прочитать styles.scss' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, risks: [], imageTasks: [],
+            }) };
+        }
+        if (role === 'decomposer') {
+            bodies.push(body);
+            return { text: JSON.stringify({ summary: 'Один экран.', screens: [], subReferences: [], notes: [] }) };
+        }
+        if (role === 'measurer') {
+            return { text: JSON.stringify({
+                summary: 'Карточка', source: 'mockup.png', unit: 'px',
+                units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '' },
+                confidence: 'high', assumptions: [], canvas: { x: 0, y: 0, width: 400, height: 300 },
+                elements: [], regions: [], rules: [], notes: '',
+            }) };
+        }
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.tools = { ...defaults.tools, images: true };
+    config.agent = { ...defaults.agent, architect: 'off', decompose: 'off' };
+    const off = await runTeam({
+        client: client(), config, ledger: createLedger(), task: 'сверстай экран',
+        root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+        emit: (event) => events.push(event),
+    });
+    assert.equal(off.status, 'completed', off.error?.message);
+    assert.equal(events.some((e) => e.type === 'stage.start' && e.stage === 'decompose'), false, 'agent.decompose off skips the stage');
+
+    const names = toolNamesForRole(
+        enabledToolNames({ ...defaults.tools, images: true }, { imageApi: true }), 'decomposer', null,
+    );
+    assert.ok(names.includes('crop_image') && names.includes('edit_image'), names.join(', '));
+    await rm(dir, { recursive: true, force: true });
+});
+
+test('subrefs always says out loud when the run cannot generate images', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-subrefs-always-'));
+    await writeFile(path.join(dir, 'mockup.png'), Buffer.from(TINY_PNG, 'base64'));
+    const events = [];
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'один экран', complexity: 'normal',
+                steps: [{ goal: 'Создать styles.scss', details: '', verify: 'прочитать styles.scss' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, risks: [], imageTasks: [],
+            }) };
+        }
+        if (role === 'decomposer') {
+            return { text: JSON.stringify({
+                summary: 'Два экрана в коллаже.',
+                screens: [{ name: 'Landing', source: 'mockup.png', nodeId: null, purpose: 'Первый экран.', bounds: '0,0 400x300', references: [], subReference: null, subReferenceKind: '' }],
+                subReferences: [], notes: [],
+            }) };
+        }
+        if (role === 'measurer') {
+            return { text: JSON.stringify({
+                summary: 'Карточка', source: 'mockup.png', unit: 'px',
+                units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '' },
+                confidence: 'high', assumptions: [], canvas: { x: 0, y: 0, width: 400, height: 300 },
+                elements: [], regions: [], rules: [], notes: '',
+            }) };
+        }
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.tools = { ...defaults.tools, images: false };
+    config.agent = { ...defaults.agent, architect: 'off', decompose: 'always', decomposerSubReferences: 'always' };
+    const result = await runTeam({
+        client: client(), config, ledger: createLedger(), task: 'сверстай экран',
+        root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+        emit: (event) => events.push(event),
+    });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.ok(events.some((event) => event.type === 'warning' && /decomposerSubReferences/.test(event.message)),
+        'a demanded sub-reference mode without generation must be reported, not silently skipped');
     await rm(dir, { recursive: true, force: true });
 });
 

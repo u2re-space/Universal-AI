@@ -3,7 +3,7 @@
  * @module agent/schemas
  * @purpose Strict JSON schemas for structured role outputs (Responses API text.format = json_schema).
  * @usedBy agent/team, agent/roles
- * @exports PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, DECORATOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA
+ * @exports PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, DECORATOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA, DECOMPOSER_SCHEMA, SUB_REFERENCE_KINDS
  * @ai.tags schema, roles
  * @ai.hint pure
  * @changed 2026-10-27 The planner may request decoration tasks; the decorator answers with its artifacts.
@@ -31,6 +31,8 @@ export const CLASSIFIER_SCHEMA = object({
     label: { type: 'string', enum: ['trivial', 'normal', 'complex'], description: 'How large the task is.' },
 });
 
+export const SUB_REFERENCE_KINDS = ['crop', 'split', 'restored', 'regenerated', 'figma-export'];
+
 export const DECOMPOSER_SCHEMA = object({
     summary: { ...string, description: 'How the provided design divides into screens or meaningful fragments.' },
     screens: {
@@ -43,6 +45,26 @@ export const DECOMPOSER_SCHEMA = object({
             purpose: { ...string, description: 'What this screen or fragment represents and how it relates to the flow.' },
             bounds: { ...nullableString, description: 'Image coordinates or Figma frame bounds when available; null when unavailable.' },
             references: { ...strings, description: 'Other screens or nodes related to this one.' },
+            subReference: {
+                ...nullableString,
+                description: 'Project-relative path of the image you produced for this screen (crop, split tile, restored or regenerated view), or null when you produced none.',
+            },
+            subReferenceKind: {
+                type: 'string',
+                enum: ['', ...SUB_REFERENCE_KINDS],
+                description: 'How that sub-reference was produced: crop, split, restored (rectified from a rotated or perspective shot), regenerated, figma-export; empty when there is none.',
+            },
+        }),
+    },
+    subReferences: {
+        type: 'array',
+        description: 'Every image file you produced for this decomposition, in the order the screens should be measured.',
+        items: object({
+            path: { ...string, description: 'Project-relative path inside the work directory, such as .tmp/<id>/decomposition/01-home.png.' },
+            screen: { ...string, description: 'Name of the screen this image stands for.' },
+            kind: { type: 'string', enum: SUB_REFERENCE_KINDS, description: 'crop, split, restored, regenerated, or figma-export.' },
+            source: { ...string, description: 'The reference this image was cut or restored from (path or URL).' },
+            note: { ...string, description: 'What was corrected or kept: the rotation or perspective removed, the region cut, what stays approximate.' },
         }),
     },
     notes: { ...strings, description: 'Ambiguities, inferred relationships, or inaccessible sources.' },

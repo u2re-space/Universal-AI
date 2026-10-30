@@ -72,6 +72,10 @@ export async function run(ctx) {
     const mockups = values.image ?? [];
     const toolsChosen = values.tools !== undefined || Boolean(values['no-tools']) || Boolean(values.images);
     if (prepared.wantsProfile && mockups.length && !toolsChosen) config.tools.images = true;
+    // The decomposer restores and cuts sub-references with the image tools: any reference source
+    // turns them on unless the caller picked the tool list by hand.
+    const subRefMode = config.agent.decomposerSubReferences ?? 'auto';
+    if ((mockups.length || hasFigmaSource) && subRefMode !== 'off' && !toolsChosen) config.tools.images = true;
     if (prepared.wantsProfile && mockups.length && config.tools.images && !values.route) config.agent.route = 'planner';
     const imageApi = imageTransport(config) === 'images';
     const names = enabledToolNames(config.tools, { interactive, memory: Boolean(store), summarize: true, imageApi, unsafeScreenshot: config.desktop?.unsafeScreenshot === true });

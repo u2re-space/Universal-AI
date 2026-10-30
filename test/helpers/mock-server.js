@@ -117,7 +117,9 @@ export async function startMockServer({ script, imageScript, backgroundPolls = 2
         const chunks = [];
         for await (const chunk of req) chunks.push(chunk);
         const raw = Buffer.concat(chunks).toString('utf8');
-        const body = raw ? JSON.parse(raw) : null;
+        // /images/edits posts multipart form data; only JSON bodies are parsed here.
+        const multipart = String(req.headers['content-type'] ?? '').includes('multipart/form-data');
+        const body = raw && !multipart ? JSON.parse(raw) : null;
         const url = new URL(req.url, 'http://localhost');
         const json = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json', 'x-request-id': `req_${randomUUID().slice(0, 8)}` }); res.end(JSON.stringify(data)); };
         requests.push({ method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), headers: req.headers, body });

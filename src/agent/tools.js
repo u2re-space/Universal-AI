@@ -147,12 +147,19 @@ function commandReport(result, timeoutMs, limits) {
 const PROCESSABLE = new Set(['delete_file', 'list_files', 'read_file', 'replace_text', 'run_command', 'run_script', 'search_files', 'write_file']);
 const WRITE_CHANGES = new Set(['write_file', 'replace_text', 'delete_file']);
 const CHANGE_OPS = new Set(['create', 'overwrite', 'edit', 'delete']);
+/**
+ * Image tools a read-only stage may still run, provided the file lands inside `.tmp/`:
+ * the measurer's crops and the decomposer's sub-references are temporary artifacts, not project output.
+ */
+const AUTO_WRITE_TOOLS = new Set(['crop_image', 'split_image', 'compare_images', 'generate_image', 'edit_image']);
+/** Tools of that set whose output path the handler itself does not guard. */
+const GENERATED_OUTPUT_TOOLS = new Set(['generate_image', 'edit_image']);
 
 /**
  * Create the executable toolset for one agent run.
  *
  * approvalLevel: 'ask' | 'read' | 'write' | 'all'.
- * allowWrite — measurement crop tools (`crop_image`, `split_image`) that may run at read access, confined to `.tmp/`.
+ * allowWrite — image tools (`crop_image`, `split_image`, `compare_images`, `generate_image`, `edit_image`) that may run at read access, confined to `.tmp/`.
  * approve({ name, category, args, preview }) → 'yes' | 'no' | 'always' | 'abort' (used for 'ask').
  * askUser(question) → string | null (optional; enables the ask_user tool).
  * memory / projectKey / projectName — long-term memory store (enables recall / remember).
@@ -174,7 +181,7 @@ export function createToolset({
 }) {
     const limits = config.limits;
     const allowed = new Set(names);
-    const autoWrite = new Set(allowWrite.filter((name) => name === 'crop_image' || name === 'split_image'));
+    const autoWrite = new Set(allowWrite.filter((name) => AUTO_WRITE_TOOLS.has(name)));
     const extraByName = new Map();
     for (const extra of extras) {
         if (!extra?.name || TOOL_SPECS[extra.name] || extraByName.has(extra.name)) throw new Error(`Имя инструмента занято: ${extra.name}`);
@@ -300,6 +307,18 @@ export function createToolset({
         if (abs !== tmp && !abs.startsWith(tmp + path.sep)) {
             throw new Error(`${name}: при read-доступе писать можно только в .tmp/ (получено: ${value}).`);
         }
+    }
+
+    /**
+     * The generation tools pick `assets/` when no path is given, so an auto-approved call at read
+     * access must name its file and that file must sit inside `.tmp/`. A sub-reference is a
+     * working artifact for the next role, never project output.
+     */
+    function guardGeneratedOutput(name, args) {
+        if (approvalLevel !== 'read' || !autoWrite.has(name) || !GENERATED_OUTPUT_TOOLS.has(name)) return;
+        const value = String(args?.path ?? '').trim();
+        if (!value) throw new Error(`${name}: укажите path внутри .tmp/ — при read-доступе сгенерированный файл обязан быть временным.`);
+        guardTemporaryOutput(name, value);
     }
 
     const handlers = {
@@ -763,6 +782,12 @@ export function createToolset({
             return fail(`операция ${name} отклонена пользователем или политикой доступа (${approvalLevel}). Не повторяйте её; предложите альтернативу или завершите с описанием.`);
         }
         signal?.throwIfAborted();
+        try {
+            guardGeneratedOutput(name, args);
+        } catch (error) {
+            stats.errors++;
+            return fail(errorMessage(error));
+        }
         if (PROCESSABLE.has(name) && processTool) {
             let remote = null;
             try {

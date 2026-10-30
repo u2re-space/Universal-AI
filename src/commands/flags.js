@@ -158,6 +158,19 @@ export function overridesFrom(values, { command = null } = {}) {
         if (!['off', 'auto', 'always'].includes(values.architect)) throw new UsageError('--architect: off | auto | always');
         (o.agent ??= {}).architect = values.architect;
     }
+    if (values['no-decompose']) (o.agent ??= {}).decompose = 'off';
+    if (values.decompose) {
+        if (!['off', 'auto', 'always'].includes(values.decompose)) throw new UsageError('--decompose: off | auto | always');
+        (o.agent ??= {}).decompose = values.decompose;
+    }
+    // Sub-references are generated images, so asking for them turns the images route on.
+    if (values['no-subrefs']) (o.agent ??= {}).decomposerSubReferences = 'off';
+    if (values.subrefs) {
+        if (!['off', 'auto', 'always'].includes(values.subrefs)) throw new UsageError('--subrefs: off | auto | always');
+        (o.agent ??= {}).decomposerSubReferences = values.subrefs;
+        // A later explicit --tools/--no-tools still wins over this.
+        if (values.subrefs !== 'off') o.tools.images = true;
+    }
     if (values.orchestrator !== undefined) (o.agent ??= {}).orchestrator = { enabled: values.orchestrator };
     // --coordinator is the retired name of --orchestrator; both enable the unified role.
     if (values.coordinator !== undefined && values.orchestrator === undefined) (o.agent ??= {}).orchestrator = { enabled: values.coordinator };

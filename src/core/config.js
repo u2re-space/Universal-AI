@@ -582,6 +582,8 @@ function validateConfig(c) {
     if (typeof c.agent.resume !== 'boolean') fail('agent.resume: true | false');
     if (!['off', 'auto', 'always'].includes(c.agent.extract)) fail('agent.extract: off | auto | always');
     if (!['off', 'auto', 'always'].includes(c.agent.measure)) fail('agent.measure: off | auto | always');
+    if (!['off', 'auto', 'always'].includes(c.agent.decompose)) fail('agent.decompose: off | auto | always');
+    if (!['off', 'auto', 'always'].includes(c.agent.decomposerSubReferences)) fail('agent.decomposerSubReferences: off | auto | always');
     if (!['off', 'auto', 'always'].includes(c.agent.decorations)) fail('agent.decorations: off | auto | always');
     if (!['off', 'auto', 'always'].includes(c.agent.architect)) fail('agent.architect: off | auto | always');
     if (c.agent.pipeline != null) {

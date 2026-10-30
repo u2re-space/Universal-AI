@@ -35,6 +35,7 @@ import { builtinTools } from './loop.js';
 import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
 import { PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, DECORATOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, DECOMPOSER_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
+import { SUB_REFERENCE_DIR, collectSubReferences, attachSubReferences, decompositionReport } from './decomposition.js';
 import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace, stageEffort, fineQuality, defaultFineQuality } from './pace.js';
 import { contextBytes, profileFor } from '../openai/model-profiles.js';
 import { ensureProjectMap, loadProjectMap } from './map.js';
@@ -140,7 +141,7 @@ export function toolNamesForRole(allNames, role, spec = null) {
             : role === 'measurer'
                 ? ['view_image', 'crop_image', 'split_image', 'fetch_url']
                 : role === 'decomposer'
-                    ? ['view_image', 'fetch_url']
+                    ? ['view_image', 'fetch_url', 'crop_image', 'split_image', 'compare_images', 'generate_image', 'edit_image']
                     : [...READ_ONLY_TOOLS, 'write_file', 'replace_text', 'generate_svg', 'fetch_url']);
         return allNames.filter((name) => allowed.has(name));
     }
@@ -240,9 +241,19 @@ export async function runTeam({
                 if (!names.includes(name)) names.push(name);
             }
         }
+        // A nested decomposer cuts and restores screens the same way the pipeline stage does.
+        if (role === 'decomposer') {
+            for (const name of ['view_image', 'crop_image', 'split_image', 'compare_images']) {
+                if (!names.includes(name)) names.push(name);
+            }
+        }
+        const allowWrite = role === 'measurer'
+            ? ['crop_image', 'split_image']
+            : role === 'decomposer'
+                ? ['crop_image', 'split_image', 'compare_images', ...names.filter((name) => name === 'generate_image' || name === 'edit_image')]
+                : [];
         const toolset = createToolset({
-            ...toolBase, names, approvalLevel,
-            allowWrite: role === 'measurer' ? ['crop_image', 'split_image'] : [],
+            ...toolBase, names, approvalLevel, allowWrite,
             describeScreen: roles.describeScreen,
         });
         const builtin = role === 'decomposer'
@@ -756,6 +767,21 @@ export async function runTeam({
         const referenceParts = parts.filter((part) => part?.type === 'input_image');
         const hasFigmaReference = /https?:\/\/(?:www\.)?figma\.com\//i.test(task);
         let decomposition = null;
+        // Images the decomposer produced (one clean screen per entry). The measurer gets them as
+        // attachments, so it measures flat screens instead of a rotated collage.
+        let screenReferences = { files: [], parts: [] };
+        /** Read the produced sub-references back and turn the existing ones into attachments. */
+        const collectScreenReferences = async (data) => {
+            const collected = await collectSubReferences({
+                root, workId: work.id, decomposition: data, maxBytes: config.limits.maxImageBytes,
+            });
+            const attached = collected.files.length
+                ? await attachSubReferences({ root, files: collected.files, maxBytes: config.limits.maxImageBytes })
+                : { parts: [], warnings: [] };
+            screenReferences = { files: collected.files, parts: attached.parts };
+            for (const warning of [...collected.warnings, ...attached.warnings]) notify({ type: 'warning', message: warning });
+            return screenReferences;
+        };
         const stages = [
             {
                 id: 'answer',
@@ -984,34 +1010,83 @@ export async function runTeam({
             {
                 id: 'decompose',
                 run: async () => {
-                    if (resumedWork || (!referenceParts.length && !/https?:\/\/(?:www\.)?figma\.com\//i.test(task))) return;
+                    const decomposeMode = config.agent.decompose ?? 'auto';
+                    if (decomposeMode === 'off') return;
+                    if (!(referenceParts.length || hasFigmaReference) && decomposeMode !== 'always') return;
+                    const dir = `.tmp/${work.id}`;
+                    if (resumedWork) {
+                        // A resumed run does not ask the role again; it reads back the screens and the
+                        // sub-reference images that are still on disk.
+                        const saved = await readFile(path.join(root, dir, 'decomposition.json'), 'utf8')
+                            .then((text) => JSON.parse(text)).catch(() => null);
+                        if (saved) {
+                            decomposition = saved;
+                            await collectScreenReferences(saved);
+                            ctx.set('decomposition', 'Screen decomposition (before measurement)', decompositionReport(decomposition, screenReferences.files, dir), { priority: 9 });
+                        }
+                        return;
+                    }
+                    const subRefMode = config.agent.decomposerSubReferences ?? 'auto';
                     const role = roles.resolve('decomposer', plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal');
                     const model = paced?.ready
                         ? clampModel(role.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.decomposer?.model))
                         : role.model;
+                    // Local cuts belong to the decomposer the same way they belong to the measurer;
+                    // generation needs the images API and an enabled `tools.images`.
+                    const names = [...new Set([
+                        ...toolNamesForRole(enabled, 'decomposer', config.roles?.decomposer),
+                        'view_image', 'crop_image', 'split_image', 'compare_images',
+                    ])];
+                    const canGenerate = subRefMode !== 'off' && names.includes('generate_image');
+                    // `always` demands pictures: say out loud when the run cannot make them, instead of
+                    // quietly returning a names-only decomposition.
+                    if (subRefMode === 'always' && !canGenerate) {
+                        notify({ type: 'warning', message: 'agent.decomposerSubReferences: always, но генерация изображений недоступна (tools.images или image API) — decomposer ограничится локальными кропами.' });
+                    }
+                    const autoWrite = ['crop_image', 'split_image', 'compare_images', ...(canGenerate ? ['generate_image', 'edit_image'] : [])];
+                    const imageDir = `${dir}/${SUB_REFERENCE_DIR}`;
                     const taskLines = [
                         ...referencePaths.map((source) => `- ${source}`),
                         ...[...task.matchAll(/https?:\/\/[^\s)]+/gi)].map(([source]) => `- ${source}`),
                     ];
+                    const subRefBrief = subRefMode === 'off'
+                        ? 'Mode: names only. Do not write any image; return the screen list and leave subReference null.'
+                        : [
+                            `Mode: produce sub-references. Write every image you produce under ${imageDir}/ — that directory is the only place you may write.`,
+                            'For each screen either cut it out of the source (crop_image, split_image) or, when the source is a rotated, mirrored, tilted or perspective shot, first restore a flat front view of the whole frame (edit_image with that source as reference, or generate_image with it as reference) and cut the screens from the restored picture.',
+                            'Check what you wrote: look at the file with view_image and, when a screen was restored, compare_images the result against the source region. Keep a screen out rather than ship an image that is not it.',
+                            'Name each file by its order and screen, e.g. 01-home.png, 02-checkout.png.',
+                            canGenerate ? '' : 'Image generation is unavailable in this run: use local crops and splits only and say so in notes.',
+                        ].filter(Boolean).join(' ');
                     notify({ type: 'stage.start', stage: 'decompose', role: 'decomposer', model });
                     const result = await roles.run('decomposer', {
-                        text: `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Design sources\n${taskLines.join('\n') || '(attached image references)'}\n\n# Task\nIdentify screens and relationships before measurements.`,
+                        text: `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Design sources\n${taskLines.join('\n') || '(attached image references)'}\n\n# Output directory\n${imageDir}/\n\n${subRefBrief}\n\n# Task\nIdentify screens and relationships before measurements, then return one clean sub-reference per screen.`,
                         parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.decomposer),
-                        toolset: createToolset({ ...toolBase, names: toolNamesForRole(enabled, 'decomposer', config.roles?.decomposer), approvalLevel: 'read', extras: mcpRead }),
+                        toolset: createToolset({
+                            ...toolBase, names, approvalLevel: 'read', allowWrite: autoWrite,
+                            extras: mcpRead, describeScreen: roles.describeScreen,
+                        }),
                         builtin: builtinTools(config, { web: config.tools.web }).filter((tool) => tool.type === 'mcp' || (config.tools.web && tool.type === 'web_search')),
                         schema: DECOMPOSER_SCHEMA, schemaName: 'decomposition',
-                        maxTurns: config.agent.decomposerMaxTurns ?? 8, model,
+                        maxTurns: config.agent.decomposerMaxTurns ?? 12, model,
                         ...(role.effort ? { effort: role.effort } : {}),
                     });
                     if (result.status === 'cancelled' || result.status === 'budget') return { exit: stop(result, 'разбиение экранов') };
                     if (result.data) {
                         decomposition = result.data;
-                        ctx.set('decomposition', 'Screen decomposition (before measurement)', JSON.stringify(decomposition, null, 2), { priority: 9 });
-                        await writeFile(path.join(root, '.tmp', work.id, 'decomposition.json'), `${JSON.stringify(decomposition, null, 2)}\n`, 'utf8').catch((error) => {
+                        await collectScreenReferences(decomposition);
+                        ctx.set('decomposition', 'Screen decomposition (before measurement)', decompositionReport(decomposition, screenReferences.files, dir), { priority: 9 });
+                        await writeFile(path.join(root, dir, 'decomposition.json'), `${JSON.stringify(decomposition, null, 2)}\n`, 'utf8').catch((error) => {
                             notify({ type: 'warning', message: `Разбиение экранов не сохранено: ${errorMessage(error)}` });
                         });
+                        if (screenReferences.files.length) {
+                            notify({ type: 'decompose.subreferences', count: screenReferences.files.length, files: screenReferences.files.map((file) => ({ path: file.rel, kind: file.kind, screen: file.screen })) });
+                        }
                         progress.notes ??= [];
-                        progress.notes.push({ kind: 'decomposer', status: 'completed', report: decomposition.summary });
+                        progress.notes.push({
+                            kind: 'decomposer', status: 'completed',
+                            report: `${decomposition.summary || 'screens'} · sub-references: ${screenReferences.files.length}`,
+                        });
                         work.progress = progress;
                         await persist();
                     } else {
@@ -1063,10 +1138,18 @@ export async function runTeam({
                             .filter((tool) => tool.type === 'mcp' || (config.tools.web && tool.type === 'web_search'));
                         const measureContext = ctx.render({ maxBytes: measureMaxBytes, exclude: ['tree'] });
                         const measurePlan = `Plan: ${plan.summary}\nSteps:\n${bullets(plan.steps.map((step) => step.goal))}`;
+                        // The decomposer's flat screens are attached next to the originals, so the sheet
+                        // is built on one screen per image instead of on a rotated collage.
+                        const subReferenceBlock = screenReferences.files.length
+                            ? '\n\n# Screen sub-references (produced by the decomposer)\n'
+                                + `${screenReferences.files.map((file) => `- ${file.rel} (${file.kind}${file.screen ? `, ${file.screen}` : ''})`).join('\n')}\n`
+                                + 'Measure these flat screens; the original references stay attached only as context. '
+                                + 'Say in notes which sub-reference every region and element was measured from.'
+                            : '';
                         /** One measurement pass, with a tool-less report when the turn budget is spent. */
                         const measureRun = async ({ pass, text, maxTurns, session }) => {
                             const result = await roles.run('measurer', {
-                                text, parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.measurer),
+                                text, parts: [...referenceParts, ...screenReferences.parts], instructions: withAgents(ROLE_INSTRUCTIONS.measurer),
                                 toolset: measureToolsFor(pass), builtin: measureBuiltin,
                                 schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns,
                                 model, effort: measureEffort, onMaxTurns, session,
@@ -1091,7 +1174,7 @@ export async function runTeam({
                             text: `${measureContext}\n\n# Measurement pass 1 — whole reference\n${measurePlan}\n\n` +
                                 'Study the whole reference first: the canvas, the global layout, every element, every reusable region, and the spacing rules. ' +
                                 'Do not start from a fragment. Return the complete overview sheet with CSS units, per-item confidence, and explicit assumptions. ' +
-                                'The harness cuts fragments from your boxes after this pass.',
+                                'The harness cuts fragments from your boxes after this pass.' + subReferenceBlock,
                             maxTurns: overviewTurns,
                             session: createSession({ store: false, model }),
                         });
@@ -1119,7 +1202,7 @@ export async function runTeam({
                                     'Return the complete final sheet, not a delta: keep every region and element, keep its crop path when the box is unchanged, ' +
                                     'and add new fragments for the worker, architect, and image-processor. Use CSS units with explicit conversions, mark every ' +
                                     'inferred value in assumptions, and set confidence per element. Do not replace the global layout with a single fragment.\n\n' +
-                                    `# Overview sheet (JSON)\n${JSON.stringify(sheet)}\n\n# Staged fragments\n${fragmentList}`,
+                                    `# Overview sheet (JSON)\n${JSON.stringify(sheet)}\n\n# Staged fragments\n${fragmentList}${subReferenceBlock}`,
                                 maxTurns: fragmentTurns,
                                 session: createSession({ store: false, model }),
                             });

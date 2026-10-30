@@ -233,7 +233,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 | `planner` | понять задачу, составить план (JSON: шаги, файлы, вопросы, критерии приёмки, нужно ли ревью, `imageTasks` и `decorationTasks`), посмотреть приложенные картинки | — | старшая модель, effort `high` |
 | `styler` | создавать и менять CSS/SCSS по плану, соглашениям проекта и замерам; сам не запускает тесты и не сравнивает варианты | чтение и правка файлов; без команд, сравнений и вложенных вызовов | `gpt-6.1-sol`; effort `medium` / `high` / `xhigh` по сложности, модель и effort можно задать через `--role styler=…` |
 | `iconifier` | после изменений HTML/JSX выбирает и доступно интегрирует иконки из уже подключённой библиотеки/ассетов, Unicode или проверенного икон-шрифта; SVG по референсу — крайний вариант; этап пропускается без изменённой разметки | чтение и просмотр файлов, редактирование разметки, проверенные загрузки шрифтов/иконок и SVG; без shell и desktop | `gpt-6.1-sol`; effort настраивается `--role iconifier=…` и `--iconifier-quality` |
-| `decomposer` | до замеров разобрать референсы (скриншоты и Figma-файл) на отдельные экраны, фреймы и переиспользуемые фрагменты: имя, источник, `nodeId`, назначение, границы и на какие референсы он опирается | `view_image`, `fetch_url`, MCP (например, `figma`) | `gpt-6.1-terra` / `xhigh`; `agent.decomposerMaxTurns` (8) |
+| `decomposer` | до замеров разобрать референсы (скриншоты, коллажи и Figma-файл) на отдельные экраны, фреймы и переиспользуемые фрагменты: имя, источник, `nodeId`, назначение, границы и на какие референсы он опирается — и собрать суб-референс на каждый экран: кроп/нарезка, а повёрнутый, зеркальный или снятый под углом источник сначала восстанавливается в плоский вид | `view_image`, `fetch_url`, `crop_image`, `split_image`, `compare_images`, `generate_image`, `edit_image`, MCP (например, `figma`); при `agent.decomposerSubReferences: off` — только чтение | `gpt-6.1-terra` / `xhigh`; `agent.decomposerMaxTurns` (12) |
 | `measurer` | снять метрики с референсов после плана: блоки элементов в пикселях, на какой угол повёрнут каждый, где проходят границы и скругления, как картинка делится на области и слои (с коробками кропа), правила отступов, куда и как ставить каждый элемент | `view_image`, `crop_image`, `split_image`, `fetch_url`, MCP | тривиально (только разделить): `gpt-6-luna` / `medium`; стили: `gpt-6-luna` / `high`; стили, SVG и геометрия: `gpt-6.1-sol` / `medium` |
 | `decorator` | построить сложные декоративные элементы (`decorationTasks` из плана) до генерации HTML: орнаменты, завитки, ленты, разделители, узоры, рамки. Для каждого выбирает нативный HTML+CSS на современных стандартах (`offset-path`, `clip-path`, `mask`, градиенты, `@property`, scroll-driven анимации) или отдельный SVG-файл; возвращает готовые сниппеты, пути файлов и fallback | `list_files`, `read_file`, `search_files`, `view_image`, `write_file`, `replace_text`, `generate_svg`, `fetch_url` | trivial: `gpt-6-luna` / `medium`; normal: `gpt-6-luna` / `high`; complex: `gpt-6.1-sol` / `medium` |
 | `architect` | после плана и замеров превратить план в конкретную файловую/модульную структуру и дизайн-решения: какие файлы, компоненты, стили и assets создавать, какие у них интерфейсы и зависимости, как реализовать каждый шаг; отдельно — вопросы оркестратору и общие конвенции | только чтение: `list_files`, `search_files`, `read_file`, `summarize_file`, `recall` | старшая модель, effort `high`; `agent.architect: auto` (по умолчанию) — для нетривиального плана, `--no-architect` выключает |
@@ -341,16 +341,32 @@ Stateless-история пересылается целиком, поэтому
 
 Роль `decomposer` идёт сразу после планировщика и до `measurer`: она читает приложенные скриншоты и ссылки на Figma
 и раскладывает макет на отдельные экраны, фреймы и переиспользуемые фрагменты. Ответ — JSON: `summary`, `screens`
-(имя, источник, `nodeId`, назначение, границы и на какие референсы опирается экран) и `notes`. Ориентир для
+(имя, источник, `nodeId`, назначение, границы, на какие референсы опирается экран, путь к суб-референсу
+`subReference` и как он получен `subReferenceKind`), `subReferences` (все записанные картинки) и `notes`. Ориентир для
 проверки — `./examples/for-decompose/*.png` (например, `3-screen.png` и его повёрнутая версия `rot-3-screen.png`).
 
-Этап `decompose` включается сам, когда к задаче приложены картинки или в тексте есть ссылка `figma.com`;
-в `--resume` уже собранный разбор не повторяется. Результат пишется в `.tmp/<id>/decomposition.json` и в общий
-контекст (раздел «Screen decomposition»), поэтому `measurer`, `architect` и worker видят те же экраны и их границы.
-Падение роли прогон не останавливает: печатается предупреждение, и замеры идут дальше по приложенным картинкам.
+Роль не только перечисляет экраны — она их строит. Каждый экран вырезается `crop_image` (или `split_image`, если
+референс — сетка равных фреймов), а источник, который снят не плашмя (фото под углом, повёрнутый или зеркальный
+кадр, экран в корпусе телефона, перекошенный коллаж), сначала восстанавливается в плоский вид: `edit_image` или
+`generate_image` с этим источником как референсом и просьбой оставить все панели, контролы, надписи, цвета и
+пропорции как есть. Экраны режутся уже с восстановленной картинки. Записанное роль проверяет сама — `view_image`
+на содержание и `compare_images` против источника, а неудачную проверку сообщает в `notes`, вместо того чтобы
+выдать перерисованный экран за оригинал. Файлы идут в `.tmp/<id>/decomposition/` (единственный каталог, куда роли
+разрешено писать) с именами `01-home.png`, `02-checkout.png`.
 
-Роль смотрит только целые референсы (`view_image`, `fetch_url`) и не режет кропы — это работа `measurer`.
-Модель по умолчанию — `gpt-6.1-terra` с `effort: xhigh`; лимит ходов задаёт `agent.decomposerMaxTurns` (8),
+Этап `decompose` включается сам, когда к задаче приложены картинки или в тексте есть ссылка `figma.com`
+(`--decompose always` — всегда, `--no-decompose` выключает); в `--resume` уже собранный разбор не повторяется.
+Результат пишется в `.tmp/<id>/decomposition.json` и в общий контекст (раздел «Screen decomposition»), поэтому
+`measurer`, `architect` и worker видят те же экраны и их границы. Суб-референсы, которые роль действительно
+записала, прикладываются `measurer`'у картинками рядом с оригиналами — тот мерит плоские экраны, а не гадал по
+коллажу; выдуманный или отсутствующий путь отбрасывается с предупреждением. Падение роли прогон не останавливает:
+печатается предупреждение, и замеры идут дальше по приложенным картинкам.
+
+Нужны ли картинки, задаёт `agent.decomposerSubReferences` (`--subrefs`, по умолчанию `auto`): `off`
+(`--no-subrefs`) оставляет роль обозревателем без права писать что-либо, `auto` даёт ей режку и генерацию, когда
+включены `tools.images` и image API, `always` требует генерацию, включает `tools.images` и предупреждает, если её
+нет. При референсах роль получает image-инструменты сама, даже без `--images`.
+Модель по умолчанию — `gpt-6.1-terra` с `effort: xhigh`; лимит ходов задаёт `agent.decomposerMaxTurns` (12),
 переопределить модель и effort можно `roles.decomposer.model`, `roles.decomposer.effort` или
 `--role decomposer=<модель>[:effort]`.
 
@@ -671,7 +687,7 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   "agent": { "mode": "team", "pipeline": null, "maxSteps": 12, "maxReviewRounds": 2, "workerMaxTurnsPerStep": 25, "maxContextBytes": "normal", "visionDelegate": "auto",
              "architect": "auto", "architectMaxTurns": 8,
              "decorations": "auto", "decoratorMaxTurns": 12,
-             "decomposerMaxTurns": 8,
+              "decomposerSubReferences": "auto", "decomposerMaxTurns": 12,
              "measurerPasses": 1, "measurerMaxTurns": 8, "measurerMaxContextBytes": 524288,
              "orchestrator": { "enabled": false, "after": ["plan", "work", "review", "fix"], "maxContextBytes": 4194304, "applyPlan": true } },
   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
@@ -796,7 +812,7 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 | `tester` | pass/fail одного утверждения по доказательству | чтение + `run_command`, `run_script`, `ssh`, `screenshot` | 8 |
 | `vision` | описывает названные в задаче картинки текстом | только чтение + `fetch_url` | 6 |
 | `solver` | решает по экрану или картинке: ответ, расчёт, капча, координаты элементов | только чтение + `screenshot` | 8 |
-| `decomposer` | разбирает референс на экраны и фрагменты до замеров | `view_image`, `fetch_url`, MCP | 8 |
+| `decomposer` | разбирает референс на экраны и фрагменты до замеров и сам готовит суб-референсы | `view_image`, `crop_image`, `split_image`, `compare_images`, `generate_image`, `edit_image`, `fetch_url`, MCP | 12 |
 | `measurer` | снимает метрики с референсов по заданному плану | `view_image`, `crop_image`, `split_image`, `fetch_url` | 8 |
 | `decorator` | строит декоративный слой до HTML: CSS или отдельный SVG по `decorationTasks` | чтение + `write_file`, `replace_text`, `generate_svg`, `fetch_url` | 12 |
 | `iconifier` | подбирает и доступно интегрирует иконки в изменённую разметку, не забирая CSS у styler | чтение, разметка, проверенные иконки/шрифты и SVG; без shell/desktop | 12 |

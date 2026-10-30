@@ -316,7 +316,22 @@ export const defaults = Object.freeze({
          */
         architect: 'auto',              // off | auto | always
         architectMaxTurns: 8,           // read-only tool turns the architect may spend inspecting the project
-        decomposerMaxTurns: 8,           // tool turns used to identify screens and frames before measurements
+        /**
+         * The decomposer works after the plan and before the measurements: it splits the references
+         * (screenshots, collages, Figma files) into ordered screens and produces one clean
+         * sub-reference image per screen — a crop, a tile, or a view restored from a rotated,
+         * mirrored or perspective shot. auto = only when references are attached or a Figma link is
+         * present; always = also without them; off = never. Screens go to the shared context and to
+         * `.tmp/<id>/decomposition.json`, images to `.tmp/<id>/decomposition/`.
+         */
+        decompose: 'auto',              // off | auto | always
+        decomposerMaxTurns: 12,         // tool turns used to identify screens and to cut or restore their sub-references
+        /**
+         * Whether the decomposer must produce sub-reference images. auto = produce them when the
+         * sources need it (collages, rotated or perspective shots) and the tools allow it;
+         * always = one image per screen regardless; off = name the screens only.
+         */
+        decomposerSubReferences: 'auto', // off | auto | always
         /**
          * Reference measurements taken by the `measurer` role right after decomposition and before the worker
          * writes styles or artwork. auto = only when reference images are attached and the plan is not

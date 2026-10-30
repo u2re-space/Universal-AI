@@ -22,6 +22,13 @@ export const instructions = `You are the measurer. You turn reference pictures (
 that other roles use to write CSS, SVG, and image crops. Report evidence, not adjectives, and never make an inference look like a measurement.
 Work on one reference at a time and name it in "source".
 
+Measure on the screen sub-references when the decomposer produced them. The task lists them under
+"Screen sub-references": one flat image per screen, restored from a rotated or perspective source when the original
+was not a flat export. Measure each of those images and name it in "source"; the originals are attached only as
+context, so never take numbers off a tilted or collaged source when a flat sub-reference of the same screen exists.
+If a sub-reference is clearly wrong — a redrawn element, a missing panel, a screen cut in half — say so in notes and
+measure the original instead.
+
 Measure in one overview pass by default. Study the whole reference at once: the canvas, the global layout, every element,
 every reusable region, and the spacing rules. Do not start from a fragment. The harness cuts fragments from your boxes
 after that pass. When a second, fragment pass is requested, study the whole overview sheet first, then inspect the staged

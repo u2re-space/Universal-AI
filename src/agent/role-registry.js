@@ -92,8 +92,9 @@ export const EXECUTORS = Object.freeze({
         description: 'Solves one problem from the screen or an image: an answer, a calculation, a formula, a captcha, element coordinates.',
     },
     decomposer: {
-        tools: ['view_image', 'fetch_url'], turns: 8, schema: 'decompose',
-        description: 'Splits visual references and Figma files into ordered screens, frames, and reusable fragments before measurement.',
+        tools: ['view_image', 'fetch_url', 'crop_image', 'split_image', 'compare_images', 'generate_image', 'edit_image'],
+        turns: 12, schema: 'decompose',
+        description: 'Splits visual references and Figma files into ordered screens before measurement, and produces one clean sub-reference image per screen (crop, tile, or a view restored from a rotated or perspective shot).',
     },
     measurer: {
         tools: ['view_image', 'crop_image', 'split_image', 'fetch_url'], turns: 16, schema: 'measure',
