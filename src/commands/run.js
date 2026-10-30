@@ -8,6 +8,7 @@
  * @ai.tags cli, agent, team
  * @ai.hint io
  * @changed 2026-10-16 Prepared scaffold files are written before the model plans.
+ * @changed 2026-10-30 The dependency install announces itself and streams npm output.
  */
 import path from 'node:path';
 import { ensureProjectMap } from '../agent/map.js';
@@ -97,7 +98,8 @@ export async function run(ctx) {
             if (saved.written.length) renderer.line('info', `Каркас уже записан: ${saved.written.join(', ')}`, { dim: true });
         }
         const deps = await ensureDependencies({
-            root: ctx.cwd, level, signal: ctx.signal,
+            root: ctx.cwd, level, signal: ctx.signal, pipe: ctx.renderer.mode !== 'json',
+            onStart: (count) => renderer.line('info', `Установка ${count} зависимостей: npm install...`, { dim: true }),
             approve: (request) => renderer.approve(request, { signal: ctx.signal }),
         });
         if (deps.ran) {
@@ -340,7 +342,8 @@ export async function resumeLocal(ctx, { revision = '', stepToken = null } = {})
     try {
         if (generation) {
             const deps = await ensureDependencies({
-                root: ctx.cwd, level, signal: ctx.signal,
+                root: ctx.cwd, level, signal: ctx.signal, pipe: renderer.mode !== 'json',
+                onStart: (count) => renderer.line('info', `Установка ${count} зависимостей: npm install...`, { dim: true }),
                 approve: (request) => renderer.approve(request, { signal: ctx.signal }),
             });
             if (deps.ran && deps.exitCode === 0) renderer.line('info', 'Зависимости установлены: npm install', { dim: true });

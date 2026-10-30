@@ -8,6 +8,7 @@
  * @ai.tags shell, process, ssh
  * @ai.hint io
  * @changed 2026-10-15 Script files and SSH plans beside the shell command.
+ * @changed 2026-10-30 `pipe` echoes a long command's output live on stderr.
  */
 
 import path from 'node:path';
@@ -151,25 +152,26 @@ export function sshPlan({ mode, host, command = '', port = null, identity = null
 /**
  * Run a shell command with a timeout, bounded output capture and process-tree termination.
  * Resolves (never rejects) with { exitCode, signal, stdout, stderr, timedOut, cancelled, durationMs, truncated }.
- * @param {{ command: string, cwd?: string, timeoutMs?: number, maxOutputBytes?: number, signal?: AbortSignal, shell?: string|null, onOutput?: Function }} options
+ * @param {{ command: string, cwd?: string, timeoutMs?: number, maxOutputBytes?: number, signal?: AbortSignal, shell?: string|null, onOutput?: Function, pipe?: boolean }} options
  * @returns {Promise<object>}
  * @exports
  * @ai.hint io
  */
-export function runCommand({ command, cwd, timeoutMs = 180_000, maxOutputBytes = 64 * 1024, signal, shell = null, onOutput }) {
+export function runCommand({ command, cwd, timeoutMs = 180_000, maxOutputBytes = 64 * 1024, signal, shell = null, onOutput, pipe = false }) {
     const launched = shellCommand(command, shell);
-    return runProgram({ ...launched, cwd, timeoutMs, maxOutputBytes, signal, onOutput });
+    return runProgram({ ...launched, cwd, timeoutMs, maxOutputBytes, signal, onOutput, pipe });
 }
 
 /**
  * Spawn an executable with an argv list. `input` is written to stdin when present.
  * Same timeout, output cap, and result shape as `runCommand`.
- * @param {{ file: string, args?: string[], cwd?: string, input?: Buffer|string|null, timeoutMs?: number, maxOutputBytes?: number, signal?: AbortSignal, onOutput?: Function, verbatim?: boolean }} options
+ * `pipe` echoes the child output live on stderr, so a long silent command does not look frozen.
+ * @param {{ file: string, args?: string[], cwd?: string, input?: Buffer|string|null, timeoutMs?: number, maxOutputBytes?: number, signal?: AbortSignal, onOutput?: Function, verbatim?: boolean, pipe?: boolean }} options
  * @returns {Promise<object>}
  * @exports
  * @ai.hint io
  */
-export function runProgram({ file, args = [], cwd, input = null, timeoutMs = 180_000, maxOutputBytes = 64 * 1024, signal, onOutput, verbatim = false }) {
+export function runProgram({ file, args = [], cwd, input = null, timeoutMs = 180_000, maxOutputBytes = 64 * 1024, signal, onOutput, verbatim = false, pipe = false }) {
     const started = Date.now();
     return new Promise((resolve) => {
         let child;
@@ -182,6 +184,8 @@ export function runProgram({ file, args = [], cwd, input = null, timeoutMs = 180
             const slice = chunk.subarray(0, room);
             if (slice.length) { output[stream].push(slice); captured += slice.length; onOutput?.({ stream, bytes: slice.length }); }
             if (slice.length < chunk.length) truncated = true;
+            // Live echo goes to stderr only: stdout carries the JSON payload in --json mode.
+            if (pipe) { try { process.stderr.write(chunk); } catch { /* stderr closed or redirected */ } }
         };
         /** Resolve once with the captured output and the timeout, cancel, and error flags. */
         const finish = (code, sig) => {

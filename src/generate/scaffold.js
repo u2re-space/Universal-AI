@@ -8,6 +8,7 @@
  * @ai.tags generate
  * @ai.hint pure
  * @changed 2026-10-22 Web kinds load fonts and icons from a CDN.
+ * @changed 2026-10-30 `onStart` callback, `pipe` option forwarded to the shell.
  */
 import path from 'node:path';
 import os from 'node:os';
@@ -480,19 +481,22 @@ export async function writePreparedScaffold(root, files) {
 /**
  * Install package.json dependencies before the first step so `npm run build` can work.
  * `all` runs at once; `ask` asks the operator; `read` and `write` skip commands.
- * @param {{ root: string, level?: string, approve?: Function, signal?: AbortSignal, timeoutMs?: number, maxOutputBytes?: number, run?: Function }} request
+ * `onStart` is notified before the install begins, and `pipe` echoes npm output live so the
+ * wait does not look like a freeze.
+ * @param {{ root: string, level?: string, approve?: Function, signal?: AbortSignal, timeoutMs?: number, maxOutputBytes?: number, run?: Function, pipe?: boolean, onStart?: Function }} request
  * @returns {Promise<{ ran: boolean, reason?: string, exitCode?: number|null, timedOut?: boolean, cancelled?: boolean, stdout?: string, stderr?: string }>}
  * @exports
  * @ai.hint io
  */
-export async function ensureDependencies({ root, level = 'read', approve = async () => 'no', signal, timeoutMs = 10 * 60_000, maxOutputBytes = 64 * 1024, run = runCommand } = {}) {
+export async function ensureDependencies({ root, level = 'read', approve = async () => 'no', signal, timeoutMs = 10 * 60_000, maxOutputBytes = 64 * 1024, run = runCommand, pipe = true, onStart = null } = {}) {
     const manifestPath = path.join(root, 'package.json');
     const manifestText = await readFile(manifestPath, 'utf8').catch(() => null);
     if (manifestText === null) return { ran: false, reason: 'no package.json' };
     let manifest;
     try { manifest = JSON.parse(manifestText); } catch { return { ran: false, reason: 'invalid package.json' }; }
     const count = (section) => (manifest?.[section] && typeof manifest[section] === 'object' ? Object.keys(manifest[section]).length : 0);
-    if (count('dependencies') + count('devDependencies') === 0) return { ran: false, reason: 'no dependencies' };
+    const total = count('dependencies') + count('devDependencies');
+    if (total === 0) return { ran: false, reason: 'no dependencies' };
     const installed = await Promise.all([
         stat(path.join(root, 'node_modules', '.package-lock.json')).then((info) => info.isFile()).catch(() => false),
         stat(path.join(root, 'node_modules', '.bin')).then((info) => info.isDirectory()).catch(() => false),
@@ -506,8 +510,9 @@ export async function ensureDependencies({ root, level = 'read', approve = async
         });
         if (answer !== 'yes' && answer !== 'always') return { ran: false, reason: 'declined' };
     }
+    onStart?.(total);
     const result = await run({
-        command: 'npm install --no-audit --no-fund', cwd: root, timeoutMs, maxOutputBytes, signal,
+        command: 'npm install --no-audit --no-fund', cwd: root, timeoutMs, maxOutputBytes, signal, pipe,
     });
     return { ran: true, ...result };
 }
