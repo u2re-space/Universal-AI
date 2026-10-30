@@ -197,7 +197,7 @@ export const defaults = Object.freeze({
      *                  findings, and recent diff after every stage and decides what to do next
      *   worker     — executes plan steps that are not code generation
      *   coder      — writes code; model and effort follow plan complexity unless config pins them
-     *   styler     — writes CSS and SCSS; uses gpt-6.1-sol while effort follows complexity
+     *   styler     — writes CSS and SCSS; starts SCSS on gpt-6.1-sol, then may use gpt-6.1-terra for edits
       *   iconifier  — selects and integrates icons in generated HTML and component markup; default model gpt-6.1-sol
 
      *   writer     — writes documents, reports, and Markdown; stays on the cheaper model, effort follows complexity
@@ -263,6 +263,7 @@ export const defaults = Object.freeze({
         styler: r({
             model: 'gpt-6.1-sol', effort: 'xhigh',
             tiers: [
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),

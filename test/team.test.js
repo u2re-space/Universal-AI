@@ -1526,6 +1526,50 @@ test('an interrupted image stage resumes before implementation', async () => {
     }
 });
 
+test('a styler revision uses terra only after a completed sol SCSS pass', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-styler-revision-'));
+    const seen = [];
+    detectCoder = true;
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'classifier') return { text: JSON.stringify({ label: 'normal' }) };
+        if (role === 'planner') return { text: JSON.stringify({
+            summary: 'Стили', complexity: 'normal', needsReview: false, imageNotes: null,
+            steps: [
+                { goal: 'Создать styles.scss', details: 'Создать базовые стили', verify: '' },
+                { goal: 'Исправить styles.scss', details: 'Уточнить отступы', verify: '' },
+            ],
+            filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], risks: [],
+        }) };
+        if (role === 'styler') {
+            const prompt = JSON.stringify(body.input);
+            const step = /Your step 2 of 2/.test(prompt) ? 2 : 1;
+            if (!seen.some((item) => item.step === step)) seen.push({ step, model: body.model });
+            if (step === 1 && !body.input.some((item) => item.type === 'function_call_output')) {
+                return { calls: [{ name: 'write_file', arguments: { path: 'styles.scss', content: '$space: 1rem;\n.card { padding: $space; }\n', overwrite: true } }] };
+            }
+            return { text: 'Отступы обновлены.' };
+        }
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.agent.chain = false;
+    config.agent.resume = false;
+    config.memory = { ...defaults.memory, enabled: false };
+    config.rolePins = { styler: { model: false, effort: false } };
+    try {
+        const result = await runTeam({ client: client(), config, ledger: createLedger(), task: 'Создать и поправить стили', root: dir, approvalLevel: 'all', emit() {} });
+        assert.equal(result.status, 'completed', result.error?.message);
+        assert.deepEqual(seen, [
+            { step: 1, model: 'gpt-6.1-sol' },
+            { step: 2, model: 'gpt-6.1-terra' },
+        ]);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
 test('measurer stage runs before collector and gives CSS-ready values to the styler', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-'));
     const events = [];

@@ -252,7 +252,7 @@ test('a per-stage dial moves only its own stage', () => {
     assert.equal(pace.ceilingModel, resolvePace({ ...base, label: 'normal' }).ceilingModel);
 });
 
-test('styler steps keep their author and the gpt-6.1-sol model', () => {
+test('styler steps keep their author and the gpt-6.1-sol model for initial styling', () => {
     const pace = resolvePace({ ...base, label: 'normal', steps: [{ complexity: 'trivial', author: 'styler', files: ['styles/app.css'], goal: 'write styles', details: '', verify: '' }] });
     assert.equal(pace.steps[0].author, 'styler');
     assert.equal(pace.steps[0].model, 'gpt-6.1-sol');

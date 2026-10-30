@@ -574,14 +574,21 @@ export async function runTeam({
         const authorModel = (files, goal, complexity = plan?.complexity) => {
             const author = authorFor(files, goal);
             const choice = encodeRoute || !paced?.ready ? legacyChoice(author, complexity) : paceChoice(author, complexity);
-            return { author, model: choice.model ?? roles.resolve(author).model, effort: choice.effort ?? null };
+            const normalizePath = (file) => String(file).replaceAll(String.fromCharCode(92), '/').toLowerCase();
+            const targets = [...(Array.isArray(files) ? files : []), ...pathsIn(goal)].map(normalizePath);
+            const priorSolScss = author === 'styler' && progress.steps?.some((step) => step.status === 'completed'
+                && step.model === 'gpt-6.1-sol'
+                && [...(step.files ?? []), ...pathsIn(step.goal)].some((file) => targets.includes(normalizePath(file)) && /\.scss$/i.test(file)));
+            const pinned = config.rolePins?.styler?.model === true;
+            const model = priorSolScss && !pinned ? 'gpt-6.1-terra' : choice.model ?? roles.resolve(author).model;
+            return { author, model, effort: choice.effort ?? null };
         };
         /** Send one worker, coder, or writer turn. A restored session continues the interrupted turn. */
         const runWorker = async (title, body, maxTurns = config.agent.workerMaxTurnsPerStep, author = 'worker', checkpoint = null) => {
             const complexity = checkpoint?.complexity ?? plan?.complexity;
             stepState.complexity = complexity === 'trivial' || complexity === 'complex' || complexity === 'normal' ? complexity : 'normal';
             const choice = encodeRoute || !paced?.ready ? legacyChoice(author, complexity) : paceChoice(author, complexity);
-            const model = choice.model ?? roles.resolve(author).model;
+            const model = checkpoint?.model ?? choice.model ?? roles.resolve(author).model;
             const effort = choice.effort ?? null;
             const restored = Boolean(checkpoint?.resume && pendingSession && pendingSession.model === model);
             if (restored) {
@@ -1394,7 +1401,7 @@ Verify: ${step.verify}`}${extra}${advice}${architectureAdvice(step)}${paced?.gua
                             lastPhase = pass.phase;
                             progress.steps[index].phase = pass.phase;
                             workerToolsFor(chosen.author).setBackupSlot?.(`${step.id ?? `s${number}`}-${pass.phase}`);
-                            outcome = await runWorker(title, pass.body, pass.maxTurns, chosen.author, { stepId: step.id, phase: pass.phase, resume: pass.resume, complexity: step.complexity });
+                            outcome = await runWorker(title, pass.body, pass.maxTurns, chosen.author, { stepId: step.id, phase: pass.phase, resume: pass.resume, complexity: step.complexity, model: chosen.model });
                             result.images.push(...outcome.images);
                             reports.push(outcome.text.trim());
                             files.push(...takeFiles());
@@ -1423,7 +1430,7 @@ Verify: ${step.verify}`}${extra}${advice}${architectureAdvice(step)}${paced?.gua
                                 'If the check still fails, report the exact error and what remains unverified.',
                             ].join('\n');
                             const repaired = await runWorker(`${title} — verify`, verifyBody, verifyTurns, chosen.author,
-                                { stepId: step.id, phase: 'verify', resume: false, complexity: 'trivial' });
+                                { stepId: step.id, phase: 'verify', resume: false, complexity: 'trivial', model: chosen.model });
                             result.images.push(...repaired.images);
                             reports.push(repaired.text.trim());
                             files.push(...takeFiles());
@@ -1441,7 +1448,7 @@ Verify: ${step.verify}`}${extra}${advice}${architectureAdvice(step)}${paced?.gua
                             }
                         }
                         return {
-                            outcome, phase: lastPhase, files: [...new Set(files)],
+                            outcome, phase: lastPhase, model: chosen.model, files: [...new Set(files)],
                             report: reports.filter(Boolean).join('\n\n') || '(отчёт отсутствует)',
                         };
                     };
@@ -1467,7 +1474,7 @@ Verify: ${step.verify}`}${extra}${advice}${architectureAdvice(step)}${paced?.gua
                             notify({ type: 'warning', message: `Шаг ${number} пропал из плана после обновления.` });
                             break;
                         }
-                        progress = recordStep(progress, { index: recordAt, status: ran.outcome.status, report: ran.report, files: ran.files, phase: ran.phase });
+                        progress = recordStep(progress, { index: recordAt, status: ran.outcome.status, report: ran.report, files: ran.files, phase: ran.phase, model: ran.model });
                         work.plan = plan;
                         work.progress = progress;
                         publish();
@@ -1496,7 +1503,7 @@ Verify: ${step.verify}`}${extra}${advice}${architectureAdvice(step)}${paced?.gua
                             `The plan steps are already complete. Apply this revision to the existing project. Do not repeat finished steps.${revisionClause(revision)}`,
                             config.agent.workerMaxTurnsPerStep,
                             chosen.author,
-                            { stepId: 'revision', phase: 'body', resume: false },
+                            { stepId: 'revision', phase: 'body', resume: false, model: chosen.model },
                         );
                         result.images.push(...outcome.images);
                         result.steps.push({ index: 'revision', goal: 'Доработка', status: outcome.status, report: outcome.text.trim() });

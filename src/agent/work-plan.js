@@ -336,12 +336,13 @@ export function syncProgress(progress, plan) {
  * @exports
  * @ai.hint pure
  */
-export function recordStep(progress, { index, status, report, files = [], phase = null }) {
+export function recordStep(progress, { index, status, report, files = [], phase = null, model = null }) {
     const steps = progress.steps.map((step, i) => {
         if (i !== index) return step;
         const merged = [...new Set([...(step.files ?? []), ...files])];
         return {
             ...step, status, report, files: merged,
+            ...(model ? { model } : {}),
             phase: status === 'completed' ? 'done' : (phase ?? step.phase ?? 'pending'),
         };
     });
