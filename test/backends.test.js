@@ -146,7 +146,7 @@ test('decisions skip a backend that turned the route off', async () => {
         { baseURL: fallback.baseURL, apiKey: 'sk-fallback' },
     ], primary.baseURL, 'sk-primary'));
     try {
-        const answer = await client.decisions.create({ model: 'gpt-6-luna-decisions', input: 'is it spam?' });
+        const answer = await client.decisions.create({ model: 'openai/gpt-6-luna-decisions', input: 'is it spam?' });
         assert.deepEqual(answer.answers, [{ label: 'fallback' }]);
         assert.equal(primary.requests.filter((request) => request.path === '/v1/decisions').length, 0);
         assert.equal(fallback.requests.filter((request) => request.path === '/v1/decisions').length, 1);

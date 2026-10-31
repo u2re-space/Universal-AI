@@ -45,6 +45,7 @@ export const MODEL_PROFILES = Object.freeze({
     'gpt-6-luna': { window: 256 * 1024, maxOutput: 16384, ceiling: 'max', efforts: null },
     'gpt-6-astra': { window: 200 * 1024, maxOutput: 32768, ceiling: 'xhigh', efforts: null },
     'gpt-6-luna-decisions': { window: 128 * 1024, maxOutput: 256, ceiling: null, efforts: null },
+    'openai/gpt-6-luna-decisions': { window: 128 * 1024, maxOutput: 256, ceiling: null, efforts: null }
 });
 
 /** Vendor prefixes, so a qualified id resolves to the same profile as the bare one. */

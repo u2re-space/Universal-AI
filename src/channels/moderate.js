@@ -53,7 +53,7 @@ export async function moderateText({ client, input, config, preset, model, conte
             if (mode === 'moderations' || !shouldFallbackModeration(error)) throw error;
         }
     }
-    const decisionModel = namedDecision ? model : (config.decisions?.model || 'gpt-6-luna-decisions');
+    const decisionModel = namedDecision ? model : (config.decisions?.model || 'openai/gpt-6-luna-decisions');
     const state = { text, preset: pack, ...(context ? { context } : {}) };
     try {
         const raw = await requestDecision(client, { model: decisionModel, state, questions: questionsFor(pack), signal });

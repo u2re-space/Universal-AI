@@ -70,7 +70,7 @@ test('auto moderation uses decisions when /moderations is missing', async () => 
     const server = await listen(async (req, res, body) => {
         seen.push(req.url);
         if (req.url === '/v1/moderations') return json(res, 404, { error: { message: 'Not Found', code: 'not_found' } });
-        assert.equal(body.model, 'gpt-6-luna-decisions');
+        assert.equal(body.model, 'openai/gpt-6-luna-decisions');
         assert.equal(body.state.preset, 'community');
         return json(res, 200, {
             id: 'gen-dec-1', model: body.model,
@@ -84,7 +84,7 @@ test('auto moderation uses decisions when /moderations is missing', async () => 
         assert.deepEqual(seen, ['/v1/moderations', '/v1/decisions']);
         assert.equal(verdict.action, 'hide');
         assert.equal(verdict.source, 'decisions');
-        assert.equal(verdict.model, 'gpt-6-luna-decisions');
+        assert.equal(verdict.model, 'openai/gpt-6-luna-decisions');
     } finally {
         client.close();
         await server.close();
@@ -213,11 +213,11 @@ test('config reads the decision model and hides the bot token', async () => {
         const config = await loadConfig({
             ensureHome: true,
             env: {
-                AI_AGENT_HOME: home, OPENAI_API_KEY: 'sk-test', AI_DECISION_MODEL: 'gpt-6-luna-decisions',
+                AI_AGENT_HOME: home, OPENAI_API_KEY: 'sk-test', AI_DECISION_MODEL: 'openai/gpt-6-luna-decisions',
                 TELEGRAM_BOT_TOKEN: '123456:ABCDEF', AI_CHANNELS_TOKEN: 'channel-secret',
             },
         });
-        assert.equal(config.decisions.model, 'gpt-6-luna-decisions');
+        assert.equal(config.decisions.model, 'openai/gpt-6-luna-decisions');
         assert.equal(config.telegram.token, '123456:ABCDEF');
         assert.equal(redactConfig(config).telegram.token, '…');
         assert.equal(redactConfig(config).channels.token, '…');

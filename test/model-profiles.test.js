@@ -39,7 +39,7 @@ test('MODEL_PROFILES contains known models', () => {
     assert.ok('gpt-6.1-sol' in MODEL_PROFILES);
     assert.ok('gpt-6-luna' in MODEL_PROFILES);
     assert.ok('gpt-6-astra' in MODEL_PROFILES);
-    assert.ok('gpt-6-luna-decisions' in MODEL_PROFILES);
+    assert.ok('openai/gpt-6-luna-decisions' in MODEL_PROFILES);
     for (const id of Object.keys(MODEL_PROFILES)) {
         const p = MODEL_PROFILES[id];
         assert.ok(typeof p.window === 'number' && p.window > 0, `${id}.window`);

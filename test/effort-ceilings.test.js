@@ -238,7 +238,7 @@ test('resolveRole never asks for more output tokens than the model accepts', () 
     assert.equal(role.maxOutput, 32768);
     assert.equal(role.maxOutputTokens, 32768);
     assert.equal(role.config.maxOutputTokens, 32768);
-    const small = resolveRole(cfg({ roles: { planner: { model: 'gpt-6-luna-decisions', maxOutputTokens: 1000 } } }), 'planner');
+    const small = resolveRole(cfg({ roles: { planner: { model: 'openai/gpt-6-luna-decisions', maxOutputTokens: 1000 } } }), 'planner');
     assert.equal(small.maxOutputTokens, 256);
     assert.equal(small.config.maxOutputTokens, 256);
 });
@@ -246,6 +246,6 @@ test('resolveRole never asks for more output tokens than the model accepts', () 
 test('buildRequestBody caps max_output_tokens at the profile limit', () => {
     const body = buildRequestBody({ config: cfg({ model: 'gpt-6.1-sol' }), input: [], maxOutputTokens: 40000 });
     assert.equal(body.max_output_tokens, 32768);
-    const small = buildRequestBody({ config: cfg({ model: 'gpt-6-luna-decisions' }), input: [], maxOutputTokens: 1000 });
+    const small = buildRequestBody({ config: cfg({ model: 'openai/gpt-6-luna-decisions' }), input: [], maxOutputTokens: 1000 });
     assert.equal(small.max_output_tokens, 256);
 });

@@ -424,7 +424,7 @@ export const defaults = Object.freeze({
      * and produced PNG/JPEG pictures with that call; a gateway without image input falls back to text.
      */
     decisions: {
-        model: 'gpt-6-luna-decisions',
+        model: 'openai/gpt-6-luna-decisions',
         reviewAt: 0.5,
         blockAt: 0.9,
         assess: true,

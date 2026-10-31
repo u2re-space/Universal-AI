@@ -812,7 +812,7 @@ export async function runTeam({
                             routeChoice = null;
                             try {
                                 const raw = await requestDecision(client, {
-                                    model: config.decisions?.model ?? 'gpt-6-luna-decisions',
+                                    model: config.decisions?.model ?? 'openai/gpt-6-luna-decisions',
                                     state: { task, answer: handoff.text },
                                     questions: questionsFor('route'),
                                     signal,
