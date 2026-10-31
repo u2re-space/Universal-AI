@@ -61,7 +61,7 @@
 ### При разметке hero
 
 - Стоит особенно учесть шахматную доску, она должна быть по `inset` находиться к `inset-block-end: 0px;` и `inset-inline-end: 0px;`.
-  - Также для шахматной доски стоит учесть и `object-position: 100% 100%` (при `object-fit: contain;`), либо `object-position: calc(100% - var(--chessboard-padding-x, 0px)) calc(100% - var(--chessboard-padding-y, 0px));` если у данного изображения вдруг оказался padding. 
+  - Также для шахматной доски стоит учесть и `object-position: 100% 100%` (при `object-fit: contain;`), либо `object-position: calc(100% + var(--chessboard-padding-x, 0px)) calc(100% + var(--chessboard-padding-y, 0px));` если у данного изображения вдруг оказался padding. 
 - Шахматная фигура должна перекрывать заголовок, но быть ниже по слою малого текста.
 
 ### При разметке правой части (в мобильной версии, в конце)
