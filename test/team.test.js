@@ -1,4 +1,4 @@
-import { test, after, before, beforeEach } from 'node:test';
+﻿import { test, after, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
@@ -48,7 +48,7 @@ const baseConfig = () => structuredClone({
     pace: { ...defaults.pace, quality: 20 },
     agent: { ...defaults.agent, architect: 'off' },
     roles: { ...defaults.roles, worker: { ...defaults.roles.worker, model: 'gpt-6.1-terra' }, orchestrator: { ...defaults.roles.orchestrator, model: 'gpt-6.1-terra' },
-        vision: { ...defaults.roles.vision, model: 'gpt-6-luna-vision' }, summarizer: { ...defaults.roles.summarizer, model: 'gpt-6-luna-nano' } },
+        reviewer: { ...defaults.roles.reviewer, model: 'gpt-6-luna-vision' } },
     memory: { ...defaults.memory, dbFile: ':memory:' },
 });
 const client = () => createClient({ apiKey: 'sk-test', baseURL: server.baseURL });
@@ -62,7 +62,7 @@ function roleOf(body) {
     if (format === 'context_report') return 'collector';
     if (format === 'review') return 'reviewer';
     if (format === 'coordination') return 'coordinator';
-    if (format === 'memory_update') return 'summarizer';
+    if (format === 'memory_update') return 'memory';
     if (format === 'task_label') return 'classifier';
     if (format === 'extraction') return 'extractor';
     if (format === 'measure') return 'measurer';
@@ -73,8 +73,8 @@ function roleOf(body) {
     if (detectCoder && typeof body.instructions === 'string' && body.instructions.includes('You are the styler.')) return 'styler';
     if (detectCoder && typeof body.instructions === 'string' && body.instructions.includes('You are the coder.')) return 'coder';
     if (typeof body.instructions === 'string' && body.instructions.includes('route: encode')) return 'answer';
+    if (typeof body.instructions === 'string' && body.instructions.includes('Summarize the given source')) return 'file-summary';
     if (body.input.some((i) => i.type === 'message' && i.content?.some?.((c) => c.type === 'input_image'))) return 'vision';
-    if (body.model === 'gpt-6-luna-nano') return 'summarizer-file';
     return 'worker';
 }
 
@@ -176,7 +176,7 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.equal(resolveRole(cfg, 'planner').effort, 'xhigh');
     assert.equal(resolveRole(cfg, 'worker').model, 'gpt-6.1-terra');
     assert.equal(resolveRole(cfg, 'default').config.model, 'default-model');
-    assert.equal(resolveRole(cfg, 'summarizer').config.reasoning.summary, 'none');
+    assert.equal(resolveRole(cfg, 'orchestrator').config.reasoning.summary, 'none');
     const overrides = overridesFrom({ role: ['planner=gpt-6.1-sol:high', 'worker=gpt-6.1-terra'], single: true, memory: false });
     assert.deepEqual(overrides.roles, { planner: { model: 'gpt-6.1-sol', effort: 'high' }, worker: { model: 'gpt-6.1-terra' } });
     assert.deepEqual(overrides.agent, { mode: 'single' });
@@ -186,7 +186,7 @@ test('resolveRole merges role, default role and top-level settings; --role flags
     assert.throws(() => overridesFrom({ role: ['Bad Name=x'] }), /--role/);
     assert.throws(() => overridesFrom({ role: ['UPPER=x'] }), /--role/);
     assert.deepEqual(overridesFrom({ role: ['image-processor=gpt-6.1-terra:medium'] }).roles, { 'image-processor': { model: 'gpt-6.1-terra', effort: 'medium' } });
-    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 23);
+    assert.equal(Object.keys(overridesFrom({ role: ['all=cheap'] }).roles).length, 18);
     assert.equal(overridesFrom({ extract: 'always' }).agent.extract, 'always');
     assert.equal(overridesFrom({ 'no-extract': true }).agent.extract, 'off');
     assert.throws(() => overridesFrom({ extract: 'nope' }), /--extract/);
@@ -262,7 +262,10 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
             case 'collector': {
                 const outputs = body.input.filter((i) => i.type === 'function_call_output');
                 if (!outputs.length) return { calls: [{ name: 'search_files', arguments: { query: 'sum', path: null, regex: false } }] };
-                assert.ok(body.tools.every((t) => ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall', 'list_backups'].includes(t.name)), 'collector is read-only');
+                // The merged orchestrator carries every enabled tool (the former writer rights), so the
+                // context pass may write as well; it must still be able to read.
+                assert.ok(body.tools.some((t) => t.name === 'read_file'), 'collector can read');
+                assert.ok(body.tools.some((t) => t.name === 'write_file'), 'the merged orchestrator keeps the full toolset');
                 return { text: JSON.stringify({ findings: [{ path: 'package.json', purpose: 'манифест', relevant: 'нет зависимостей' }], answers: [{ question: 'Какой test runner?', answer: 'node --test' }], conventions: ['ESM'], notes: '' }) };
             }
             case 'worker': {
@@ -287,7 +290,7 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
                 assert.match(doc, /Number\(a\)/, 'second review sees the fix');
                 return { text: JSON.stringify({ verdict: 'accept', summary: 'Готово', issues: [], unverified: [] }) };
             }
-            case 'summarizer':
+            case 'memory':
                 return { text: JSON.stringify({ taskSummary: 'Добавлена функция sum с тестом.', memories: [
                     { scope: 'project', kind: 'convention', content: 'Тесты в проекте запускаются через node --test', tags: ['tests'] },
                     { scope: 'global', kind: 'preference', content: 'Пользователь просит отчёты по-русски', tags: [] } ] }) };
@@ -300,7 +303,7 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
     const memory = openMemory({ file: ':memory:' });
     const key = projectKey(root);
     memory.remember({ scope: 'project', project: key, kind: 'fact', content: 'Тесты в проекте пишутся на node:test; функции экспортируются как ESM', tags: ['esm'] });
-    const ledger = createLedger({ prices: { 'gpt-6.1-sol': { input: 10, output: 30 }, 'gpt-6.1-terra': { input: 1, output: 2 }, 'gpt-6-luna': { input: 1, output: 2 }, 'gpt-6-luna-nano': { input: 0.1, output: 0.4 }, 'gpt-6-astra': { input: 20, output: 60 } } });
+    const ledger = createLedger({ prices: { 'gpt-6.1-sol': { input: 10, output: 30 }, 'gpt-6.1-terra': { input: 1, output: 2 }, 'gpt-6-luna': { input: 1, output: 2 }, 'gpt-6-luna-nano': { input: 0.1, output: 0.4 }, 'gpt-6-luna-vision': { input: 1, output: 2 }, 'gpt-6-astra': { input: 20, output: 60 } } });
     const events = [];
     const result = await runTeam({ client: client(), config, ledger, task: 'Добавь функцию sum с тестом', root, approvalLevel: 'all', memory, projectKey: key,
         projectName: 'demo', emit: (e) => events.push(e) });
@@ -321,7 +324,8 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
     assert.equal(planner.effort, 'xhigh');
     assert.ok(seen.filter((s) => s.role === 'worker').every((s) => s.model === 'gpt-6.1-terra' && s.effort === 'medium'));
     assert.equal(seen.find((s) => s.role === 'collector').model, 'gpt-6.1-terra');
-    assert.equal(seen.find((s) => s.role === 'summarizer').model, 'gpt-6-luna-nano');
+    // Memory and collect both run under the merged orchestrator role on terra.
+    assert.equal(seen.find((s) => s.role === 'memory').model, 'gpt-6.1-terra');
     const stages = events.filter((e) => e.type === 'stage.start').map((e) => e.stage);
     assert.deepEqual(stages, ['answer', 'plan', 'collect', 'work', 'review', 'fix', 'review', 'memory']);
     assert.ok(events.some((e) => e.type === 'plan.ready' && e.steps.length === 3));
@@ -337,7 +341,7 @@ test('team run: planner → collector → worker steps → reviewer (revise → 
     assert.equal(progresses.at(-1).files.some((file) => file.path === 'test/sum.test.js'), true);
     assert.ok(events.some((e) => e.type === 'memory.saved' && e.count === 2));
     const byRole = Object.fromEntries(ledger.snapshot().byRole.map((r) => [r.role, r]));
-    assert.ok(byRole.planner.requests === 1 && byRole.coder.requests >= 5 && byRole.reviewer.requests === 2 && byRole.summarizer.requests === 1);
+    assert.ok(byRole.planner.requests === 1 && byRole.coder.requests >= 5 && byRole.reviewer.requests === 2 && byRole.orchestrator.requests >= 2);
     assert.ok(ledger.snapshot().costKnown);
     // Structured role outputs were not streamed as answer text.
     assert.ok(!events.some((e) => e.type === 'text.delta' && /"verdict"/.test(e.text)));
@@ -386,7 +390,7 @@ test('team run: trivial plan skips collector and review; worker failure marks th
         const role = roleOf(body);
         if (role === 'answer') return { text: 'ok\nroute: plan' };
         if (role === 'planner') return { text: JSON.stringify({ summary: 'мелочь', complexity: 'trivial', steps: [{ goal: 'сделать', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
         return { status: 'incomplete', text: 'oops', reason: 'max_output_tokens' };
     };
     const config = { ...baseConfig(), memory: { ...defaults.memory, enabled: false } };
@@ -487,11 +491,11 @@ test('role runner: vision delegation and file summaries with cache', async () =>
     script = (body) => {
         const role = roleOf(body);
         if (role === 'vision') { visionCalls++; assert.equal(body.model, 'gpt-6-luna-vision'); return { text: 'Красная точка 1×1.' }; }
-        if (role === 'summarizer-file') { summaryCalls++; return { text: 'Файл экспортирует функцию a.' }; }
+        if (role === 'file-summary') { summaryCalls++; return { text: 'Файл экспортирует функцию a.' }; }
         const outputs = body.input.filter((i) => i.type === 'function_call_output');
         if (outputs.length === 0) return { calls: [{ name: 'view_image', arguments: { path: 'pic.png', detail: 'auto', question: 'что на картинке?' } }, { name: 'summarize_file', arguments: { path: 'big.js', focus: null } }] };
         if (outputs.length === 2) {
-            assert.match(outputs[0].output, /модель vision/);
+            assert.match(outputs[0].output, /модель reviewer/);
             assert.match(outputs[0].output, /Красная точка/);
             assert.match(outputs[1].output, /экспортирует функцию a/);
             return { calls: [{ name: 'summarize_file', arguments: { path: 'big.js', focus: null } }] };
@@ -569,7 +573,7 @@ test('the extractor writes clean tmp files and the encoder copies them into the 
         assert.match(encoderText, /# Extracted files/);
         assert.match(encoderText, /extracted/);
         assert.equal(extractModel, 'gpt-6.1-terra');
-        assert.ok(events.some((event) => event.type === 'stage.start' && event.stage === 'extract' && event.role === 'extractor'));
+        assert.ok(events.some((event) => event.type === 'stage.start' && event.stage === 'extract' && event.role === 'encoder'));
         const { readdir } = await import('node:fs/promises');
         const id = (await readdir(path.join(dir, '.tmp'))).find((name) => /^[0-9a-f]{8}$/.test(name));
         assert.ok(id);
@@ -614,7 +618,7 @@ test('a plan read attaches a line range before the collector', async () => {
         if (role === 'planner') {
             return { text: JSON.stringify({ summary: 's', complexity: 'trivial', steps: [{ goal: 'посмотреть', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [], fileActions: [{ action: 'read', source: null, path: 'note.txt', cwd: '.', language: 'text', reason: 'вторая строка', start: 2, end: 2 }] }) };
         }
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
         return { text: 'ok' };
     };
     const result = await runTeam({ client: client(), config: { ...baseConfig(), memory: { ...defaults.memory, enabled: false } }, ledger: createLedger(), task: 'прочитай строку', root, approvalLevel: 'read', emit() {} });
@@ -775,7 +779,7 @@ test('team run puts the confirmed read file in the collector brief', async () =>
         seen.push(body);
         if (role === 'planner') return { text: JSON.stringify({ summary: 's', complexity: 'normal', steps: [{ goal: 'прочитать', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [], taskMap: [{ path: 'src/sum.js', role: 'read', reason: 'функция sum' }, { path: 'missing.js', role: 'edit', reason: 'нет файла' }] }) };
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
         return { text: 'ok' };
     };
     const result = await runTeam({ client: client(), config: baseConfig(), ledger: createLedger(), task: 'sum', root, approvalLevel: 'read', emit() {} });
@@ -995,7 +999,7 @@ test('several encoded files get a compatibility pass and a progress file', async
     }
 });
 
-test('each step takes the model for its own complexity, not the plan complexity', async () => {
+test('each step takes its own complexity, not the plan complexity', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-step-models-'));
     const seen = [];
     script = (body) => {
@@ -1013,9 +1017,11 @@ test('each step takes the model for its own complexity, not the plan complexity'
             }) };
         }
         if (role === 'worker') {
-            const text = body.input[0]?.content?.[0]?.text ?? '';
+            // The worker session is reused across steps, so the step title is in the last user message.
+            const messages = body.input.filter((item) => item.type === 'message' && item.role === 'user');
+            const text = messages.at(-1)?.content?.[0]?.text ?? '';
             const match = /# Your step (\d+) of (\d+)/.exec(text);
-            seen.push({ step: match ? Number(match[1]) : 0, model: body.model });
+            seen.push({ step: match ? Number(match[1]) : 0, model: body.model, effort: body.reasoning?.effort });
             return { text: 'готово' };
         }
         return { text: 'ok' };
@@ -1033,9 +1039,11 @@ test('each step takes the model for its own complexity, not the plan complexity'
         const first = seen.filter((item) => item.step === 1);
         const second = seen.filter((item) => item.step === 2);
         assert.ok(first.length >= 1, JSON.stringify(seen));
-        assert.ok(first.every((item) => item.model === 'gpt-6.1-terra'), JSON.stringify(seen));
+        // A complex code step keeps the coder floor and the higher effort.
+        assert.ok(first.every((item) => item.model === 'gpt-6.1-terra' && item.effort === 'high'), JSON.stringify(seen));
         assert.ok(second.length >= 1, JSON.stringify(seen));
-        assert.ok(second.every((item) => item.model === 'gpt-6-luna'), JSON.stringify(seen));
+        // A trivial document step runs under the worker role on its pinned model with the lowest effort.
+        assert.ok(second.every((item) => item.model === 'gpt-6.1-terra' && item.effort === 'low'), JSON.stringify(seen));
     } finally {
         await rm(dir, { recursive: true, force: true });
     }
@@ -1127,7 +1135,7 @@ test('trivial pace skips the reviewer', async () => {
         if (role === 'classifier') return { text: JSON.stringify({ label: 'trivial' }) };
         if (role === 'planner') return { text: JSON.stringify({ summary: 'мелочь', complexity: 'trivial', steps: [{ goal: 'сделать', details: '', verify: '', complexity: 'trivial' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: true, imageNotes: null, risks: [], fileActions: [], taskMap: [] }) };
         if (role === 'reviewer') throw new Error('reviewer ran');
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'ok', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'ok', memories: [] }) };
         return { text: 'готово' };
     };
     const result = await runTeam({ client: client(), config: { ...baseConfig(), pace: { ...defaults.pace, speed: 10, quality: 40 } }, ledger: createLedger(), task: 'Поправь опечатку', root, approvalLevel: 'all', emit: () => {} });
@@ -1141,7 +1149,7 @@ test('pace c does not call the planner', async () => {
         if (role === 'answer') return { text: 'Коротко.\nroute: plan' };
         if (role === 'classifier') return { text: JSON.stringify({ label: 'trivial' }) };
         if (role === 'planner') throw new Error('planner ran');
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'ok', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'ok', memories: [] }) };
         return { text: 'готово' };
     };
     const result = await runTeam({ client: client(), config: { ...baseConfig(), pace: { ...defaults.pace, mode: 'c' }, agent: { ...baseConfig().agent, chain: false } }, ledger: createLedger(), task: 'Поправь опечатку', root, approvalLevel: 'all', emit: () => {} });
@@ -1155,7 +1163,7 @@ test('a bad classifier label becomes normal and the run continues', async () => 
         const role = roleOf(body);
         if (role === 'classifier') return { text: 'не json' };
         if (role === 'planner') return { text: JSON.stringify({ summary: 's', complexity: 'normal', steps: [{ goal: 'сделать', details: '', verify: '', complexity: 'normal' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [], fileActions: [], taskMap: [] }) };
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'ok', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'ok', memories: [] }) };
         return { text: 'готово' };
     };
     const result = await runTeam({ client: client(), config: { ...baseConfig(), agent: { ...baseConfig().agent, chain: false } }, ledger: createLedger(), task: 'Сделай шаг', root, approvalLevel: 'all', emit: (event) => events.push(event) });
@@ -1173,7 +1181,7 @@ test('a strained budget tells the planner that balance is not promised', async (
             return { text: JSON.stringify({ summary: 's', complexity: 'normal', steps: [{ goal: 'сделать', details: '', verify: '', complexity: 'normal' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: ['видно'], needsReview: false, imageNotes: null, risks: [], fileActions: [], taskMap: [] }) };
         }
         if (role === 'reviewer') return { text: JSON.stringify({ verdict: 'accept', summary: 'ok', issues: [], unverified: [] }) };
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'ok', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'ok', memories: [] }) };
         return { text: 'готово' };
     };
     const result = await runTeam({
@@ -1304,7 +1312,7 @@ test('image processing runs before implementation and passes prepared assets in 
             }) };
         }
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
         return { text: 'worker done' };
     };
     const config = baseConfig();
@@ -1376,7 +1384,7 @@ test('image processor and measurer omit web search when tools.web is disabled', 
         }) };
         if (role === 'image-processor') return { text: JSON.stringify({ summary: 'Обложка готова.', assets: [], typography: [], notes: [] }) };
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
         return { text: 'worker done' };
     };
     const config = baseConfig();
@@ -1445,7 +1453,7 @@ test('a completed image stage is not repeated when the run resumes', async () =>
             summary: 'Обложка создана.', assets: [{ path: 'assets/cover.png', format: 'png', use: 'Hero background image.' }], typography: [], notes: [],
         }) };
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
         workerBodies.push(body);
         const workerText = [...body.input].reverse().find((item) => item.type === 'message' && item.role === 'user')?.content?.[0]?.text ?? '';
         if (interruptWorker && /Your step 1/.test(workerText)) {
@@ -1828,7 +1836,7 @@ test('measurer stage runs before collector and gives CSS-ready values to the sty
             assert.match(body.instructions, /CSS or SCSS/);
             return { text: 'styles.scss построен по sheet' };
         }
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
         return { text: 'ok' };
     };
     const config = baseConfig();
@@ -1890,7 +1898,7 @@ test('the measurer defaults to one cheap overview pass', async () => {
             }) };
         }
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
         return { text: 'worker done' };
     };
     const config = baseConfig();
@@ -1944,7 +1952,7 @@ test('the decorator builds the decorative layer before the worker writes the pag
             }) };
         }
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
         if (JSON.stringify(body.input).includes('Your step')) workerBodies.push(body);
         return { text: 'страница готова' };
     };
@@ -1984,7 +1992,7 @@ test('the decorator stage stays off when the plan names no decorations', async (
             }) };
         }
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
         return { text: 'страница готова' };
     };
     const config = baseConfig();
@@ -2037,7 +2045,7 @@ test('the fragment pass replaces the overview sheet and reuses its crops', async
                 : sheet('fragments', [element('Card'), element('Badge')], [region('Card region')])) };
         }
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [], conventions: [], notes: '' }) };
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'готово', memories: [] }) };
         return { text: 'worker done' };
     };
     const config = baseConfig();
@@ -2122,7 +2130,7 @@ test('architect runs after the measurements and gives the structure to the orche
             coderBody = body;
             return { text: 'src/app.js готов' };
         }
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
         return { text: 'ok' };
     };
     const config = baseConfig();
@@ -2166,7 +2174,7 @@ test('a spent measurement budget still returns the sheet for what the role alrea
             return { text: JSON.stringify({ summary: 'Замерено частично', source: 'mockup.png', unit: 'px', canvas: { width: 400, height: 300 }, elements: [], regions: [], rules: [], notes: 'Часть деталей не разглядена' }) };
         }
         if (role === 'collector') return { text: JSON.stringify({ findings: [], answers: [{ question: 'Какой стиль?', answer: 'минимализм' }], conventions: [], notes: '' }) };
-        if (role === 'summarizer') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
+        if (role === 'memory') return { text: JSON.stringify({ taskSummary: 'x', memories: [] }) };
         return { text: 'ok' };
     };
     const config = baseConfig();

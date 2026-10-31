@@ -8,6 +8,8 @@
  * @ai.hint pure
  * @changed 2026-10-26 0.2.0: --max-effort, --context, role ceilings, delegate_role, and the stage pipeline.
  * @changed 2026-10-31 --url for run/gen, the decomposer role and decompose stage, Figma MCP, and decomposition examples.
+ * @changed 2026-10-31 Merged roles (writer, tester, vision → reviewer; extractor → encoder; summarizer → orchestrator)
+ *   and the `model:role` header format.
  */
 export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
 
@@ -76,8 +78,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   При tools.fetch доступны download_font (Google Fonts или URL) и download_icons (Phosphor, Lucide с CDN).
   При tools.subagents доступны run_subagent и delegate_role: отдельный агент со своим контекстом, своими инструментами
   и лимитом ходов. delegate_role с context=true прикладывает общий контекст команды (план, находки, отчёты, diff),
-context=false запускает роль на чистом контексте. coder, styler, iconifier, worker, writer правят только файлы по своему назначению;
-   reviewer и tester только проверяют; vision описывает картинки; solver отвечает по экрану или картинке; image-processor готовит ассеты.
+context=false запускает роль на чистом контексте. coder, styler, iconifier и worker правят файлы по своему назначению;
+   reviewer проверяет результат и описывает картинки; solver отвечает по экрану или картинке; image-processor готовит ассеты.
   Вложенный запуск не видит переписку — задачу пишут целиком; свой суб-агент ему недоступен, и правит он лишь
   то, что разрешено вызвавшему.
 
@@ -88,15 +90,16 @@ context=false запускает роль на чистом контексте. 
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 
 Команда (run и gen):
-  --role <роль=модель[:effort[:max-effort]]>  модель для роли: planner, architect, orchestrator, worker, coder, styler, writer, reviewer, vision,
-                         summarizer, solver, clicker, typer, encoder, tester, classifier, extractor, decomposer, measurer, iconifier,
+  --role <роль=модель[:effort[:max-effort]]>  модель для роли: planner, architect, orchestrator, worker, coder, styler, reviewer,
+                         solver, clicker, typer, encoder, classifier, decomposer, measurer, iconifier,
                          image-processor, default, all.
+                         В шапке рана роли показываются как модель:роль.
                          Своё имя-слаг создаёт роль в roles.<имя> (инструкции и инструменты задаются в конфигурации)
-                         (например: --role planner=gpt-6.1-terra:high --role worker=gpt-6.1-terra:medium:high --role vision=gpt-6.1-terra)
+                         (например: --role planner=gpt-6.1-terra:high --role worker=gpt-6.1-terra:medium:high --role reviewer=gpt-6.1-terra)
                          --role collector=... и --role coordinator=... принимают orchestrator (объединённая роль)
     --team / --single      команда ролей / один агент     --no-chain   сразу planner, без первого ответа
     --orchestrator         оркестратор после этапов: сбор контекста, свежий взгляд на план, правки плана и указания следующему шагу
-   --extract off|auto|always  extractor чистит ответ и кладёт готовые файлы в .tmp/<id>/extracted.
+   --extract off|auto|always  encoder в режиме извлечения чистит ответ и кладёт готовые файлы в .tmp/<id>/extracted.
                          auto — только для маршрута encoder, always — и для planner. --no-extract выключает
     --decompose off|auto|always  decomposer разбирает референсы (скриншоты, коллажи, файл Figma) на экраны до замеров
                          и сам строит суб-референсы: crop_image/split_image вырезают каждый экран, а повёрнутый,
@@ -151,7 +154,7 @@ context=false запускает роль на чистом контексте. 
    уровень каждые 34 пункта относительно --quality. Общий бюджет speed + quality не меняется,
     100 — оптимальный уровень, выше — допустимое завышение.
     Шаги coder и worker никогда не опускаются ниже gpt-6.1-terra; styler начинает SCSS на gpt-6.1-sol и может править его на gpt-6.1-terra.
-    writer и остальные роли следуют общему --quality. Явный --role worker=…, coder=… или styler=… переопределяет модель роли.
+    Остальные роли следуют общему --quality. Явный --role worker=…, coder=… или styler=… переопределяет модель роли.
   --max-steps <n>        потолок шагов плана. Закрепляет число и заменяет расчёт pace
   --creativity <0..100>  сколько можно добавить сверх референсов (по умолчанию 20)
   --platform <id>        профиль платформы (по умолчанию chrome-157-beta)

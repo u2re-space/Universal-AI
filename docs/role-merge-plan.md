@@ -1,5 +1,7 @@
 # План объединения ролей
 
+**Статус: выполнено 2026-10-31 (код, без тестов).** Слияния применены, формат `model:role` в шапке рана включён.
+
 ## Цель
 
 Сократить число ролей, объединив узкоспециализированные в более крупные.
@@ -115,7 +117,7 @@ return `${role.model}:${name}`;
 | `default` | ask / chat / single-agent run |
 | `planner` | понимает задачу, пишет план |
 | `architect` | план → файловая структура, дизайн |
-| `orchestrator` | собирает контекст, координирует, сводки, память, документы |
+| `orchestrator` | собирает контекст, координирует, сводки, память, документы (все инструменты, как у бывшего writer) |
 | `worker` | выполняет шаги не-код |
 | `coder` | пишет код |
 | `styler` | пишет CSS/SCSS |
@@ -132,3 +134,15 @@ return `${role.model}:${name}`;
 | `image-processor` | подготовка картинок |
 
 **Упразднены:** `tester`, `vision`, `extractor`, `summarizer`, `writer`
+
+## Что осталось сделать (не выполнено)
+
+1. Ничего: `node --test "test/*.test.js"` проходит (664/664).
+
+## Выполнено
+
+- Тесты — обновлены все затронутые: `roles.test.js`, `role-registry.test.js`, `subagents.test.js`, `solver.test.js`, `team.test.js`, `pace.test.js`, `extract.test.js`, `role-tiers.test.js`, `effort-ceilings.test.js`, `exec.test.js`, `desktop.test.js`, `custom-roles.test.js`, `cli.test.js`, `generate.test.js`; удалён `test/writer.test.js` (его проверки `isWritingStep` перенесены в `roles.test.js`).
+- Пользовательский текст в `src/agent/tools.js` обновлён: «(модель vision)» / `→ vision` → «(модель reviewer)» / `→ reviewer`.
+- `src/core/config-defaults.js`: у `reviewer` убран явный пин `effort: 'xhigh'`, иначе он перекрывал `tiers` при вызове с размером картинки.
+- `src/agent/pace.js`: `decorate` сохраняет поведение бывшего writer для документов — worker-шаг без кодовых файлов может стоять на самом дешёвом рунге; кодовые и styler-шаги держат свой пол.
+- `src/agent/team.js`: `paceChoice` получает `files`/`goal` шага, чтобы модель документа выбиралась по тем же правилам.

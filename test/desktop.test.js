@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+﻿import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ahkString, scriptFor, wrapScript } from '../src/interact/filesystem.js';
 
@@ -133,13 +133,13 @@ import { toolNamesForRole } from '../src/agent/team.js';
 import { DESKTOP_TOOL_NAMES } from '../src/agent/desktop.js';
 import { READ_ONLY_TOOLS } from '../src/agent/tools.js';
 
-test('reviewer receives desktop tools and the orchestrator does not', () => {
+test('reviewer receives desktop tools and the orchestrator holds them too', () => {
     const all = [...READ_ONLY_TOOLS, 'run_command', 'write_file', ...DESKTOP_TOOL_NAMES];
     const reviewer = toolNamesForRole(all, 'reviewer');
     assert.equal(reviewer.includes('click'), true);
     assert.equal(reviewer.includes('write_file'), false);
     const orchestrator = toolNamesForRole(all, 'orchestrator');
-    assert.equal(orchestrator.includes('click'), false);
+    assert.equal(orchestrator.includes('click'), true);
     assert.equal(orchestrator.includes('read_file'), true);
 });
 

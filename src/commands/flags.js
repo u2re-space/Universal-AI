@@ -8,6 +8,7 @@
  * @ai.tags cli, config
  * @ai.hint pure
  * @changed 2026-10-26 --role accepts a user-defined role name, --max-effort, and --context.
+ * @changed 2026-10-31 The run header shows roles as `model:role`; --role syntax stays `name=model:effort`.
  */
 import { APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, CUSTOM_ROLE_NAME } from '../core/config.js';
 import { CONTEXT_LEVELS } from '../openai/model-profiles.js';
@@ -119,7 +120,7 @@ export function overridesFrom(values, { command = null } = {}) {
         o.roles = {};
         for (const spec of values.role) {
             const match = /^([\w*-]+)=([^:]+?)(?::([a-z]*))?(?::([a-z]*))?$/.exec(spec.trim());
-            if (!match) throw new UsageError(`--role: ожидается имя=модель[:effort[:max-effort]], получено "${spec}"`);
+            if (!match) throw new UsageError(`--role: ожидается имя=модель[:effort[:max-effort]] (в шапке рана роли показываются как модель:роль), получено "${spec}"`);
             const [, rawName, model, effort, maxEffort] = match;
             const name = canonicalRole(rawName);
             if (effort && !REASONING_EFFORTS.includes(effort)) throw new UsageError(`--role ${rawName}: effort должен быть одним из ${REASONING_EFFORTS.join(' | ')}`);

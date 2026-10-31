@@ -49,7 +49,8 @@ test('shell tools are enabled together and the reviewer may run them', () => {
     const reviewer = toolNamesForRole([...names, 'write_file'], 'reviewer');
     assert.equal(reviewer.includes('ssh'), true);
     assert.equal(reviewer.includes('write_file'), false);
-    assert.equal(toolNamesForRole(names, 'orchestrator').includes('run_script'), false);
+    // The orchestrator now holds every tool, including the shell ones.
+    assert.equal(toolNamesForRole(names, 'orchestrator').includes('run_script'), true);
 });
 
 test('run_command can target cmd and powershell, and run_script runs a file', async () => {

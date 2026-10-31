@@ -254,17 +254,17 @@ export function openMemoryFor(config, root, renderer = null) {
 }
 
 /**
- * Human-readable list of models per role (for the run header).
+ * Human-readable list of roles with their models (for the run header).
  * @param {object} config Resolved config passed to resolveRole.
  * @param {string[]} names Role names to describe.
- * @returns {string} Comma-separated role=model or role=model:effort.
+ * @returns {string} Comma-separated `model:role` pairs.
  * @exports
  * @ai.hint pure
  */
 export function describeRoles(config, names) {
     return names.map((name) => {
         const role = resolveRole(config, name);
-        return `${name}=${role.model}${role.effort ? `:${role.effort}` : ''}`;
+        return `${role.model}:${name}`;
     }).join(', ');
 }
 

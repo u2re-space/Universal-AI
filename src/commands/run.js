@@ -41,7 +41,7 @@ const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло 
 
 /**
  * `ai run <task>` — autonomous agent in the working directory.
- *   team   (default): planner → measurer → architect / context collection → image processor → worker steps → reviewer (+fix rounds) → summarizer/memory,
+ *   team   (default): planner → measurer → architect / context collection → image processor → worker steps → reviewer (+fix rounds) → memory,
  *                     each role with its own model (config.roles / --role).
  *   single (--single): one model, one tool loop (plus memory tools).
  * @param {object} ctx Command context from cli.main.

@@ -13,6 +13,7 @@
  * @changed 2026-10-27 Coder and worker steps never fall below the gpt-6.1-terra rung.
  * @changed 2026-10-28 Styler steps stay on gpt-6.1-sol when the model ladder includes it.
  * @changed 2026-10-28 Iconifier effort follows its own fine-quality dial.
+ * @changed 2026-10-31 writer merged into worker; summarizer and extractor merged into the orchestrator and encoder.
  */
 
 import { effectiveFidelity } from '../generate/fidelity.js';
@@ -321,13 +322,19 @@ function knownComplexity(value, fallback = 'normal') {
 function decorate(steps, { modelSpeed, paceSpeed, modelQuality, fineBaseline, codeQuality, models, adjusted, recklessExtra, bounded }) {
     const floor = coderFloor(models);
     const stylesFloor = stylerFloor(models);
+    // The merged worker keeps the former writer behavior: a document step (no code files)
+    // may sit on the cheapest rung, while code and styling steps never fall below the floor.
+    const CODE_FILE = /\.(?:js|mjs|cjs|ts|tsx|jsx|html|vue|svelte|py|rs|go|java)$/i;
     return steps.map((step) => {
         const complexity = knownComplexity(step.complexity);
-        const isCode = step.author === 'coder' || step.author === 'styler' || step.author === 'worker';
+        const mentioned = String(step.goal ?? '').match(/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+/g) ?? [];
+        const named = [...(Array.isArray(step.files) ? step.files : []), ...mentioned].map((file) => String(file).split(String.fromCharCode(92)).join('/'));
+        const isCode = step.author === 'coder' || step.author === 'styler'
+            || (step.author === 'worker' && (!named.length || named.some((file) => CODE_FILE.test(file))));
         const authorFloor = step.author === 'styler' ? stylesFloor : floor;
         const rung = Math.max(authorRung(complexity, modelSpeed, adjusted), isCode ? authorFloor : 0);
         const base = complexity === 'trivial' ? 'low' : complexity === 'complex' ? 'high' : 'medium';
-        const author = step.author === 'styler' ? 'styler' : step.author === 'coder' || step.author === 'writer' ? step.author : 'worker';
+        const author = step.author === 'styler' ? 'styler' : step.author === 'coder' ? step.author : 'worker';
         const model = models[rung];
         const level = effortFor(base, paceSpeed, modelQuality, complexity === 'complex', recklessExtra);
         return {
@@ -409,8 +416,7 @@ export function resolvePace({
             planner, architect: role(plannerRung(label, modelSpeed, adjusted), 'xhigh', true, fine.architect),
             orchestrator: role(1, 'xhigh', false),
             reviewer: role(reviewerRung(models, modelQuality >= 67 ? Math.min(adjusted, 1) : Math.min(adjusted, 0)), reviewerBase, true),
-            summarizer: role(1, 'xhigh', false),
-            extractor: role(1, 'xhigh', false),
+            encoder: role(1, 'xhigh', false),
         },
         steps: null,
     };
@@ -422,8 +428,8 @@ export function resolvePace({
     if (!directive.ready) return directive;
     if (policy === 'c' && !Array.isArray(steps)) {
         const complexity = knownComplexity(label);
-        const singleAuthor = author === 'coder' || author === 'styler' || author === 'writer' ? author : 'worker';
-        const authorFloor = singleAuthor === 'styler' ? stylerFloor(models) : singleAuthor === 'writer' ? 0 : coderFloor(models);
+        const singleAuthor = author === 'coder' || author === 'styler' ? author : 'worker';
+        const authorFloor = singleAuthor === 'styler' ? stylerFloor(models) : coderFloor(models);
         const rung = Math.max(singleRung(label, adjusted), authorFloor);
         const base = complexity === 'trivial' ? 'low' : complexity === 'complex' ? 'high' : 'medium';
         const model = models[rung];

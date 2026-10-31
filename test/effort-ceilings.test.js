@@ -42,14 +42,14 @@ test('resolveRole leaves an uncapped model alone', () => {
 });
 
 test('resolveRole passes none through any ceiling', () => {
-    const role = resolveRole(cfg({ roles: { summarizer: { model: 'gpt-6.1-sol', effort: 'none' } } }), 'summarizer');
+    const role = resolveRole(cfg({ roles: { encoder: { model: 'gpt-6.1-sol', effort: 'none' } } }), 'encoder');
     assert.equal(role.effort, 'none');
 });
 
 // ── resolveRole: the role ceiling ──────────────────────────────────────────
 
 test('roles.<name>.maxEffort caps a model with no ceiling of its own', () => {
-    const role = resolveRole(cfg({ roles: { summarizer: { model: 'gpt-6.1-terra', effort: 'max', maxEffort: 'low' } } }), 'summarizer');
+    const role = resolveRole(cfg({ roles: { encoder: { model: 'gpt-6.1-terra', effort: 'max', maxEffort: 'low' } } }), 'encoder');
     assert.equal(role.effort, 'low');
     assert.equal(role.ceiling, 'low');
 });
@@ -97,10 +97,10 @@ test('a null ceiling in models.<id> removes the registry limit', () => {
 // ── pace: ceilings on the directive ────────────────────────────────────────
 
 test('resolvePace never hands a role an effort above its model ceiling', () => {
-    // summarizer sits on rung 0 with base max; the ladder of the model decides what it gets.
+    // encoder sits on rung 0 with base max; the ladder of the model decides what it gets.
     const pace = resolvePace({ ...paceBase, label: 'normal', modelProfiles: { 'gpt-6-luna': { ceiling: 'medium' } } });
-    assert.equal(pace.roles.summarizer.model, 'gpt-6.1-terra');
-    assert.equal(pace.roles.summarizer.effort, 'xhigh');
+    assert.equal(pace.roles.encoder.model, 'gpt-6.1-terra');
+    assert.equal(pace.roles.encoder.effort, 'xhigh');
 });
 
 test('resolvePace caps an author step to the model it lands on', () => {

@@ -242,8 +242,10 @@ test('a tools list never adds a name the run did not enable', () => {
 });
 
 test('a built-in role keeps its own restriction when tools is empty', () => {
-    const names = toolNamesForRole(allNames, 'orchestrator', { tools: null });
-    assert.deepEqual(names, ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall']);
+    // The architect stays read-only; the merged orchestrator keeps every enabled name (the former writer rights).
+    const architect = toolNamesForRole(allNames, 'architect', { tools: null });
+    assert.deepEqual(architect, ['list_files', 'read_file', 'search_files', 'view_image', 'summarize_file', 'recall']);
+    assert.deepEqual(toolNamesForRole(allNames, 'orchestrator', { tools: null }), allNames);
 });
 
 // ── defaults ───────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { imageLongSide, imageTier } from '../src/roles/vision.js';
+import { imageLongSide, imageTier } from '../src/roles/reviewer.js';
 import { defaults, resolveRole } from '../src/core/config.js';
 
 test('solver effort and model follow the step complexity', () => {
@@ -40,7 +40,7 @@ function png(width, height) {
     return bytes;
 }
 
-test('vision effort and model follow the long side, and a screenshot stays complex', () => {
+test('reviewer effort and model follow the image long side, and a screenshot stays complex', () => {
     assert.equal(imageLongSide(png(400, 120)), 400);
     assert.equal(imageLongSide(png(1920, 1080)), 1920);
     assert.equal(imageLongSide(Buffer.from('nope')), null);
@@ -52,18 +52,18 @@ test('vision effort and model follow the long side, and a screenshot stays compl
     assert.equal(imageTier(null), 'normal');
     assert.equal(imageTier(80, { screen: true }), 'complex');
 
-    assert.equal(resolveRole(defaults, 'vision', imageTier(400)).effort, 'medium');
-    assert.equal(resolveRole(defaults, 'vision', imageTier(800)).effort, 'high');
-    assert.equal(resolveRole(defaults, 'vision', imageTier(1281)).model, 'gpt-6.1-terra');
-    assert.equal(resolveRole(defaults, 'vision', imageTier(80, { screen: true })).model, 'gpt-6.1-terra');
+    assert.equal(resolveRole(defaults, 'reviewer', imageTier(400)).effort, 'medium');
+    assert.equal(resolveRole(defaults, 'reviewer', imageTier(800)).effort, 'high');
+    assert.equal(resolveRole(defaults, 'reviewer', imageTier(1281)).model, 'gpt-6.1-terra');
+    assert.equal(resolveRole(defaults, 'reviewer', imageTier(80, { screen: true })).model, 'gpt-6.1-terra');
 });
 
-test('an explicit vision model and effort replace the tier', () => {
+test('an explicit reviewer model and effort replace the tier', () => {
     const config = {
         ...defaults,
-        roles: { ...defaults.roles, vision: { ...defaults.roles.vision, model: 'gpt-6.1-terra', effort: 'low' } },
+        roles: { ...defaults.roles, reviewer: { ...defaults.roles.reviewer, model: 'gpt-6.1-terra', effort: 'low' } },
     };
-    const role = resolveRole(config, 'vision', imageTier(1920));
+    const role = resolveRole(config, 'reviewer', imageTier(1920));
     assert.equal(role.model, 'gpt-6.1-terra');
     assert.equal(role.effort, 'low');
 });

@@ -1,13 +1,14 @@
 /**
  * @file src/roles/orchestrator.js
  * @module roles/orchestrator
- * @purpose One senior role that both collects project context and coordinates the team after every stage.
+ * @purpose One senior role that collects project context, coordinates the team, extracts durable
+ *   memories, summarizes files, and writes documents.
  * @depends roles/untrusted
- * @usedBy roles/index
- * @exports instructions
- * @ai.tags roles, context, coordination
+ * @usedBy roles/index, agent/team
+ * @exports instructions, memoryInstructions, fileSummaryInstructions, writingInstructions, isWritingStep
+ * @ai.tags roles, context, coordination, summary, memory, docs
  * @ai.hint pure
- * @changed 2026-10-22 Merged the former collector and coordinator roles into one orchestrator.
+ * @changed 2026-10-31 Merged the former summarizer and writer roles into the orchestrator.
  */
 
 import { UNTRUSTED } from './untrusted.js';
@@ -49,3 +50,58 @@ The architect's brief in the shared context is the agreed file/module structure 
 interfaces, and conventions as the default. When you coordinate, check the plan and the work against it; if a
 concrete problem requires a deviation, say so in nextStep or planUpdate instead of silently changing the structure.
 Never invent file contents, command output, or a test result. ${UNTRUSTED}`;
+
+/**
+ * Prompt that extracts durable project memories from a finished task.
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export const memoryInstructions = `You extract durable knowledge from a completed task for the team's long-term memory.
+Return 0-6 memories: only facts likely useful in FUTURE sessions — project conventions (test runner, style, structure),
+environment quirks, decisions and their reasons, pitfalls discovered, user preferences. Nothing task-specific or ephemeral,
+no secrets, no restating the diff. Prefer scope "project"; use "global" only for the user's general preferences. Reply in JSON only.`;
+
+/**
+ * Prompt that summarizes one source file for other agents.
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export const fileSummaryInstructions = `Summarize the given source/text file for other AI agents: purpose, structure (main sections, exported symbols,
+key functions/classes with one-line descriptions), notable conventions, and anything relevant to the stated focus, with line
+numbers when useful. Plain text, compact, max ~60 lines. Do not propose changes.`;
+
+/**
+ * Prompt for the former writer: one document, report, or Markdown file from the step and the instructions.
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export const writingInstructions = `You write documents, documentation, reports, and Markdown for ONE approved step.
+Follow the step goal, the plan, review notes, and the operator instructions. When the shared context contains the architect's
+brief, use the document paths and conventions it names. Prefer replace_text for edits and write_file for new files.
+Write the complete document the step names. State only what the project, the plan, and the instructions support. A README covers install, run, and test. A report covers what changed and what was checked.
+A trivial note stays short. A complex document may use the sections the plan names, and no extra product claims. Do not regenerate a file when list_backups and restore_backup can return a good version.
+When the step is done, reply with a brief summary: files changed, how you checked them, and what the next step must know. Do not start other steps.
+${UNTRUSTED}`;
+
+const DOC_FILE = /\.(?:md|mdx|rst|adoc|asciidoc|txt)$/i;
+const SKIP_DOC = /^(?:\.rules|\.skills)\//;
+
+/**
+ * True when the step is a document, report, or Markdown file, not a rule or a skill.
+ * @param {string[]} [files]
+ * @param {string} [goal]
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function isWritingStep(files = [], goal = '') {
+    const mentioned = String(goal).match(/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+/g) ?? [];
+    const backslash = String.fromCharCode(92);
+    const list = [...(Array.isArray(files) ? files : []), ...mentioned].map((file) => String(file).split(backslash).join('/'));
+    const docs = list.filter((file) => DOC_FILE.test(file) && !SKIP_DOC.test(file));
+    if (docs.length) return true;
+    return !list.length && /readme|documentation|document|report|отч[её]т/i.test(goal);
+}

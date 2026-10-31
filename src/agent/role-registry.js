@@ -10,7 +10,7 @@
  * @ai.hint pure
  * @changed 2026-10-26 Version 0.2.0: one registry for delegate_role and run_subagent, plus custom roles.
  * @changed 2026-10-28 Added iconifier for markup and icon integration.
- */
+ * @changed 2026-10-31 writer, tester, and vision merged into reviewer and orchestrator. */
 
 import { READ_ONLY_TOOLS, SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES } from './tool-specs.js';
 import { BUILTIN_ROLE_NAMES } from '../core/config-defaults.js';
@@ -71,21 +71,9 @@ export const EXECUTORS = Object.freeze({
         tools: 'all', turns: 40, schema: null,
         description: 'General doer for one self-contained task of any kind: reads, edits, runs commands, and reports what changed.',
     },
-    writer: {
-        tools: 'all', turns: 24, schema: null,
-        description: 'Documents, README, report, or Markdown built only from the facts the task provides.',
-    },
     reviewer: {
         tools: 'check', turns: 16, schema: null,
-        description: 'Independent review of a result: reads the changed files, runs the project checks, lists findings with evidence. Changes nothing.',
-    },
-    tester: {
-        tools: 'check', turns: 8, schema: null,
-        description: 'Pass or fail one claim from evidence: runs the command or looks at the screen, then reports what was observed and what stayed unverified.',
-    },
-    vision: {
-        tools: 'read', turns: 8, schema: null,
-        description: 'Describes the image files the task names in plain text, so their full description never enters this context.',
+        description: 'Independent review, a single-claim pass/fail check, or a plain-text description of image files — reads the changed files, may run the project checks, changes nothing.',
     },
     solver: {
         tools: 'screen', turns: 8, schema: null,
@@ -127,7 +115,7 @@ export const EXECUTOR_NAMES = Object.freeze(Object.keys(EXECUTORS));
 
 /**
  * Names a configuration may hand work to: the built-in executors plus every user-defined role.
- * A built-in pipeline role without an executor entry (planner, orchestrator, summarizer, …)
+ * A built-in pipeline role without an executor entry (planner, orchestrator, …)
  * stays out: it has a job in the pipeline, not a free-form task.
  * @param {object} [config]
  * @returns {string[]}

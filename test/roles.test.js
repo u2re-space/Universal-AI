@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ROLE_INSTRUCTIONS } from '../src/roles/index.js';
+import { isWritingStep } from '../src/roles/orchestrator.js';
 import { EXECUTORS } from '../src/agent/role-registry.js';
 import { defaults } from '../src/core/config.js';
 
-const NAMES = ['default', 'planner', 'architect', 'orchestrator', 'worker', 'coder', 'styler', 'iconifier', 'writer', 'reviewer', 'vision', 'summarizer', 'solver', 'clicker', 'typer', 'encoder', 'tester', 'classifier', 'extractor', 'decomposer', 'measurer', 'decorator', 'image-processor'];
+const NAMES = ['default', 'planner', 'architect', 'orchestrator', 'worker', 'coder', 'styler', 'iconifier', 'reviewer', 'solver', 'clicker', 'typer', 'encoder', 'classifier', 'decomposer', 'measurer', 'decorator', 'image-processor'];
 
 test('role modules match config role names', () => {
     assert.deepEqual(Object.keys(defaults.roles).sort(), NAMES.slice().sort());
@@ -32,16 +33,17 @@ test('existing role instructions keep their job', () => {
     assert.match(ROLE_INSTRUCTIONS.iconifier, /Unicode symbol/);
     assert.match(ROLE_INSTRUCTIONS.iconifier, /SVG from a supplied source image only as a last resort/);
     assert.match(ROLE_INSTRUCTIONS.iconifier, /Keep stylesheet edits to the styler/);
-    assert.match(ROLE_INSTRUCTIONS.writer, /documents, documentation, reports, and Markdown/);
+    assert.match(ROLE_INSTRUCTIONS.orchestratorWriting, /documents, documentation, reports, and Markdown/);
     assert.match(ROLE_INSTRUCTIONS.worker, /delegate_role/);
     assert.match(ROLE_INSTRUCTIONS.reviewer, /independent reviewer/);
     assert.match(ROLE_INSTRUCTIONS.reviewer, /delegate_role/);
-    assert.match(ROLE_INSTRUCTIONS.vision, /Plain text\./);
-    assert.match(ROLE_INSTRUCTIONS.summarizerMemory, /long-term memory/);
-    assert.match(ROLE_INSTRUCTIONS.summarizerFile, /Do not propose changes\./);
-    assert.match(ROLE_INSTRUCTIONS.visionScreen, /elements/);
-    assert.match(ROLE_INSTRUCTIONS.extractor, /extractor/);
-    assert.match(ROLE_INSTRUCTIONS.extractor, /removeLines/);
+    assert.match(ROLE_INSTRUCTIONS.reviewerCheck, /pass or fail/);
+    assert.match(ROLE_INSTRUCTIONS.reviewerVision, /Plain text\./);
+    assert.match(ROLE_INSTRUCTIONS.reviewerVisionScreen, /elements/);
+    assert.match(ROLE_INSTRUCTIONS.orchestratorMemory, /long-term memory/);
+    assert.match(ROLE_INSTRUCTIONS.orchestratorFileSummary, /Do not propose changes\./);
+    assert.match(ROLE_INSTRUCTIONS.encoderExtract, /encoder in extraction mode/);
+    assert.match(ROLE_INSTRUCTIONS.encoderExtract, /removeLines/);
     assert.match(ROLE_INSTRUCTIONS['image-processor'], /before implementation begins/);
     assert.match(ROLE_INSTRUCTIONS['image-processor'], /Do not edit application code/);
 });
@@ -104,11 +106,22 @@ test('desktop helpers keep their tool slices and never delegate', () => {
     assert.deepEqual(EXECUTORS.clicker.tools, ['click', 'screenshot']);
     assert.deepEqual(EXECUTORS.typer.tools, ['type', 'screenshot']);
     assert.deepEqual(EXECUTORS.encoder.tools, ['screenshot']);
-    assert.equal(EXECUTORS.tester.tools, 'check');
     assert.deepEqual(EXECUTORS.measurer.tools, ['view_image', 'crop_image', 'split_image', 'fetch_url']);
-    for (const name of ['solver', 'clicker', 'typer', 'encoder', 'tester', 'measurer']) {
+    for (const name of ['solver', 'clicker', 'typer', 'encoder', 'measurer']) {
         const tools = EXECUTORS[name].tools;
         assert.equal(Array.isArray(tools) ? tools.includes('delegate_role') : false, false, name);
         assert.equal(Array.isArray(tools) ? tools.includes('run_batch') : false, false, name);
     }
+});
+
+test('the merged roles keep their former jobs', () => {
+    // Documents and reports stay recognized as writing steps (the former writer helper).
+    assert.equal(isWritingStep(['README.md']), true);
+    assert.equal(isWritingStep(['docs/guide.md']), true);
+    assert.equal(isWritingStep(['notes.txt']), true);
+    assert.equal(isWritingStep([], 'Напиши отчёт'), true);
+    assert.equal(isWritingStep([], 'Write the documentation'), true);
+    assert.equal(isWritingStep(['.rules/stack.md']), false);
+    assert.equal(isWritingStep(['.skills/scaffold/SKILL.md']), false);
+    assert.equal(isWritingStep(['src/app.tsx']), false);
 });

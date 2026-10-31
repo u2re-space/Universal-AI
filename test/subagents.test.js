@@ -31,7 +31,8 @@ const CALLER_TOOLS = [
 
 test('every executor is an existing role, and the registry and the tool enum stay in step', () => {
     // 0.2.0: one registry serves both delegation tools, so it holds the union of the old lists.
-    assert.deepEqual(SUBAGENT_NAMES, ['coder', 'styler', 'iconifier', 'worker', 'writer', 'reviewer', 'tester', 'vision', 'solver', 'decomposer', 'measurer', 'decorator', 'image-processor', 'clicker', 'typer', 'encoder']);
+    // 2026-10-31: writer, tester, and vision merged away (reviewer covers review, checks, and images).
+    assert.deepEqual(SUBAGENT_NAMES, ['coder', 'styler', 'iconifier', 'worker', 'reviewer', 'solver', 'decomposer', 'measurer', 'decorator', 'image-processor', 'clicker', 'typer', 'encoder']);
     for (const name of SUBAGENT_NAMES) {
         assert.ok(ROLE_INSTRUCTIONS[name], `${name} needs a registered role prompt`);
         assert.ok(defaults.roles[name], `${name} needs role settings so its model is configurable`);
@@ -44,7 +45,7 @@ test('every executor is an existing role, and the registry and the tool enum sta
     for (const name of TOOL_SPECS.run_subagent.parameters.properties.kind.enum) {
         assert.ok(SUBAGENT_NAMES.includes(name), `${name} of the static enum must exist in the registry`);
     }
-    assert.deepEqual(TOOL_SPECS.run_subagent.parameters.required.slice().sort(), ['kind', 'task']);
+    assert.deepEqual(TOOL_SPECS.run_subagent.parameters.required.slice().sort(), ['kind']);
 
     assert.equal(enabledToolNames({ ...defaults.tools, subagents: true }).includes('run_subagent'), true);
     assert.equal(enabledToolNames({ ...defaults.tools, subagents: false }).includes('run_subagent'), false);
@@ -74,7 +75,7 @@ test('every executor stays inside its remit and never delegates again', () => {
     assert.ok(iconifier.includes('list_files') && iconifier.includes('read_file') && iconifier.includes('write_file'));
     for (const name of ['run_command', 'click', 'run_subagent', 'delegate_role']) assert.equal(iconifier.includes(name), false, `iconifier must not have ${name}`);
 
-    for (const kind of ['coder', 'worker', 'writer']) {
+    for (const kind of ['coder', 'worker']) {
         const names = subagentToolNames(kind, CALLER_TOOLS);
         assert.ok(names.includes('write_file') && names.includes('run_command'), `${kind} must be able to work`);
     }
@@ -84,17 +85,9 @@ test('every executor stays inside its remit and never delegates again', () => {
     assert.ok(iconifier.includes('write_file') && iconifier.includes('replace_text'));
     assert.ok(iconifier.includes('download_icons') && iconifier.includes('generate_svg'));
 
-    for (const kind of ['reviewer', 'tester']) {
-        const names = subagentToolNames(kind, CALLER_TOOLS);
-        assert.ok(names.includes('read_file') && names.includes('run_command') && names.includes('screenshot'));
-        assert.equal(names.includes('write_file'), false, `${kind} must not change files`);
-    }
-
-    const vision = subagentToolNames('vision', CALLER_TOOLS);
-    assert.ok(vision.includes('view_image'));
-    for (const name of ['run_command', 'write_file', 'screenshot']) {
-        assert.equal(vision.includes(name), false, `vision must not have ${name}`);
-    }
+    const names = subagentToolNames('reviewer', CALLER_TOOLS);
+    assert.ok(names.includes('read_file') && names.includes('run_command') && names.includes('screenshot'));
+    assert.equal(names.includes('write_file'), false, 'reviewer must not change files');
 
     const solver = subagentToolNames('solver', CALLER_TOOLS);
     assert.ok(solver.includes('view_image') && solver.includes('screenshot'));
@@ -112,7 +105,6 @@ test('every executor stays inside its remit and never delegates again', () => {
     assert.deepEqual(subagentToolNames('typer', CALLER_TOOLS), ['screenshot', 'type']);
 
     // The slice never offers a tool the calling agent does not have.
-    assert.deepEqual(subagentToolNames('vision', ['read_file']), ['read_file']);
     assert.deepEqual(subagentToolNames('solver', ['read_file']), ['read_file']);
     assert.equal(subagentToolNames('coder', ['read_file']).includes('write_file'), false);
     assert.throws(() => subagentToolNames('ghost', CALLER_TOOLS), /Неизвестный суб-агент/);
@@ -162,21 +154,21 @@ test('the sub-agent runs on its own context, tools, and turn cap', async () => {
             config: defaults, roles, root, allNames: ['read_file', 'run_subagent'], approvalLevel: 'read',
             agentsText: () => 'AGENTS.md rules', emit: (event) => events.push(event),
         });
-        const result = await subagent('vision', 'Describe .tmp/mock.png');
+        const result = await subagent('reviewer', 'Describe .tmp/mock.png');
         assert.equal(roles.seen.length, 1);
         const call = roles.seen[0];
-        assert.equal(call.role, 'vision');
+        assert.equal(call.role, 'reviewer');
         assert.equal(call.text, 'Describe .tmp/mock.png');
         assert.equal(call.silent, true);
-        assert.equal(call.maxTurns, SUBAGENTS.vision.turns);
+        assert.equal(call.maxTurns, SUBAGENTS.reviewer.turns);
         // The role runner adds the role prompt; the sub-agent only carries the project rules.
         assert.equal(call.instructions, 'AGENTS.md rules');
         assert.deepEqual(call.toolset.names(), ['read_file'], 'a sub-agent cannot delegate again');
-        assert.match(result.output, /Суб-агент vision: статус completed/);
+        assert.match(result.output, /Суб-агент reviewer: статус completed/);
         assert.match(result.output, /report/);
         assert.equal(result.ok, true);
         assert.deepEqual(events.map((event) => event.type), ['subagent.start', 'subagent.done']);
-        assert.equal(events[0].model, 'model-vision');
+        assert.equal(events[0].model, 'model-reviewer');
         assert.equal(events[1].status, 'completed');
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -222,11 +214,11 @@ test('the sub-agent stays inside the caller access policy and reports a failed s
                 const denied = await options.toolset.execute({ name: 'run_command', call_id: 'n1', arguments: JSON.stringify({ command: 'dir', cwd: '', shell: '', reason: '' }) });
                 assert.equal(denied.ok, false);
                 assert.match(denied.output, /политикой доступа/);
-                return { status: 'max_turns', text: '', turns: SUBAGENTS.tester.turns, toolCalls: 1, images: [], error: new Error('лимит ходов') };
+                return { status: 'max_turns', text: '', turns: SUBAGENTS.reviewer.turns, toolCalls: 1, images: [], error: new Error('лимит ходов') };
             }),
             root, allNames: [...READ_ONLY_TOOLS, ...SHELL_TOOL_NAMES, 'write_file'], approvalLevel: 'read',
         });
-        const result = await subagent('tester', 'check that npm test passes');
+        const result = await subagent('reviewer', 'check that npm test passes');
         assert.equal(result.ok, false);
         assert.match(result.output, /статус max_turns/);
         assert.match(result.output, /отчёт пуст/);
@@ -236,13 +228,14 @@ test('the sub-agent stays inside the caller access policy and reports a failed s
     }
 });
 
-test('the orchestrator and the architect stay read-only while the reviewer may use sub-agents', async () => {
+test('the orchestrator may use sub-agents while the architect stays read-only', async () => {
     const { toolNamesForRole } = await import('../src/agent/team.js');
     const all = enabledToolNames({ ...defaults.tools, desktop: false, images: false });
     assert.equal(all.includes('run_subagent'), true);
     assert.equal(toolNamesForRole(all, 'worker').includes('run_subagent'), true);
     assert.equal(toolNamesForRole(all, 'reviewer').includes('run_subagent'), true);
-    assert.equal(toolNamesForRole(all, 'orchestrator').includes('run_subagent'), false);
+    assert.equal(toolNamesForRole(all, 'orchestrator').includes('run_subagent'), true);
+    // The architect stays read-only, the image-processor keeps its own tool slice.
     assert.equal(toolNamesForRole(all, 'architect').includes('run_subagent'), false);
     assert.equal(toolNamesForRole(all, 'image-processor').includes('run_subagent'), false);
 });

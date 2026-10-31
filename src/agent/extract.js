@@ -7,16 +7,17 @@
  * @exports EXTRACT_MAX_BYTES, EXTRACT_MAX_FILES, languageExtension, normalizeLanguage, cleanExtractPath, extractionChunks, applyRemoveLines, parseExtraction, renderExtractionPrompt, hasExtractableArtifacts, extractHandoff
  * @ai.tags handoff, extraction, tmp
  * @ai.hint io
- * @changed 2026-10-21 Raw answers stay in answer.md; the extractor writes clean code files.
+ * @changed 2026-10-21 Raw answers stay in answer.md; the encoder writes clean code files.
+ * @changed 2026-10-31 The former extractor role merged into the encoder; notifications say Encoder.
  */
 
 import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { referenceLine, saveHandoff } from './handoff.js';
 
-/** One extractor request covers at most this many bytes of artifact bodies. */
+/** One encoder request covers at most this many bytes of artifact bodies. */
 export const EXTRACT_MAX_BYTES = 48 * 1024;
-/** One extractor request covers at most this many artifacts. */
+/** One encoder request covers at most this many artifacts. */
 export const EXTRACT_MAX_FILES = 4;
 
 const EXTENSIONS = Object.freeze({
@@ -104,7 +105,7 @@ export function cleanExtractPath(value, language = '', index = 1, used = new Set
 }
 
 /**
- * Split artifacts into bounded extractor requests.
+ * Split artifacts into bounded encoder requests.
  * @param {object[]} artifacts
  * @param {{ maxBytes?: number, maxFiles?: number }} [options]
  * @returns {object[][]}
@@ -157,7 +158,7 @@ function stripFence(body) {
 }
 
 /**
- * Validate an extractor reply and turn it into clean file records.
+ * Validate an encoder reply and turn it into clean file records.
  * @param {object} data
  * @param {object[]} artifacts
  * @param {Map<string, string>} bodies
@@ -187,7 +188,7 @@ export function parseExtraction(data, artifacts, bodies, { used = new Set() } = 
 }
 
 /**
- * Prompt body with numbered artifact lines, so the extractor can return removeLines.
+ * Prompt body with numbered artifact lines, so the encoder can return removeLines.
  * @param {object[]} artifacts
  * @param {Map<string, string>} bodies
  * @returns {string}
@@ -255,7 +256,7 @@ function appendExtractionSection(state, artifacts) {
 }
 
 /**
- * Run the extractor over fenced artifacts, one request per bounded chunk.
+ * Run the encoder over fenced artifacts, one request per bounded chunk.
  * A failed request leaves its original artifacts in place.
  * @param {{ root: string, state: object, run: (text: string) => Promise<object>, notify?: (event: object) => void, maxBytes?: number, maxFiles?: number }} options
  * @returns {Promise<{ files: object[], calls: number }>}
@@ -278,12 +279,12 @@ export async function extractHandoff({ root, state, run, notify = () => {}, maxB
         try { result = await run(renderExtractionPrompt(chunk, bodies)); }
         catch (error) {
             if (error?.name === 'AbortError' || error?.name === 'CancelledError') throw error;
-            notify({ type: 'warning', message: `Extractor: ${error.message}` });
+            notify({ type: 'warning', message: `Encoder: ${error.message}` });
             continue;
         }
         calls += 1;
         if (result?.status !== 'completed' || !result.data) {
-            notify({ type: 'warning', message: `Extractor не ответил (${result?.status ?? 'unknown'}); исходные артефакты сохранены.` });
+            notify({ type: 'warning', message: `Encoder не ответил (${result?.status ?? 'unknown'}); исходные артефакты сохранены.` });
             continue;
         }
         const used = new Set(state.artifacts.filter((item) => item.extracted && item.hintPath).map((item) => item.hintPath));
@@ -293,7 +294,7 @@ export async function extractHandoff({ root, state, run, notify = () => {}, maxB
             let artifact;
             try { artifact = await writeExtractedFile({ root, state, file }); }
             catch (error) {
-                notify({ type: 'warning', message: `Extractor: файл ${file.path} не записан (${error.message}).` });
+                notify({ type: 'warning', message: `Encoder: файл ${file.path} не записан (${error.message}).` });
                 continue;
             }
             const original = state.artifacts.find((item) => item.id === file.source);

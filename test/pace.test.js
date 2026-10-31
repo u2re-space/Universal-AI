@@ -44,8 +44,8 @@ test('default pace keeps a complex author on the coder floor and the planner on 
     assert.equal(pace.steps[0].effort, 'high');
     assert.equal(pace.roles.classifier.model, 'gpt-6.1-terra');
     assert.equal(pace.roles.classifier.effort, 'xhigh');
-    assert.equal(pace.roles.extractor.model, 'gpt-6.1-terra');
-    assert.equal(pace.roles.extractor.effort, 'xhigh');
+    assert.equal(pace.roles.encoder.model, 'gpt-6.1-terra');
+    assert.equal(pace.roles.encoder.effort, 'xhigh');
     assert.equal(pace.reviewRounds, 1);
     assert.equal(pace.reviewMode, 'force');
     assert.equal(pace.collect, 'allow');
@@ -121,14 +121,15 @@ test('merge folds adjacent steps of the same author and rung', () => {
         steps: [
             { complexity: 'complex', author: 'coder', files: ['a.js'], goal: 'one', details: 'd1', verify: 'v1' },
             { complexity: 'complex', author: 'coder', files: ['b.js'], goal: 'two', details: 'd2', verify: 'v2' },
-            { complexity: 'trivial', author: 'writer', files: ['README.md'], goal: 'note', details: '', verify: '' },
+            { complexity: 'trivial', author: 'worker', files: ['README.md'], goal: 'note', details: '', verify: '' },
         ],
     });
     assert.equal(pace.steps.length, 2);
     assert.match(pace.steps[0].goal, /one\n\ntwo/);
     assert.equal(pace.steps[0].complexity, 'complex');
     assert.deepEqual(pace.steps[0].files, ['a.js', 'b.js']);
-    assert.equal(pace.steps[1].author, 'writer');
+    assert.equal(pace.steps[1].author, 'worker');
+    // The document step keeps the cheapest rung (the former writer behavior).
     assert.equal(pace.steps[1].model, 'gpt-6-luna');
 });
 
@@ -137,7 +138,7 @@ test('rungs and review rounds follow the tables', () => {
     // gpt-6-astra is forbidden for the reviewer: the ladder steps down to the previous rung.
     assert.equal(high.roles.reviewer.model, 'gpt-6.1-terra');
     assert.equal(high.roles.orchestrator.rung, 1);
-    assert.equal(high.roles.summarizer.model, 'gpt-6.1-terra');
+    assert.equal(high.roles.encoder.model, 'gpt-6.1-terra');
     const normalAuthor = resolvePace({
         ...base, speed: 90, quality: 80, label: 'normal',
         steps: [{ complexity: 'normal', author: 'coder', files: [], goal: 'g', details: '', verify: '' }],
@@ -145,10 +146,10 @@ test('rungs and review rounds follow the tables', () => {
     assert.equal(normalAuthor.model, 'gpt-6.1-terra');
     assert.equal(resolvePace({ ...base, quality: 20, label: 'complex' }).reviewRounds, 0);
     assert.equal(resolvePace({ ...base, quality: 20, label: 'complex' }).acceptance, 'loose');
-    const single = resolvePace({ ...base, mode: 'c', speed: 10, quality: 80, label: 'normal', task: 'note', author: 'writer' });
+    const single = resolvePace({ ...base, mode: 'c', speed: 10, quality: 80, label: 'normal', task: 'note', author: 'worker' });
     assert.equal(single.steps[0].model, 'gpt-6.1-terra');
     assert.equal(resolvePace({ ...base, mode: 'c', speed: 90, quality: 80, label: 'trivial', task: 'typo', author: 'worker' }).steps[0].model, 'gpt-6.1-terra');
-    assert.equal(resolvePace({ ...base, mode: 'c', speed: 90, quality: 80, label: 'trivial', task: 'note', author: 'writer' }).steps[0].model, 'gpt-6-luna');
+    assert.equal(resolvePace({ ...base, mode: 'c', speed: 90, quality: 80, label: 'trivial', task: 'note', author: 'worker' }).steps[0].model, 'gpt-6.1-terra');
 });
 
 test('acceptance paragraphs name the criterion cap', () => {
@@ -292,8 +293,6 @@ test('code authors never fall below the coder floor', () => {
     assert.equal(step('coder', 'trivial').model, 'gpt-6.1-terra');
     assert.equal(step('worker', 'trivial').model, 'gpt-6.1-terra');
     assert.equal(step('coder', 'normal').model, 'gpt-6.1-terra');
-    // Documents keep the cheapest rung.
-    assert.equal(step('writer', 'trivial').model, 'gpt-6-luna');
     // A raised code dial no longer leaves the author on the cheap model.
     assert.equal(step('coder', 'normal', { codeQuality: 120 }).model, 'gpt-6.1-terra');
     const single = resolvePace({ ...base, mode: 'c', speed: 90, quality: 20, label: 'trivial', task: 'fix', author: 'coder' }).steps[0];

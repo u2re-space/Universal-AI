@@ -251,7 +251,7 @@ test('--detach starts a job that can be inspected with jobs status/result', asyn
 });
 
 test('run (team mode): roles use their own models; memory command sees what was saved', async () => {
-    const roleOf = (body) => body.text?.format?.name ?? (body.model === 'gpt-6-luna' ? 'summarizer-file' : 'worker');
+    const roleOf = (body) => body.text?.format?.name ?? (body.model === 'gpt-6-luna-nano' ? 'file-summary' : 'worker');
     const models = {};
     script = (body) => {
         const role = roleOf(body);
@@ -263,7 +263,7 @@ test('run (team mode): roles use their own models; memory command sees what was 
         if (!outputs.length) return { calls: [{ name: 'write_file', arguments: { path: 'note.txt', content: 'привет\n', overwrite: true } }] };
         return { text: 'Файл note.txt создан.' };
     };
-    const { code, stdout, stderr } = await runCli(['run', 'создай note.txt', '--approve', 'write', '--role', 'planner=gpt-6-luna:high', '--role', 'worker=gpt-6-luna', '--role', 'summarizer=gpt-6-luna-nano']);
+    const { code, stdout, stderr } = await runCli(['run', 'создай note.txt', '--approve', 'write', '--role', 'planner=gpt-6-luna:high', '--role', 'worker=gpt-6-luna', '--role', 'orchestrator=gpt-6-luna-nano']);
     assert.equal(code, 0, stderr);
     assert.equal(models.plan, 'gpt-6-luna');
     //assert.equal(models.worker, 'gpt-6-luna'); // I'm not able to pass test

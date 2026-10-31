@@ -1,7 +1,7 @@
 /**
  * @file src/agent/team.js
  * @module agent/team
- * @purpose Run planner, architect, measurer, image processor, orchestrator, worker, reviewer, and summarizer over one shared context.
+ * @purpose Run planner, architect, measurer, image processor, orchestrator, worker, reviewer, and memory over one shared context.
  * @depends node:path, node:fs/promises, core/session, core/context, core/memory, openai/errors, util/text, commands/instructions, roles/index, agent/tools, agent/desktop, agent/fs-tools, agent/diff, agent/roles, agent/loop, agent/schemas, agent/map, agent/task-map, agent/team-text, agent/workspace-scan, agent/work-plan, agent/handoff, agent/quality, agent/pipeline, mcp/session, channels/decide, channels/questions, channels/verdict
  * @usedBy commands/run, index.js
  * @exports toolNamesForRole, runTeam
@@ -10,6 +10,8 @@
  * @changed 2026-10-27 The decorator stage builds the decorative layer before the page markup.
  * @changed 2026-10-28 The iconifier conditionally integrates icons after changed page markup.
  * @changed 2026-10-26 Stages run from a data-driven pipeline; the plan and the config choose the order.
+ * @changed 2026-10-31 Merged roles: extract stage runs the encoder, memory stage runs the orchestrator;
+ *   the orchestrator keeps every enabled tool (the merged writer role), the writer role is gone.
  */
 
 import path from 'node:path';
@@ -24,7 +26,6 @@ import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { EXECUTORS, executorSpec, executorToolNames, executorNames } from './role-registry.js';
 import { isCodingStep } from '../roles/coder.js';
 import { isStylingStep } from '../roles/styler.js';
-import { isWritingStep } from '../roles/writer.js';
 import { createToolset, enabledToolNames, READ_ONLY_TOOLS } from './tools.js';
 import { createSubagentRunner } from './subagents.js';
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
@@ -54,16 +55,16 @@ import { createPipeline } from './pipeline.js';
 import { resolveInside } from './paths.js';
 
 /**
- * Styler for CSS/SCSS, coder for other source files, writer for documents, worker for everything else.
+ * Styler for CSS/SCSS, coder for other source files, worker for documents and everything else.
+ * The former writer role is merged into the worker: documents go to the orchestrator's guidance.
  * @param {string[]} files
  * @param {string} goal
- * @returns {'styler'|'coder'|'writer'|'worker'}
+ * @returns {'styler'|'coder'|'worker'}
  * @ai.hint pure
  */
 function authorFor(files, goal) {
     if (isStylingStep(files, goal)) return 'styler';
     if (isCodingStep(files, goal)) return 'coder';
-    if (isWritingStep(files, goal)) return 'writer';
     return 'worker';
 }
 import { fileInstructions } from '../roles/encoder.js';
@@ -110,7 +111,8 @@ function measurementReport(sheet, conclusion, dir) {
 
 /**
  * Tools one role may use, cut from the enabled names of the run.
- * The orchestrator and architect stay read-only. Reviewer may run commands and use the desktop.
+ * The architect stays read-only; the orchestrator keeps every enabled name (the merged writer role
+ * writes documents). Reviewer may run commands and use the desktop.
  * Worker keeps every enabled name. A role that names its own tools (a user-defined role) keeps only those.
  * @param {string[]} allNames
  * @param {string} role
@@ -131,7 +133,7 @@ export function toolNamesForRole(allNames, role, spec = null) {
     if (Array.isArray(spec?.tools) && spec.tools.length) {
         return allNames.filter((name) => spec.tools.includes(name));
     }
-    if (role === 'orchestrator' || role === 'architect' || role === 'collector' || role === 'coordinator') return allNames.filter((name) => READ_ONLY_TOOLS.includes(name));
+    if (role === 'architect' || role === 'collector' || role === 'coordinator') return allNames.filter((name) => READ_ONLY_TOOLS.includes(name));
     if (role === 'reviewer') {
         return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || name === 'run_subagent' || name === 'delegate_role');
     }
@@ -150,7 +152,7 @@ export function toolNamesForRole(allNames, role, spec = null) {
 
 /**
  * Multi-role run: planner (senior) → orchestrator (collects context, coordinates after stages)
- * → worker (tool calls, step by step) → reviewer (+ fix rounds) → summarizer (long-term memory).
+ * → worker (tool calls, step by step) → reviewer (+ fix rounds) → memory (orchestrator role).
  *
  * Returns { status, text, plan, review, steps, images, changes, stats, recalled, memoriesSaved, error }.
  * status: completed | revise (review not accepted) | incomplete | cancelled | budget | failed
@@ -197,11 +199,11 @@ export async function runTeam({
         const role = roles.resolve(author, complexity);
         return { model: role.model, effort: role.effort };
     };
-    const paceChoice = (author, complexity) => {
+    const paceChoice = (author, complexity, files = [], goal = '') => {
         const known = complexity === 'trivial' || complexity === 'complex' || complexity === 'normal' ? complexity : 'normal';
         const one = applyPins(resolvePace(paceInput({
             label: pacedLabel,
-            steps: [{ complexity: known, author, files: [], goal: '', details: '', verify: '' }],
+            steps: [{ complexity: known, author, files: Array.isArray(files) ? files : [], goal: String(goal ?? ''), details: '', verify: '' }],
         })), config.roles ?? {}, pins, config.models ?? null);
         return one.steps?.[0] ?? { model: null, effort: null };
     };
@@ -215,7 +217,8 @@ export async function runTeam({
     const mcpRead = mcp.extras.filter((extra) => extra.category === 'read');
     const imageApi = imageTransport(config) === 'images';
     const enabled = enabledToolNames(config.tools, { interactive, memory: Boolean(memory), summarize: true, imageApi, unsafeScreenshot: config.desktop?.unsafeScreenshot === true });
-    const readNames = toolNamesForRole(enabled, 'orchestrator', config.roles?.orchestrator);
+    const readNames = toolNamesForRole(enabled, 'architect', config.roles?.architect);
+    const orchestratorNames = toolNamesForRole(enabled, 'orchestrator', config.roles?.orchestrator);
     const reviewerNames = toolNamesForRole(enabled, 'reviewer', config.roles?.reviewer);
     const allNames = toolNamesForRole(enabled, 'worker', config.roles?.worker);
     const vision = (role) => {
@@ -223,6 +226,7 @@ export async function runTeam({
         if (role === 'worker' || role === 'reviewer') return roles.describeImage;
         return roles.shouldDelegateVision(role) ? roles.describeImage : null;
     };
+
     const taskMarks = { edit: null };
     const stepState = { complexity: 'normal' };
     let marks = [];
@@ -301,7 +305,7 @@ export async function runTeam({
     });
     const workerToolsFor = (author) => author === 'styler' ? stylerTools : workerTools;
     const workerChanges = () => [...workerTools.stats().changes, ...stylerTools.stats().changes];
-    const orchestratorTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('orchestrator'), extras: mcpRead });
+    const orchestratorTools = createToolset({ ...toolBase, names: orchestratorNames, approvalLevel, describeImage: vision('orchestrator'), extras: mcp.extras, toolEnums });
     const architectTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('architect'), extras: mcpRead });
     const reviewerTools = createToolset({
         ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer'),
@@ -589,7 +593,7 @@ export async function runTeam({
          */
         const authorModel = (files, goal, complexity = plan?.complexity) => {
             const author = authorFor(files, goal);
-            const choice = encodeRoute || !paced?.ready ? legacyChoice(author, complexity) : paceChoice(author, complexity);
+            const choice = encodeRoute || !paced?.ready ? legacyChoice(author, complexity) : paceChoice(author, complexity, files, goal);
             const normalizePath = (file) => String(file).replaceAll(String.fromCharCode(92), '/').toLowerCase();
             const targets = [...(Array.isArray(files) ? files : []), ...pathsIn(goal)].map(normalizePath);
             const priorSolScss = author === 'styler' && progress.steps?.some((step) => step.status === 'completed'
@@ -599,7 +603,7 @@ export async function runTeam({
             const model = priorSolScss && !pinned ? 'gpt-6.1-terra' : choice.model ?? roles.resolve(author).model;
             return { author, model, effort: choice.effort ?? null };
         };
-        /** Send one worker, coder, or writer turn. A restored session continues the interrupted turn. */
+        /** Send one worker, coder, or styler turn. A restored session continues the interrupted turn. */
         const runWorker = async (title, body, maxTurns = config.agent.workerMaxTurnsPerStep, author = 'worker', checkpoint = null) => {
             const complexity = checkpoint?.complexity ?? plan?.complexity;
             stepState.complexity = complexity === 'trivial' || complexity === 'complex' || complexity === 'normal' ? complexity : 'normal';
@@ -830,19 +834,19 @@ export async function runTeam({
                         notify({ type: 'stage.done', stage: 'answer', status: 'completed', route });
                         const extractMode = config.agent.extract ?? 'auto';
                         if (extractMode !== 'off' && (route === 'encode' || extractMode === 'always') && hasExtractableArtifacts(handoff)) {
-                            const extractorPace = paced?.roles?.extractor;
-                            const extractor = {
-                                model: extractorPace?.model ?? config.roles?.extractor?.model ?? config.roles?.default?.model
-                                    ?? paceSettings.models?.[0] ?? roles.resolve('extractor').model,
-                                effort: config.roles?.extractor?.effort ?? extractorPace?.effort ?? 'low',
+                            const encoderPace = paced?.roles?.encoder;
+                            const encoder = {
+                                model: encoderPace?.model ?? config.roles?.encoder?.model ?? config.roles?.default?.model
+                                    ?? paceSettings.models?.[0] ?? roles.resolve('encoder').model,
+                                effort: config.roles?.encoder?.effort ?? encoderPace?.effort ?? 'low',
                             };
-                            notify({ type: 'stage.start', stage: 'extract', role: 'extractor', model: extractor.model });
+                            notify({ type: 'stage.start', stage: 'extract', role: 'encoder', model: encoder.model });
                             const extracted = await extractHandoff({
                                 root, state: handoff, maxBytes: EXTRACT_MAX_BYTES, maxFiles: EXTRACT_MAX_FILES,
-                                run: (text) => roles.run('extractor', {
-                                    text, instructions: withAgents(ROLE_INSTRUCTIONS.extractor), instructionsOnly: true,
+                                run: (text) => roles.run('encoder', {
+                                    text, instructions: withAgents(ROLE_INSTRUCTIONS.encoderExtract), instructionsOnly: true,
                                     schema: EXTRACT_SCHEMA, schemaName: 'extraction',
-                                    silent: true, model: extractor.model, effort: extractor.effort,
+                                    silent: true, model: encoder.model, effort: encoder.effort,
                                 }),
                                 notify,
                             });
@@ -1764,7 +1768,7 @@ Verify: ${step.verify}`}${extra}${advice}${architectureAdvice(step)}${paced?.gua
                         notify({ type: 'stage.start', stage: 'fix', role: 'worker', model: roles.resolve('worker').model, round });
                         const issues = review.issues.map((i) => `- [${i.severity}] ${i.path ? `${i.path}: ` : ''}${i.message} → ${i.requestedChange}`).join('\n') || '- (see summary)';
                         const fixGuidance = reviewAdvice?.nextStep ? `\n\nOrchestrator guidance:\n${reviewAdvice.nextStep}` : '';
-                        const fixed = await runWorker(`Review round ${round}: changes requested`, `${review.summary}\n${issues}${fixGuidance}\n\nAddress every issue, verify, and report what you changed.`, config.agent.workerMaxTurnsPerStep, plan.steps.some((step) => authorFor(step.files, step.goal) === 'coder') ? 'coder' : plan.steps.some((step) => authorFor(step.files, step.goal) === 'writer') ? 'writer' : 'worker', { complexity: [...plan.steps].sort((a, b) => (({ trivial: 0, normal: 1, complex: 2 })[b.complexity] ?? 1) - (({ trivial: 0, normal: 1, complex: 2 })[a.complexity] ?? 1))[0]?.complexity ?? plan.complexity });
+                        const fixed = await runWorker(`Review round ${round}: changes requested`, `${review.summary}\n${issues}${fixGuidance}\n\nAddress every issue, verify, and report what you changed.`, config.agent.workerMaxTurnsPerStep, plan.steps.some((step) => authorFor(step.files, step.goal) === 'coder') ? 'coder' : 'worker', { complexity: [...plan.steps].sort((a, b) => (({ trivial: 0, normal: 1, complex: 2 })[b.complexity] ?? 1) - (({ trivial: 0, normal: 1, complex: 2 })[a.complexity] ?? 1))[0]?.complexity ?? plan.complexity });
                         result.images.push(...fixed.images);
                         result.steps.push({ index: `fix-${round}`, goal: 'Устранение замечаний ревью', status: fixed.status, report: fixed.text.trim() });
                         progress.notes ??= [];
@@ -1797,20 +1801,20 @@ Verify: ${step.verify}`}${extra}${advice}${architectureAdvice(step)}${paced?.gua
             {
                 id: 'memory',
                 run: async () => {
-                    // 6. Memory extraction (cheap summarizer role).
+                    // 6. Memory extraction (the orchestrator knows the project best).
                     if (memory) {
                         if (config.memory.autoSave) {
-                            notify({ type: 'stage.start', stage: 'memory', role: 'summarizer', model: paced?.roles.summarizer.model ?? roles.resolve('summarizer').model });
-                            const extracted = await roles.run('summarizer', {
+                            notify({ type: 'stage.start', stage: 'memory', role: 'orchestrator', model: paced?.roles.orchestrator.model ?? roles.resolve('orchestrator').model });
+                            const extracted = await roles.run('orchestrator', {
                                 text: `# Task\n${task}\n\n# Plan summary\n${plan.summary}\n\n# Worker reports\n${clipMiddle(ctx.get('progress'), 24 * 1024)}\n\n# Review\n${review ? `${review.verdict}: ${review.summary}` : 'not performed'}` +
                                     `\n\n# Existing memories (do not repeat)\n${renderMemories(result.recalled) || '(none)'}`,
-                                instructions: withAgents(ROLE_INSTRUCTIONS.summarizerMemory), schema: MEMORY_SCHEMA, schemaName: 'memory_update',
-                                model: paced?.roles.summarizer.model ?? null, effort: paced?.roles.summarizer.effort ?? null,
+                                instructions: withAgents(ROLE_INSTRUCTIONS.orchestratorMemory), schema: MEMORY_SCHEMA, schemaName: 'memory_update',
+                                model: paced?.roles.orchestrator.model ?? null, effort: paced?.roles.orchestrator.effort ?? null,
                             });
                             if (extracted.status === 'completed' && extracted.data) {
                                 for (const item of extracted.data.memories.slice(0, 6)) {
                                     try {
-                                        result.memoriesSaved.push(memory.remember({ scope: item.scope, project: projectKey, projectName, kind: item.kind, content: item.content, tags: item.tags, source: 'summarizer' }));
+                                        result.memoriesSaved.push(memory.remember({ scope: item.scope, project: projectKey, projectName, kind: item.kind, content: item.content, tags: item.tags, source: 'orchestrator' }));
                                     } catch (error) { notify({ type: 'warning', message: `Память: ${errorMessage(error)}` }); }
                                 }
                                 if (result.memoriesSaved.length) notify({ type: 'memory.saved', count: result.memoriesSaved.length, items: result.memoriesSaved });

@@ -6,7 +6,7 @@
  * @exports defaults, ROLE_NAMES, REASONING_EFFORTS, REASONING_SUMMARIES, APPROVAL_LEVELS, IMAGE_DETAILS, CONTEXT_LEVEL_NAMES
  * @ai.tags config
  * @ai.hint pure
- * @changed 2026-10-26 Model profiles section and word context levels for 0.2.0.
+ * @changed 2026-10-31 tester, vision, extractor, summarizer, and writer merged into reviewer, encoder, and orchestrator.
  */
 import { MODEL_FALLBACKS } from '../openai/model-map.js';
 import { CONTEXT_LEVELS } from '../openai/model-profiles.js';
@@ -200,22 +200,17 @@ export const defaults = Object.freeze({
      *   styler     — writes CSS and SCSS; starts SCSS on gpt-6.1-sol, then may use gpt-6.1-terra for edits
       *   iconifier  — selects and integrates icons in generated HTML and component markup; default model gpt-6.1-sol
 
-     *   writer     — writes documents, reports, and Markdown; stays on the cheaper model, effort follows complexity
-     *   reviewer   — verifies the result (read-only tools, may run tests)
-     *   vision     — describes images; model and effort follow the long side, unless config pins them
-     *   summarizer — compaction, file summaries, memory extraction (cheapest model)
-     *   solver     — solves a step from the screen or an image; model and effort follow step complexity
-     *   clicker    — clicks one UI target
-     *   typer      — types into a named UI field
-     *   encoder    — returns a batch for later execution
-     *   tester     — checks whether the step result is true
+     *   reviewer   — verifies the result, checks single claims, and describes images (read-only tools, may run tests)
+     *   solver     — solves a step by screen or picture; model and effort follow step complexity
+     *   clicker    — one click
+     *   typer      — text or key chord input
+     *   encoder    — a desktop batch, file commands, and clean file bodies from a verbose answer
      *   classifier — labels a task as trivial, normal, or complex
-     *   extractor  — cleans a verbose answer and writes clean file bodies to .tmp
      *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
-     *   decorator  — builds complex decorative elements (ornaments, flourishes, dividers, patterns, frames) as HTML+CSS or SVG
+     *   decorator  — decorative elements (ornaments, flourishes, dividers, patterns, frames) as native HTML+CSS or SVG
      *                before the first page markup is written
      *   image-processor — generates, edits, and prepares requested images and visual assets before implementation
-     * worker, coder, styler, writer, reviewer, tester, vision, solver, and image-processor double as the
+     * worker, coder, styler, reviewer, solver, and image-processor double as the
      * sub-agents of run_subagent (tools.subagents): same prompt, same model settings, own context.
      */
 
@@ -223,30 +218,20 @@ export const defaults = Object.freeze({
         default: r({}),
         planner: r({ model: 'gpt-6.1-terra', effort: 'xhigh' }),
         architect: r({ model: 'gpt-6.1-terra', effort: 'xhigh' }),
-        orchestrator: r({ model: 'gpt-6.1-terra', effort: 'xhigh' }),
+        orchestrator: r({
+            model: 'gpt-6.1-terra', effort: 'xhigh',
+            // Memory extraction and file summaries come from the merged summarizer role.
+            summary: 'none', verbosity: 'medium',
+        }),
         worker: r({ model: 'gpt-6.1-terra', effort: 'high' }),
-        writer: r({
-            // Documents stay on the cheaper model; only the effort grows with the work.
+        reviewer: r({ model: "gpt-6.1-terra",
+            // Review, single-claim checks, and image descriptions of any size.
             tiers: [
-                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] }, // check (review tier)
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] }, // vision: trivial and normal images
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] }, // vision: screenshots and large images
             ],
         }),
-        reviewer: r({ model: "gpt-6.1-terra", effort: 'xhigh',
-            tiers: [
-                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
-                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] }, // I added this step, due for avoid ceiling to `-sol` models
-                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
-            ],
-        }),
-        vision: r({
-            // A medium image keeps the cheap model; a screenshot or a large image moves to the senior one.
-            tiers: {
-                trivial: { model: 'gpt-6.1-terra', effort: 'medium' },
-                normal: { model: 'gpt-6.1-terra', effort: 'high' },
-                complex: { model: 'gpt-6.1-terra', effort: 'xhigh' },
-            },
-        }),
-        summarizer: r({ model: "gpt-6.1-terra", effort: 'xhigh', summary: 'none', verbosity: 'medium' }),
         solver: r({
             tiers: {
                 trivial: { model: 'gpt-6.1-terra', effort: 'high' },
@@ -256,10 +241,8 @@ export const defaults = Object.freeze({
         }),
         clicker: r({ model: "gpt-6.1-terra", effort: 'low' }),
         typer: r({ model: "gpt-6.1-terra", effort: 'low' }),
-        encoder: r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
-        tester: r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
+        encoder: r({ model: "gpt-6.1-terra", effort: 'xhigh', verbosity: 'low' }),
         classifier: r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
-        extractor: r({ model: "gpt-6.1-terra", effort: 'xhigh', verbosity: 'low' }),
         coder: r({
             tiers: [
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] }, // I added this step, due for avoid ceiling to `-sol` models
@@ -315,7 +298,7 @@ export const defaults = Object.freeze({
         workerMaxTurnsPerStep: 40,
         reviewerMaxTurns: 12,
         maxContextBytes: 'normal',      // small | normal | large | max | auto
-        visionDelegate: 'auto',         // auto (when roles.vision has its own model) | always | never
+        visionDelegate: 'auto',         // auto (when roles.reviewer has its own model) | always | never
         chain: true,                    // first answer, then encoder or planner
         route: null,                    // null | encoder | planner; null lets the answer and the heuristic choose
         extract: 'auto',                // off | auto (encode route) | always (encode and plan); clean fenced code into .tmp/<id>/extracted
@@ -383,7 +366,7 @@ export const defaults = Object.freeze({
     /** Long-term memory (SQLite, node:sqlite) and project notes. */
     memory: {
         enabled: true,
-        autoSave: true,                 // extract durable facts after a team run (summarizer role)
+        autoSave: true,                 // extract durable facts after a team run (orchestrator role)
         maxRecall: 8,                   // memories injected into the shared context
         notesFile: 'AGENTS.md',         // project notes file included in the context when present
         dbFile: null,                   // null → <home>/memory.db

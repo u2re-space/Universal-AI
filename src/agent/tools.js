@@ -164,7 +164,7 @@ const GENERATED_OUTPUT_TOOLS = new Set(['generate_image', 'edit_image']);
  * askUser(question) → string | null (optional; enables the ask_user tool).
  * memory / projectKey / projectName — long-term memory store (enables recall / remember).
  * describeImage({ part, question }) → string — vision role delegation for view_image (optional).
- * summarizeFile({ rel, text, focus }) → string — summarizer role for summarize_file (optional).
+ * summarizeFile({ rel, text, focus }) → string — orchestrator role for summarize_file (optional).
  * describeScreen({ part, rel }) → string | { toon } — screen vision for a desktop capture (optional).
  * performDesktop(action) → { message, screenshotAbs, screenshotRel } — injected runner; skips AutoHotkey (optional).
  * delegate(role, task) → { output, summary, data? } — specialist call for delegate_role (optional).
@@ -543,7 +543,7 @@ export function createToolset({
             const part = { type: 'input_image', image_url: `data:${mime};base64,${buffer.toString('base64')}`, detail: args.detail ?? 'auto' };
             if (describeImage) {
                 const description = await describeImage({ part, question: args.question ?? null, rel, buffer });
-                return { output: `Описание изображения ${rel} (модель vision):\n${description}`, summary: `${rel} → vision (${formatBytes(buffer.length)})` };
+                return { output: `Описание изображения ${rel} (модель reviewer):\n${description}`, summary: `${rel} → reviewer (${formatBytes(buffer.length)})` };
             }
             return {
                 output: [{ type: 'input_text', text: `Изображение ${rel} (${mime}, ${formatBytes(buffer.length)}):` }, part],

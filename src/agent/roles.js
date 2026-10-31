@@ -8,6 +8,7 @@
  * @ai.tags roles, models
  * @ai.hint hot
  * @changed 2026-10-27 Role instructions expand {{env:}}, {{fs:}}, {{task:PROMPT}}, and {{delegated:PROMPT}}.
+ * @changed 2026-10-31 Image description and screen description run the reviewer role; file summaries run the orchestrator.
  */
 
 import { createSession } from '../core/session.js';
@@ -20,7 +21,7 @@ import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { encodeToon } from '../util/toon.js';
 import { runTurn } from './loop.js';
 import { SCREEN_SCHEMA } from './schemas.js';
-import { imageLongSide, imageTier } from '../roles/vision.js';
+import { imageLongSide, imageTier } from '../roles/reviewer.js';
 
 const WEB_STACK_ROLES = new Set(['planner', 'architect', 'orchestrator', 'worker', 'coder', 'styler', 'iconifier', 'decomposer', 'measurer', 'image-processor']);
 const WEB_STACK_INSTRUCTIONS = `Web development conventions (apply when relevant to the project's stack):
@@ -131,46 +132,45 @@ export function createRoleRunner({ client, config, ledger, emit = () => {}, sign
         return result;
     }
 
-    /** Should view_image delegate to the vision role when used by `currentRole`? */
+    /** Should view_image delegate to the reviewer's vision instructions when used by `currentRole`? */
     function shouldDelegateVision(currentRole = 'default') {
         const mode = config.agent.visionDelegate;
         if (mode === 'never') return false;
         if (mode === 'always') return true;
-        return resolve('vision').model !== resolve(currentRole).model;
+        return resolve('reviewer').model !== resolve(currentRole).model;
     }
 
-    /** Describe an image through the vision role; returns plain text. */
+    /** Describe an image through the reviewer role; returns plain text. */
     async function describeImage({ part, question = null, rel = 'image', buffer = null }) {
-        const choice = resolve('vision', imageTier(imageLongSide(buffer)));
+        const choice = resolve('reviewer', imageTier(imageLongSide(buffer)));
         const prompt = question ? `Image: ${rel}\nQuestion: ${question}` : `Image: ${rel}\nDescribe it in detail.`;
-        const result = await run('vision', {
-            text: prompt, parts: [part], instructions: ROLE_INSTRUCTIONS.vision, silent: true,
+        const result = await run('reviewer', {
+            text: prompt, parts: [part], instructions: ROLE_INSTRUCTIONS.reviewerVision, silent: true,
             model: choice.model, effort: choice.effort,
         });
-        if (result.status !== 'completed' || !result.text.trim()) throw new Error(result.error?.message ?? `Роль vision не вернула описание (${result.status}).`);
+        if (result.status !== 'completed' || !result.text.trim()) throw new Error(result.error?.message ?? `Роль reviewer не вернула описание (${result.status}).`);
         return result.text.trim();
     }
 
-    /** Describe a screenshot through the vision role; returns structured data and its TOON form. */
+    /** Describe a screenshot through the reviewer role; returns structured data and its TOON form. */
     async function describeScreen({ part, rel = 'screenshot', buffer = null }) {
-        const choice = resolve('vision', imageTier(imageLongSide(buffer), { screen: true }));
-        const prompt = `Screenshot: ${rel}\nDescribe the screen.`;
-        const result = await run('vision', {
-            text: prompt, parts: [part], instructions: ROLE_INSTRUCTIONS.visionScreen,
+        const choice = resolve('reviewer', imageTier(imageLongSide(buffer), { screen: true }));
+        const result = await run('reviewer', {
+            text: `Screenshot: ${rel}\nDescribe the screen.`, parts: [part], instructions: ROLE_INSTRUCTIONS.reviewerVisionScreen,
             schema: SCREEN_SCHEMA, schemaName: 'screen', silent: true,
             model: choice.model, effort: choice.effort,
         });
-        if (result.status !== 'completed' || !result.data) throw new Error(result.error?.message ?? `Роль vision не вернула описание (${result.status}).`);
+        if (result.status !== 'completed' || !result.data) throw new Error(result.error?.message ?? `Роль reviewer не вернула описание (${result.status}).`);
         return { data: result.data, toon: encodeToon(result.data) };
     }
 
-    /** Summarize a text file through the summarizer role. */
+    /** Summarize a text file through the orchestrator role. */
     async function summarizeFile({ rel, text, focus = null }) {
         const body = clipMiddle(text, 400 * 1024);
         const prompt = `File: ${rel}${focus ? `\nFocus: ${focus}` : ''}\n\n\`\`\`\n${body}\n\`\`\``;
-        const result = await run('summarizer', { text: prompt, instructions: ROLE_INSTRUCTIONS.summarizerFile, silent: true });
-        if (result.status !== 'completed' || !result.text.trim()) throw new Error(result.error?.message ?? `Роль summarizer не вернула сводку (${result.status}).`);
-        return { summary: result.text.trim(), model: resolve('summarizer').model };
+        const result = await run('orchestrator', { text: prompt, instructions: ROLE_INSTRUCTIONS.orchestratorFileSummary, silent: true });
+        if (result.status !== 'completed' || !result.text.trim()) throw new Error(result.error?.message ?? `Роль orchestrator не вернула сводку (${result.status}).`);
+        return { summary: result.text.trim(), model: resolve('orchestrator').model };
     }
 
     return { resolve, run, describeImage, describeScreen, summarizeFile, shouldDelegateVision };

@@ -33,7 +33,7 @@ test('extracted paths stay relative, gain an extension, and never collide', () =
     assert.equal(cleanExtractPath('scan.comp', 'glsl', 10, used), 'scan.comp');
 });
 
-test('extractor chunks respect the file count and byte budget', () => {
+test('extraction chunks respect the file count and byte budget', () => {
     const artifacts = [
         { id: 'a001', bytes: 10 },
         { id: 'a002', bytes: 20 },
@@ -109,7 +109,7 @@ test('extractHandoff writes clean files, marks originals, and keeps a failed chu
     }
 });
 
-test('a failed extractor leaves the original artifacts untouched', async () => {
+test('a failed extraction leaves the original artifacts untouched', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'ai-extract-fail-'));
     try {
         const state = await openHandoff(root);

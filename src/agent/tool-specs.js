@@ -8,6 +8,7 @@
  * @ai.tags tools, schema
  * @ai.hint pure
  * @changed 2026-10-25 run_subagent (tools.subagents). Image splitting, cropping, SVG generation, fonts, and icon sets.
+ * @changed 2026-10-31 tester, vision, and writer removed from the tool role lists (merged roles).
  */
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
 
@@ -316,7 +317,7 @@ export const TOOL_SPECS = {
         category: 'read', group: 'desktop',
         description: 'Send one task to another role and return its answer. Unlike run_subagent it may carry the shared context of this run with the task (context=true), so the role does not have to rediscover what this run already knows. encoder returns a batch and does not run it; pass that batch to run_batch. measurer re-measures a crop or a layer and returns its measurement sheet. decorator builds a decorative element as HTML+CSS or SVG and returns its snippet. iconifier selects existing or verified icons and integrates them into markup. User-defined roles from roles.<name> are accepted too.',
         parameters: schema({
-            role: { type: 'string', enum: ['solver', 'clicker', 'typer', 'encoder', 'tester', 'decomposer', 'measurer', 'decorator', 'styler', 'iconifier'], description: 'Role to call: a built-in executor or a name from roles.<name>.' },
+            role: { type: 'string', enum: ['solver', 'clicker', 'typer', 'encoder', 'decomposer', 'measurer', 'decorator', 'styler', 'iconifier'], description: 'Role to call: a built-in executor or a name from roles.<name>.' },
             task: str('One task for that role. Say what to return; a self-contained task is still better.'),
             context: bool('True includes the shared context of this run (task, plan, progress, findings, diff) with the task. False sends the task alone, like run_subagent.'),
         }),
@@ -426,10 +427,9 @@ export const TOOL_SPECS = {
     },
     run_subagent: {
         category: 'read', group: 'subagents',
-        description: 'Start one sub-agent: a separate agent on a fresh context, with its own tools and turn cap, that works on the task and returns a report. It never sees this conversation, so the task must be self-contained — name the paths, the exact question, and what the report must contain. coder, styler, worker, and writer change files; reviewer and tester only check and report; vision describes image files; solver answers from the screen or an image; image-processor prepares assets; measurer returns a measurement sheet; decorator builds decorative HTML+CSS or SVG. A sub-agent cannot start another sub-agent, and it can only write or run commands the caller itself is allowed to. Use delegate_role instead when the role should see this run’s context.',
+        description: 'Start one sub-agent: a separate agent on a fresh context, with its own tools and turn cap, that works on the task and returns a report. It never sees this conversation, so the task must be self-contained — name the paths, the exact goal, and what the report must contain. coder, styler, iconifier, and worker change files; reviewer only checks and reports (including image descriptions); solver answers from the screen or an image; image-processor prepares assets; decorator builds decorative HTML+CSS or SVG. A sub-agent cannot start another sub-agent, and it can only write or run commands the caller itself is allowed to. Use delegate_role instead when the role should see this run’s context.',
         parameters: schema({
-            kind: { type: 'string', enum: ['coder', 'styler', 'iconifier', 'worker', 'writer', 'reviewer', 'tester', 'vision', 'solver', 'image-processor', 'decorator'], description: 'Sub-agent to start; the name is also the role whose prompt and model are used.' },
-            task: str('The whole task for that sub-agent: goal, paths, constraints, and the report it must return.'),
+            kind: { type: 'string', enum: ['coder', 'styler', 'iconifier', 'worker', 'reviewer', 'solver', 'image-processor', 'decorator'], description: 'Sub-agent to start; the name is also the role whose prompt and model are used.' },
         }),
     },
 };

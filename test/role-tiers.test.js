@@ -74,11 +74,11 @@ test('the shipped styler tiers stay on gpt-6.1-sol', () => {
     }
 });
 
-test('the shipped writer tiers stay on one model', () => {
-    assert.equal(resolveRole(defaults, 'writer', 'trivial').effort, 'medium');
-    assert.equal(resolveRole(defaults, 'writer', 'normal').effort, 'high');
-    assert.equal(resolveRole(defaults, 'writer', 'complex').effort, 'xhigh');
-    assert.equal(resolveRole(defaults, 'writer', 'complex').model, 'gpt-6.1-terra');
+test('the shipped reviewer tiers stay on one model', () => {
+    assert.equal(resolveRole(defaults, 'reviewer', 'trivial').effort, 'medium');
+    assert.equal(resolveRole(defaults, 'reviewer', 'normal').effort, 'high');
+    assert.equal(resolveRole(defaults, 'reviewer', 'complex').effort, 'xhigh');
+    assert.equal(resolveRole(defaults, 'reviewer', 'complex').model, 'gpt-6.1-terra');
 });
 
 test('the shipped measurer tiers keep the cheap model for normal work', () => {
