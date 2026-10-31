@@ -15,7 +15,7 @@ test('coder effort and model follow the plan complexity', () => {
     assert.equal(trivial.effort, 'medium');
 
     const normal = resolveRole(defaults, 'coder', 'normal');
-    assert.equal(normal.model, 'gpt-6.1-sol');
+    assert.equal(normal.model, 'gpt-6.1-terra');
     assert.equal(normal.effort, 'high');
 
     const complex = resolveRole(defaults, 'coder', 'complex');

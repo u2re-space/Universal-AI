@@ -231,7 +231,13 @@ export const defaults = Object.freeze({
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
-        reviewer: r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
+        reviewer: r({ model: "gpt-6.1-terra", effort: 'xhigh',
+            tiers: [
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
+            ],
+        }),
         vision: r({
             // A medium image keeps the cheap model; a screenshot or a large image moves to the senior one.
             tiers: {
@@ -257,6 +263,7 @@ export const defaults = Object.freeze({
         coder: r({
             tiers: [
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
@@ -264,11 +271,13 @@ export const defaults = Object.freeze({
             /*model: 'gpt-6.1-sol', effort: 'xhigh',*/
             tiers: [
                 { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
+                { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
                 { model: 'gpt-6.1-sol', effort: ['high', 'xhigh', 'max'] },
             ],
         }),
         iconifier: r({
             /*model: 'gpt-6.1-sol', effort: 'xhigh',*/ tiers: [
+                { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
                 { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ]
@@ -276,6 +285,7 @@ export const defaults = Object.freeze({
         decomposer: r({ model: 'gpt-6.1-terra', effort: 'xhigh' }),
         measurer: r({
             /*model: 'gpt-6.1-sol', effort: 'xhigh',*/ tiers: [
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
                 { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
                 { model: 'gpt-6.1-sol', effort: ['low', 'medium', 'high'] },
             ],
@@ -283,6 +293,7 @@ export const defaults = Object.freeze({
         decorator: r({
             /*model: 'gpt-6.1-terra', effort: 'xhigh',*/
             tiers: [
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
                 { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
                 { model: 'gpt-6.1-sol', effort: ['high', 'xhigh', 'max'] },
             ],

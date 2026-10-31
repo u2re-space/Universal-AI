@@ -1785,7 +1785,7 @@ test('measurer stage runs before collector and gives CSS-ready values to the sty
         if (role === 'measurer') {
             measureBodies.push(body);
             assert.equal(body.model, 'gpt-6.1-sol');
-            assert.equal(body.reasoning?.effort, 'medium');
+            assert.equal(body.reasoning?.effort, 'xhigh');
             assert.ok((body.tools ?? []).some((tool) => tool.name === 'fetch_url'), 'the measurer can open its documentation links');
             assert.equal((body.tools ?? []).some((tool) => tool.type === 'web_search'), config.tools.web);
             return { text: JSON.stringify({
@@ -1905,7 +1905,7 @@ test('the measurer defaults to one cheap overview pass', async () => {
         assert.equal(result.status, 'completed', result.error?.message);
         assert.equal(measureBodies.length, 1, 'one overview pass by default');
         assert.equal(measureBodies[0].model, 'gpt-6-luna', 'the cheap vision model measures normal work');
-        assert.equal(measureBodies[0].reasoning?.effort, 'medium');
+        assert.equal(measureBodies[0].reasoning?.effort, 'xhigh');
         assert.match(JSON.stringify(measureBodies[0].input), /Measurement pass 1/);
         assert.doesNotMatch(JSON.stringify(measureBodies[0].input), /Measurement pass 2/);
     } finally {
