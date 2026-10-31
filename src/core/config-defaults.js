@@ -234,7 +234,7 @@ export const defaults = Object.freeze({
         reviewer: r({ model: "gpt-6.1-terra", effort: 'xhigh',
             tiers: [
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
-                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] }, // I added this step, due for avoid ceiling to `-sol` models
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
             ],
         }),
@@ -262,7 +262,7 @@ export const defaults = Object.freeze({
         extractor: r({ model: "gpt-6.1-terra", effort: 'xhigh', verbosity: 'low' }),
         coder: r({
             tiers: [
-                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] }, // I added this step, due for avoid ceiling to `-sol` models
                 { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ],
@@ -277,7 +277,7 @@ export const defaults = Object.freeze({
         }),
         iconifier: r({
             /*model: 'gpt-6.1-sol', effort: 'xhigh',*/ tiers: [
-                { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] }, // I added this step, due for avoid ceiling to `-sol` models
                 { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
                 { model: 'gpt-6.1-sol', effort: ['medium', 'high', 'xhigh'] },
             ]
@@ -285,7 +285,7 @@ export const defaults = Object.freeze({
         decomposer: r({ model: 'gpt-6.1-terra', effort: 'xhigh' }),
         measurer: r({
             /*model: 'gpt-6.1-sol', effort: 'xhigh',*/ tiers: [
-                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
+                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] }, // I added this step, due for avoid ceiling to `-sol` models
                 { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
                 { model: 'gpt-6.1-sol', effort: ['low', 'medium', 'high'] },
             ],
@@ -293,8 +293,8 @@ export const defaults = Object.freeze({
         decorator: r({
             /*model: 'gpt-6.1-terra', effort: 'xhigh',*/
             tiers: [
-                { model: 'gpt-6.1-terra', effort: ['medium', 'high', 'xhigh'] },
                 { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] },
+                { model: 'gpt-6.1-terra', effort: ['high', 'xhigh', 'max'] }, // I added this step, due for avoid ceiling to `-sol` models
                 { model: 'gpt-6.1-sol', effort: ['high', 'xhigh', 'max'] },
             ],
         }),
