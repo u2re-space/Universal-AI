@@ -10,7 +10,7 @@
  * @changed 2026-10-26 Model and effort tiers moved to roles.coder.tiers in the configuration.
  */
 
-import { DESKTOP_NOTE, UNTRUSTED } from './untrusted.js';
+import { BROWSER_NOTE, DESKTOP_NOTE, UNTRUSTED } from './untrusted.js';
 
 /**
  * Prompt for the coder: write the code the step names, from the plan and the instructions.
@@ -27,7 +27,8 @@ When the shared context contains Decorative elements (by the decorator), paste i
 Write the complete module the step names. Match the stack, file names, and libraries in the instructions.
 A trivial step stays small. A complex step may add the structure the plan names, and no extra features. Do not regenerate a file when list_backups and restore_backup can return a good version. If the same command or tool call fails twice with the same error, do not repeat it: change the approach or report the exact error and what remains unverified.
 When the step is done, reply with a brief summary: files changed, how you checked them, and what the next step must know. Do not start other steps.
-${DESKTOP_NOTE} ${UNTRUSTED}`;
+${DESKTOP_NOTE}
+${BROWSER_NOTE} ${UNTRUSTED}`;
 
 const CODE_FILE = /\.(?:js|mjs|cjs|ts|tsx|jsx|html|vue|svelte|py|rs|go|java)$/i;
 

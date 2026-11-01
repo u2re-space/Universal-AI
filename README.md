@@ -18,6 +18,7 @@
 | Векторизация логотипов и бейджей | `ai run "конвертируй логотипы PNG/WebP в SVG"` — инструмент `vectorize_image` (`recraft/recraft-v4.1-pro-vector`) с локальным удалением фона; источник — кроп из `.tmp/<id>/crops/` |
 | Изображения и файлы во входе | `ai --image screenshot.png "что не так на экране?"`, `ai -f spec.pdf "сделай план"` |
 | Автономные задачи | `ai run "добавь тесты для src/utils.js и прогони их"` — инструменты: файлы, команды, URL, web-поиск, картинки |
+| Браузер агента | `ai run --browser "проверь страницу http://localhost:3000"` — Ego Lite (если установлен) открывает страницу, выдаёт accessibility snapshot и позволяет кликать/вводить; без Ego — headless Chrome/Edge для чтения и снимков |
 | Сайты, лендинги, бэкенды | `ai gen landing "собери страницу" --image test-gen/landing.png` — точность 87% (цель, не измерение), креативность, профиль Chrome 157 Beta |
 | Свои MCP-серверы | `ai mcp add design --mcp-command node --mcp-arg server.js` — инструменты и ресурсы по stdio; сторонний https-сервер уходит в API как `type: mcp` |
 | Макеты Figma | `ai gen landing "собери страницу" --url https://www.figma.com/design/<file>/…` — ссылка сама добавляет MCP `https://mcp.figma.com/mcp`, decomposer разбирает файл на экраны до замеров |
@@ -649,8 +650,9 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   "shell": null,
   "magickPath": null,
   "image": { "rasterEngine": "auto" },
-  "tools": { "fs": true, "shell": true, "fetch": true, "web": true, "images": false, "askUser": true, "desktop": false, "mcp": true, "channels": false },
+  "tools": { "fs": true, "shell": true, "fetch": true, "web": true, "images": false, "askUser": true, "desktop": false, "browser": false, "mcp": true, "channels": false },
   "desktop": { "ahkPath": null },
+  "browser": { "engine": "auto", "executable": null, "timeoutMs": 60000, "spaceName": "ai-browser" },
   "limits": { "maxTurns": 60, "extendTurns": 10, "budgetUsd": null, "budgetTokens": null, "commandTimeoutMs": 180000 },
   "documentation": {
     "sources": {
@@ -789,9 +791,25 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 `replace_text`, `delete_file`, `make_dir`, `view_image`, `summarize_file`, `run_command`, `run_script`, `ssh`, `fetch_url`,
 `recall`, `remember`, `ask_user`; с `--images` — `split_image`, `crop_image`, `generate_svg`; при `tools.fetch` —
 `download_font`, `download_icons` (Google Fonts и CDN Phosphor/Lucide); с `--desktop` у worker и reviewer —
-`screenshot`, `click`, `type`, `run_ahk`, `run_batch`; при `tools.subagents` (по умолчанию включён) —
-`run_subagent` и `delegate_role`; встроенные инструменты API: `web_search`
+`screenshot`, `click`, `type`, `run_ahk`, `run_batch`; при `tools.browser` — `browser`, `browser_drive`;
+при `tools.subagents` (по умолчанию включён) — `run_subagent` и `delegate_role`; встроенные инструменты API: `web_search`
 (включён по умолчанию, `--no-web` выключает), `image_generation` (`--images`).
+
+`--browser` включает браузерные инструменты в `ask`/`chat`; в автономном `run` они доступны при `tools.browser: true`
+(флаг `--browser` включает их для этого запуска). `browser.engine: "auto"` предпочитает Ego Lite (`ego-browser`),
+а если он не установлен — headless Chrome/Edge. Ego Lite поддерживает accessibility snapshot с ref-ами, клики,
+ввод и evaluate. Headless Chromium читает текст и снимает кадры; если снимок в Ego завершается ошибкой,
+для страницы, открытой этим запуском, пробуется тот же headless fallback. Локальные пути разрешены только
+внутри рабочего каталога, снимки по умолчанию попадают в `.ai/browser/`.
+
+```json
+{
+  "tools": { "browser": true },
+  "browser": { "engine": "auto", "executable": null, "timeoutMs": 60000, "spaceName": "ai-browser" }
+}
+```
+
+`--browser-engine auto|ego|chrome` выбирает движок, `--browser-path <путь>` задаёт его исполняемый файл.
 
 ### Суб-агенты
 

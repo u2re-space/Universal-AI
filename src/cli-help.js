@@ -63,13 +63,17 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --no-stream            без потоковой передачи
 
 Инструменты и автономность:
-  --tools fs,shell,fetch,mcp,channels,subagents  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
+  --tools fs,shell,fetch,mcp,channels,subagents,browser  локальные инструменты для ask/chat (run включает их по конфигурации)   --no-tools
   search_files scope=path|symbol|content|all читает карту проекта.
   --web                  поиск web_search на /v1/responses (ProxyAPI), включён по умолчанию; --no-web выключает
                          запросы и страницы печатаются под ответом
   --images               генерация картинок в ответах; вместе с tools.images — split_image, crop_image, compare_images, generate_svg
   --desktop              включает экран Windows, мышь, клавиатуру и AutoHotkey v2
   --unsafe-screenshot    разрешить снимок рабочего стола. Без флага screenshot и снимок после клика выключены
+  --browser              включает браузерные инструменты browser и browser_drive. Движок — Ego Lite (ego-browser),
+                         при его отсутствии — headless Chrome/Edge только на чтение (open, screenshot, text)
+  --browser-engine auto|ego|chrome   выбор движка (по умолчанию auto: Ego Lite, затем Chrome/Edge)
+  --browser-path <путь>  явный путь к ego-browser.exe или chrome.exe/msedge.exe (browser.executable)
   --approve ask|read|write|all   политика подтверждений (по умолчанию: ask в терминале, read без него)
   --yes, -y              = --approve all (без вопросов; осторожно)
   --cwd, -C <каталог>    рабочий каталог для инструментов (по умолчанию текущий)
@@ -87,6 +91,9 @@ context=false запускает роль на чистом контексте. 
   crop_image режет коробку x/y/width/height, а с trim=true снимает padding по краям.
   compare_images локально собирает PNG-таблицу из 2–12 растров/SVG и карту различий двух файлов; SVG рендерит ReSVG, браузер и повторная генерация не нужны.
   При tools.shell агент может: run_command (оболочка на вызов), run_script (.ps1 .cmd .bat .sh .bash), ssh (команда или файл, scp put/get).
+  При tools.browser агент открывает страницы в реальном движке: browser(status|open|screenshot|snapshot|text|close) и
+  browser_drive(click|fill|eval). Ego Lite даёт snapshot с ref-ами (@12) и взаимодействие; headless Chrome/Edge —
+  только снимок и текст страницы. Снимки пишутся в .ai/browser/, их видно через view_image.
   --budget-usd <n>       лимит расходов (нужны prices в конфигурации)   --budget-tokens <n>
 
 Команда (run и gen):

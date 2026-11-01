@@ -81,7 +81,10 @@ function roleOf(body) {
 test('image processor only sees enabled image, asset, and documentation-fetch tools', () => {
     const enabled = ['list_files', 'write_file', 'run_command', 'fetch_url', 'view_image', 'crop_image', 'split_image', 'compare_images', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons', 'image_generation'];
     assert.deepEqual(toolNamesForRole(enabled, 'image-processor'), ['fetch_url', 'view_image', 'crop_image', 'split_image', 'compare_images', 'generate_image', 'edit_image', 'vectorize_image', 'generate_svg', 'download_font', 'download_icons']);
-    const api = enabledToolNames({ ...defaults.tools, images: true, fetch: true }, { imageApi: true });
+    const api = enabledToolNames({ ...defaults.tools, images: true, fetch: true, browser: true }, { imageApi: true });
+    assert.ok(toolNamesForRole(api, 'reviewer').includes('browser'));
+    assert.ok(toolNamesForRole(api, 'reviewer').includes('browser_drive'));
+    assert.ok(toolNamesForRole(api, 'worker').includes('browser_drive'));
     assert.deepEqual(toolNamesForRole(api, 'image-processor'), ['view_image', 'fetch_url', 'generate_image', 'edit_image', 'vectorize_image', 'split_image', 'crop_image', 'compare_images', 'generate_svg', 'download_font', 'download_icons']);
     const noFetch = enabledToolNames({ ...defaults.tools, images: true, fetch: false }, { imageApi: false });
     assert.deepEqual(toolNamesForRole(noFetch, 'image-processor'), ['view_image', 'split_image', 'crop_image', 'compare_images', 'generate_svg']);

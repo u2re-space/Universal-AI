@@ -38,11 +38,16 @@ test('the registry is the union of the old specialist and sub-agent lists', () =
 });
 
 test('every slice is callable and returns a tool list', () => {
+    const callerTools = [...CALLER_TOOLS, 'browser', 'browser_drive'];
     for (const [name, slice] of Object.entries(SLICES)) {
         assert.equal(typeof slice, 'function', name);
-        const names = slice(CALLER_TOOLS);
+        const names = slice(callerTools);
         assert.ok(Array.isArray(names), name);
     }
+    assert.ok(SLICES.read(callerTools).includes('browser'));
+    assert.equal(SLICES.read(callerTools).includes('browser_drive'), false);
+    assert.ok(SLICES.check(callerTools).includes('browser_drive'));
+    assert.ok(SLICES.screen(callerTools).includes('browser'));
     assert.deepEqual(SLICES.all(CALLER_TOOLS), CALLER_TOOLS);
 });
 

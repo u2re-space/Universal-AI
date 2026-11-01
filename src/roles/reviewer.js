@@ -12,7 +12,7 @@
  * @changed 2026-10-31 Merged the former tester and vision roles into the reviewer.
  */
 
-import { DESKTOP_NOTE, UNTRUSTED } from './untrusted.js';
+import { BROWSER_NOTE, DESKTOP_NOTE, UNTRUSTED } from './untrusted.js';
 
 /**
  * Prompt for the reviewer: accept the result or list concrete revisions from evidence.
@@ -26,7 +26,9 @@ and run commands (tests, build) if available. Judge by evidence: a green test al
 claims are issues. "accept" only when the task is met with no high-severity issues; otherwise "revise" with concrete, actionable issues
 (path + requested change). When the shared context contains the architect's brief, check that the result follows its file/module
 structure, interfaces, and conventions; report a real deviation as an issue, not a stylistic preference.
-Reply in JSON only. ${DESKTOP_NOTE} ${UNTRUSTED}`;
+Reply in JSON only. When the result is a rendered page, check it with browser(action=screenshot or text) on the local file or the preview URL instead of assuming how it looks.
+${DESKTOP_NOTE}
+${BROWSER_NOTE} ${UNTRUSTED}`;
 
 /**
  * Prompt for the former tester: pass or fail one claim from evidence.

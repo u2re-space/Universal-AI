@@ -225,6 +225,32 @@ test('sanitizeTerminal strips control sequences but keeps newlines', () => {
     assert.equal(sanitizeTerminal('a\x1b[31mred\x1b[0m\nb\u202etext\x07'), 'ared\nbtext');
 });
 
+test('browser engine defaults, validation, and CLI switches', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-browser-cfg-'));
+    const env = { AI_AGENT_HOME: home };
+    try {
+        const config = await loadConfig({ env, ensureHome: false });
+        assert.equal(config.tools.browser, false);
+        assert.deepEqual(config.browser, { engine: 'auto', executable: null, timeoutMs: 60_000, spaceName: 'ai-browser' });
+
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ browser: { engine: 'not-a-browser' } }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /browser\.engine: auto \| ego \| chrome/);
+        await writeFile(path.join(home, 'config.json'), JSON.stringify({ browser: { timeoutMs: 4999 } }));
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /browser\.timeoutMs: целое 5000\.\.300000/);
+
+        assert.deepEqual(overridesFrom({ browser: true, 'browser-engine': 'ego', 'browser-path': 'ego-browser.exe' }), {
+            limits: {}, reasoning: {}, image: {}, tools: { browser: true }, verbosity: 'low',
+            browser: { engine: 'ego', executable: 'ego-browser.exe' },
+        });
+        const selected = overridesFrom({ tools: 'browser' });
+        assert.equal(selected.tools.browser, true);
+        assert.equal(selected.tools.fs, false);
+        assert.throws(() => overridesFrom({ 'browser-engine': 'playwright' }), /--browser-engine: auto \| ego \| chrome/);
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
 test('a retired scanner role in config is dropped', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-scanner-cfg-'));
     try {

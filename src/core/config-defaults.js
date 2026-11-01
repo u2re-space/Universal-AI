@@ -146,9 +146,16 @@ export const defaults = Object.freeze({
     approve: null,                    // ask | read | write | all; null → ask (TTY) or read (no TTY)
     shell: null,                      // run_command shell: null (cmd.exe / sh) | powershell | pwsh | bash | sh | zsh | cmd
     magickPath: null,                 // ImageMagick executable (magick or convert); null → look it up in PATH
-    tools: { fs: true, shell: true, fetch: true, web: true, images: false, askUser: true, desktop: false, mcp: true, channels: false, subagents: true },
+    tools: { fs: true, shell: true, fetch: true, web: true, images: false, askUser: true, desktop: false, browser: false, mcp: true, channels: false, subagents: true },
     /** Windows screen, mouse, keyboard, and AutoHotkey v2. Tools stay off until tools.desktop is true. Screen capture stays off until unsafeScreenshot. */
     desktop: { ahkPath: null, shotAfterAction: true, unsafeScreenshot: false },
+    /**
+     * Real browser engine for the browser tools (tools.browser). Ego Lite (the ego-browser CLI) is the
+     * primary engine — it drives pages: snapshots with refs, clicks, fills, evaluate. Chrome/Edge in
+     * headless mode is the read-only fallback (open, screenshot, text). engine: auto | ego | chrome;
+     * executable overrides the search for the chosen engine; timeoutMs bounds one browser call.
+     */
+    browser: { engine: 'auto', executable: null, timeoutMs: 60_000, spaceName: 'ai-browser' },
     limits: {
         maxTurns: 60,
         extendTurns: 10,              // when maxTurns is reached, ask the operator to extend by this many turns; 0 disables

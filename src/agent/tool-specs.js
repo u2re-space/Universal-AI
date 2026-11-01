@@ -2,15 +2,20 @@
  * @file src/agent/tool-specs.js
  * @module agent/tool-specs
  * @purpose JSON schemas and enablement rules for the local function tools.
- * @depends agent/desktop
+ * @depends agent/desktop, agent/browser
  * @usedBy agent/tools
- * @exports TOOL_SPECS, READ_ONLY_TOOLS, SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES, toolDefinitions, enabledToolNames, describeTool, toolCategory
+ * @exports TOOL_SPECS, READ_ONLY_TOOLS, SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES, BROWSER_TOOL_NAMES, toolDefinitions, enabledToolNames, describeTool, toolCategory
  * @ai.tags tools, schema
  * @ai.hint pure
  * @changed 2026-10-25 run_subagent (tools.subagents). Image splitting, cropping, SVG generation, fonts, and icon sets.
  * @changed 2026-10-31 tester, vision, and writer removed from the tool role lists (merged roles).
+ * @changed 2026-11-01 browser and browser_drive (tools.browser): Ego Lite engine, headless Chromium fallback.
  */
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
+import { BROWSER_TOOL_NAMES, BROWSER_ACTIONS, BROWSER_DRIVE_ACTIONS } from './browser.js';
+
+/** Re-exported so role lists can name the browser group without importing the engine module. */
+export { BROWSER_TOOL_NAMES };
 
 /**
  * String field for a strict tool schema.
@@ -425,6 +430,32 @@ export const TOOL_SPECS = {
             output: str('Output directory. Empty string = assets/icons/<set>/.'),
         }),
     },
+    browser: {
+        category: 'network', group: 'browser',
+        description: 'Open and read a page in a real browser engine: Ego Lite (the ego-browser CLI) when it is installed, otherwise headless Chrome/Edge. action=status reports the engine and the session; action=open navigates to url (http/https or a file inside the working directory — a directory needs index.html); action=screenshot saves a PNG under the working directory; action=snapshot returns the accessibility snapshot with @refs for clicks and fills (Ego only); action=text returns the rendered text; action=close ends the browser task and releases agent pages. With headless Chrome only status, open, screenshot and text work — install Ego Lite for snapshots and interaction.',
+        parameters: schema({
+            action: { type: 'string', enum: [...BROWSER_ACTIONS], description: 'status, open, screenshot, snapshot, text, or close.' },
+            url: str('http(s) URL or a path inside the working directory (file or directory with index.html). Empty string reuses the opened page.'),
+            page: str('Page label from an earlier result, such as p1 or p2. Empty string uses the page this run opened.'),
+            output: str('Screenshot path inside the working directory. Empty string = .ai/browser/shot-<timestamp>.png.'),
+            width: nullableInt('Viewport width for the headless Chromium screenshot. Null = 1280.'),
+            timeout_seconds: nullableInt('Time limit for this call in seconds (5..300). Null = browser.timeoutMs from the configuration.'),
+            reason: str('One sentence: why the page must be opened in a browser (shown to the user for approval).'),
+        }),
+    },
+    browser_drive: {
+        category: 'exec', group: 'browser',
+        description: 'Drive the page opened by the browser tool: click a target, fill a field, or evaluate a function in the page. Needs the Ego Lite engine; targets come from browser(action=snapshot) refs (@12), text=…, loc=css:, loc=role:, xpath=…, or a CSS selector. Read the result snapshot before choosing the next target.',
+        parameters: schema({
+            action: { type: 'string', enum: [...BROWSER_DRIVE_ACTIONS], description: 'click, fill, or eval.' },
+            selector: str('Target for click and fill: a snapshot ref (@12), text=…, loc=css:…, loc=role:…, xpath=…, or a CSS selector. Empty string for eval.'),
+            value: str('Text to put into the field for fill. Empty string clears it; unused for click and eval.'),
+            script: str('For eval: a JavaScript function expression (async allowed) that runs in the page and returns a JSON-serializable value. Empty string for click and fill.'),
+            page: str('Page label from an earlier result, such as p1. Empty string uses the page this run opened.'),
+            timeout_seconds: nullableInt('Time limit for this call in seconds (5..300). Null = browser.timeoutMs from the configuration.'),
+            reason: str('One sentence: why this page action is needed (shown to the user for approval).'),
+        }),
+    },
     run_subagent: {
         category: 'read', group: 'subagents',
         description: 'Start one sub-agent: a separate agent on a fresh context, with its own tools and turn cap, that works on the task and returns a report. It never sees this conversation, so the task must be self-contained — name the paths, the exact goal, and what the report must contain. coder, styler, iconifier, and worker change files; reviewer only checks and reports (including image descriptions); solver answers from the screen or an image; image-processor prepares assets; decorator builds decorative HTML+CSS or SVG. A sub-agent cannot start another sub-agent, and it can only write or run commands the caller itself is allowed to. Use delegate_role instead when the role should see this run’s context.',
@@ -477,6 +508,7 @@ export function enabledToolNames(tools, { interactive = false, memory = false, s
     if (tools.shell) names.push(...SHELL_TOOL_NAMES);
     if (tools.fetch) names.push('fetch_url');
     if (tools.desktop) names.push(...DESKTOP_TOOL_NAMES.filter((name) => name !== 'screenshot' || unsafeScreenshot));
+    if (tools.browser) names.push(...BROWSER_TOOL_NAMES);
     if (memory) names.push('recall', 'remember');
     if (tools.askUser && interactive) names.push('ask_user');
     if (tools.images && imageApi) names.push('generate_image', 'edit_image', 'vectorize_image');

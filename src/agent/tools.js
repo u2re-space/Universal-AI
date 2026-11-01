@@ -2,9 +2,9 @@
  * @file src/agent/tools.js
  * @module agent/tools
  * @purpose Build the local toolset: approval, handlers, and the re-exports from tool-specs.
- * @depends node:path, node:crypto, node:fs/promises, openai/errors, core/attachments, util/text, agent/paths, agent/fs-tools, agent/map, agent/shell, agent/desktop, agent/tool-specs, channels/tool-handlers, generate/scaffold
+ * @depends node:path, node:crypto, node:fs/promises, openai/errors, core/attachments, util/text, agent/paths, agent/fs-tools, agent/map, agent/shell, agent/desktop, agent/browser, agent/tool-specs, channels/tool-handlers, generate/scaffold
  * @usedBy commands/ask, commands/chat, commands/run, agent/team, index.js
- * @exports TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory, createToolset, relativeToRoot
+ * @exports TOOL_SPECS, READ_ONLY_TOOLS, SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES, BROWSER_TOOL_NAMES, toolDefinitions, enabledToolNames, describeTool, toolCategory, createToolset, relativeToRoot
  * @ai.tags tools, approval
  * @ai.hint hot
  * @changed 2026-10-25 Measurement crops may run at read access, confined to .tmp/.
@@ -25,6 +25,7 @@ import { SHELLS, runCommand, runProgram, scriptLaunch, sshPlan } from './shell.j
 import { guardScaffold, isScaffoldCommand } from '../generate/scaffold.js';
 import { structureCode } from '../structure/structure.js';
 import { DESKTOP_TOOL_NAMES, createDesktopHandlers } from './desktop.js';
+import { BROWSER_TOOL_NAMES, createBrowserHandlers } from './browser.js';
 import { createImageHandlers } from './image-tools.js';
 import { createChannelHandlers } from '../channels/tool-handlers.js';
 import { detectMagick, magickSplit, magickCrop, magickTrimImage, magickIdentify } from './image-magick.js';
@@ -33,12 +34,14 @@ import { generateSvg, downloadFont, downloadIcons } from './assets.js';
 import {
     TOOL_SPECS,
     READ_ONLY_TOOLS,
+    SHELL_TOOL_NAMES,
+    IMAGE_TOOL_NAMES,
     toolDefinitions,
     enabledToolNames,
     describeTool,
     toolCategory,
 } from './tool-specs.js';
-export { TOOL_SPECS, READ_ONLY_TOOLS, toolDefinitions, enabledToolNames, describeTool, toolCategory };
+export { TOOL_SPECS, READ_ONLY_TOOLS, SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES, BROWSER_TOOL_NAMES, toolDefinitions, enabledToolNames, describeTool, toolCategory };
 
 
 /**
@@ -170,6 +173,7 @@ const GENERATED_OUTPUT_TOOLS = new Set(['generate_image', 'edit_image']);
  * delegate(role, task) → { output, summary, data? } — specialist call for delegate_role (optional).
  * subagent(kind, task) → { output, summary, ok, stats? } — nested agent run for run_subagent (optional).
  * extras — additional tools `{ name, description, parameters, category, handler }`, used for MCP.
+ * browserOverrides — engine injection for the browser tools ({ engine, runEgo, runChromium }); used by tests.
  * processTool(name, args, signal) → null | { output, summary, changes? } — remote handler for a processable tool. null runs the local handler.
  */
 export function createToolset({
@@ -177,7 +181,7 @@ export function createToolset({
     backupDir = null, signal, emit = () => { }, memory = null, projectKey = null, projectName = null,
     describeImage = null, summarizeFile = null, editPaths = () => null,
     describeScreen = null, performDesktop = null, delegate = null, subagent = null, extras = [], client = null, ledger = null,
-    scaffoldTask = '', processTool = null, toolEnums = {},
+    scaffoldTask = '', processTool = null, toolEnums = {}, browserOverrides = {},
 }) {
     const limits = config.limits;
     const allowed = new Set(names);
@@ -276,6 +280,8 @@ export function createToolset({
             case 'type': return `Ввод: ${truncate(args.text ?? '', 400)}`;
             case 'run_ahk': return `Скрипт: ${truncate(args.script ?? '', 400)}`;
             case 'run_batch': return `Пакет: ${truncate(batchSource(args), 400)}`;
+            case 'browser': return `Браузер ${args.action || 'status'}${args.url ? `: ${truncate(args.url, 200)}` : ''}${args.output ? ` → ${args.output}` : ''}\nПричина: ${args.reason ?? '—'}`;
+            case 'browser_drive': return `Браузер ${args.action}: ${truncate(args.selector || args.script || '', 200)}\nПричина: ${args.reason ?? '—'}`;
             case 'split_image': return `Разбить ${args.path} на ${args.rows ?? 1}×${args.cols ?? 1} плиток\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
             case 'crop_image': return `${args.trim ? `Снять padding ${args.path}` : `Обрезать ${args.path}: ${args.width ?? '?'}×${args.height ?? '?'} в (${args.x ?? 0},${args.y ?? 0}) `}\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
             case 'compare_images': return `Сравнить ${args.files?.join(', ') || 'изображения'} (${args.mode || 'sheet'})\nВыход: ${args.output || 'авто'}\nПричина: ${args.reason ?? '—'}`;
@@ -754,6 +760,11 @@ export function createToolset({
         const desktopHandlers = createDesktopHandlers({ root, config, decide, describeScreen, performDesktop, delegate });
         for (const name of desktopNames) handlers[name] = desktopHandlers[name];
         if (needsDelegate) handlers.delegate_role = desktopHandlers.delegate_role;
+    }
+    const browserNames = BROWSER_TOOL_NAMES.filter((name) => allowed.has(name));
+    if (browserNames.length) {
+        const browserHandlers = createBrowserHandlers({ root, config, signal, ...browserOverrides });
+        for (const name of browserNames) handlers[name] = browserHandlers[name];
     }
     if (['decide', 'moderate_text', 'channel_reply', 'telegram_call'].some((name) => allowed.has(name))) {
         Object.assign(handlers, createChannelHandlers({ client, config, signal, ledger }));

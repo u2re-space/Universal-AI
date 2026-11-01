@@ -480,6 +480,18 @@ function validateConfig(c) {
     }
     if (typeof c.desktop.shotAfterAction !== 'boolean') fail('desktop.shotAfterAction: true | false');
     if (typeof c.desktop.unsafeScreenshot !== 'boolean') fail('desktop.unsafeScreenshot: true | false');
+    if (!isRecord(c.browser)) fail('browser должен быть объектом');
+    for (const key of Object.keys(c.browser)) {
+        if (!(key in defaults.browser)) fail(`неизвестный параметр browser.${key}`);
+    }
+    if (!['auto', 'ego', 'chrome'].includes(c.browser.engine)) fail('browser.engine: auto | ego | chrome');
+    if (c.browser.executable !== null && (typeof c.browser.executable !== 'string' || c.browser.executable.trim() === '')) {
+        fail('browser.executable: непустая строка или null');
+    }
+    if (!Number.isSafeInteger(c.browser.timeoutMs) || c.browser.timeoutMs < 5_000 || c.browser.timeoutMs > 300_000) {
+        fail('browser.timeoutMs: целое 5000..300000');
+    }
+    if (typeof c.browser.spaceName !== 'string' || !c.browser.spaceName.trim()) fail('browser.spaceName: непустая строка');
     if (!['png', 'webp', 'jpeg'].includes(c.image.format)) fail('image.format: png | webp | jpeg');
     if (!['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(c.image.quality)) fail('image.quality: auto | low | medium | high | xhigh | max');
     if (!['auto', 'transparent', 'opaque'].includes(c.image.background)) fail('image.background: auto | transparent | opaque');

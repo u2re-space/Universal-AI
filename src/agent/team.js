@@ -26,7 +26,7 @@ import { ROLE_INSTRUCTIONS } from '../commands/instructions.js';
 import { EXECUTORS, executorSpec, executorToolNames, executorNames } from './role-registry.js';
 import { isCodingStep } from '../roles/coder.js';
 import { isStylingStep } from '../roles/styler.js';
-import { createToolset, enabledToolNames, READ_ONLY_TOOLS } from './tools.js';
+import { createToolset, enabledToolNames, READ_ONLY_TOOLS, BROWSER_TOOL_NAMES } from './tools.js';
 import { createSubagentRunner } from './subagents.js';
 import { DESKTOP_TOOL_NAMES } from './desktop.js';
 import { listFiles } from './fs-tools.js';
@@ -135,7 +135,7 @@ export function toolNamesForRole(allNames, role, spec = null) {
     }
     if (role === 'architect' || role === 'collector' || role === 'coordinator') return allNames.filter((name) => READ_ONLY_TOOLS.includes(name));
     if (role === 'reviewer') {
-        return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || name === 'run_subagent' || name === 'delegate_role');
+        return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || BROWSER_TOOL_NAMES.includes(name) || name === 'run_subagent' || name === 'delegate_role');
     }
     if (role === 'image-processor' || role === 'measurer' || role === 'decomposer' || role === 'decorator') {
         const allowed = new Set(role === 'image-processor'

@@ -11,6 +11,7 @@
  * @changed 2026-10-31 The run header shows roles as `model:role`; --role syntax stays `name=model:effort`.
  */
 import { APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, CUSTOM_ROLE_NAME } from '../core/config.js';
+import { defaults } from '../core/config-defaults.js';
 import { CONTEXT_LEVELS } from '../openai/model-profiles.js';
 import { PLATFORMS } from '../generate/platform.js';
 import { assertPaceBudget, PACE_QUALITY_MESSAGE, PACE_SPEED_MESSAGE, FINE_QUALITY_FLAGS } from '../agent/pace.js';
@@ -57,6 +58,19 @@ const IMAGE_QUALITY = ['low', 'medium', 'high', 'xhigh', 'max', 'auto'];
 
 /** The retired collector/coordinator roles are accepted as aliases for the unified orchestrator role. */
 const ROLE_ALIASES = { collector: 'orchestrator', coordinator: 'orchestrator' };
+
+/** Names --tools and --no-tools accept: every switch of the default tools object. */
+const TOOL_SWITCH_NAMES = Object.keys(defaults.tools);
+
+/**
+ * A tools object with every switch set to `value` (--tools list, --no-tools).
+ * @param {boolean} value
+ * @returns {object}
+ * @ai.hint pure
+ */
+function toolSwitches(value) {
+    return Object.fromEntries(TOOL_SWITCH_NAMES.map((name) => [name, value]));
+}
 
 /**
  * Map a legacy or current role name to the name stored in configuration.
@@ -224,20 +238,30 @@ export function overridesFrom(values, { command = null } = {}) {
     if (values['no-web']) o.tools.web = false;
     if (values.images) o.tools.images = true;
     if (values.desktop) o.tools.desktop = true;
+    if (values.browser) o.tools.browser = true;
+    if (values['browser-engine']) {
+        if (!['auto', 'ego', 'chrome'].includes(values['browser-engine'])) throw new UsageError('--browser-engine: auto | ego | chrome');
+        (o.browser ??= {}).engine = values['browser-engine'];
+        o.tools.browser = true;
+    }
+    if (values['browser-path']) {
+        (o.browser ??= {}).executable = values['browser-path'];
+        o.tools.browser = true;
+    }
     if (values['unsafe-screenshot']) (o.desktop ??= {}).unsafeScreenshot = true;
     if (values.tools !== undefined) {
         const list = values.tools.split(',').map((s) => s.trim()).filter(Boolean);
-        const all = { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false, channels: false, subagents: false };
+        const all = toolSwitches(false);
         if (!(list.length === 1 && list[0] === 'none')) {
             for (const name of list) {
-                if (!(name in all)) throw new UsageError(`--tools: неизвестный инструмент "${name}" (fs, shell, fetch, web, images, askUser, desktop, mcp, channels, subagents, none)`);
+                if (!(name in all)) throw new UsageError(`--tools: неизвестный инструмент "${name}" (${TOOL_SWITCH_NAMES.join(', ')}, none)`);
                 all[name] = true;
             }
             if (list.length) all.askUser = true;
         }
         Object.assign(o.tools, all);
     }
-    if (values['no-tools']) Object.assign(o.tools, { fs: false, shell: false, fetch: false, web: false, images: false, askUser: false, desktop: false, mcp: false, channels: false, subagents: false });
+    if (values['no-tools']) Object.assign(o.tools, toolSwitches(false));
     if (values.detail && !IMAGE_DETAILS.includes(values.detail)) throw new UsageError(`--detail: ${IMAGE_DETAILS.join(' | ')}`);
     if (values.fidelity !== undefined || values.creativity !== undefined || values.platform) o.generate = {};
     if (values.fidelity !== undefined) {

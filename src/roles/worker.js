@@ -11,7 +11,7 @@
  * @changed 2026-10-21 No dev servers or package internals during a step.
  */
 
-import { DESKTOP_NOTE, UNTRUSTED } from './untrusted.js';
+import { BROWSER_NOTE, DESKTOP_NOTE, UNTRUSTED } from './untrusted.js';
 
 /**
  * Prompt for the worker: carry out one approved plan step and report what changed.
@@ -31,4 +31,5 @@ To add or revise a later step, end the report with a plan-update fence. Omit the
 \`\`\`plan-update
 {"note":"why","addSteps":[{"goal":"...","details":"...","verify":"...","complexity":"normal"}],"revise":[{"id":"s03","details":"..."}]}
 \`\`\`
-${DESKTOP_NOTE} ${UNTRUSTED}`;
+${DESKTOP_NOTE}
+${BROWSER_NOTE} ${UNTRUSTED}`;

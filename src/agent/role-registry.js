@@ -12,7 +12,7 @@
  * @changed 2026-10-28 Added iconifier for markup and icon integration.
  * @changed 2026-10-31 writer, tester, and vision merged into reviewer and orchestrator. */
 
-import { READ_ONLY_TOOLS, SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES } from './tool-specs.js';
+import { READ_ONLY_TOOLS, SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES, BROWSER_TOOL_NAMES } from './tool-specs.js';
 import { BUILTIN_ROLE_NAMES } from '../core/config-defaults.js';
 
 /**
@@ -26,17 +26,17 @@ export const NESTED_FORBIDDEN = Object.freeze(['run_subagent', 'delegate_role', 
 /**
  * Tool slices an executor may use, before they are intersected with the caller's tools.
  * `all` keeps whatever the calling agent has; the other slices name a remit and never carry
- * click, type, or run_ahk — a checker or a solver may look at the screen with `screenshot`,
- * it does not drive it.
+ * click, type, or run_ahk — a checker or a solver may look at the screen with `screenshot`
+ * or read a page with the browser tools, it does not drive the desktop.
  * @returns {object}
  * @exports
  * @ai.hint pure
  */
 export const SLICES = {
     all: (allNames) => allNames,
-    read: () => [...READ_ONLY_TOOLS, 'fetch_url'],
-    check: () => [...READ_ONLY_TOOLS, ...SHELL_TOOL_NAMES, 'screenshot'],
-    screen: () => [...READ_ONLY_TOOLS, 'screenshot'],
+    read: () => [...READ_ONLY_TOOLS, 'fetch_url', 'browser'],
+    check: () => [...READ_ONLY_TOOLS, ...SHELL_TOOL_NAMES, 'screenshot', ...BROWSER_TOOL_NAMES],
+    screen: () => [...READ_ONLY_TOOLS, 'screenshot', 'browser'],
     images: (allNames) => [...IMAGE_TOOL_NAMES, ...(allNames.includes('fetch_url') ? ['fetch_url'] : [])],
 };
 
