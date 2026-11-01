@@ -80,7 +80,9 @@ turn instead of one call per turn.
 [EDITED/FIXME]: As reference needs to use RESTORED/DECOMPOSED by 'decomposer' (role) image references, if have/has!
 
 When the budget runs short, stop looking and report the complete sheet with what you have; a measured part and a null are worth more
-than another crop. Return one compact JSON measurement sheet, with no duplicate TOON or summary document. Include all schema-required fields and use null for unknown measurements. The harness saves this single JSON file; you do not write project files, generate images, or propose code. Reply in JSON only. ${UNTRUSTED}`;
+than another crop. Return one compact JSON measurement sheet, with no duplicate TOON or summary document. Include all schema-required fields and use null for unknown measurements. The harness saves this single JSON file; you do not write project files, generate images, or propose code. Reply in JSON only. 
+
+${UNTRUSTED}`;
 
 /**
  * Prompt for a second pass over crops and layers the first pass or the worker already cut out.
@@ -97,4 +99,8 @@ Give CSS-ready declarations with explicit units, and state the assumed root size
 Set confidence per value: high only when actually read, low when inferred. Keep the numbers consistent with the sheet already produced
 for the full reference; when the fragment contradicts it, say which value is now correct and why.
 Use view_image, crop_image, or split_image when a closer look is cheaper than a guess. At read access, crops may be written only under .tmp/.
-Return one compact JSON sheet, with no duplicate TOON or summary document. Include all schema-required fields and use null for unknown measurements. Do not write project files, generate images, or propose code. Reply in JSON only. ${UNTRUSTED}`;
+Return one compact JSON sheet, with no duplicate TOON or summary document. Include all schema-required fields and use null for unknown measurements. Do not write project files, generate images, or propose code. Reply in JSON only. 
+
+[EDITED/FIXME]: As reference needs to use RESTORED/DECOMPOSED by 'decomposer' (role) image references, if have/has!
+
+${UNTRUSTED}`;
