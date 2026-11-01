@@ -164,7 +164,7 @@ context=false запускает роль на чистом контексте. 
     Остальные роли следуют общему --quality. Явный --role worker=…, coder=… или styler=… переопределяет модель роли.
   --max-steps <n>        потолок шагов плана. Закрепляет число и заменяет расчёт pace
   --creativity <0..100>  сколько можно добавить сверх референсов (по умолчанию 20)
-  --platform <id>        профиль платформы (по умолчанию chrome-157-beta)
+  --platform <id>        профиль платформы (по умолчанию chrome-156-stable)
   --example <путь|url>   пример или шаблон оформления, можно несколько; для decompose — ./examples/for-decompose/*.png
   --kind landing|site|backend|app  вид генерации. У memory --kind по-прежнему вид записи
   --no-memory            не использовать долговременную память (SQLite в ~/.ai-agent/memory.db)

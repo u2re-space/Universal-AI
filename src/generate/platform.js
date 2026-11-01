@@ -1,16 +1,16 @@
 /**
  * @file src/generate/platform.js
  * @module generate/platform
- * @purpose Frozen web-platform profile for generation. Default is Chrome 157 Beta with flags off.
+ * @purpose Frozen web-platform profile for generation. Default is Chromium 156 based browser with flags off.
  * @usedBy generate/brief, commands/flags, commands/gen, core/config
- * @exports ENABLED_IN_157, WITHHELD, PLATFORM_SOURCES, CHROME_157_BETA, PLATFORMS, resolvePlatform, platformInstructions
+ * @exports ENABLED_IN_156, WITHHELD, PLATFORM_SOURCES, CHROME_156_STABLE, PLATFORMS, resolvePlatform, platformInstructions
  * @ai.tags generate, css, javascript
  * @ai.hint pure
  * @changed 2026-10-21 Vite target strings live on the profile.
  */
 
-/** Features enabled by default in Chrome 157. Origin trials and flags are not in this list. */
-export const ENABLED_IN_157 = Object.freeze([
+/** Features enabled by default in Chromium 156 based browser. Origin trials and flags are not in this list. */
+export const ENABLED_IN_156 = Object.freeze([
     Object.freeze({ id: 'sanitizer-javascript-urls', area: 'html', summary: 'SanitizerConfig javascriptURLs option. Omitting the option keeps the previous behavior.' }),
     Object.freeze({ id: 'background-fetch-cors', area: 'fetch', summary: 'Background Fetch enforces CORS and the same security checks as fetch, including Local Network Access.' }),
     Object.freeze({ id: 'css-corner-shorthand', area: 'css', summary: 'corner shorthand plus per-corner, physical, and logical sub-shorthands for border-radius and corner-shape. corners stays as a compat alias.' }),
@@ -31,10 +31,10 @@ export const ENABLED_IN_157 = Object.freeze([
 
 /** Not allowed for generated pages. Gates are origin-trial, flag, or not-default. */
 export const WITHHELD = Object.freeze([
-    Object.freeze({ id: 'connection-allowlists-embedded', gate: 'origin-trial', summary: 'Connection Allowlists embedded enforcement is an origin trial in Chrome 157.' }),
-    Object.freeze({ id: 'overscroll-areas', gate: 'origin-trial', summary: 'Overscroll Areas is an origin trial in Chrome 157.' }),
-    Object.freeze({ id: 'flagged-in-157', gate: 'flag', summary: 'The 2026-10-15 snapshot has five Chrome 157 features behind a flag. Do not toggle chrome://flags and do not ship a feature whose status is behind a flag.' }),
-    Object.freeze({ id: 'css-random', gate: 'not-default', summary: 'CSS random() appears in Dev notes and on CSS-Tricks. It is not in the Chrome 157 default-enabled list.' }),
+    Object.freeze({ id: 'connection-allowlists-embedded', gate: 'origin-trial', summary: 'Connection Allowlists embedded enforcement is an origin trial in Chromium 156 based browser.' }),
+    Object.freeze({ id: 'overscroll-areas', gate: 'origin-trial', summary: 'Overscroll Areas is an origin trial in Chromium 156 based browser.' }),
+    Object.freeze({ id: 'flagged-in-156', gate: 'flag', summary: 'The 2026-10-15 snapshot has five Chromium 156 based browser features behind a flag. Do not toggle chrome://flags and do not ship a feature whose status is behind a flag.' }),
+    Object.freeze({ id: 'css-random', gate: 'not-default', summary: 'CSS random() appears in Dev notes and on CSS-Tricks. It is not in the Chromium 156 based browser default-enabled list.' }),
 ]);
 
 /** Pages the profile was checked against. They also describe experiments, which stay withheld. */
@@ -73,39 +73,39 @@ export const PLATFORM_SOURCES = Object.freeze([
 ]);
 
 /**
- * Chrome 157 Beta, experimental flags off, origin trials off.
- * Captured 2026-10-15 from the Chrome 157 default-enabled list (16 features).
+ * Chromium 156 based browser, experimental flags off, origin trials off.
+ * Captured 2026-10-15 from the Chromium 156 based browser default-enabled list (16 features).
  */
-export const CHROME_157_BETA = Object.freeze({
-    id: 'chrome-157-beta',
+export const CHROME_156_STABLE = Object.freeze({
+    id: 'chrome-156-stable',
     browser: 'chrome',
-    version: 157,
-    channel: 'beta',
+    version: 156,
+    channel: 'stable',
     experimentalFlags: false,
     originTrials: false,
     snapshot: '2026-10-15',
     ecma: Object.freeze({ edition: 2026, spec: 'https://262.ecma-international.org/' }),
     javascript: Object.freeze({ target: 'es2026', engine: 'v8', flags: false }),
-    css: Object.freeze({ target: 'chrome-157-beta', flags: false }),
-    vite: Object.freeze({ target: 'esnext', cssTarget: 'chrome157' }),
+    css: Object.freeze({ target: 'chrome-156-stable', flags: false }),
+    vite: Object.freeze({ target: 'esnext', cssTarget: 'chrome156' }),
     sources: PLATFORM_SOURCES,
-    enabledIn157: ENABLED_IN_157,
+    enabledIn156: ENABLED_IN_156,
     withheld: WITHHELD,
 });
 
-/** Profiles a config may name. The default is chrome-157-beta. */
+/** Profiles a config may name. The default is chrome-156-stable. */
 export const PLATFORMS = Object.freeze({
-    'chrome-157-beta': CHROME_157_BETA,
+    'chrome-156-stable': CHROME_156_STABLE,
 });
 
 /**
  * Return the profile for `id`, or the default profile when `id` is omitted.
- * @param {string} [id='chrome-157-beta']
+ * @param {string} [id='chrome-156-stable']
  * @returns {object}
  * @exports
  * @ai.hint pure
  */
-export function resolvePlatform(id = 'chrome-157-beta') {
+export function resolvePlatform(id = 'chrome-156-stable') {
     const profile = PLATFORMS[id];
     if (!profile) throw new Error(`Неизвестный профиль платформы: ${id}`);
     return profile;
@@ -119,7 +119,7 @@ export function resolvePlatform(id = 'chrome-157-beta') {
  * @ai.hint pure
  */
 export function platformInstructions(profile) {
-    const enabled = profile.enabledIn157.map((feature) => `- ${feature.id} (${feature.area}): ${feature.summary}`).join('\n');
+    const enabled = profile.enabledIn156.map((feature) => `- ${feature.id} (${feature.area}): ${feature.summary}`).join('\n');
     const withheld = profile.withheld.map((feature) => `- ${feature.id} [${feature.gate}]: ${feature.summary}`).join('\n');
     const sources = profile.sources.map((url) => `- ${url}`).join('\n');
     return [

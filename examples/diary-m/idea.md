@@ -42,7 +42,7 @@
 
 ## Frontend latest standards
 
-Main basis of support: Chrome 157 Beta and beyond...
+Main basis of support: Chromium 156 based browser and beyond...
 
 - https://css-tricks.com/
 - https://caniuse.com/

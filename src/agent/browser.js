@@ -32,7 +32,7 @@ const RESULT_START = '@@AI_RESULT@@';
 
 const EGO_NOT_FOUND = 'ego-browser не найден в PATH. Установите Ego Lite (https://lite.ego.app/) или укажите browser.executable.';
 
-const CHROME_WIN = ['Google/Chrome/Application/chrome.exe', 'Microsoft/Edge/Application/msedge.exe'];
+const CHROME_WIN = ['Citro Labs/ego lite/Applications/ego.exe', 'Google/Chrome/Application/chrome.exe', 'Microsoft/Edge/Application/msedge.exe'];
 const CHROME_MAC = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'];
 const CHROME_LINUX = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'microsoft-edge'].map((name) => `/usr/bin/${name}`);
 

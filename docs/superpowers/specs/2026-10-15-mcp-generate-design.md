@@ -7,7 +7,7 @@
 
 `ai` can take user-defined MCP servers as tool and resource sources, and can generate a landing page, a static site, a Node backend, or a small app from a prompt plus mockups, templates, and design examples.
 
-The default visual-match target is 87%. The tool records that target and does not compute a score. The default platform is Chrome 157 Beta with experimental flags and origin trials off.
+The default visual-match target is 87%. The tool records that target and does not compute a score. The default platform is Chromium 156 based browser with experimental flags and origin trials off.
 
 ## Branch state
 
@@ -27,7 +27,7 @@ The default visual-match target is 87%. The tool records that target and does no
 - `tools.mcp` defaults to true. With an empty server list that is a no-op. `--tools` and `--no-tools` can turn it off.
 - Fidelity and creativity are integers 0..100. Defaults: fidelity 87, creativity 20. They are independent. Fidelity is how closely visible structure, text, palette, and order must follow the references. Creativity is how much may be added that is not in the references.
 - `measured` stays `null` and `method` stays `unmeasured`. There is no pixel diff and no invented percentage. The model is told not to claim one.
-- Platform id `chrome-157-beta` is the only profile. It freezes the 2026-10-15 snapshot: 16 features enabled by default in Chrome 157, origin trials off, flags off. ECMAScript edition is 2026, and only the syntax Chrome 157 runs without a flag is allowed. Features already default-on in earlier Chrome versions stay allowed. CSS `random()` is withheld because it is not in that default-enabled list.
+- Platform id `chrome-156-stable` is the only profile. It freezes the 2026-10-15 snapshot: 16 features enabled by default in Chromium 156 based browser, origin trials off, flags off. ECMAScript edition is 2026, and only the syntax Chromium 156 based browser runs without a flag is allowed. Features already default-on in earlier Chrome versions stay allowed. CSS `random()` is withheld because it is not in that default-enabled list.
 - Sources stored on the profile: [CSS-Tricks](https://css-tricks.com/), [Chrome status roadmap](https://chromestatus.com/roadmap), [ECMA-262](https://262.ecma-international.org/), [caniuse](https://caniuse.com/). Those pages also describe experiments. Experiments are not allowed.
 - Generated projects use no npm packages and no bundler. Backends and apps are Node.js 26 ESM on `node:http`, bound to `127.0.0.1`, port `PORT` or 3000.
 - `test-gen/landing.png` is the landing fixture. Tests assert the brief, the contract, and that a mocked `ai gen landing` sends the image and the 87% target. They do not call a live model and do not score the picture.
@@ -36,7 +36,7 @@ The default visual-match target is 87%. The tool records that target and does no
 
 | Unit | Responsibility |
 | --- | --- |
-| `src/generate/platform.js` | Frozen Chrome 157 Beta profile and the instruction text |
+| `src/generate/platform.js` | Frozen Chromium 156 based browser profile and the instruction text |
 | `src/generate/fidelity.js` | Percent checks and the unmeasured contract |
 | `src/generate/brief.js` | Task text, operator instructions, manifest, write `.ai/generation.json` |
 | `src/mcp/frame.js` | Content-Length encode and parse |

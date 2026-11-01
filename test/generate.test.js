@@ -5,7 +5,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { resolvePlatform, platformInstructions, PLATFORM_SOURCES, ENABLED_IN_157 } from '../src/generate/platform.js';
+import { resolvePlatform, platformInstructions, PLATFORM_SOURCES, ENABLED_IN_156 } from '../src/generate/platform.js';
 import { fidelityContract, effectiveFidelity, DEFAULT_FIDELITY, DEFAULT_CREATIVITY } from '../src/generate/fidelity.js';
 import { buildGenerationBrief, GENERATION_KINDS } from '../src/generate/brief.js';
 import { loadConfig, redactConfig } from '../src/core/config.js';
@@ -16,17 +16,17 @@ import { ensureLocalEnv } from './helpers/local-env.js';
 const landing = fileURLToPath(new URL('../test-gen/landing.png', import.meta.url));
 const bin = fileURLToPath(new URL('../bin/ai.js', import.meta.url));
 
-test('chrome-157-beta is the default and keeps flags off', () => {
+test('chrome-156-stable is the default and keeps flags off', () => {
     const profile = resolvePlatform();
-    assert.equal(profile.id, 'chrome-157-beta');
-    assert.equal(profile.version, 157);
-    assert.equal(profile.channel, 'beta');
+    assert.equal(profile.id, 'chrome-156-stable');
+    assert.equal(profile.version, 156);
+    assert.equal(profile.channel, 'stable');
     assert.equal(profile.experimentalFlags, false);
     assert.equal(profile.originTrials, false);
     assert.equal(profile.snapshot, '2026-10-15');
     assert.equal(profile.ecma.edition, 2026);
     assert.equal(profile.ecma.spec, 'https://262.ecma-international.org/');
-    assert.equal(ENABLED_IN_157.length, 16);
+    assert.equal(ENABLED_IN_156.length, 16);
     assert.deepEqual(profile.sources, [...PLATFORM_SOURCES]);
     assert.throws(() => resolvePlatform('ie6'), /Неизвестный профиль/);
 });
@@ -35,7 +35,7 @@ test('platform instructions list the snapshot and withhold css-random', () => {
     const text = platformInstructions(resolvePlatform());
     assert.match(text, /Experimental flags: off/);
     assert.match(text, /Origin trials: off/);
-    for (const feature of resolvePlatform().enabledIn157) assert.match(text, new RegExp(feature.id));
+    for (const feature of resolvePlatform().enabledIn156) assert.match(text, new RegExp(feature.id));
     for (const feature of resolvePlatform().withheld) assert.match(text, new RegExp(feature.id));
     for (const url of PLATFORM_SOURCES) assert.ok(text.includes(url), url);
     assert.match(text, /css-random/);
@@ -62,7 +62,7 @@ test('effective fidelity scales with quality and stays unmeasured', () => {
     assert.equal(effectiveFidelity(0, 40), 0);
 });
 
-test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
+test('landing.png becomes a brief at 87% for chrome-156-stable', async () => {
     const bytes = await readFile(landing).catch(() => Buffer.from(TINY_PNG, 'base64'));
     assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     const brief = buildGenerationBrief({
@@ -70,7 +70,7 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
         prompt: 'Повтори макет Tilda Publishing',
         fidelity: 80,
         creativity: 20,
-        platform: resolvePlatform('chrome-157-beta'),
+        platform: resolvePlatform('chrome-156-stable'),
         references: { images: [landing], files: [], templates: ['templates/base'], examples: ['https://css-tricks.com/'] },
     });
     assert.equal(brief.manifest.fidelity, 80);
@@ -78,7 +78,7 @@ test('landing.png becomes a brief at 87% for chrome-157-beta', async () => {
     assert.equal(brief.manifest.creativity, 20);
     assert.equal(brief.manifest.measured, null);
     assert.equal(brief.manifest.method, 'unmeasured');
-    assert.equal(brief.manifest.platform, 'chrome-157-beta');
+    assert.equal(brief.manifest.platform, 'chrome-156-stable');
     assert.equal(brief.manifest.experimentalFlags, false);
     assert.deepEqual(brief.manifest.outputs, [
         'package.json', 'vite.config.js', 'index.html', 'src/main.js', 'src/styles.scss', 'scripts/generate.js',
@@ -133,7 +133,7 @@ test('config defaults and flag bounds', async () => {
         const config = await loadConfig({ env: { AI_AGENT_HOME: home, AI_MODEL: 'mock-model', OPENAI_API_KEY: 'sk-test' }, ensureHome: false });
         assert.equal(config.generate.fidelity, 80);
         assert.equal(config.generate.creativity, 20);
-        assert.equal(config.generate.platform, 'chrome-157-beta');
+        assert.equal(config.generate.platform, 'chrome-156-stable');
         assert.equal(config.tools.mcp, true);
         assert.deepEqual(config.mcp.servers, []);
         const shown = redactConfig({ ...config, mcp: { servers: [{ id: 'design', env: { TOKEN: 'secret' } }] } });
@@ -141,7 +141,7 @@ test('config defaults and flag bounds', async () => {
     } finally {
         await rm(home, { recursive: true, force: true });
     }
-    assert.equal(overridesFrom({ fidelity: '87', creativity: '20', platform: 'chrome-157-beta' }).generate.fidelity, 87);
+    assert.equal(overridesFrom({ fidelity: '87', creativity: '20', platform: 'chrome-156-stable' }).generate.fidelity, 87);
     assert.throws(() => overridesFrom({ fidelity: '101' }), /--fidelity/);
     assert.throws(() => overridesFrom({ platform: 'ie6' }), /--platform/);
     assert.equal(overridesFrom({ tools: 'fs,mcp' }).tools.mcp, true);
@@ -305,7 +305,7 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
         assert.match(planner, /80%/);
         assert.match(planner, /Plan the work before changing files/);
         assert.match(planner, /Customer task:/);
-        assert.match(planner, /chrome-157-beta/);
+        assert.match(planner, /chrome-156-stable/);
         assert.match(planner, /landing\.png/);
         assert.match(planner, /image_generation/);
         assert.equal(sawImageTool, true);
@@ -317,7 +317,7 @@ test('ai gen landing sends the mockup and records an unmeasured 87% contract', a
         assert.equal(manifest.creativity, 20);
         assert.equal(manifest.measured, null);
         assert.equal(manifest.method, 'unmeasured');
-        assert.equal(manifest.platform, 'chrome-157-beta');
+        assert.equal(manifest.platform, 'chrome-156-stable');
         assert.equal(manifest.references.images[0], image);
     } finally {
         await server.close();

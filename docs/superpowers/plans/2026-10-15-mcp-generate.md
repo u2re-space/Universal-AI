@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
-**Goal:** Let the CLI generate a landing, site, backend, or app from references at a recorded fidelity target, using user-defined stdio MCP servers and a Chrome 157 Beta platform profile.
+**Goal:** Let the CLI generate a landing, site, backend, or app from references at a recorded fidelity target, using user-defined stdio MCP servers and a Chromium 156 based browser platform profile.
 
 **Architecture:** Pure modules build the platform text, the fidelity contract, and the generation brief. A stdio MCP client turns each user server into strict function tools. `ai gen` writes `.ai/generation.json` and then calls the existing team. `ai mcp` edits the home config and can probe a server without an API key.
 
@@ -13,8 +13,8 @@
 - Node.js built-in modules only. No new npm dependencies.
 - Default fidelity is 87. Default creativity is 20. Both are integers 0..100.
 - `measured` is null. `method` is `unmeasured`. Do not invent a visual score.
-- Default platform id is `chrome-157-beta`. Experimental flags off. Origin trials off. Snapshot date `2026-10-15`. ECMAScript edition 2026, only what Chrome 157 runs without a flag.
-- Withhold CSS `random()`, the Chrome 157 origin trials, and anything behind a chrome://flag.
+- Default platform id is `chrome-156-stable`. Experimental flags off. Origin trials off. Snapshot date `2026-10-15`. ECMAScript edition 2026, only what Chromium 156 based browser runs without a flag.
+- Withhold CSS `random()`, the Chromium 156 based browser origin trials, and anything behind a chrome://flag.
 - Profile sources, verbatim: `https://css-tricks.com/`, `https://chromestatus.com/roadmap`, `https://262.ecma-international.org/`, `https://caniuse.com/`.
 - MCP transport is stdio only. Client requests protocol `2025-06-18` and accepts `2025-06-18`, `2025-03-26`, `2024-11-05`.
 - Tool names match `mcp_<serverId>_<toolName>`, `[A-Za-z0-9_-]`, length at most 64.
@@ -36,7 +36,7 @@
 - Test: `test/generate.test.js`
 
 **Interfaces:**
-- Produces: `resolvePlatform(id = 'chrome-157-beta')`, `platformInstructions(profile)`, `fidelityContract({ fidelity, creativity })`, `buildGenerationBrief({ kind, prompt, fidelity, creativity, platform, references })`, `writeGenerationManifest(root, manifest)`
+- Produces: `resolvePlatform(id = 'chrome-156-stable')`, `platformInstructions(profile)`, `fidelityContract({ fidelity, creativity })`, `buildGenerationBrief({ kind, prompt, fidelity, creativity, platform, references })`, `writeGenerationManifest(root, manifest)`
 - `buildGenerationBrief` returns `{ task, instructions, manifest }`
 - `manifest.measured === null`, `manifest.method === 'unmeasured'`, `manifest.fidelity === 87` when those defaults are passed
 - Kinds: `landing`, `site`, `backend`, `app`
@@ -103,7 +103,7 @@
 
 **Interfaces:**
 - Consumes: Task 1 and Task 2 exports
-- `defaults.generate = { fidelity: 87, creativity: 20, platform: 'chrome-157-beta' }`
+- `defaults.generate = { fidelity: 87, creativity: 20, platform: 'chrome-156-stable' }`
 - `defaults.tools.mcp = true`
 - `defaults.mcp = { servers: [] }`
 - `createToolset({ extras })` adds those tools to `names()`, `definitions()`, and `execute()`
@@ -111,7 +111,7 @@
 - `ai mcp` does not require `OPENAI_API_KEY`
 - `redactConfig` replaces MCP env values with `…`
 
-- [x] **Step 1:** Add tests for config defaults, invalid fidelity, invalid server id, `--fidelity 101`, `ai mcp list` without an API key, `ai mcp add` plus `probe`, and `ai gen landing --image <landing.png> --no-memory` against the mock server. The planner input must include `87%` and `chrome-157-beta`. `.ai/generation.json` must keep `measured: null`.
+- [x] **Step 1:** Add tests for config defaults, invalid fidelity, invalid server id, `--fidelity 101`, `ai mcp list` without an API key, `ai mcp add` plus `probe`, and `ai gen landing --image <landing.png> --no-memory` against the mock server. The planner input must include `87%` and `chrome-156-stable`. `.ai/generation.json` must keep `measured: null`.
 
 - [x] **Step 2:** Run the new tests and confirm they fail.
 

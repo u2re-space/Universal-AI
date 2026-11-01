@@ -361,11 +361,11 @@ export function scaffoldScript() {
  */
 export function viteConfig(platform = {}) {
     const target = platform?.vite?.target ?? 'esnext';
-    const cssTarget = platform?.vite?.cssTarget ?? 'chrome157';
+    const cssTarget = platform?.vite?.cssTarget ?? 'chrome156';
     return [
         "import { defineConfig } from 'vite';",
         '',
-        '// Chrome 157 Beta is the only target. esnext keeps the ES2026 syntax intact.',
+        '// Chromium 156 based browser is the only target. esnext keeps the ES2026 syntax intact.',
         'export default defineConfig({',
         '    build: {',
         `        target: '${target}',`,
@@ -410,7 +410,7 @@ export function kindRules(kind, recommendations) {
     } else if (web) {
         lines.push('Vite, SCSS, and ESM. Node.js 26.');
         lines.push(kind === 'app' ? 'server.js serves dist/ after vite build.' : 'No Node server.');
-        lines.push('vite.config.js is already written with the Chrome 157 build targets. Do not plan a step to create or verify it.');
+        lines.push('vite.config.js is already written with the Chromium 156 based browser build targets. Do not plan a step to create or verify it.');
         lines.push('Do not run npm run dev or npm run preview inside a step: they do not exit. Verify with npm run build and read the built files.');
         lines.push('Load fonts and icons from a CDN (Google Fonts, jsDelivr, unpkg). Do not vendor an icon set by hand; use download_font or download_icons only when the task needs local files.');
         lines.push('For each prominent graphic, compare existing candidates only: suitable Lucide or Phosphor icons available to the project, lightweight HTML/CSS drawings, and existing raster or SVG artwork. Do not generate new images for comparison or atlas packing. Use compare_images to create a local PNG sheet and optional pixel-difference map directly from raster data with sharp/node-canvas, rendering SVG candidates through ReSVG; do not create an SVG snapshot or rasterize comparison in a browser, and do not spend an AI request on comparison. Candidates are fitted proportionally into a common aspect-ratio frame with transparent/neutral padding or a deliberate crop; never stretch them. Preserve the original candidates and prefer a PNG that already has a real alpha channel; an optional SVG conversion may be tried on a copy. If a WebP copy is useful, convert it locally and keep the PNG; never use image generation or editing just to change the format. After npm run build, inspect the rendered page and retain only the best-fitting existing option.');

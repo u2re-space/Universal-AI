@@ -394,12 +394,12 @@ export const defaults = Object.freeze({
     },
     /**
      * Project generation (`ai gen`). Fidelity is a target, not a measured score.
-     * platform selects the frozen web-platform profile (Chrome 157 Beta, flags off).
+     * platform selects the frozen web-platform profile (Chromium 156 based browser, flags off).
      */
     generate: {
         fidelity: 80,
         creativity: 20,
-        platform: 'chrome-157-beta',
+        platform: 'chrome-156-stable',
     },
     /**
      * Team pace. models run from cheap to expensive.

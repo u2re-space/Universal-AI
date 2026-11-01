@@ -14,7 +14,7 @@
 - The npx guard runs for every `run_command`, including runs that are not a generation profile.
 - Node.js 26, `"type": "module"`, `engines.node` `>=26`. Versions in a generated manifest are `*` until `npm install` rewrites them. Do not invent version numbers.
 - The npm `name` is the working-directory basename when it matches `^[a-z0-9][a-z0-9._-]*$` and is at most 214 characters. Otherwise `app`.
-- Web kinds `landing`, `site`, and `app` use Vite, SCSS, and the platform ECMAScript edition. Chrome 157 Beta flags stay off. `measured` stays `null`.
+- Web kinds `landing`, `site`, and `app` use Vite, SCSS, and the platform ECMAScript edition. Chromium 156 based browser flags stay off. `measured` stays `null`.
 - `site` lists `about.html` immediately after `index.html`. `app` lists `server.js`, which serves `dist/` after `vite build`. `landing` and `site` have no server.
 - Backend stays on `node:http`, `127.0.0.1`, port `PORT` or 3000, with no dependencies until a recommendation includes them.
 - Prompt framing added by this program is English. The customer text stays verbatim. CLI help, renderer lines, approval previews, and thrown operator errors stay Russian. Team report headings `## План`, `## Шаг`, and `## Ревью` stay Russian.
@@ -56,7 +56,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { filesForKind, npmPackageName, buildPackageManifest, stackText } from '../src/generate/scaffold.js';
 
-const platform = { id: 'chrome-157-beta', ecma: { edition: 2026 } };
+const platform = { id: 'chrome-156-stable', ecma: { edition: 2026 } };
 
 test('web and backend file lists', () => {
     assert.deepEqual(filesForKind('landing'), [

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { filesForKind, filesForStack, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, renderGenerationTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, guardScaffold, preparedScaffoldFiles, writePreparedScaffold, ensureDependencies } from '../src/generate/scaffold.js';
 
-const platform = { id: 'chrome-157-beta', ecma: { edition: 2026 } };
+const platform = { id: 'chrome-156-stable', ecma: { edition: 2026 } };
 
 test('web and backend file lists', () => {
     assert.deepEqual(filesForKind('landing'), [
@@ -165,7 +165,7 @@ test('prepared scaffold files are written once and an existing file stays', asyn
     const files = preparedScaffoldFiles({ kind: 'landing', platform, recommendations, name: 'widget' });
     assert.equal(typeof files['scripts/generate.js'], 'string');
     assert.match(files['vite.config.js'], /target: 'esnext'/);
-    assert.match(files['vite.config.js'], /cssTarget: 'chrome157'/);
+    assert.match(files['vite.config.js'], /cssTarget: 'chrome156'/);
     assert.match(files['package.json'], /"name": "widget"/);
     const backend = preparedScaffoldFiles({ kind: 'backend', platform, recommendations, name: 'api' });
     assert.equal('vite.config.js' in backend, false);

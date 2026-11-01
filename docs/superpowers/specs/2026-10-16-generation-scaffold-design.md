@@ -7,7 +7,7 @@
 
 When `ai gen` or `ai run` builds a generation profile, the model receives an English wrapper before the customer task. The wrapper is assembled from code: stack, file tree, `package.json`, `.rules/`, `.skills/`, and library recommendations. A scaffold command (`npx create-…`, `npm create`, `npm init`) cannot replace files that already exist or paths the customer task names.
 
-This replaces the generation rule "no framework, no bundler, no npm" in `docs/superpowers/specs/2026-10-15-mcp-generate-design.md`. Fidelity stays unmeasured. The platform profile stays Chrome 157 Beta with flags off.
+This replaces the generation rule "no framework, no bundler, no npm" in `docs/superpowers/specs/2026-10-15-mcp-generate-design.md`. Fidelity stays unmeasured. The platform profile stays Chromium 156 based browser with flags off.
 
 ## When it runs
 
@@ -34,7 +34,7 @@ Node.js 26 and `"type": "module"` apply to every kind. `engines.node` is `>=26`.
 
 ### Web (`landing`, `site`, `app`)
 
-Vite, SCSS, and the ECMAScript edition of the platform profile (Chrome 157 Beta, experimental flags off).
+Vite, SCSS, and the ECMAScript edition of the platform profile (Chromium 156 based browser, experimental flags off).
 
 `package.json` is `private: true` and has scripts `dev` (`vite`), `build` (`vite build`), `preview` (`vite preview`), `test` (`node --test`), and `generate` (`node scripts/generate.js`). Dev dependencies that are included: `vite`, `sass`. Installation is `npm install`. There is no separate install script.
 

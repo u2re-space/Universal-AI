@@ -19,7 +19,7 @@
 | Изображения и файлы во входе | `ai --image screenshot.png "что не так на экране?"`, `ai -f spec.pdf "сделай план"` |
 | Автономные задачи | `ai run "добавь тесты для src/utils.js и прогони их"` — инструменты: файлы, команды, URL, web-поиск, картинки |
 | Браузер агента | `ai run --browser "проверь страницу http://localhost:3000"` — Ego Lite (если установлен) открывает страницу, выдаёт accessibility snapshot и позволяет кликать/вводить; без Ego — headless Chrome/Edge для чтения и снимков |
-| Сайты, лендинги, бэкенды | `ai gen landing "собери страницу" --image test-gen/landing.png` — точность 87% (цель, не измерение), креативность, профиль Chrome 157 Beta |
+| Сайты, лендинги, бэкенды | `ai gen landing "собери страницу" --image test-gen/landing.png` — точность 87% (цель, не измерение), креативность, профиль Chromium 156 based browser |
 | Свои MCP-серверы | `ai mcp add design --mcp-command node --mcp-arg server.js` — инструменты и ресурсы по stdio; сторонний https-сервер уходит в API как `type: mcp` |
 | Макеты Figma | `ai gen landing "собери страницу" --url https://www.figma.com/design/<file>/…` — ссылка сама добавляет MCP `https://mcp.figma.com/mcp`, decomposer разбирает файл на экраны до замеров |
 | Решения и модерация | `ai decide`, `ai moderate` — `/v1/decisions` (`openai/gpt-6-luna-decisions`) или `omni-moderation-latest`, если шлюз отдаёт `/v1/moderations` |
@@ -514,7 +514,7 @@ ai run --template quest.md --file notes.md "допиши шейдер"
 * **Креативность** (`--creativity`, по умолчанию 20) — сколько можно добавить того, чего в референсах нет. 0 ничего не добавляет. Оси независимы.
 * **Референсы** — `--image` (макеты), `--file`, `--example` (примеры и шаблоны оформления), `--url` (исходный адрес, только http/https). Можно несколько каждого. `--template` — файл с текстом задачи, в том числе вместо фразы в команде. Ссылки из `--url` попадают в задачу блоком `Source URLs`, а при профиле генерации — в `.ai/generation.json` (`references.urls`); ссылка `figma.com` вдобавок подключает MCP `https://mcp.figma.com/mcp`, и `decomposer` разбирает файл на экраны.
 * **Зависимости** — при `--approve all` (и по подтверждению при `ask`) система выполняет `npm install` сразу после записи каркаса, до первого шага. Тогда `npm run build` работает с Vite. При `write` и `read` команды запрещены: установите зависимости вручную.
-* **Платформа** — `--platform chrome-157-beta` (единственный профиль и значение по умолчанию). Chrome 157 Beta без экспериментальных флагов и без origin trial. ECMAScript — редакция 2026, только то, что Chrome 157 выполняет без флага. CSS `random()` и пять флаговых возможностей снимка от 2026-10-15 не используются. Ориентиры: [CSS-Tricks](https://css-tricks.com/), [дорожная карта Chrome](https://chromestatus.com/roadmap), [ECMA-262](https://262.ecma-international.org/), [caniuse](https://caniuse.com/).
+* **Платформа** — `--platform chrome-156-stable` (единственный профиль и значение по умолчанию). Chromium 156 based browser без экспериментальных флагов и без origin trial. ECMAScript — редакция 2026, только то, что Chromium 156 based browser выполняет без флага. CSS `random()` и пять флаговых возможностей снимка от 2026-10-15 не используются. Ориентиры: [CSS-Tricks](https://css-tricks.com/), [дорожная карта Chrome](https://chromestatus.com/roadmap), [ECMA-262](https://262.ecma-international.org/), [caniuse](https://caniuse.com/).
 * Страницы без npm и без сборщика. Бэкенд и приложение — Node.js 26, ESM, только `node:http`, адрес `127.0.0.1`, порт `PORT` или 3000.
 
 ## MCP-источники
