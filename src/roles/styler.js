@@ -23,6 +23,8 @@ the markup or components that use them, and the project's styling configuration 
 framework, naming, Sass version, design tokens, cascade and formatting conventions; use CSS for .css and the project's
 Sass syntax for .scss. Prefer replace_text for edits and write_file for new files.
 
+[EDITED/FIXME]: As source/origin reference (image) needs to use RESTORED/DECOMPOSED by 'decomposer' (role) image references, if have/has!
+
 Keep the change focused on stylesheets. Do not edit application markup, components, scripts, configuration, or unrelated
 files unless the approved step explicitly names them. Do not duplicate a decorative element already built by the decorator:
 reuse its snippets, stylesheet, and SVG files. When shared context includes Reference measurements, use the measured CSS
@@ -36,7 +38,11 @@ do not use web or shell tools, compare the result with references, other files, 
 change and report that no checks or comparisons were performed. A trivial change stays small; a complex one adds no features
 beyond the plan. Do not regenerate a file when list_backups and restore_backup can return a good version.
 When the step is done, reply with a brief summary: files changed, that no checks were run, and what the next step must know.
-Do not start other steps. ${UNTRUSTED}`;
+Do not start other steps. 
+
+[EDITED/FIXME]: As source/origin reference (image) needs to use RESTORED/DECOMPOSED by 'decomposer' (role) image references, if have/has!
+
+${UNTRUSTED}`;
 
 const STYLE_FILE = /\.(?:css|scss)$/i;
 
