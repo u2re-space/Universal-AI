@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { runProgram } from '../src/agent/shell.js';
 import { detectMagick, ensureTransparentBackground, magickIsOpaque, assessVectorSuitability, magickColorCount, magickPaletteStats } from '../src/agent/image-magick.js';
 import { stageMeasurementCrops, measurementConclusion } from '../src/agent/measure-crops.js';
@@ -106,6 +106,68 @@ test('measurement crops are cut once and rendered as ready generate_image refere
         assert.match(text, /never stretch an image/);
         assert.match(text, /convert it locally and keep the PNG/);
         assert.match(text, /After the page is built, compare the options/);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('crops follow the sub-reference an item was measured on', async (t) => {
+    const exe = await detectMagick();
+    if (!exe) return t.skip('ImageMagick is not installed');
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-subref-'));
+    try {
+        await makeFlatImage({ exe, dir });
+        // A flat blue sub-reference the decomposer produced next to the red-on-white original.
+        const subRel = '.tmp/work-1/decomposition/01-home.png';
+        await mkdir(path.join(dir, '.tmp', 'work-1', 'decomposition'), { recursive: true });
+        await runProgram({ file: exe, args: ['-size', '64x64', 'xc:blue', subRel], cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096 });
+        const sheet = {
+            summary: 'Two screens',
+            source: 'mockup.png',
+            unit: 'px',
+            units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '' },
+            confidence: 'medium',
+            assumptions: [],
+            canvas: { x: 0, y: 0, width: 64, height: 64 },
+            elements: [
+                {
+                    name: 'From sub', kind: 'image', box: { x: 0, y: 0, width: 10, height: 10 },
+                    rotation: 0, borders: '', radius: null,
+                    padding: { top: null, right: null, bottom: null, left: null },
+                    margin: { top: null, right: null, bottom: null, left: null }, gap: null,
+                    spacing: '', placement: '', css: '', typography: null, confidence: 'high',
+                    notes: `measured from ${subRel}`, use: '', crop: null,
+                },
+                {
+                    name: 'From original', kind: 'image', box: { x: 10, y: 10, width: 50, height: 50 },
+                    rotation: 0, borders: '', radius: null,
+                    padding: { top: null, right: null, bottom: null, left: null },
+                    margin: { top: null, right: null, bottom: null, left: null }, gap: null,
+                    spacing: '', placement: '', css: '', typography: null, confidence: 'high',
+                    notes: '', use: '', crop: null,
+                },
+            ],
+            regions: [],
+            rules: [],
+            notes: '',
+        };
+        const { crops, warnings } = await stageMeasurementCrops({
+            root: dir, workId: 'work-1', sheet,
+            referencePaths: ['mockup.png'],
+            subReferences: [{ rel: subRel, screen: 'Home', kind: 'restored' }],
+        });
+        assert.equal(warnings.length, 0);
+        assert.equal(crops.length, 2);
+
+        const pixel = async (rel, x, y) => {
+            const result = await runProgram({
+                file: exe, args: [rel, '-format', `%[pixel:p{${x},${y}}]`, 'info:'],
+                cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096,
+            });
+            return result.stdout.trim();
+        };
+        assert.match(await pixel(sheet.elements[0].crop, 5, 5), /0,0,255/, 'the sub-reference item is cut from the blue sub-reference');
+        assert.match(await pixel(sheet.elements[1].crop, 30, 30), /255,0,0/, 'the unnamed item is cut from the sheet source');
     } finally {
         await rm(dir, { recursive: true, force: true });
     }

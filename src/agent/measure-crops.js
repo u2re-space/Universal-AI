@@ -9,6 +9,7 @@
  * @ai.tags images, measurement, crop
  * @ai.hint io
  * @changed 2026-10-25 Two-pass measurement with deduplicated element crops.
+ * @changed 2026-11-03 Crops are cut from the image the item was measured on: sub-references join the source candidates, and an item naming a sub-reference in its notes is cut from that sub-reference.
  */
 
 import path from 'node:path';
@@ -48,10 +49,10 @@ async function isFile(abs) {
 }
 
 /**
- * Resolve the source image of a sheet. The measurer usually names the reference by basename;
- * a staged reference path is preferred over a model-provided path so nothing outside the
- * working directory can be read.
- * @param {{ root: string, sheet: object, referencePaths: string[] }} options
+ * Resolve the default source image of a sheet. The measurer usually names the reference by
+ * basename; a staged reference or sub-reference path is preferred over a model-provided path
+ * so nothing outside the working directory can be read.
+ * @param {{ root: string, sheet: object, referencePaths: string[], subReferences?: object[] }} options
  * @returns {Promise<string|null>} project-relative or absolute path inside root
  * @ai.hint io
  */
@@ -64,8 +65,11 @@ async function insideFile(root, ref) {
     }
 }
 
-async function resolveSource({ root, sheet, referencePaths }) {
-    const candidates = (referencePaths ?? []).filter((item) => typeof item === 'string' && item.trim());
+async function resolveSource({ root, sheet, referencePaths, subReferences = [] }) {
+    const candidates = [
+        ...(referencePaths ?? []).filter((item) => typeof item === 'string' && item.trim()),
+        ...subReferences.map((file) => file?.rel).filter((rel) => typeof rel === 'string' && rel.trim()),
+    ];
     const named = String(sheet?.source ?? '').trim();
     if (named && !/^https?:|^data:/i.test(named)) {
         const exact = candidates.find((item) => item === named || path.basename(item) === path.basename(named));
@@ -80,30 +84,53 @@ async function resolveSource({ root, sheet, referencePaths }) {
 }
 
 /**
+ * The sub-reference an item was measured on, when its notes name one by path or file name.
+ * @param {object} item a sheet element or region
+ * @param {object[]} subReferences collected sub-references with `rel` paths
+ * @returns {string|null} the sub-reference project-relative path
+ * @ai.hint pure
+ */
+function namedSubReference(item, subReferences) {
+    const text = `${item?.notes ?? ''} ${item?.how ?? ''}`;
+    if (!text.trim()) return null;
+    for (const file of subReferences) {
+        if (typeof file?.rel !== 'string') continue;
+        const base = file.rel.split('/').pop();
+        if (text.includes(file.rel) || (base && text.includes(base))) return file.rel;
+    }
+    return null;
+}
+
+/**
  * Cut every region and reusable element in `sheet` that has a usable box and no existing crop.
  * The crop path is written back to the item, so `renderMeasurements`, `measurements.json`, and
- * the conclusion carry it. Identical boxes share one file.
- * @param {{ root: string, workId: string, sheet: object, referencePaths?: string[], config?: object, signal?: AbortSignal, reuse?: Array<{ crop?: string, box?: object }> }} options
+ * the conclusion carry it. Identical boxes share one file. An item is cut from the sub-reference
+ * named in its notes when there is one, from the sheet source otherwise.
+ * @param {{ root: string, workId: string, sheet: object, referencePaths?: string[], subReferences?: object[], config?: object, signal?: AbortSignal, reuse?: Array<{ crop?: string, box?: object }> }} options
  * @returns {Promise<{ crops: Array<{ kind: string, name: string, crop: string, bytes?: number, box?: object }>, warnings: string[] }>}
  * @exports
  * @ai.hint io
  */
-export async function stageMeasurementCrops({ root, workId, sheet, referencePaths = [], config = {}, signal, reuse = [] }) {
+export async function stageMeasurementCrops({ root, workId, sheet, referencePaths = [], subReferences = [], config = {}, signal, reuse = [] }) {
     const regions = Array.isArray(sheet?.regions) ? sheet.regions : [];
     const elements = Array.isArray(sheet?.elements) ? sheet.elements : [];
-    if (!regions.length && !elements.length) return { crops: [], warnings: [] };
+    if (!regions.length && elements.length === 0) return { crops: [], warnings: [] };
     const exe = await detectMagick({ magickPath: config.magickPath ?? null }).catch(() => null);
     if (!exe) return { crops: [], warnings: ['ImageMagick не найден: готовые кропы из замеров не созданы.'] };
-    const source = await resolveSource({ root, sheet, referencePaths });
+    const source = await resolveSource({ root, sheet, referencePaths, subReferences });
     if (!source) return { crops: [], warnings: ['Источник замеров не найден: готовые кропы не созданы.'] };
 
-    let size;
-    try {
-        size = await magickIdentify({ exe, input: source, cwd: root, signal });
-    } catch (error) {
-        return { crops: [], warnings: [`Не удалось прочитать ${source}: ${error.message}`] };
-    }
-    if (!size.width || !size.height) return { crops: [], warnings: [`Не удалось определить размеры ${source}.`] };
+    // Sizes are resolved per source: a box measured on a restored sub-reference clamps against
+    // that sub-reference, not against the original rotated picture.
+    const sizeCache = new Map();
+    const sizeFor = async (rel) => {
+        if (!sizeCache.has(rel)) {
+            sizeCache.set(rel, await magickIdentify({ exe, input: rel, cwd: root, signal }).catch(() => null));
+        }
+        return sizeCache.get(rel);
+    };
+    const size = await sizeFor(source);
+    if (!size?.width || !size?.height) return { crops: [], warnings: [`Не удалось определить размеры ${source}.`] };
 
     const crops = [];
     const warnings = [];
@@ -165,10 +192,17 @@ export async function stageMeasurementCrops({ root, workId, sheet, referencePath
             return;
         }
 
-        const left = Math.max(0, Math.min(Math.round(x), size.width - 1));
-        const top = Math.max(0, Math.min(Math.round(y), size.height - 1));
-        const w = Math.min(Math.round(width), size.width - left);
-        const h = Math.min(Math.round(height), size.height - top);
+        const itemSource = namedSubReference(item, subReferences) ?? source;
+        const itemSize = itemSource === source ? size : await sizeFor(itemSource);
+        if (!itemSize?.width || !itemSize?.height) {
+            warnings.push(`Не удалось определить размеры ${itemSource}: кроп «${name}» не создан.`);
+            return;
+        }
+
+        const left = Math.max(0, Math.min(Math.round(x), itemSize.width - 1));
+        const top = Math.max(0, Math.min(Math.round(y), itemSize.height - 1));
+        const w = Math.min(Math.round(width), itemSize.width - left);
+        const h = Math.min(Math.round(height), itemSize.height - top);
         if (w <= 0 || h <= 0) return;
 
         let serial = reserved.size + 1;
@@ -178,7 +212,7 @@ export async function stageMeasurementCrops({ root, workId, sheet, referencePath
             rel = `.tmp/${workId}/crops/${String(serial).padStart(2, '0')}-${kind}-${slug(name, fallback)}.png`;
         }
         try {
-            const result = await magickCrop({ exe, input: source, output: rel, x: left, y: top, width: w, height: h, cwd: root, signal });
+            const result = await magickCrop({ exe, input: itemSource, output: rel, x: left, y: top, width: w, height: h, cwd: root, signal });
             item.crop = result.rel;
             seen.set(key, result.rel);
             manifest.add(result.rel);

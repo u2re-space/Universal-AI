@@ -34,7 +34,7 @@ measure the original instead.
 
 Measure in one overview pass by default. Study the whole reference at once: the canvas, the global layout, every element,
 every reusable region, and the spacing rules. Do not start from a fragment. The harness cuts fragments from your boxes
-after that pass. When a second, fragment pass is requested, study the whole overview sheet first, then inspect the staged
+on the image named in "source" after that pass, so name the sub-reference every element was measured from in its notes. When a second, fragment pass is requested, study the whole overview sheet first, then inspect the staged
 fragments and add more small fragments where a detail is too small to read.
 A fragment is evidence for its own box only; never replace the global layout with one crop.
 

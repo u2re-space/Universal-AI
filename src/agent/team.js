@@ -1178,7 +1178,7 @@ export async function runTeam({
                             text: `${measureContext}\n\n# Measurement pass 1 — whole reference\n${measurePlan}\n\n` +
                                 'Study the whole reference first: the canvas, the global layout, every element, every reusable region, and the spacing rules. ' +
                                 'Do not start from a fragment. Return the complete overview sheet with CSS units, per-item confidence, and explicit assumptions. ' +
-                                'The harness cuts fragments from your boxes after this pass.' + subReferenceBlock,
+                                'The harness cuts fragments from your boxes on the image named in "source" after this pass; name the sub-reference every element was measured from.' + subReferenceBlock,
                             maxTurns: overviewTurns,
                             session: createSession({ store: false, model }),
                         });
@@ -1189,7 +1189,7 @@ export async function runTeam({
                             // Cut the overview regions and reusable elements first, then let the measurer inspect
                             // the actual fragments instead of guessing from the full-size picture.
                             const preliminary = await stageMeasurementCrops({
-                                root, workId: work.id, sheet, referencePaths, config, signal,
+                                root, workId: work.id, sheet, referencePaths, subReferences: screenReferences.files, config, signal,
                             });
                             const fragmentList = preliminary.crops.length
                                 ? preliminary.crops.map((crop) => {
@@ -1220,11 +1220,11 @@ export async function runTeam({
                                 notify({ type: 'warning', message: `Второй проход замеров не завершён (${detailed.status}); остаётся лист обзорного прохода.` });
                             }
                             stagedCrops = await stageMeasurementCrops({
-                                root, workId: work.id, sheet, referencePaths, config, signal, reuse: preliminary.crops,
+                                root, workId: work.id, sheet, referencePaths, subReferences: screenReferences.files, config, signal, reuse: preliminary.crops,
                             });
                         } else if (sheet) {
                             stagedCrops = await stageMeasurementCrops({
-                                root, workId: work.id, sheet, referencePaths, config, signal,
+                                root, workId: work.id, sheet, referencePaths, subReferences: screenReferences.files, config, signal,
                             });
                         }
                         if (sheet) {
