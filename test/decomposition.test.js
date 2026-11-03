@@ -75,6 +75,36 @@ test('decomposition: a sub-reference outside the work directory is kept but flag
     }
 });
 
+test('decomposition: short work-relative paths are located and reported as found', async () => {
+    const root = await rootFor('fuzzy');
+    const workId = 'w4';
+    try {
+        await mkdir(path.join(root, '.tmp', workId, 'decomposition'), { recursive: true });
+        await writeFile(path.join(root, '.tmp', workId, 'decomposition', '00-restored.png'), png());
+        const { files, warnings } = await collectSubReferences({
+            root, workId,
+            decomposition: {
+                screens: [
+                    { name: 'A', subReference: 'decomposition/00-restored.png' },
+                    { name: 'B', subReference: '00-restored.png' },
+                    { name: 'Ghost', subReference: 'decomposition/99-missing.png' },
+                ],
+                subReferences: [],
+            },
+        });
+        // Both short forms resolve to the one file on disk; the missing one is dropped.
+        assert.deepEqual(files.map((file) => file.rel), [
+            `.tmp/${workId}/decomposition/00-restored.png`,
+            `.tmp/${workId}/decomposition/00-restored.png`,
+        ]);
+        assert.match(warnings.join('\n'), /найден как/);
+        assert.match(warnings.join('\n'), /99-missing\.png/);
+        assert.doesNotMatch(warnings.join('\n'), /вне рабочего каталога/);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
 test('decomposition: the schema makes every produced image name its kind', () => {
     const screen = DECOMPOSER_SCHEMA.properties.screens.items;
     assert.ok(screen.required.includes('subReference'), 'screens carry a sub-reference field');

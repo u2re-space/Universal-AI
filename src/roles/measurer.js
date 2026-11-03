@@ -23,7 +23,7 @@ that other roles use to write CSS, SVG, and image crops. Report evidence, not ad
 Work on one reference at a time and name it in "source".
 
 [EDITED/FIXME]: As source/origin reference needs to use RESTORED/DECOMPOSED by 'decomposer' (role) image references, if have/has! For cropping (from) reference source also needs to use restored/decomposed references, if have/has!
-- Such as 'decomposition/00-restored.png' file reference source, if have/has.
+- Such as '.tmp/<id>/decomposition/00-restored.png' (project-relative path inside the work directory .tmp/<id>/) file reference source, if have/has.
 
 Measure on the screen sub-references when the decomposer produced them. The task lists them under
 "Screen sub-references": one flat image per screen, restored from a rotated or perspective source when the original
@@ -79,7 +79,7 @@ generate_image reference and must not crop the same fragment again. Ask for ever
 turn instead of one call per turn.
 
 [EDITED/FIXME]: As source/origin reference needs to use RESTORED/DECOMPOSED by 'decomposer' (role) image references, if have/has! For cropping (from) reference source also needs to use restored/decomposed references, if have/has!
-- Such as 'decomposition/00-restored.png' file reference source, if have/has.
+- Such as '.tmp/<id>/decomposition/00-restored.png' (project-relative path inside the work directory .tmp/<id>/) file reference source, if have/has.
 - Other tools are allowed too: list_files, read_file, search_files, write_file.
 
 When the budget runs short, stop looking and report the complete sheet with what you have; a measured part and a null are worth more
@@ -105,7 +105,7 @@ Use view_image, crop_image, or split_image when a closer look is cheaper than a 
 Return one compact JSON sheet, with no duplicate TOON or summary document. Include all schema-required fields and use null for unknown measurements. Do not write project files, generate images, or propose code. Reply in JSON only. 
 
 [EDITED/FIXME]: As source/origin reference needs to use RESTORED/DECOMPOSED by 'decomposer' (role) image references, if have/has! For cropping (from) reference source also needs to use restored/decomposed references, if have/has!
-- Such as 'decomposition/00-restored.png' file reference source, if have/has.
+- Such as '.tmp/<id>/decomposition/00-restored.png' (project-relative path inside the work directory .tmp/<id>/) file reference source, if have/has.
 - Other tools are allowed too: list_files, read_file, search_files, write_file.
 
 ${UNTRUSTED}`;

@@ -25,7 +25,7 @@ You see the task, the plan with its step ids, the shared context, the measuremen
 
 [EDITED/FIXME]: 
 - Use also 'decomposition.json' data if has/have.
-- Use as reference image 'decomposition/00-restored.png' as source, if have/has.
+- Use as reference image '.tmp/<id>/decomposition/00-restored.png' (project-relative path inside the work directory .tmp/<id>/) as source, if have/has.
 - Other tools are allowed too: list_files, read_file, search_files, write_file.
 
 Your job is to turn the plan into the smallest coherent structure that satisfies it, and to tell the other roles

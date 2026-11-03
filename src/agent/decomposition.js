@@ -9,6 +9,7 @@
  * @ai.tags decomposition, images, measurement
  * @ai.hint io
  * @changed 2026-10-31 The decomposer now builds one clean image per screen instead of only naming it.
+ * @changed 2026-11-03 Sub-reference paths named relative to the work directory (or by bare file name) are located by trying the work-directory candidates before the entry is dropped.
  */
 
 import path from 'node:path';
@@ -24,6 +25,42 @@ export const SUB_REFERENCE_DIR = 'decomposition';
 export const MAX_SUB_REFERENCES = 16;
 
 const KIND_FALLBACK = 'crop';
+
+/**
+ * Locate one sub-reference path on disk. The role may name its file project-relative
+ * (`.tmp/<id>/decomposition/01-home.png`), relative to the work directory
+ * (`decomposition/01-home.png`), or by bare name (`01-home.png`); all three are tried
+ * in that order, and the first existing file wins.
+ * @param {string} root project root
+ * @param {string} rel cleaned path from the decomposition
+ * @param {string} workId working directory id
+ * @returns {Promise<{located:{abs:string, rel:string}|null, escapedRoot:boolean}>}
+ *   `escapedRoot` marks an entry whose own path points outside the project root.
+ * @ai.hint io
+ */
+async function locateSubReference(root, rel, workId) {
+    const prefix = `.tmp/${workId}/${SUB_REFERENCE_DIR}/`;
+    const candidates = [rel];
+    if (!rel.startsWith(`.tmp/${workId}/`)) candidates.push(`.tmp/${workId}/${rel}`);
+    if (!rel.startsWith(prefix)) candidates.push(prefix + rel.split('/').pop());
+    let escapedRoot = false;
+    const seen = new Set();
+    for (const candidate of candidates) {
+        if (seen.has(candidate)) continue;
+        seen.add(candidate);
+        let located;
+        try {
+            located = await resolveInside(root, candidate, { allowRoot: false });
+        } catch {
+            // Only the entry's own path counts as an escape; the rewritten candidates stay inside.
+            if (candidate === rel) escapedRoot = true;
+            continue;
+        }
+        const info = await stat(located.abs).catch(() => null);
+        if (info?.isFile()) return { located, escapedRoot };
+    }
+    return { located: null, escapedRoot };
+}
 
 /**
  * A project-relative, forward-slashed path, or null for anything that cannot be a file
@@ -95,11 +132,11 @@ export async function collectSubReferences({ root, workId, decomposition, maxByt
         }
         if (seen.has(entry.rel)) continue;
         seen.add(entry.rel);
-        let located;
-        try {
-            located = await resolveInside(root, entry.rel, { allowRoot: false });
-        } catch {
-            warnings.push(`Суб-референс вне рабочего каталога отброшен: ${entry.rel}`);
+        const { located, escapedRoot } = await locateSubReference(root, entry.rel, workId);
+        if (!located) {
+            warnings.push(escapedRoot
+                ? `Суб-референс вне рабочего каталога отброшен: ${entry.rel}`
+                : `Суб-референс не найден: ${entry.rel} (роль его не записала).`);
             continue;
         }
         const info = await stat(located.abs).catch(() => null);
@@ -107,11 +144,14 @@ export async function collectSubReferences({ root, workId, decomposition, maxByt
             warnings.push(`Суб-референс не найден: ${entry.rel} (роль его не записала).`);
             continue;
         }
+        if (located.rel.split(path.sep).join('/') !== entry.rel) {
+            warnings.push(`Суб-референс ${entry.rel} найден как ${located.rel.split(path.sep).join('/')}.`);
+        }
         if (maxBytes && info.size > maxBytes) {
             warnings.push(`Суб-референс ${entry.rel} больше лимита (${info.size} байт): не приложен.`);
             continue;
         }
-        if (!entry.rel.startsWith(expectedPrefix)) {
+        if (!located.rel.split(path.sep).join('/').startsWith(expectedPrefix)) {
             warnings.push(`Суб-референс ${entry.rel} лежит вне ${expectedPrefix} — следующий этап может принять его за готовый asset.`);
         }
         files.push({ ...entry, rel: located.rel.split(path.sep).join('/'), abs: located.abs, bytes: info.size });

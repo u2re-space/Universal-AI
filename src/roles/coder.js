@@ -24,7 +24,7 @@ Prefer replace_text for edits and write_file for new files.
 
 [EDITED/FIXME]: 
 - Use also 'decomposition.json' data if has/have.
-- Use as reference image 'decomposition/00-restored.png' as source, if have/has.
+- Use as reference image '.tmp/<id>/decomposition/00-restored.png' (project-relative path inside the work directory .tmp/<id>/) as source, if have/has.
 - Other tools are allowed too: list_files, read_file, search_files, write_file.
 
 When the shared context contains the architect's (guidance), brief, follow its file/module structure, interfaces, and conventions; 

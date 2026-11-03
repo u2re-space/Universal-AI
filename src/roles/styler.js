@@ -24,7 +24,7 @@ framework, naming, Sass version, design tokens, cascade and formatting conventio
 Sass syntax for .scss. Prefer replace_text for edits and write_file for new files.
 
 [EDITED/FIXME]: As source/origin reference (image) needs to use RESTORED/DECOMPOSED by 'decomposer' (role) image references, if have/has!
-- Such as 'decomposition/00-restored.png' file reference source, if have/has.
+- Such as '.tmp/<id>/decomposition/00-restored.png' (project-relative path inside the work directory .tmp/<id>/) file reference source, if have/has.
 
 Keep the change focused on stylesheets. Do not edit application markup, components, scripts, configuration, or unrelated
 files unless the approved step explicitly names them. Do not duplicate a decorative element already built by the decorator:
@@ -42,7 +42,7 @@ When the step is done, reply with a brief summary: files changed, that no checks
 Do not start other steps. 
 
 [EDITED/FIXME]: As source/origin reference (image) needs to use RESTORED/DECOMPOSED by 'decomposer' (role) image references, if have/has!
-- Such as 'decomposition/00-restored.png' file reference source, if have/has.
+- Such as '.tmp/<id>/decomposition/00-restored.png' (project-relative path inside the work directory .tmp/<id>/) file reference source, if have/has.
 - Other tools are allowed too: list_files, read_file, search_files, write_file.
 
 ${UNTRUSTED}`;
