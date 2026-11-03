@@ -1182,6 +1182,13 @@ export async function runTeam({
                         if (measureSource === 'subrefs' && !screenReferences.files.length) {
                             notify({ type: 'warning', message: 'agent.measureSource: subrefs, но суб-референсов нет — замеры идут по оригинальным референсам.' });
                         }
+                        // An original that produced sub-references is not attached at all: the flat
+                        // screens already cover it, and the original picture next to them pulls the
+                        // measurements back to the tilted or collaged source the sub-references fix.
+                        const coveredBySubReferences = (rel) => screenReferences.files.some((file) => {
+                            const source = String(file?.source ?? '').trim();
+                            return Boolean(source) && (source === rel || path.basename(source) === path.basename(rel));
+                        });
                         // Attached images carry no file names, so each one gets a caption written
                         // directly above it; a summary in the task text alone is not enough, because
                         // the model renumbers the pictures by its own reading order.
@@ -1189,6 +1196,8 @@ export async function runTeam({
                             const parts = [];
                             const captions = [];
                             let index = 0;
+                            let originals = 0;
+                            let hidden = 0;
                             for (const [fileIndex, file] of screenReferences.files.entries()) {
                                 const attachment = screenReferences.parts[fileIndex];
                                 if (!attachment) continue;
@@ -1199,14 +1208,21 @@ export async function runTeam({
                             }
                             if (!subRefsOnly) {
                                 for (const [originalIndex, part] of referenceParts.entries()) {
-                                    index += 1;
                                     const rel = referencePaths[originalIndex] ?? `(unnamed original #${originalIndex + 1})`;
+                                    if (coveredBySubReferences(rel)) {
+                                        hidden += 1;
+                                        continue;
+                                    }
+                                    index += 1;
+                                    originals += 1;
                                     const caption = `Attached image ${index}: ${rel} (original reference — context only)`;
                                     parts.push({ type: 'input_text', text: caption }, part);
                                     captions.push(caption);
                                 }
+                            } else {
+                                hidden += referenceParts.length;
                             }
-                            return { parts, captions };
+                            return { parts, captions, originals, hidden };
                         };
                         const attachments = captionedAttachments();
                         const attachmentBlock = attachments.captions.length
@@ -1216,13 +1232,18 @@ export async function runTeam({
                         const subReferenceBlock = screenReferences.files.length
                             ? '\n\n# Screen sub-references (produced by the decomposer)\n'
                                 + `${screenReferences.files.map((file) => `- ${file.rel} (${file.kind}${file.screen ? `, ${file.screen}` : ''})`).join('\n')}\n`
-                                + (subRefsOnly
-                                    ? 'Only the sub-references are attached; the original references are not attached. '
-                                        + 'Measure the attached flat screens and set every element and region "source" to the sub-reference path you measured it on. '
-                                        + 'When a sub-reference is unusable, say so in notes and view an original by its project-relative path from the shared context instead.'
-                                    : 'Measure these flat screens; the original references attached after them are context only. '
-                                        + 'Match every sub-reference path to the picture under its "Attached image N" caption. '
-                                        + 'Set every element and region "source" to the sub-reference path you measured it on.')
+                                + 'The sub-references are authoritative measurement sources: the decomposer produced them exactly so a flat screen can be measured, '
+                                + 'and a generated or restored look never makes one less measurable. '
+                                + 'Measure these flat screens and set every element and region "source" to the sub-reference path you measured it on. '
+                                + 'Match every sub-reference path to the picture under its "Attached image N" caption. '
+                                + (attachments.originals
+                                    ? 'The original references attached after them are context only. '
+                                    : (referencePaths.length || screenReferences.files.some((file) => String(file?.source ?? '').trim()))
+                                        ? 'The original references are not attached: they exist only as paths in the shared context, and view_image can open one when a sub-reference misses a panel or cuts a screen in half. '
+                                        : '')
+                                + (attachments.hidden && attachments.originals
+                                    ? 'The originals that produced these sub-references are not attached; view one by its project-relative path from the shared context when a sub-reference misses a panel or cuts a screen in half. '
+                                    : '')
                             : '';
                         /** One measurement pass, with a tool-less report when the turn budget is spent. */
                         const measureRun = async ({ pass, text, maxTurns, session }) => {

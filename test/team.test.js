@@ -1673,23 +1673,24 @@ test('decomposer builds one clean sub-reference per screen before the measurer',
     assert.match(userText(measureBodies[0]), new RegExp(`${workDir.replace(/[./]/g, '$&')}\/01-landing\.png`));
     assert.match(userText(measureBodies[0]), /# Attached images, in order/, 'the measurer must know which attached image is which');
     assert.match(userText(measureBodies[0]), /Attached image 1: \S*00-restored\.png [(]sub-reference, restored/);
-    assert.match(userText(measureBodies[0]), /Attached image 1: \S*00-restored\.png [(]sub-reference, restored/);
-    assert.match(userText(measureBodies[0]), /Attached image 3: mockup\.png [(]original reference/, 'sub-references are captioned before the originals');
+    assert.match(userText(measureBodies[0]), /Attached image 2: \S*01-landing\.png [(]sub-reference, restored|Attached image 2: \S*01-landing\.png [(]sub-reference, crop/);
+    assert.doesNotMatch(userText(measureBodies[0]), /mockup\.png [(]original reference/, 'the original covered by its sub-references is not attached');
     // Each picture must carry its caption directly above it, so the model cannot renumber the stack.
     const content = measureBodies[0].input.flatMap((item) => item.content ?? []);
     const firstImage = content.findIndex((part) => part.type === 'input_image');
     assert.ok(firstImage > 0, 'the first picture is not the first part');
     assert.match(content[firstImage - 1].text, /Attached image 1: \S*00-restored\.png \(sub-reference/);
     const lastImage = content.map((part) => part.type).lastIndexOf('input_image');
-    assert.match(content[lastImage - 1].text, /Attached image 3: mockup\.png \(original reference/);
+    assert.match(content[lastImage - 1].text, /Attached image 2: \S*01-landing\.png \(sub-reference/);
     assert.match(userText(measureBodies[0]), /Match every sub-reference path to the picture under its "Attached image N" caption/);
+    assert.match(userText(measureBodies[0]), /The original references are not attached/);
     assert.match(userText(measureBodies[0]), /# Work directory/, 'the run work id must be stated in the shared context');
     assert.match(userText(measureBodies[0]), new RegExp(`\.tmp/${result.workId}/`));
     assert.match(userText(measureBodies[0]), /<id> is a placeholder for this run's work directory id/);
     const measuredImages = measureBodies[0].input
         .flatMap((item) => item.content ?? [])
         .filter((part) => part.type === 'input_image');
-    assert.equal(measuredImages.length, 3, 'the originals stay attached next to both sub-references');
+    assert.equal(measuredImages.length, 2, 'the covered original is not attached next to the sub-references');
     assert.ok(measuredImages.some((part) => String(part.image_url).startsWith('data:image/')), 'a sub-reference travels as an image');
     assert.match(JSON.stringify(measureBodies[0].input), /Screen decomposition/);
     const saved = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'decomposition.json'), 'utf8'));
@@ -1861,6 +1862,88 @@ test('measure-source subrefs attaches only the sub-references to the measurer', 
     assert.match(userText(measureBodies[0]), /Attached image 1: \S*00-restored\.png [(]sub-reference, restored/);
     assert.doesNotMatch(userText(measureBodies[0]), /[(]original reference[)]/);
     await rm(dir, { recursive: true, force: true });
+});
+
+test('measure-source auto does not attach an original covered by its sub-references', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-auto-'));
+    await writeFile(path.join(dir, 'mockup.png'), Buffer.from(TINY_PNG, 'base64'));
+    await writeFile(path.join(dir, 'extra.png'), Buffer.from(TINY_PNG, 'base64'));
+    const measureBodies = [];
+    const userText = (body) => body.input
+        .filter((item) => item.type === 'message' && item.role === 'user')
+        .flatMap((item) => (item.content ?? []).filter((part) => part.type === 'input_text').map((part) => part.text))
+        .join('\n');
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'один экран', complexity: 'normal',
+                steps: [{ goal: 'Создать styles.scss', details: '', verify: 'прочитать styles.scss' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, risks: [], imageTasks: [],
+            }) };
+        }
+        if (role === 'decomposer') {
+            const outDir = /# Output directory\n([^\n]+)/.exec(userText(body))?.[1]?.replace(/[/]+$/, '') ?? '.tmp/unknown/decomposition';
+            if (!body.input.some((item) => item.type === 'function_call_output')) {
+                return { calls: [
+                    { name: 'edit_image', arguments: {
+                        prompt: 'flat front view', image: 'mockup.png', path: `${outDir}/00-restored.png`, size: '', quality: '', background: '', extra_images: '', to_svg: false,
+                    } },
+                ] };
+            }
+            return { text: JSON.stringify({
+                summary: 'Один экран восстановлен.',
+                screens: [{ name: 'Home', source: 'mockup.png', nodeId: null, purpose: 'Экран.', bounds: '0,0 400x300', references: [], subReference: `${outDir}/00-restored.png`, subReferenceKind: 'restored' }],
+                subReferences: [
+                    { path: `${outDir}/00-restored.png`, screen: 'Home', kind: 'restored', source: 'mockup.png', note: 'перспектива снята' },
+                ],
+                notes: [],
+            }) };
+        }
+        if (role === 'measurer') {
+            measureBodies.push(body);
+            return { text: JSON.stringify({
+                summary: 'Карточка', source: '.tmp/unknown/decomposition/00-restored.png', unit: 'px',
+                units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '' },
+                confidence: 'high', assumptions: [], canvas: { x: 0, y: 0, width: 8, height: 8 },
+                elements: [], regions: [], rules: [], notes: '',
+            }) };
+        }
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.tools = { ...defaults.tools, images: true };
+    config.agent = { ...defaults.agent, architect: 'off', decompose: 'always', decomposerSubReferences: 'always' };
+    try {
+        const result = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'сверстай экран',
+            root: dir, approvalLevel: 'read',
+            parts: [
+                { type: 'input_image', image: { path: 'mockup.png' } },
+                { type: 'input_image', image: { path: 'extra.png' } },
+            ],
+            referencePaths: ['mockup.png', 'extra.png'],
+            emit: () => {},
+        });
+        assert.equal(result.status, 'completed', result.error?.message);
+        assert.equal(measureBodies.length, 1, 'the measurer runs once');
+        const measuredImages = measureBodies[0].input
+            .flatMap((item) => item.content ?? [])
+            .filter((part) => part.type === 'input_image');
+        assert.equal(measuredImages.length, 2, 'the sub-reference and the uncovered original are attached, the covered one is not');
+        const content = measureBodies[0].input.flatMap((item) => item.content ?? []);
+        const firstImage = content.findIndex((part) => part.type === 'input_image');
+        assert.match(content[firstImage - 1].text, /Attached image 1: \S*00-restored\.png \(sub-reference/);
+        const lastImage = content.map((part) => part.type).lastIndexOf('input_image');
+        assert.match(content[lastImage - 1].text, /Attached image 2: extra\.png \(original reference/);
+        assert.doesNotMatch(userText(measureBodies[0]), /mockup\.png [(]original reference/, 'the covered original is not attached');
+        assert.match(userText(measureBodies[0]), /The originals that produced these sub-references are not attached/);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
 });
 
 test('stop-after ends the run cleanly after one stage and keeps the work resumable', async () => {

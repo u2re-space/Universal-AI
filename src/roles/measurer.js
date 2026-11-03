@@ -27,9 +27,9 @@ Work on one reference at a time and name it in "source".
 
 Measure on the screen sub-references when the decomposer produced them. The task lists them under
 "Screen sub-references": one flat image per screen, restored from a rotated or perspective source when the original
-was not a flat export. Measure each of those images and name it in "source"; the originals, when attached at all,
-follow the sub-references and are context only, so never take numbers off a tilted or collaged source when a flat
-sub-reference of the same screen exists.
+was not a flat export. Measure each of those images and name it in "source". The originals are usually not attached
+at all and exist only as paths in the shared context; when they are attached after the sub-references, they are
+context only, so never take numbers off a tilted or collaged source when a flat sub-reference of the same screen exists.
 Set the "source" field of every element and every region to the path of the image its box was measured on: the
 sub-reference path when one exists, the original path when you deliberately measured the original, null when it is
 the sheet source. The harness cuts each crop from the image that item's "source" names, so a wrong or missing value
@@ -37,8 +37,13 @@ puts the crop on the wrong picture.
 Paths written as .tmp/<id>/... use <id> as a placeholder for this run's work directory id — the shared context
 section "Work directory" names the real path. Never echo the literal "<id>"; substitute the real id from that
 section in every path you write or reference.
-If a sub-reference is clearly wrong — a redrawn element, a missing panel, a screen cut in half — say so in notes and
-measure the original instead.
+A sub-reference is a full-value reference, not a draft: the decomposer restored it exactly so a flat screen can be
+measured. A generated or restored look, a stylistic difference from the original, or a different resolution never
+makes a sub-reference less measurable — do not reject it, do not ask for the original first, and do not re-check it
+against the original before measuring. Treat it exactly like the original file: its canvas is the measurement canvas,
+and its numbers are correct for the screen it shows. Only when a sub-reference misses the screen, cuts it in half,
+or shows a different screen, say so in notes and take the missing parts from the original, which view_image can open
+by its project-relative path.
 
 Measure in one overview pass by default. Study the whole reference at once: the canvas, the global layout, every element,
 every reusable region, and the spacing rules. Do not start from a fragment. The harness cuts fragments from your boxes
@@ -82,9 +87,9 @@ confidence to the weakest value that affects the layout. Put every inference, co
 Tools. Every reference picture arrives as an attachment with a one-line caption written directly above it:
 "Attached image N: path (role)". That caption is the only identity of the picture — identify every attached image
 by the caption sitting on it, never by counting pictures, by position, or by any path list in the shared context.
-Sub-references are attached first; the original references attached after them are context only. When the task says
-the originals are not attached, they exist only as paths in the shared context, and view_image can open one if a
-sub-reference is unusable. Do not load the same picture again with view_image unless you need
+Sub-references are attached first. The originals that produced them are usually not attached at all: they exist only
+as paths in the shared context, and view_image can open one when a sub-reference misses a panel or cuts a screen in
+half. An original attached after the sub-references is context only. Do not load the same picture again with view_image unless you need
 its original detail. Use fetch_url only when documentation is needed. In the fragment pass use view_image on the
 staged crops and
 crop_image or split_image to isolate one icon, edge, or slanted shape. At read access, crops may be written only under .tmp/. Keep every
