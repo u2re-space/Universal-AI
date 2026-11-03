@@ -1144,10 +1144,20 @@ export async function runTeam({
                         const measurePlan = `Plan: ${plan.summary}\nSteps:\n${bullets(plan.steps.map((step) => step.goal))}`;
                         // The decomposer's flat screens are attached next to the originals, so the sheet
                         // is built on one screen per image instead of on a rotated collage.
+                        // Attached images carry no file names, so the sheet can only be built on the
+                        // right picture when the message states which attachment is which, in order.
+                        const attachmentList = [
+                            ...referencePaths.map((rel, index) => `${index + 1}. ${rel} (original reference)`),
+                            ...screenReferences.files.map((file, index) => `${referencePaths.length + index + 1}. ${file.rel} (sub-reference, ${file.kind}${file.screen ? `, screen ${file.screen}` : ''})`),
+                        ];
+                        const attachmentBlock = attachmentList.length
+                            ? '\n\n# Attached images, in order\n' + attachmentList.join('\n')
+                            : '';
                         const subReferenceBlock = screenReferences.files.length
                             ? '\n\n# Screen sub-references (produced by the decomposer)\n'
                                 + `${screenReferences.files.map((file) => `- ${file.rel} (${file.kind}${file.screen ? `, ${file.screen}` : ''})`).join('\n')}\n`
                                 + 'Measure these flat screens; the original references stay attached only as context. '
+                                + 'Match every sub-reference path to its attached image by the numbered order in "# Attached images, in order". '
                                 + 'Say in notes which sub-reference every region and element was measured from.'
                             : '';
                         /** One measurement pass, with a tool-less report when the turn budget is spent. */
@@ -1178,7 +1188,8 @@ export async function runTeam({
                             text: `${measureContext}\n\n# Measurement pass 1 — whole reference\n${measurePlan}\n\n` +
                                 'Study the whole reference first: the canvas, the global layout, every element, every reusable region, and the spacing rules. ' +
                                 'Do not start from a fragment. Return the complete overview sheet with CSS units, per-item confidence, and explicit assumptions. ' +
-                                'The harness cuts fragments from your boxes on the image named in "source" after this pass; name the sub-reference every element was measured from.' + subReferenceBlock,
+                                'The harness cuts fragments from your boxes on the image named in "source" after this pass; name the sub-reference every element was measured from.' +
+                                attachmentBlock + subReferenceBlock,
                             maxTurns: overviewTurns,
                             session: createSession({ store: false, model }),
                         });
@@ -1206,7 +1217,7 @@ export async function runTeam({
                                     'Return the complete final sheet, not a delta: keep every region and element, keep its crop path when the box is unchanged, ' +
                                     'and add new fragments for the worker, architect, and image-processor. Use CSS units with explicit conversions, mark every ' +
                                     'inferred value in assumptions, and set confidence per element. Do not replace the global layout with a single fragment.\n\n' +
-                                    `# Overview sheet (JSON)\n${JSON.stringify(sheet)}\n\n# Staged fragments\n${fragmentList}${subReferenceBlock}`,
+                                    `# Overview sheet (JSON)\n${JSON.stringify(sheet)}\n\n# Staged fragments\n${fragmentList}` + attachmentBlock + subReferenceBlock,
                                 maxTurns: fragmentTurns,
                                 session: createSession({ store: false, model }),
                             });

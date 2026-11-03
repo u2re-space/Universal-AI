@@ -1669,7 +1669,10 @@ test('decomposer builds one clean sub-reference per screen before the measurer',
     const notice = events.find((e) => e.type === 'decompose.subreferences');
     assert.equal(notice?.count, 2, JSON.stringify(notice ?? null));
     assert.match(userText(measureBodies[0]), /Screen sub-references/);
-    assert.match(userText(measureBodies[0]), new RegExp(`${workDir.replace(/[./]/g, '\$&')}\/01-landing\.png`));
+    assert.match(userText(measureBodies[0]), new RegExp(`${workDir.replace(/[./]/g, '$&')}\/01-landing\.png`));
+    assert.match(userText(measureBodies[0]), /# Attached images, in order/, 'the measurer must know which attached image is which');
+    assert.match(userText(measureBodies[0]), new RegExp(`1\. ${workDir.replace(/[./]/g, '$&')}\/00-restored\.png [(]sub-reference, restored`));
+    assert.match(userText(measureBodies[0]), /Match every sub-reference path to its attached image by the numbered order/);
     const measuredImages = measureBodies[0].input
         .flatMap((item) => item.content ?? [])
         .filter((part) => part.type === 'input_image');
