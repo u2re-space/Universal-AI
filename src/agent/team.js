@@ -360,7 +360,10 @@ export async function runTeam({
         ctx.set('environment', 'Environment', `Platform: ${process.platform}; shell for run_command: ${config.shell ?? (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh')}; ` +
             `access policy: ${approvalLevel}; interactive operator: ${interactive ? 'yes' : 'no'}; date: ${new Date().toISOString().slice(0, 10)}`, { priority: 9 });
         if (referencePaths.length) {
-            ctx.set('references', 'Reference images (project-relative paths)', referencePaths.map((item) => `- ${item}`).join('\n'), { priority: 9 });
+            ctx.set('references', 'Reference image files (on-disk paths)',
+                'File paths on disk, not the order of attached images. An attached image is matched to a path only by the "Attached image N" caption written directly above that picture in the task.\n'
+                + referencePaths.map((item) => `- ${item} (original)`).join('\n'),
+                { priority: 9 });
         }
         if (extraInstructions) ctx.set('operator', 'Operator instructions', extraInstructions, { priority: 9 });
         if (mcp.describe()) ctx.set('mcp', 'MCP sources', mcp.describe(), { priority: 8 });
@@ -791,6 +794,15 @@ export async function runTeam({
                 ? await attachSubReferences({ root, files: collected.files, maxBytes: config.limits.maxImageBytes })
                 : { parts: [], warnings: [] };
             screenReferences = { files: collected.files, parts: attached.parts };
+            // The on-disk reference list now also names the sub-references, so no role reads a
+            // stale list where only the originals exist.
+            if (collected.files.length) {
+                ctx.set('references', 'Reference image files (on-disk paths)',
+                    'File paths on disk, not the order of attached images. An attached image is matched to a path only by the "Attached image N" caption written directly above that picture in the task.\n'
+                    + [...referencePaths.map((item) => `- ${item} (original)`),
+                        ...collected.files.map((file) => `- ${file.rel} (sub-reference, ${file.kind})`)].join('\n'),
+                    { priority: 9 });
+            }
             for (const warning of [...collected.warnings, ...attached.warnings]) notify({ type: 'warning', message: warning });
             return screenReferences;
         };
@@ -1158,16 +1170,36 @@ export async function runTeam({
                         if (measureSource === 'subrefs' && !screenReferences.files.length) {
                             notify({ type: 'warning', message: 'agent.measureSource: subrefs, но суб-референсов нет — замеры идут по оригинальным референсам.' });
                         }
-                        // The originals attached after the sub-references: the count follows the actual
-                        // image parts, the labels use the staged paths when they are available.
-                        const originalCount = referenceParts.length || referencePaths.length;
-                        const attachmentList = [
-                            ...screenReferences.files.map((file, index) => `${index + 1}. ${file.rel} (sub-reference, ${file.kind}${file.screen ? `, screen ${file.screen}` : ''})`),
-                            ...(subRefsOnly ? [] : Array.from({ length: originalCount }, (_, index) =>
-                                `${screenReferences.files.length + index + 1}. ${referencePaths[index] ?? `(unnamed original #${index + 1})`} (original reference)`)),
-                        ];
-                        const attachmentBlock = attachmentList.length
-                            ? '\n\n# Attached images, in order\n' + attachmentList.join('\n')
+                        // Attached images carry no file names, so each one gets a caption written
+                        // directly above it; a summary in the task text alone is not enough, because
+                        // the model renumbers the pictures by its own reading order.
+                        const captionedAttachments = () => {
+                            const parts = [];
+                            const captions = [];
+                            let index = 0;
+                            for (const [fileIndex, file] of screenReferences.files.entries()) {
+                                const attachment = screenReferences.parts[fileIndex];
+                                if (!attachment) continue;
+                                index += 1;
+                                const caption = `Attached image ${index}: ${file.rel} (sub-reference, ${file.kind}${file.screen ? `, screen ${file.screen}` : ''})`;
+                                parts.push({ type: 'input_text', text: caption }, attachment);
+                                captions.push(caption);
+                            }
+                            if (!subRefsOnly) {
+                                for (const [originalIndex, part] of referenceParts.entries()) {
+                                    index += 1;
+                                    const rel = referencePaths[originalIndex] ?? `(unnamed original #${originalIndex + 1})`;
+                                    const caption = `Attached image ${index}: ${rel} (original reference — context only)`;
+                                    parts.push({ type: 'input_text', text: caption }, part);
+                                    captions.push(caption);
+                                }
+                            }
+                            return { parts, captions };
+                        };
+                        const attachments = captionedAttachments();
+                        const attachmentBlock = attachments.captions.length
+                            ? '\n\n# Attached images, in order\n' + attachments.captions.join('\n')
+                                + '\n"Attached image N" always means the picture under that exact caption, not a picture counted by position.'
                             : '';
                         const subReferenceBlock = screenReferences.files.length
                             ? '\n\n# Screen sub-references (produced by the decomposer)\n'
@@ -1177,13 +1209,13 @@ export async function runTeam({
                                         + 'Measure the attached flat screens and set every element and region "source" to the sub-reference path you measured it on. '
                                         + 'When a sub-reference is unusable, say so in notes and view an original by its project-relative path from the shared context instead.'
                                     : 'Measure these flat screens; the original references attached after them are context only. '
-                                        + 'Match every sub-reference path to its attached image by the numbered order in "# Attached images, in order". '
+                                        + 'Match every sub-reference path to the picture under its "Attached image N" caption. '
                                         + 'Set every element and region "source" to the sub-reference path you measured it on.')
                             : '';
                         /** One measurement pass, with a tool-less report when the turn budget is spent. */
                         const measureRun = async ({ pass, text, maxTurns, session }) => {
                             const result = await roles.run('measurer', {
-                                text, parts: subRefsOnly ? [...screenReferences.parts] : [...screenReferences.parts, ...referenceParts], instructions: withAgents(ROLE_INSTRUCTIONS.measurer),
+                                text, parts: attachments.parts, instructions: withAgents(ROLE_INSTRUCTIONS.measurer),
                                 toolset: measureToolsFor(pass), builtin: measureBuiltin,
                                 schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns,
                                 model, effort: measureEffort, onMaxTurns, session,

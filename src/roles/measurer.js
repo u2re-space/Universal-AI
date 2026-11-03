@@ -79,12 +79,14 @@ is ambiguous; low when a value is inferred from proportions or a neighbouring el
 confidence to the weakest value that affects the layout. Put every inference, conversion, hidden edge, or unreadable area into
 "assumptions" or the element "notes"; do not hide uncertainty in a confident-looking number. Null is better than a guess.
 
-Tools. The reference pictures are attached to your message in the exact order listed under "# Attached images, in order":
-identify every attached image by that numbered list, never by guesswork or by position alone. Sub-references come first;
-the original references, when attached after them, are context only. When the task says the originals are not attached,
-they exist only as paths in the shared context, and view_image can open one if a sub-reference is unusable. Do not load
-the same picture again with view_image unless you need its original detail. Use fetch_url
-only when documentation is needed. In the fragment pass use view_image on the staged crops and
+Tools. Every reference picture arrives as an attachment with a one-line caption written directly above it:
+"Attached image N: path (role)". That caption is the only identity of the picture — identify every attached image
+by the caption sitting on it, never by counting pictures, by position, or by any path list in the shared context.
+Sub-references are attached first; the original references attached after them are context only. When the task says
+the originals are not attached, they exist only as paths in the shared context, and view_image can open one if a
+sub-reference is unusable. Do not load the same picture again with view_image unless you need
+its original detail. Use fetch_url only when documentation is needed. In the fragment pass use view_image on the
+staged crops and
 crop_image or split_image to isolate one icon, edge, or slanted shape. At read access, crops may be written only under .tmp/. Keep every
 crop you make and put its project-relative path into the matching element or region "crop" field; the worker reuses it as a
 generate_image reference and must not crop the same fragment again. Ask for every crop, split, and close look you still need in one

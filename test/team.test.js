@@ -1672,9 +1672,17 @@ test('decomposer builds one clean sub-reference per screen before the measurer',
     assert.match(userText(measureBodies[0]), /Screen sub-references/);
     assert.match(userText(measureBodies[0]), new RegExp(`${workDir.replace(/[./]/g, '$&')}\/01-landing\.png`));
     assert.match(userText(measureBodies[0]), /# Attached images, in order/, 'the measurer must know which attached image is which');
-    assert.match(userText(measureBodies[0]), new RegExp(`1\. ${workDir.replace(/[./]/g, '$&')}\/00-restored\.png [(]sub-reference, restored`));
-    assert.match(userText(measureBodies[0]), new RegExp(`3\. mockup\.png [(]original reference[)]`), 'sub-references are listed before the originals');
-    assert.match(userText(measureBodies[0]), /Match every sub-reference path to its attached image by the numbered order/);
+    assert.match(userText(measureBodies[0]), /Attached image 1: \S*00-restored\.png [(]sub-reference, restored/);
+    assert.match(userText(measureBodies[0]), /Attached image 1: \S*00-restored\.png [(]sub-reference, restored/);
+    assert.match(userText(measureBodies[0]), /Attached image 3: mockup\.png [(]original reference/, 'sub-references are captioned before the originals');
+    // Each picture must carry its caption directly above it, so the model cannot renumber the stack.
+    const content = measureBodies[0].input.flatMap((item) => item.content ?? []);
+    const firstImage = content.findIndex((part) => part.type === 'input_image');
+    assert.ok(firstImage > 0, 'the first picture is not the first part');
+    assert.match(content[firstImage - 1].text, /Attached image 1: \S*00-restored\.png \(sub-reference/);
+    const lastImage = content.map((part) => part.type).lastIndexOf('input_image');
+    assert.match(content[lastImage - 1].text, /Attached image 3: mockup\.png \(original reference/);
+    assert.match(userText(measureBodies[0]), /Match every sub-reference path to the picture under its "Attached image N" caption/);
     assert.match(userText(measureBodies[0]), /# Work directory/, 'the run work id must be stated in the shared context');
     assert.match(userText(measureBodies[0]), new RegExp(`\.tmp/${result.workId}/`));
     assert.match(userText(measureBodies[0]), /<id> is a placeholder for this run's work directory id/);
@@ -1850,7 +1858,7 @@ test('measure-source subrefs attaches only the sub-references to the measurer', 
         .filter((part) => part.type === 'input_image');
     assert.equal(measuredImages.length, 1, 'only the sub-reference is attached, the original is not');
     assert.match(userText(measureBodies[0]), /original references are not attached/);
-    assert.match(userText(measureBodies[0]), /1\. \S*00-restored\.png [(]sub-reference, restored/);
+    assert.match(userText(measureBodies[0]), /Attached image 1: \S*00-restored\.png [(]sub-reference, restored/);
     assert.doesNotMatch(userText(measureBodies[0]), /[(]original reference[)]/);
     await rm(dir, { recursive: true, force: true });
 });
