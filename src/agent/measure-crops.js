@@ -65,22 +65,60 @@ async function insideFile(root, ref) {
     }
 }
 
-async function resolveSource({ root, sheet, referencePaths, subReferences = [] }) {
-    const candidates = [
-        ...(referencePaths ?? []).filter((item) => typeof item === 'string' && item.trim()),
-        ...subReferences.map((file) => file?.rel).filter((rel) => typeof rel === 'string' && rel.trim()),
-    ];
+async function resolveSource({ root, sheet, referencePaths, subReferences = [], measureSource = 'auto', warnings = [] }) {
+    const originals = (referencePaths ?? []).filter((item) => typeof item === 'string' && item.trim());
+    const subRefs = subReferences.map((file) => file?.rel).filter((rel) => typeof rel === 'string' && rel.trim());
+    const preferSubRefs = measureSource !== 'original';
     const named = String(sheet?.source ?? '').trim();
+
+    /** The sub-reference that replaces an original, or null when the original stays. */
+    const overrideFor = (originalRel) => {
+        if (!preferSubRefs) return null;
+        const derived = derivedSubReferences(subReferences, originalRel);
+        if (derived.length === 1) return derived[0];
+        if (derived.length > 1) return measureSource === 'subrefs' ? derived[0] : null;
+        if (measureSource === 'subrefs' && subRefs.length) return subRefs[0];
+        return null;
+    };
+    const replaced = (originalRel, overridden) => {
+        warnings.push(`Источник замеров ${originalRel} заменён суб-референсом ${overridden} (measure-source: ${measureSource}).`);
+        return overridden;
+    };
+
     if (named && !/^https?:|^data:/i.test(named)) {
-        const exact = candidates.find((item) => item === named || path.basename(item) === path.basename(named));
-        if (exact && await insideFile(root, exact)) return exact;
+        const exact = [...subRefs, ...originals].find((item) => item === named || path.basename(item) === path.basename(named));
+        if (exact) {
+            const overridden = subRefs.includes(exact) ? null : overrideFor(exact);
+            if (overridden) return replaced(exact, overridden);
+            if (await insideFile(root, exact)) return exact;
+        }
         const direct = await insideFile(root, named);
-        if (direct) return direct;
+        if (direct) {
+            const overridden = subRefs.includes(direct) ? null : overrideFor(direct);
+            if (overridden) return replaced(direct, overridden);
+            return direct;
+        }
     }
+    const candidates = measureSource === 'subrefs' ? [...subRefs, ...originals] : [...originals, ...subRefs];
     for (const item of candidates) {
         if (await insideFile(root, item)) return item;
     }
     return null;
+}
+
+/**
+ * The sub-references one original produced, matched by path or file name of `file.source`.
+ * @param {object[]} subReferences
+ * @param {string} original project-relative path of the original reference
+ * @returns {string[]} sub-reference rel paths in collection order
+ * @ai.hint pure
+ */
+function derivedSubReferences(subReferences, original) {
+    const base = path.basename(original);
+    return subReferences
+        .filter((file) => typeof file?.source === 'string' && file.source.trim()
+            && (file.source.trim() === original || path.basename(file.source) === base))
+        .map((file) => file.rel);
 }
 
 /**
@@ -104,21 +142,49 @@ function namedSubReference(item, subReferences) {
 /**
  * Cut every region and reusable element in `sheet` that has a usable box and no existing crop.
  * The crop path is written back to the item, so `renderMeasurements`, `measurements.json`, and
- * the conclusion carry it. Identical boxes share one file. An item is cut from the sub-reference
- * named in its notes when there is one, from the sheet source otherwise.
- * @param {{ root: string, workId: string, sheet: object, referencePaths?: string[], subReferences?: object[], config?: object, signal?: AbortSignal, reuse?: Array<{ crop?: string, box?: object }> }} options
+ * the conclusion carry it. Identical boxes share one file. The image each item is cut from is
+ * resolved in this order: the item's own `source` field, a sub-reference named in its notes,
+ * the sheet source — with `measureSource: 'subrefs'` forcing derived sub-references over the
+ * named original.
+ * @param {{ root: string, workId: string, sheet: object, referencePaths?: string[], subReferences?: object[], measureSource?: string, config?: object, signal?: AbortSignal, reuse?: Array<{ crop?: string, box?: object }> }} options
  * @returns {Promise<{ crops: Array<{ kind: string, name: string, crop: string, bytes?: number, box?: object }>, warnings: string[] }>}
  * @exports
  * @ai.hint io
  */
-export async function stageMeasurementCrops({ root, workId, sheet, referencePaths = [], subReferences = [], config = {}, signal, reuse = [] }) {
+export async function stageMeasurementCrops({ root, workId, sheet, referencePaths = [], subReferences = [], measureSource = 'auto', config = {}, signal, reuse = [] }) {
     const regions = Array.isArray(sheet?.regions) ? sheet.regions : [];
     const elements = Array.isArray(sheet?.elements) ? sheet.elements : [];
     if (!regions.length && elements.length === 0) return { crops: [], warnings: [] };
     const exe = await detectMagick({ magickPath: config.magickPath ?? null }).catch(() => null);
     if (!exe) return { crops: [], warnings: ['ImageMagick не найден: готовые кропы из замеров не созданы.'] };
-    const source = await resolveSource({ root, sheet, referencePaths, subReferences });
-    if (!source) return { crops: [], warnings: ['Источник замеров не найден: готовые кропы не созданы.'] };
+    const warnings = [];
+    const source = await resolveSource({ root, sheet, referencePaths, subReferences, measureSource, warnings });
+    if (!source) return { crops: [], warnings: warnings.length ? warnings : ['Источник замеров не найден: готовые кропы не созданы.'] };
+
+    // Resolve one item's own source: its structured `source` field first, then a sub-reference
+    // named in the notes, then the sheet source. In the subrefs mode an original that produced
+    // sub-references is replaced by a derived sub-reference even when the item pins the original.
+    const subRefRels = subReferences.map((file) => file?.rel).filter((rel) => typeof rel === 'string' && rel.trim());
+    const resolveItemSource = async (item, name) => {
+        const explicit = String(item?.source ?? '').trim();
+        if (explicit && !/^https?:|^data:/i.test(explicit)) {
+            const sub = subReferences.find((file) => file?.rel === explicit || path.basename(file?.rel ?? '') === path.basename(explicit));
+            if (sub && await insideFile(root, sub.rel)) return sub.rel;
+            const listed = (referencePaths ?? []).find((item2) => item2 === explicit || path.basename(item2) === path.basename(explicit));
+            const originalRel = listed && await insideFile(root, listed) ? listed : await insideFile(root, explicit);
+            if (originalRel) {
+                if (measureSource === 'subrefs' && subRefRels.length && !subRefRels.includes(originalRel)) {
+                    const derived = derivedSubReferences(subReferences, originalRel);
+                    const forced = derived[0] ?? subRefRels[0];
+                    warnings.push(`Элемент «${name}» назвал источник ${originalRel}: в режиме measure-source: subrefs кроп режется из ${forced}.`);
+                    return forced;
+                }
+                return originalRel;
+            }
+            warnings.push(`Источник «${explicit}» у элемента «${name}» не найден — использован источник листа.`);
+        }
+        return namedSubReference(item, subReferences) ?? source;
+    };
 
     // Sizes are resolved per source: a box measured on a restored sub-reference clamps against
     // that sub-reference, not against the original rotated picture.
@@ -133,7 +199,6 @@ export async function stageMeasurementCrops({ root, workId, sheet, referencePath
     if (!size?.width || !size?.height) return { crops: [], warnings: [`Не удалось определить размеры ${source}.`] };
 
     const crops = [];
-    const warnings = [];
     const seen = new Map();
     const manifest = new Set();
     const reserved = new Set();
@@ -192,7 +257,7 @@ export async function stageMeasurementCrops({ root, workId, sheet, referencePath
             return;
         }
 
-        const itemSource = namedSubReference(item, subReferences) ?? source;
+        const itemSource = await resolveItemSource(item, name);
         const itemSize = itemSource === source ? size : await sizeFor(itemSource);
         if (!itemSize?.width || !itemSize?.height) {
             warnings.push(`Не удалось определить размеры ${itemSource}: кроп «${name}» не создан.`);

@@ -1647,6 +1647,7 @@ test('decomposer builds one clean sub-reference per screen before the measurer',
     const result = await runTeam({
         client: client(), config, ledger: createLedger(), task: 'сверстай три экрана',
         root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+        referencePaths: ['mockup.png'],
         emit: (event) => events.push(event),
     });
     assert.equal(result.status, 'completed', result.error?.message);
@@ -1672,7 +1673,11 @@ test('decomposer builds one clean sub-reference per screen before the measurer',
     assert.match(userText(measureBodies[0]), new RegExp(`${workDir.replace(/[./]/g, '$&')}\/01-landing\.png`));
     assert.match(userText(measureBodies[0]), /# Attached images, in order/, 'the measurer must know which attached image is which');
     assert.match(userText(measureBodies[0]), new RegExp(`1\. ${workDir.replace(/[./]/g, '$&')}\/00-restored\.png [(]sub-reference, restored`));
+    assert.match(userText(measureBodies[0]), new RegExp(`3\. mockup\.png [(]original reference[)]`), 'sub-references are listed before the originals');
     assert.match(userText(measureBodies[0]), /Match every sub-reference path to its attached image by the numbered order/);
+    assert.match(userText(measureBodies[0]), /# Work directory/, 'the run work id must be stated in the shared context');
+    assert.match(userText(measureBodies[0]), new RegExp(`\.tmp/${result.workId}/`));
+    assert.match(userText(measureBodies[0]), /<id> is a placeholder for this run's work directory id/);
     const measuredImages = measureBodies[0].input
         .flatMap((item) => item.content ?? [])
         .filter((part) => part.type === 'input_image');
@@ -1778,6 +1783,75 @@ test('subrefs always says out loud when the run cannot generate images', async (
     assert.equal(result.status, 'completed', result.error?.message);
     assert.ok(events.some((event) => event.type === 'warning' && /decomposerSubReferences/.test(event.message)),
         'a demanded sub-reference mode without generation must be reported, not silently skipped');
+    await rm(dir, { recursive: true, force: true });
+});
+
+test('measure-source subrefs attaches only the sub-references to the measurer', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-subrefs-'));
+    await writeFile(path.join(dir, 'mockup.png'), Buffer.from(TINY_PNG, 'base64'));
+    const measureBodies = [];
+    const userText = (body) => body.input
+        .filter((item) => item.type === 'message' && item.role === 'user')
+        .flatMap((item) => (item.content ?? []).filter((part) => part.type === 'input_text').map((part) => part.text))
+        .join('\n');
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'один экран', complexity: 'normal',
+                steps: [{ goal: 'Создать styles.scss', details: '', verify: 'прочитать styles.scss' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, risks: [], imageTasks: [],
+            }) };
+        }
+        if (role === 'decomposer') {
+            const outDir = /# Output directory\n([^\n]+)/.exec(userText(body))?.[1]?.replace(/[/]+$/, '') ?? '.tmp/unknown/decomposition';
+            if (!body.input.some((item) => item.type === 'function_call_output')) {
+                return { calls: [
+                    { name: 'edit_image', arguments: {
+                        prompt: 'flat front view', image: 'mockup.png', path: `${outDir}/00-restored.png`, size: '', quality: '', background: '', extra_images: '', to_svg: false,
+                    } },
+                ] };
+            }
+            return { text: JSON.stringify({
+                summary: 'Один экран восстановлен.',
+                screens: [{ name: 'Home', source: 'mockup.png', nodeId: null, purpose: 'Экран.', bounds: '0,0 400x300', references: [], subReference: `${outDir}/00-restored.png`, subReferenceKind: 'restored' }],
+                subReferences: [
+                    { path: `${outDir}/00-restored.png`, screen: 'Home', kind: 'restored', source: 'mockup.png', note: 'перспектива снята' },
+                ],
+                notes: [],
+            }) };
+        }
+        if (role === 'measurer') {
+            measureBodies.push(body);
+            return { text: JSON.stringify({
+                summary: 'Карточка', source: '.tmp/unknown/decomposition/00-restored.png', unit: 'px',
+                units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '' },
+                confidence: 'high', assumptions: [], canvas: { x: 0, y: 0, width: 8, height: 8 },
+                elements: [], regions: [], rules: [], notes: '',
+            }) };
+        }
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.tools = { ...defaults.tools, images: true };
+    config.agent = { ...defaults.agent, architect: 'off', decompose: 'always', decomposerSubReferences: 'always', measureSource: 'subrefs' };
+    const result = await runTeam({
+        client: client(), config, ledger: createLedger(), task: 'сверстай экран',
+        root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+        emit: () => {},
+    });
+    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(measureBodies.length, 1, 'the measurer runs once');
+    const measuredImages = measureBodies[0].input
+        .flatMap((item) => item.content ?? [])
+        .filter((part) => part.type === 'input_image');
+    assert.equal(measuredImages.length, 1, 'only the sub-reference is attached, the original is not');
+    assert.match(userText(measureBodies[0]), /original references are not attached/);
+    assert.match(userText(measureBodies[0]), /1\. \S*00-restored\.png [(]sub-reference, restored/);
+    assert.doesNotMatch(userText(measureBodies[0]), /[(]original reference[)]/);
     await rm(dir, { recursive: true, force: true });
 });
 

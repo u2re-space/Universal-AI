@@ -173,8 +173,81 @@ test('crops follow the sub-reference an item was measured on', async (t) => {
     }
 });
 
+test('measure-source overrides the sheet source deterministically', async (t) => {
+    const exe = await detectMagick();
+    if (!exe) return t.skip('ImageMagick is not installed');
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-source-'));
+    try {
+        await makeFlatImage({ exe, dir });
+        // A flat blue sub-reference restored from the red-on-white original.
+        const subRel = '.tmp/work-1/decomposition/01-home.png';
+        await mkdir(path.join(dir, '.tmp', 'work-1', 'decomposition'), { recursive: true });
+        await runProgram({ file: exe, args: ['-size', '64x64', 'xc:blue', subRel], cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096 });
+        const element = (name, source = null) => ({
+            name, kind: 'image', box: source ? { x: 20, y: 20, width: 10, height: 10 } : { x: 0, y: 0, width: 10, height: 10 },
+            rotation: 0, borders: '', radius: null,
+            padding: { top: null, right: null, bottom: null, left: null },
+            margin: { top: null, right: null, bottom: null, left: null }, gap: null,
+            spacing: '', placement: '', css: '', typography: null, confidence: 'high',
+            notes: '', use: '', crop: null, source,
+        });
+        const subReferences = [{ rel: subRel, screen: 'Home', kind: 'restored', source: 'mockup.png' }];
+        const pixel = async (rel, x, y) => {
+            const result = await runProgram({
+                file: exe, args: [rel, '-format', `%[pixel:p{${x},${y}}]`, 'info:'],
+                cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096,
+            });
+            return result.stdout.trim();
+        };
+
+        // auto: the sheet source names the original, so the unattributed element is cut from the
+        // single derived sub-reference; the element that pins the original keeps the original.
+        const autoSheet = {
+            summary: 'one screen', source: 'mockup.png', unit: 'px',
+            units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '' },
+            confidence: 'medium', assumptions: [],
+            canvas: { x: 0, y: 0, width: 64, height: 64 },
+            elements: [element('Default'), element('Pinned original', 'mockup.png')],
+            regions: [], rules: [], notes: '',
+        };
+        const auto = await stageMeasurementCrops({
+            root: dir, workId: 'work-1', sheet: autoSheet,
+            referencePaths: ['mockup.png'], subReferences, measureSource: 'auto',
+        });
+        assert.equal(auto.warnings.some((line) => /заменён суб-референсом/.test(line)), true, JSON.stringify(auto.warnings));
+        assert.match(await pixel(autoSheet.elements[0].crop, 5, 5), /0,0,255/, 'an unattributed element follows the derived sub-reference');
+        assert.match(await pixel(autoSheet.elements[1].crop, 25, 25), /255,0,0/, 'an element pinning the original keeps the original');
+
+        // subrefs: the original is replaced even when the item pins it.
+        const subrefsSheet = {
+            ...autoSheet,
+            elements: [element('Default'), element('Pinned original', 'mockup.png')],
+        };
+        const forced = await stageMeasurementCrops({
+            root: dir, workId: 'work-2', sheet: subrefsSheet,
+            referencePaths: ['mockup.png'], subReferences, measureSource: 'subrefs',
+        });
+        assert.match(await pixel(subrefsSheet.elements[0].crop, 5, 5), /0,0,255/);
+        assert.match(await pixel(subrefsSheet.elements[1].crop, 25, 25), /0,0,255/, 'subrefs forces the derived sub-reference over a pinned original');
+
+        // original: the sheet source is taken literally again.
+        const literalSheet = {
+            ...autoSheet,
+            elements: [element('Default')],
+        };
+        await stageMeasurementCrops({
+            root: dir, workId: 'work-3', sheet: literalSheet,
+            referencePaths: ['mockup.png'], subReferences, measureSource: 'original',
+        });
+        assert.match(await pixel(literalSheet.elements[0].crop, 5, 5), /gray\(255\)/, 'original mode trusts the sheet source: the white corner is the original, not the blue sub-reference');
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
 test('the measurer schema can record units, confidence, and a crop path', () => {
     assert.ok(MEASURER_SCHEMA.properties.regions.items.properties.crop);
+    assert.ok(MEASURER_SCHEMA.properties.regions.items.properties.source);
     assert.ok(MEASURER_SCHEMA.properties.units);
     assert.deepEqual(MEASURER_SCHEMA.properties.confidence.enum, ['high', 'medium', 'low', 'unknown']);
     assert.deepEqual(MEASURER_SCHEMA.properties.assumptions.type, 'array');
@@ -183,6 +256,7 @@ test('the measurer schema can record units, confidence, and a crop path', () => 
     assert.ok(element.css);
     assert.ok(element.use);
     assert.ok(element.kind);
+    assert.ok(element.source);
     assert.deepEqual(element.confidence.enum, ['high', 'medium', 'low', 'unknown']);
     assert.deepEqual(element.typography.type, ['object', 'null']);
     assert.deepEqual(element.typography.properties.familyConfidence.enum, ['high', 'medium', 'low', 'unknown']);

@@ -27,8 +27,16 @@ Work on one reference at a time and name it in "source".
 
 Measure on the screen sub-references when the decomposer produced them. The task lists them under
 "Screen sub-references": one flat image per screen, restored from a rotated or perspective source when the original
-was not a flat export. Measure each of those images and name it in "source"; the originals are attached only as
-context, so never take numbers off a tilted or collaged source when a flat sub-reference of the same screen exists.
+was not a flat export. Measure each of those images and name it in "source"; the originals, when attached at all,
+follow the sub-references and are context only, so never take numbers off a tilted or collaged source when a flat
+sub-reference of the same screen exists.
+Set the "source" field of every element and every region to the path of the image its box was measured on: the
+sub-reference path when one exists, the original path when you deliberately measured the original, null when it is
+the sheet source. The harness cuts each crop from the image that item's "source" names, so a wrong or missing value
+puts the crop on the wrong picture.
+Paths written as .tmp/<id>/... use <id> as a placeholder for this run's work directory id — the shared context
+section "Work directory" names the real path. Never echo the literal "<id>"; substitute the real id from that
+section in every path you write or reference.
 If a sub-reference is clearly wrong — a redrawn element, a missing panel, a screen cut in half — say so in notes and
 measure the original instead.
 
@@ -72,9 +80,10 @@ confidence to the weakest value that affects the layout. Put every inference, co
 "assumptions" or the element "notes"; do not hide uncertainty in a confident-looking number. Null is better than a guess.
 
 Tools. The reference pictures are attached to your message in the exact order listed under "# Attached images, in order":
-identify every attached image by that numbered list, never by guesswork or by position alone. When a screen has a
-sub-reference, the matching attached image is the one to measure and to name in "source"; the original attached next to it
-is context only. Do not load the same picture again with view_image unless you need its original detail. Use fetch_url
+identify every attached image by that numbered list, never by guesswork or by position alone. Sub-references come first;
+the original references, when attached after them, are context only. When the task says the originals are not attached,
+they exist only as paths in the shared context, and view_image can open one if a sub-reference is unusable. Do not load
+the same picture again with view_image unless you need its original detail. Use fetch_url
 only when documentation is needed. In the fragment pass use view_image on the staged crops and
 crop_image or split_image to isolate one icon, edge, or slanted shape. At read access, crops may be written only under .tmp/. Keep every
 crop you make and put its project-relative path into the matching element or region "crop" field; the worker reuses it as a

@@ -334,6 +334,14 @@ export const defaults = Object.freeze({
          */
         decomposerSubReferences: 'auto', // off | auto | always
         /**
+         * Which images the measurer measures on and the harness cuts measurement crops from.
+         * auto = sub-references first in the attachments, and when the sheet source names an
+         * original with exactly one derived sub-reference, crops come from that sub-reference;
+         * subrefs = the originals are not attached at all and every crop is cut from a
+         * sub-reference; original = the sheet source is always taken literally.
+         */
+        measureSource: 'auto',          // auto | subrefs | original
+        /**
          * Reference measurements taken by the `measurer` role right after decomposition and before the worker
          * writes styles or artwork. auto = only when reference images are attached and the plan is not
          * trivial; always = whenever references are attached; off = never. The sheet goes to the shared

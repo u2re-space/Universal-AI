@@ -186,6 +186,11 @@ export function overridesFrom(values, { command = null } = {}) {
         // A later explicit --tools/--no-tools still wins over this.
         if (values.subrefs !== 'off') o.tools.images = true;
     }
+    // Which images the measurer measures on and the harness cuts crops from.
+    if (values['measure-source']) {
+        if (!['auto', 'subrefs', 'original'].includes(values['measure-source'])) throw new UsageError('--measure-source: auto | subrefs | original');
+        (o.agent ??= {}).measureSource = values['measure-source'];
+    }
     if (values.orchestrator !== undefined) (o.agent ??= {}).orchestrator = { enabled: values.orchestrator };
     // --coordinator is the retired name of --orchestrator; both enable the unified role.
     if (values.coordinator !== undefined && values.orchestrator === undefined) (o.agent ??= {}).orchestrator = { enabled: values.coordinator };

@@ -652,6 +652,14 @@ export async function runTeam({
             work = { id: progress.id, plan, progress };
             if (expose) result.plan = plan;
             result.workId = work.id;
+            // Every role reads the shared context, so this is the one place where the run's work
+            // id becomes known: role instructions write example paths as .tmp/<id>/..., and this
+            // section states what <id> stands for in this run.
+            ctx.set('work', 'Work directory',
+                `This run's artifacts live under .tmp/${work.id}/ inside the project. `
+                + `Wherever role instructions or schemas write a path as .tmp/<id>/..., <id> is a placeholder for this run's work directory id: here it is ${work.id}. `
+                + `Decomposer sub-references: .tmp/${work.id}/decomposition/. Measurement crops: .tmp/${work.id}/crops/.`,
+                { priority: 9 });
             applyMarks(plan);
             if (plan.imageNotes) ctx.set('images', 'Attached images (planner notes)', plan.imageNotes, { priority: 7 });
             publish();
@@ -1142,13 +1150,21 @@ export async function runTeam({
                             .filter((tool) => tool.type === 'mcp' || (config.tools.web && tool.type === 'web_search'));
                         const measureContext = ctx.render({ maxBytes: measureMaxBytes, exclude: ['tree'] });
                         const measurePlan = `Plan: ${plan.summary}\nSteps:\n${bullets(plan.steps.map((step) => step.goal))}`;
-                        // The decomposer's flat screens are attached next to the originals, so the sheet
-                        // is built on one screen per image instead of on a rotated collage.
-                        // Attached images carry no file names, so the sheet can only be built on the
-                        // right picture when the message states which attachment is which, in order.
+                        // The restored sub-references come first in the attachment list and in the
+                        // message: attached images carry no file names, so the sheet can only be built
+                        // on the right picture when the manifest states which attachment is which.
+                        const measureSource = config.agent.measureSource ?? 'auto';
+                        const subRefsOnly = measureSource === 'subrefs' && screenReferences.files.length > 0;
+                        if (measureSource === 'subrefs' && !screenReferences.files.length) {
+                            notify({ type: 'warning', message: 'agent.measureSource: subrefs, но суб-референсов нет — замеры идут по оригинальным референсам.' });
+                        }
+                        // The originals attached after the sub-references: the count follows the actual
+                        // image parts, the labels use the staged paths when they are available.
+                        const originalCount = referenceParts.length || referencePaths.length;
                         const attachmentList = [
-                            ...referencePaths.map((rel, index) => `${index + 1}. ${rel} (original reference)`),
-                            ...screenReferences.files.map((file, index) => `${referencePaths.length + index + 1}. ${file.rel} (sub-reference, ${file.kind}${file.screen ? `, screen ${file.screen}` : ''})`),
+                            ...screenReferences.files.map((file, index) => `${index + 1}. ${file.rel} (sub-reference, ${file.kind}${file.screen ? `, screen ${file.screen}` : ''})`),
+                            ...(subRefsOnly ? [] : Array.from({ length: originalCount }, (_, index) =>
+                                `${screenReferences.files.length + index + 1}. ${referencePaths[index] ?? `(unnamed original #${index + 1})`} (original reference)`)),
                         ];
                         const attachmentBlock = attachmentList.length
                             ? '\n\n# Attached images, in order\n' + attachmentList.join('\n')
@@ -1156,14 +1172,18 @@ export async function runTeam({
                         const subReferenceBlock = screenReferences.files.length
                             ? '\n\n# Screen sub-references (produced by the decomposer)\n'
                                 + `${screenReferences.files.map((file) => `- ${file.rel} (${file.kind}${file.screen ? `, ${file.screen}` : ''})`).join('\n')}\n`
-                                + 'Measure these flat screens; the original references stay attached only as context. '
-                                + 'Match every sub-reference path to its attached image by the numbered order in "# Attached images, in order". '
-                                + 'Say in notes which sub-reference every region and element was measured from.'
+                                + (subRefsOnly
+                                    ? 'Only the sub-references are attached; the original references are not attached. '
+                                        + 'Measure the attached flat screens and set every element and region "source" to the sub-reference path you measured it on. '
+                                        + 'When a sub-reference is unusable, say so in notes and view an original by its project-relative path from the shared context instead.'
+                                    : 'Measure these flat screens; the original references attached after them are context only. '
+                                        + 'Match every sub-reference path to its attached image by the numbered order in "# Attached images, in order". '
+                                        + 'Set every element and region "source" to the sub-reference path you measured it on.')
                             : '';
                         /** One measurement pass, with a tool-less report when the turn budget is spent. */
                         const measureRun = async ({ pass, text, maxTurns, session }) => {
                             const result = await roles.run('measurer', {
-                                text, parts: [...referenceParts, ...screenReferences.parts], instructions: withAgents(ROLE_INSTRUCTIONS.measurer),
+                                text, parts: subRefsOnly ? [...screenReferences.parts] : [...screenReferences.parts, ...referenceParts], instructions: withAgents(ROLE_INSTRUCTIONS.measurer),
                                 toolset: measureToolsFor(pass), builtin: measureBuiltin,
                                 schema: MEASURER_SCHEMA, schemaName: 'measure', maxTurns,
                                 model, effort: measureEffort, onMaxTurns, session,
@@ -1188,7 +1208,7 @@ export async function runTeam({
                             text: `${measureContext}\n\n# Measurement pass 1 — whole reference\n${measurePlan}\n\n` +
                                 'Study the whole reference first: the canvas, the global layout, every element, every reusable region, and the spacing rules. ' +
                                 'Do not start from a fragment. Return the complete overview sheet with CSS units, per-item confidence, and explicit assumptions. ' +
-                                'The harness cuts fragments from your boxes on the image named in "source" after this pass; name the sub-reference every element was measured from.' +
+                                'The harness cuts fragments from your boxes on the image each item names in its "source" field after this pass.' +
                                 attachmentBlock + subReferenceBlock,
                             maxTurns: overviewTurns,
                             session: createSession({ store: false, model }),
@@ -1200,7 +1220,7 @@ export async function runTeam({
                             // Cut the overview regions and reusable elements first, then let the measurer inspect
                             // the actual fragments instead of guessing from the full-size picture.
                             const preliminary = await stageMeasurementCrops({
-                                root, workId: work.id, sheet, referencePaths, subReferences: screenReferences.files, config, signal,
+                                root, workId: work.id, sheet, referencePaths, subReferences: screenReferences.files, measureSource, config, signal,
                             });
                             const fragmentList = preliminary.crops.length
                                 ? preliminary.crops.map((crop) => {
@@ -1231,11 +1251,11 @@ export async function runTeam({
                                 notify({ type: 'warning', message: `Второй проход замеров не завершён (${detailed.status}); остаётся лист обзорного прохода.` });
                             }
                             stagedCrops = await stageMeasurementCrops({
-                                root, workId: work.id, sheet, referencePaths, subReferences: screenReferences.files, config, signal, reuse: preliminary.crops,
+                                root, workId: work.id, sheet, referencePaths, subReferences: screenReferences.files, measureSource, config, signal, reuse: preliminary.crops,
                             });
                         } else if (sheet) {
                             stagedCrops = await stageMeasurementCrops({
-                                root, workId: work.id, sheet, referencePaths, subReferences: screenReferences.files, config, signal,
+                                root, workId: work.id, sheet, referencePaths, subReferences: screenReferences.files, measureSource, config, signal,
                             });
                         }
                         if (sheet) {
