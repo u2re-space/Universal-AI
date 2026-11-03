@@ -24,7 +24,7 @@ export const STAGE_CATALOG = Object.freeze([
     { id: 'plan', title: 'Plan', after: ['classify'], requires: [] },
     { id: 'decompose', title: 'Screen decomposition', after: ['plan'], requires: ['plan'] },
     { id: 'measure', title: 'Reference measurements', after: ['plan', 'decompose'], requires: ['plan', 'decompose'] },
-    { id: 'architect', title: 'Architecture brief', after: ['plan', 'measure'], requires: ['plan'] },
+    { id: 'architect', title: 'Architecture brief', after: ['plan', 'decompose', 'measure'], requires: ['plan'] },
     { id: 'collect', title: 'Context collection', after: ['plan', 'architect'], requires: ['plan'] },
     { id: 'images', title: 'Visual assets', after: ['plan', 'measure'], requires: ['plan'] },
     { id: 'decor', title: 'Decorative elements', after: ['plan', 'measure', 'architect', 'images'], requires: ['plan'] },
