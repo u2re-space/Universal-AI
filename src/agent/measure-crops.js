@@ -18,7 +18,7 @@ import { resolveInside } from './paths.js';
 import { detectMagick, magickCrop, magickIdentify } from './image-magick.js';
 
 /** Upper bound on automatic crops for one measurement sheet. */
-const MAX_CROPS = 96;
+const MAX_CROPS = 192;
 
 /**
  * A filesystem-safe short name for a crop file.
