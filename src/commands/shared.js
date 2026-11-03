@@ -216,6 +216,7 @@ export async function writeOutput(file, text, { cwd = process.cwd() } = {}) {
 export const STATUS_LABELS = {
     completed: 'завершено', incomplete: 'ответ неполный', refused: 'отказ модели', max_turns: 'лимит ходов',
     budget: 'лимит бюджета', cancelled: 'отменено', failed: 'ошибка', revise: 'требуются правки',
+    prepared: 'подготовка завершена (продолжение: ai resume)',
 };
 
 /**
@@ -226,7 +227,7 @@ export const STATUS_LABELS = {
  * @ai.hint pure
  */
 export function exitCodeFor(status) {
-    if (status === 'completed') return 0;
+    if (status === 'completed' || status === 'prepared') return 0;
     if (status === 'cancelled') return 130;
     return 1;
 }

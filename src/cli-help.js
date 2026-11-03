@@ -132,6 +132,11 @@ context=false запускает роль на чистом контексте. 
                           subrefs — оригиналы не прикладываются к замеру вовсе, measurer видит только
                           суб-референсы, и каждый кроп режется из суб-референса, даже если роль называет
                           источником оригинал; original — источник листа принимается буквально (прежнее поведение).
+    --stop-after <этап>  cleanly завершить прогон после указанного этапа (answer, classify, plan, decompose,
+                          measure, architect, collect, images, decor, work, iconify, review). Работа сохраняется
+                          как незавершённая; продолжение: ai resume — уже с другими флагами и другими --image.
+                          Типовой двухфазный сценарий: ai run "..." --image collage.png --stop-after decompose,
+                          затем ai resume --image .tmp/<id>/decomposition/00-restored.png
    --decor off|auto|always  decorator строит сложные декоративные элементы (орнаменты, завитки, ленты, разделители,
                            узоры, рамки) до генерации HTML: нативный HTML+CSS (offset-path, clip-path, mask, градиенты)
                            или отдельный SVG-файл. Планировщик назначает decorationTasks; готовые сниппеты и файлы

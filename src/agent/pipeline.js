@@ -9,6 +9,7 @@
  * @changed 2026-10-26 Stages are a list, not a fixed sequence: the planner and the config may reorder or skip them.
  * @changed 2026-10-27 `decor` builds the decorative layer before `work` writes the page.
  * @changed 2026-10-28 `iconify` reviews generated markup after `work` and before `review`.
+ * @changed 2026-11-03 `stopAfter` ends the run cleanly after one stage, handing the exit value to `onStop`.
  */
 
 /**
@@ -129,10 +130,12 @@ export function resolvePipeline({ planPipeline, configPipeline, defaults = DEFAU
  * Run stages in the resolved order. The order is re-resolved on every step, so a plan that appears
  * mid-run (the planner stage) or changes after a plan update applies from the next stage on.
  * A stage may return `{ exit }` to stop the whole run with that value.
- * @param {{ stages: Array<{ id: string, when?: () => boolean, run: () => Promise<unknown> }>, config?: object, plan?: object | (() => object), notify?: (event: object) => void }} input
+ * `stopAfter` ends the run cleanly right after the named stage completes: `onStop(stageId)` is
+ * awaited and its `{ exit }` value is returned, so a caller can persist the work and finish.
+ * @param {{ stages: Array<{ id: string, when?: () => boolean, run: () => Promise<unknown> }>, config?: object, plan?: object | (() => object), notify?: (event: object) => void, stopAfter?: string|null, onStop?: (stageId: string) => Promise<unknown>|unknown }} input
  * @returns {{ order: () => string[], run: () => Promise<unknown> }}
  */
-export function createPipeline({ stages = [], config = null, plan = null, notify = null } = {}) {
+export function createPipeline({ stages = [], config = null, plan = null, notify = null, stopAfter = null, onStop = null } = {}) {
     const byId = new Map(stages.map((stage) => [stage.id, stage]));
     const ran = new Set();
     let queue = [];
@@ -167,6 +170,11 @@ export function createPipeline({ stages = [], config = null, plan = null, notify
                 }
                 const result = await stage.run();
                 if (result && typeof result === 'object' && 'exit' in result) return result.exit;
+                if (stopAfter && id === stopAfter) {
+                    const stopped = typeof onStop === 'function' ? await onStop(id) : undefined;
+                    if (stopped && typeof stopped === 'object' && 'exit' in stopped) return stopped.exit;
+                    return undefined;
+                }
             }
         },
     };

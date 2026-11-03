@@ -161,7 +161,7 @@ export async function runTeam({
     client, config, ledger, task, parts = [], root, approvalLevel = 'read', interactive = false, approve, askUser = null,
     memory = null, projectKey = null, projectName = null, backupDir = null, extraInstructions = null, emit = () => { }, signal,
     seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, processTool = null, encodeHost = null,
-    onMaxTurns = null, referencePaths = [], agentsText = null,
+    onMaxTurns = null, referencePaths = [], agentsText = null, stopAfter = null,
 }) {
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
     const roles = createRoleRunner({ client, config, ledger, emit, signal, root, task });
@@ -727,6 +727,7 @@ export async function runTeam({
             if (sheet) {
                 try {
                     const parsedSheet = JSON.parse(sheet);
+                    hasMeasurements = Boolean(parsedSheet);
                     ctx.set('metrics', 'Reference measurements (by the measurer)',
                         measurementReport(parsedSheet, measurementConclusion(parsedSheet), `.tmp/${work.id}`), { priority: 8 });
                 } catch { /* a damaged sheet is skipped, the run continues on the plan */ }
@@ -782,6 +783,9 @@ export async function runTeam({
         const referenceParts = parts.filter((part) => part?.type === 'input_image');
         const hasFigmaReference = /https?:\/\/(?:www\.)?figma\.com\//i.test(task);
         let decomposition = null;
+        // Whether the resumed work already carries a measurement sheet: a resume with no sheet
+        // still runs the measure stage (the two-phase workflow: decompose, then resume to measure).
+        let hasMeasurements = false;
         // Images the decomposer produced (one clean screen per entry). The measurer gets them as
         // attachments, so it measures flat screens instead of a rotated collage.
         let screenReferences = { files: [], parts: [] };
@@ -1123,8 +1127,16 @@ export async function runTeam({
                 id: 'measure',
                 run: async () => {
                     // 2. Measurer: numbers for the references before any style, SVG, or artwork is written.
+                    // A resumed run measures too when it has no sheet yet (or --measure always asks
+                    // for a re-measure): the two-phase workflow decomposes first, then resumes with
+                    // its own reference images for the measurement pass.
                     const measureMode = config.agent.measure ?? 'auto';
-                    if (measureMode !== 'off' && !resumedWork && (referenceParts.length || hasFigmaReference) && (measureMode === 'always' || plan.complexity !== 'trivial')) {
+                    // Restored sub-references count as measurable sources too: a two-phase run resumes
+                    // without new --image and still measures against the decomposition output.
+                    const canMeasure = (referenceParts.length || referencePaths.length || hasFigmaReference || screenReferences.files.length > 0);
+                    const wantsMeasure = measureMode === 'always' || (measureMode === 'auto' && plan.complexity !== 'trivial');
+                    const needsMeasure = !resumedWork || !hasMeasurements || measureMode === 'always';
+                    if (measureMode !== 'off' && canMeasure && wantsMeasure && needsMeasure) {
                         const tier = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
                         const measurerRole = roles.resolve('measurer', tier);
                         const model = encodeRoute || !paced?.ready
@@ -1895,7 +1907,18 @@ Verify: ${step.verify}`}${extra}${advice}${architectureAdvice(step)}${paced?.gua
         ];
         // A pipeline may start at the plan or skip the classifier; the pace must exist before any stage reads it.
         if (!paced) adopt({ label: pacedLabel });
-        const exit = await createPipeline({ stages, config, plan: () => plan, notify }).run();
+        // `--stop-after` ends the run right after one stage: the work is persisted as running
+        // (so `ai resume` picks it up) and the caller sees the `prepared` status.
+        const exit = await createPipeline({
+            stages, config, plan: () => plan, notify, stopAfter,
+            onStop: async (stageId) => {
+                notify({ type: 'run.stopped', stage: stageId, workId: work?.id ?? null });
+                result.status = 'prepared';
+                result.text = result.text || `Этап «${stageId}» завершён. Работа сохранена в .tmp/${work?.id ?? ''}; продолжение: ai resume (можно с другими --image).`;
+                await persist('running');
+                return { exit: finish() };
+            },
+        }).run();
         if (exit !== undefined) return exit;
         if (work) {
             work.progress.status = result.status;

@@ -33,7 +33,7 @@ import { buildGenerationBrief, writeGenerationManifest } from '../generate/brief
 import { stageReferences } from '../generate/references.js';
 import { preparedScaffoldFiles, writePreparedScaffold, ensureDependencies } from '../generate/scaffold.js';
 import { resolvePlatform } from '../generate/platform.js';
-import { stdinFence } from '../core/attachments.js';
+import { stdinFence, loadImageAttachment } from '../core/attachments.js';
 import { startEncodeHost } from '../encode/host.js';
 import { discoverAgents } from '../core/agents-md.js';
 
@@ -157,7 +157,7 @@ export async function run(ctx) {
     try {
         const ensured = await ensureProjectMap(ctx.cwd);
         if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
-        if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra, seedFiles: prepared.seedFiles, generation: prepared.wantsProfile, referencePaths: stagedRefs.map((item) => item.rel), agentsText });
+        if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra, seedFiles: prepared.seedFiles, generation: prepared.wantsProfile, referencePaths: stagedRefs.map((item) => item.rel), agentsText, stopAfter: values['stop-after'] ?? null });
         return await runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra, agentsText });
     } finally {
         await encodeHost?.close();
@@ -228,7 +228,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
  * @returns {Promise<number>}
  * @ai.hint io
  */
-async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, referencePaths = [], agentsText = null }) {
+async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, referencePaths = [], agentsText = null, stopAfter = null }) {
     const { config, renderer, values, signal, emit } = ctx;
     const client = createClientFor(config);
     const ledger = createLedgerFor(config);
@@ -242,7 +242,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles, generation, revision, fromStep, resumeId,
         processTool: ctx.processTool, encodeHost: ctx.encodeHost ?? null, referencePaths,
         onMaxTurns: turnExtender(renderer, config, signal),
-        agentsText,
+        agentsText, stopAfter,
     });
     renderer.idle();
     renderer.ensureNewline();
@@ -365,9 +365,19 @@ export async function resumeLocal(ctx, { revision = '', stepToken = null } = {})
         }
         const ensured = await ensureProjectMap(ctx.cwd);
         if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
+        // Staged references travel as real image parts too, so the resumed measurement pass
+        // (and every other vision role) sees the pictures, not only their paths.
+        const resumeParts = [];
+        for (const ref of resumeRefs) {
+            try {
+                resumeParts.push((await loadImageAttachment(ref.rel, { cwd: ctx.cwd, maxBytes: config.limits.maxImageBytes })).part);
+            } catch (error) {
+                renderer.line('warn', `Референс ${ref.rel} не приложен: ${error.message}`, { dim: true });
+            }
+        }
         return await runTeamFlow(ctx, {
-            task, parts: [], level, interactive, store, names, extra, generation, revision: note, fromStep, resumeId: found.id,
-            referencePaths: resumeRefs.map((item) => item.rel), agentsText,
+            task, parts: resumeParts, level, interactive, store, names, extra, generation, revision: note, fromStep, resumeId: found.id,
+            referencePaths: resumeRefs.map((item) => item.rel), agentsText, stopAfter: values['stop-after'] ?? null,
         });
     } finally {
         store?.memory.close();

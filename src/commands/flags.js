@@ -15,6 +15,7 @@ import { defaults } from '../core/config-defaults.js';
 import { CONTEXT_LEVELS } from '../openai/model-profiles.js';
 import { PLATFORMS } from '../generate/platform.js';
 import { assertPaceBudget, PACE_QUALITY_MESSAGE, PACE_SPEED_MESSAGE, FINE_QUALITY_FLAGS } from '../agent/pace.js';
+import { PIPELINE_STAGE_IDS } from '../agent/pipeline.js';
 
 /**
  * Error for invalid arguments or configuration. Command handlers map it to exit code 2.
@@ -190,6 +191,12 @@ export function overridesFrom(values, { command = null } = {}) {
     if (values['measure-source']) {
         if (!['auto', 'subrefs', 'original'].includes(values['measure-source'])) throw new UsageError('--measure-source: auto | subrefs | original');
         (o.agent ??= {}).measureSource = values['measure-source'];
+    }
+    // End the run cleanly after one pipeline stage; `ai resume` continues from there.
+    // The value is read from values by the run/resume commands; here it is only validated.
+    if (values['stop-after']) {
+        const stage = String(values['stop-after']).trim();
+        if (!PIPELINE_STAGE_IDS.includes(stage)) throw new UsageError(`--stop-after: неизвестный этап «${stage}». Этапы: ${PIPELINE_STAGE_IDS.join(', ')}`);
     }
     if (values.orchestrator !== undefined) (o.agent ??= {}).orchestrator = { enabled: values.orchestrator };
     // --coordinator is the retired name of --orchestrator; both enable the unified role.

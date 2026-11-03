@@ -138,6 +138,38 @@ test('createPipeline ignores a stage with no implementation', async () => {
     assert.deepEqual(seen, ['plan']);
 });
 
+test('createPipeline stops cleanly after the stopAfter stage', async () => {
+    const seen = [];
+    const stopped = [];
+    const pipeline = createPipeline({
+        config: null,
+        stages: [
+            { id: 'plan', run: async () => { seen.push('plan'); } },
+            { id: 'decompose', run: async () => { seen.push('decompose'); } },
+            { id: 'measure', run: async () => { seen.push('measure'); } },
+        ],
+        stopAfter: 'decompose',
+        onStop: async (stageId) => { stopped.push(stageId); return { exit: 'stopped' }; },
+    });
+    assert.equal(await pipeline.run(), 'stopped');
+    assert.deepEqual(seen, ['plan', 'decompose']);
+    assert.deepEqual(stopped, ['decompose']);
+});
+
+test('createPipeline without onStop just ends after the stopAfter stage', async () => {
+    const seen = [];
+    const pipeline = createPipeline({
+        config: null,
+        stages: [
+            { id: 'plan', run: async () => { seen.push('plan'); } },
+            { id: 'measure', run: async () => { seen.push('measure'); } },
+        ],
+        stopAfter: 'plan',
+    });
+    assert.equal(await pipeline.run(), undefined);
+    assert.deepEqual(seen, ['plan']);
+});
+
 test('PLAN_SCHEMA carries the stage enum and requires the field', () => {
     const pipeline = PLAN_SCHEMA.properties.pipeline;
     assert.deepEqual(pipeline.items.enum, [...PIPELINE_STAGE_IDS]);

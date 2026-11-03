@@ -1863,6 +1863,160 @@ test('measure-source subrefs attaches only the sub-references to the measurer', 
     await rm(dir, { recursive: true, force: true });
 });
 
+test('stop-after ends the run cleanly after one stage and keeps the work resumable', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-stop-after-'));
+    await writeFile(path.join(dir, 'mockup.png'), Buffer.from(TINY_PNG, 'base64'));
+    const events = [];
+    const measureBodies = [];
+    const userText = (body) => body.input
+        .filter((item) => item.type === 'message' && item.role === 'user')
+        .flatMap((item) => (item.content ?? []).filter((part) => part.type === 'input_text').map((part) => part.text))
+        .join('\n');
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'один экран', complexity: 'normal',
+                steps: [{ goal: 'Создать styles.scss', details: '', verify: 'прочитать styles.scss' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, risks: [], imageTasks: [],
+            }) };
+        }
+        if (role === 'decomposer') {
+            const outDir = /# Output directory\n([^\n]+)/.exec(userText(body))?.[1]?.replace(/[/]+$/, '') ?? '.tmp/unknown/decomposition';
+            if (!body.input.some((item) => item.type === 'function_call_output')) {
+                return { calls: [
+                    { name: 'edit_image', arguments: {
+                        prompt: 'flat front view', image: 'mockup.png', path: `${outDir}/00-restored.png`, size: '', quality: '', background: '', extra_images: '', to_svg: false,
+                    } },
+                ] };
+            }
+            return { text: JSON.stringify({
+                summary: 'Один экран восстановлен.',
+                screens: [{ name: 'Home', source: 'mockup.png', nodeId: null, purpose: 'Экран.', bounds: '0,0 400x300', references: [], subReference: `${outDir}/00-restored.png`, subReferenceKind: 'restored' }],
+                subReferences: [
+                    { path: `${outDir}/00-restored.png`, screen: 'Home', kind: 'restored', source: 'mockup.png', note: 'перспектива снята' },
+                ],
+                notes: [],
+            }) };
+        }
+        if (role === 'measurer') {
+            measureBodies.push(body);
+            return { text: JSON.stringify({ summary: 'Карточка', source: '', unit: 'px', units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '' }, confidence: 'high', assumptions: [], canvas: { x: 0, y: 0, width: 8, height: 8 }, elements: [], regions: [], rules: [], notes: '' }) };
+        }
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.tools = { ...defaults.tools, images: true };
+    config.agent = { ...defaults.agent, architect: 'off', decompose: 'always', decomposerSubReferences: 'always' };
+    try {
+        const result = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'сверстай экран',
+            root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+            referencePaths: ['mockup.png'], stopAfter: 'decompose', emit: (event) => events.push(event),
+        });
+        assert.equal(result.status, 'prepared', result.error?.message);
+        assert.match(result.text ?? '', /ai resume/);
+        const stopped = events.find((e) => e.type === 'run.stopped');
+        assert.equal(stopped?.stage, 'decompose');
+        assert.equal(stopped?.workId, result.workId);
+        const started = events.filter((e) => e.type === 'stage.start').map((e) => e.stage);
+        assert.equal(started.includes('measure'), false, `measure must not run after the stop: ${started.join(', ')}`);
+        assert.equal(started.includes('work'), false, `work must not run after the stop: ${started.join(', ')}`);
+        assert.equal(measureBodies.length, 0, 'the measurer never answers in the stopped phase');
+        const progress = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'progress.json'), 'utf8'));
+        assert.equal(progress.status, 'running', 'the stopped work stays resumable');
+        const decomposition = JSON.parse(await readFile(path.join(dir, '.tmp', result.workId, 'decomposition.json'), 'utf8'));
+        assert.equal(decomposition.screens[0].subReference, `.tmp/${result.workId}/decomposition/00-restored.png`);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('a resume after stop-after runs the measurer on the restored sub-references', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-stop-resume-'));
+    await writeFile(path.join(dir, 'mockup.png'), Buffer.from(TINY_PNG, 'base64'));
+    let measureBodies = [];
+    const userText = (body) => body.input
+        .filter((item) => item.type === 'message' && item.role === 'user')
+        .flatMap((item) => (item.content ?? []).filter((part) => part.type === 'input_text').map((part) => part.text))
+        .join('\n');
+    script = (body) => {
+        const role = roleOf(body);
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') {
+            return { text: JSON.stringify({
+                summary: 'один экран', complexity: 'normal',
+                steps: [{ goal: 'Создать styles.scss', details: '', verify: 'прочитать styles.scss' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, risks: [], imageTasks: [],
+            }) };
+        }
+        if (role === 'decomposer') {
+            const outDir = /# Output directory\n([^\n]+)/.exec(userText(body))?.[1]?.replace(/[/]+$/, '') ?? '.tmp/unknown/decomposition';
+            if (!body.input.some((item) => item.type === 'function_call_output')) {
+                return { calls: [
+                    { name: 'edit_image', arguments: {
+                        prompt: 'flat front view', image: 'mockup.png', path: `${outDir}/00-restored.png`, size: '', quality: '', background: '', extra_images: '', to_svg: false,
+                    } },
+                ] };
+            }
+            return { text: JSON.stringify({
+                summary: 'Один экран восстановлен.',
+                screens: [{ name: 'Home', source: 'mockup.png', nodeId: null, purpose: 'Экран.', bounds: '0,0 400x300', references: [], subReference: `${outDir}/00-restored.png`, subReferenceKind: 'restored' }],
+                subReferences: [
+                    { path: `${outDir}/00-restored.png`, screen: 'Home', kind: 'restored', source: 'mockup.png', note: 'перспектива снята' },
+                ],
+                notes: [],
+            }) };
+        }
+        if (role === 'measurer') {
+            measureBodies.push(body);
+            return { text: JSON.stringify({
+                summary: 'Карточка', source: '.tmp/unknown/decomposition/00-restored.png', unit: 'px',
+                units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '' },
+                confidence: 'high', assumptions: [], canvas: { x: 0, y: 0, width: 8, height: 8 },
+                elements: [], regions: [], rules: [], notes: '',
+            }) };
+        }
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    config.tools = { ...defaults.tools, images: true };
+    config.agent = { ...defaults.agent, architect: 'off', decompose: 'always', decomposerSubReferences: 'always', measureSource: 'subrefs' };
+    try {
+        const first = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'сверстай экран',
+            root: dir, approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+            referencePaths: ['mockup.png'], stopAfter: 'decompose', emit: () => {},
+        });
+        assert.equal(first.status, 'prepared', first.error?.message);
+        assert.equal(measureBodies.length, 0, 'the stopped phase never measures');
+        measureBodies = [];
+        // The second command carries no --image: the resume measures against the sub-references
+        // the first phase already wrote under the work directory.
+        const second = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'сверстай экран',
+            root: dir, approvalLevel: 'read', resumeId: first.workId, emit: () => {},
+        });
+        assert.equal(second.status, 'completed', second.error?.message);
+        assert.equal(measureBodies.length, 1, 'the measurer runs on the resume without new --image');
+        const measuredImages = measureBodies[0].input
+            .flatMap((item) => item.content ?? [])
+            .filter((part) => part.type === 'input_image');
+        assert.equal(measuredImages.length, 1, 'only the restored sub-reference is attached');
+        assert.match(userText(measureBodies[0]), /Attached image 1: \S*00-restored\.png [(]sub-reference, restored/);
+        assert.match(userText(measureBodies[0]), /original references are not attached/);
+        const measurements = JSON.parse(await readFile(path.join(dir, '.tmp', first.workId, 'measurements.json'), 'utf8'));
+        assert.equal(measurements.summary, 'Карточка');
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
 test('measurer stage runs before collector and gives CSS-ready values to the styler', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-measure-'));
     const events = [];
