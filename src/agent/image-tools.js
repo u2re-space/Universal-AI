@@ -486,6 +486,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             const payloads = await client.images.generate({
                 model, prompt: args.prompt, size: args.size || null, quality: args.quality || null,
                 format, background: effectiveBackground(model, requested), signal,
+                background_mode: effectiveBackground(model, requested),
             });
             return saveAll(payloads, args.path, { transparent, model, toSvg, frame: Boolean(args.size?.trim()) });
         },
@@ -504,6 +505,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             const payloads = await client.images.edit({
                 model, prompt: args.prompt, size: args.size || null,
                 format, background: effectiveBackground(model, requested), signal,
+                background_mode: effectiveBackground(model, requested),
                 files,
             });
             return saveAll(payloads, args.path, { transparent, alphaSource: args.image, model, toSvg, frame: Boolean(String(args.size ?? '').trim()) });

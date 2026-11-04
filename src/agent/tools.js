@@ -630,6 +630,7 @@ export function createToolset({
                 layout: ['row', 'column', 'grid'].includes(args.layout) ? args.layout : 'row',
                 frame: args.frame ?? '', gap: args.gap ?? 8,
                 background: args.background || 'transparent', maxSide,
+                background_mode: args.background || 'transparent',
                 labels: Boolean(args.labels), engine, signal,
             });
             const lines = [`Движок: ${result.engine}. Ячейка: ${result.cell.width}×${result.cell.height}; таблица: ${result.width}×${result.height}.`];

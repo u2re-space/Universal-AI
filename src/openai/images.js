@@ -375,7 +375,7 @@ export function imageFormatField(model) {
  */
 export function supportsTransparentBackground(model) {
     const version = /^(?:openai\/)?gpt-image-(\d+(?:\.\d+)?)/i.exec(String(model ?? '').trim())?.[1];
-    return Boolean(version) && version !== '2';
+    return (Boolean(version) && version !== '2') || model?.trim?.()?.endsWith?.("riverflow-v2.6-pro");
 }
 
 /**
