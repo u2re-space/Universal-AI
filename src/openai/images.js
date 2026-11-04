@@ -576,6 +576,77 @@ export function pngHasAlphaChannel(buffer) {
 }
 
 /**
+ * Pixel frame read straight from encoded bytes — PNG IHDR, JPEG SOF, WebP (VP8/VP8L/VP8X) and GIF.
+ * No raster engine is involved, so the frame of a source picture survives a bundled build where
+ * sharp or ImageMagick may be missing. Null means the buffer is not a readable raster, and the
+ * caller leaves the frame to the gateway default.
+ * @param {Buffer | Uint8Array | null | undefined} buffer
+ * @returns {{ width: number, height: number } | null}
+ * @exports
+ * @ai.hint pure
+ */
+export function readImageSize(buffer) {
+    if (!buffer || buffer.length < 10) return null;
+    const b = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+    const tag = (at) => b.length >= at + 4 && String.fromCharCode(b[at], b[at + 1], b[at + 2], b[at + 3]);
+    const u16be = (at) => (b[at] << 8) | b[at + 1];
+    const u32be = (at) => ((b[at] << 24) >>> 0) + (b[at + 1] << 16) + (b[at + 2] << 8) + b[at + 3];
+    const u32le = (at) => b[at] + (b[at + 1] << 8) + (b[at + 2] << 16) + (b[at + 3] << 24);
+    const frame = (width, height) => (width > 0 && height > 0 ? { width, height } : null);
+
+    // PNG: the IHDR chunk sits at a fixed offset behind the eight-byte signature.
+    if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) {
+        if (b.length < 24 || tag(12) !== 'IHDR') return null;
+        return frame(u32be(16), u32be(20));
+    }
+    // GIF: two little-endian 16-bit fields at a fixed offset.
+    if (tag(0) === 'GIF8') return frame(b[6] | (b[7] << 8), b[8] | (b[9] << 8));
+    // WebP: the frame lives in the first of three possible chunk kinds.
+    if (tag(0) === 'RIFF' && tag(8) === 'WEBP') {
+        for (let offset = 12; offset + 8 <= b.length;) {
+            const chunk = tag(offset);
+            const size = u32le(offset + 4);
+            const data = offset + 8;
+            if (chunk === 'VP8X' && size >= 10 && data + 10 <= b.length) {
+                return frame(1 + b[data + 4] + (b[data + 5] << 8) + (b[data + 6] << 16),
+                    1 + b[data + 7] + (b[data + 8] << 8) + (b[data + 9] << 16));
+            }
+            if (chunk === 'VP8L' && size >= 5 && data + 5 <= b.length && b[data] === 0x2f) {
+                const bits = u32le(data + 1);
+                return frame(1 + (bits & 0x3fff), 1 + ((bits >> 14) & 0x3fff));
+            }
+            if (chunk === 'VP8 ' && size >= 10 && data + 10 <= b.length
+                && b[data + 3] === 0x9d && b[data + 4] === 0x01 && b[data + 5] === 0x2a) {
+                return frame(((b[data + 7] & 0x3f) << 8) | b[data + 6], ((b[data + 9] & 0x3f) << 8) | b[data + 8]);
+            }
+            offset = data + size + (size & 1);
+        }
+        return null;
+    }
+    // JPEG: walk the marker chain to the first SOF that carries the frame.
+    if (b[0] === 0xff && b[1] === 0xd8) {
+        for (let i = 2; i + 9 < b.length;) {
+            if (b[i] !== 0xff) { i += 1; continue; }
+            let marker = b[i + 1];
+            while (marker === 0xff && i + 2 < b.length) { i += 1; marker = b[i + 1]; }
+            // Start of scan or end of image: no frame header in what is left.
+            if (marker === 0xda || marker === 0xd9) return null;
+            // Standalone markers carry no length field.
+            if (marker === 0x01 || marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7)) { i += 2; continue; }
+            // SOF0..SOF15 except DHT (C4), JPEG lossless (C8) and arithmetic (CC).
+            if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+                return frame(u16be(i + 7), u16be(i + 5));
+            }
+            const length = u16be(i + 2);
+            if (length < 2) return null;
+            i += 2 + length;
+        }
+        return null;
+    }
+    return null;
+}
+
+/**
  * Extension and MIME from magic bytes. Unknown bytes are treated as PNG.
  * Also detects SVG text (from vector model output) starting with <svg or <?xml.
  * @param {Buffer} buffer

@@ -9,7 +9,7 @@ import { createClient } from '../src/openai/client.js';
 import { TINY_PNG } from './helpers/mock-server.js';
 import { rasterInfo, rasterIsOpaque, rasterPadImageBytes } from '../src/agent/image-raster.js';
 import { runProgram } from '../src/agent/shell.js';
-import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFor, imageModelProfile, imagePayloads, imageRequestSize, imageSizeAttempts, imageSizeFields, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_RIVERFLOW_MODEL, PROXY_VECTOR_MODEL, VECTOR_RATIOS } from '../src/openai/images.js';
+import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFor, imageModelProfile, imagePayloads, imageRequestSize, imageSizeAttempts, imageSizeFields, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_RIVERFLOW_MODEL, PROXY_VECTOR_MODEL, VECTOR_RATIOS, readImageSize } from '../src/openai/images.js';
 import { builtinTools } from '../src/agent/loop.js';
 import { enabledToolNames } from '../src/agent/tool-specs.js';
 import { createToolset } from '../src/agent/tools.js';
@@ -129,6 +129,72 @@ test('Riverflow keeps custom sizes, maps resolution/aspect_ratio, keeps -pro suf
     assert.equal(generationBody({ model: 'sourceful/riverflow-v2.6-pro', prompt: 'test', size: '16:9' }).aspect_ratio, '16:9');
     // -pro suffix is kept at any size.
     assert.equal(generationBody({ model: 'sourceful/riverflow-v2.6-pro', prompt: 'test', size: '512x512' }).model, 'sourceful/riverflow-v2.6-pro');
+});
+
+test('readImageSize reads the frame from encoded bytes without a raster engine', () => {
+    const canvas = createCanvas(800, 600);
+    canvas.getContext('2d').fillRect(0, 0, 800, 600);
+    assert.deepEqual(readImageSize(canvas.toBuffer('image/png')), { width: 800, height: 600 });
+    assert.deepEqual(readImageSize(canvas.toBuffer('image/jpeg', { quality: 60 })), { width: 800, height: 600 });
+
+    // GIF89a: two little-endian 16-bit fields at a fixed offset.
+    const gif = Buffer.alloc(13);
+    gif.write('GIF89a', 0, 'latin1');
+    gif.writeUInt16LE(640, 6);
+    gif.writeUInt16LE(480, 8);
+    assert.deepEqual(readImageSize(gif), { width: 640, height: 480 });
+
+    // WebP VP8X: the canvas size is stored as value - 1 in three little-endian bytes each.
+    const webp = Buffer.alloc(30);
+    webp.write('RIFF', 0, 'latin1');
+    webp.writeUInt32LE(18, 4);
+    webp.write('WEBPVP8X', 8, 'latin1');
+    webp.writeUInt32LE(10, 16);
+    webp.writeUIntLE(1023, 24, 3);
+    webp.writeUIntLE(767, 27, 3);
+    assert.deepEqual(readImageSize(webp), { width: 1024, height: 768 });
+
+    assert.equal(readImageSize(Buffer.from('not an image at all')), null);
+    assert.equal(readImageSize(null), null);
+});
+
+test('edit_image keeps the source frame when no size is asked for', async () => {
+    const canvas = createCanvas(800, 600);
+    canvas.getContext('2d').fillRect(0, 0, 800, 600);
+    const png = canvas.toBuffer('image/png');
+    const sizes = [];
+    const server = http.createServer(async (req, res) => {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const form = Buffer.concat(chunks).toString('latin1');
+        sizes.push({
+            size: /name="size"\r\n\r\n([^\r]+)/.exec(form)?.[1] ?? null,
+            resolution: /name="resolution"\r\n\r\n([^\r]+)/.exec(form)?.[1] ?? null,
+            aspect: /name="aspect_ratio"\r\n\r\n([^\r]+)/.exec(form)?.[1] ?? null,
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: [{ b64_json: TINY_PNG }] }));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    const client = createClient({ apiKey: 'sk-test', baseURL: `http://127.0.0.1:${port}/v1/`, retries: 0 });
+    try {
+        // Riverflow takes the exact source frame instead of the gateway default square.
+        await client.images.edit({
+            model: 'sourceful/riverflow-v2.6-pro', prompt: 'edit', size: 'auto', format: 'png',
+            files: [{ filename: 'shot.png', mime: 'image/png', bytes: png }],
+        });
+        assert.deepEqual(sizes.pop(), { size: '800x600', resolution: null, aspect: null });
+        // A frame the caller named still wins over the source.
+        await client.images.edit({
+            model: 'sourceful/riverflow-v2.6-pro', prompt: 'edit', size: '2K', format: 'png',
+            files: [{ filename: 'shot.png', mime: 'image/png', bytes: png }],
+        });
+        assert.deepEqual(sizes.pop(), { size: null, resolution: '2K', aspect: null });
+    } finally {
+        client.close();
+        await new Promise((resolve) => server.close(resolve));
+    }
 });
 
 test('vector model uses aspect_ratio and svg output', () => {

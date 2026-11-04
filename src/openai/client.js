@@ -20,7 +20,7 @@ import { CHAT_PATH, chatGaps, createChatStreamReducer, droppedTools, normalizeCh
 import { envValue } from '../core/runtime-env.js';
 import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
 import { rasterPadImageBytes, rasterRemoveImagePadding } from '../agent/image-raster.js';
-import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat } from './images.js';
+import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, readImageSize, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat } from './images.js';
 
 export { ApiError };
 
@@ -701,16 +701,13 @@ export function createClient({
                 padding = prepared[0].frame;
                 requestedFrame = `${padding.width}x${padding.height}`;
             }
-            // No explicit frame and no padding: derive the frame from the source image itself,
-            // so edits preserve the input image's size and aspect ratio instead of the gateway
-            // default square (1024×1024).  Uses sharp when available; silently falls through for
-            // gateways without a raster engine.
-            if (!vector && !requestedFrame && files?.length) {
-                try {
-                    const sharp = (await import('sharp')).default;
-                    const meta = await sharp(files[0].bytes).metadata();
-                    if (meta?.width && meta?.height) requestedFrame = `${meta.width}x${meta.height}`;
-                } catch { /* no raster engine: gateway default stands */ }
+            // No frame in the request (auto/empty) and nothing padded: take it from the source
+            // picture, so an edit keeps the input image's own size and aspect instead of the
+            // gateway default square. The header is read straight from the bytes, so no raster
+            // engine has to be present for this to work in a bundled build.
+            if (!vector && files?.length && !Object.keys(imageSizeFields(requestedFrame, model)).length) {
+                const source = readImageSize(files[0]?.bytes);
+                if (source) requestedFrame = `${source.width}x${source.height}`;
             }
             const attempts = vector ? [] : imageSizeAttempts(requestedFrame, model);
             let result;
