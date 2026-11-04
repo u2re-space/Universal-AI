@@ -62,11 +62,18 @@ const r = (overrides) => ({ ...ROLE_FIELDS, ...overrides });
  * environment variables (OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_ORG_ID, OPENAI_PROJECT_ID,
  * AI_MODEL, AI_AGENT_HOME) and finally CLI flags.
  */
+let currentProviders = [];
+let defaultProviders = [
+    { baseURL: 'https://sprutdock.ru/v1', apiKey: "{{env:SPRUTDOCK_API_KEY}}", supports: { decisionAPI: false }, env: 'SPRUTDOCK_API_KEY' },
+    { baseURL: 'https://api.proxyapi.ru/v1', apiKey: "{{env:PROXYAPI_API_KEY}}", env: 'PROXYAPI_API_KEY' },
+    { baseURL: 'https://routerai.ru/api/v1', apiKey: "{{env:ROUTERAI_API_KEY}}", env: 'ROUTERAI_API_KEY' },
+    { baseURL: 'https://gptunnel.ru/v1', apiKey: '{{env:GPTUNNEL_API_KEY}}', body: { useWalletBalance: false }, env: 'GPTUNNEL_API_KEY' }
+];
 export const defaults = Object.freeze({
     model: 'gpt-6.1-terra',
     imageModel: 'openai/gpt-image-2.5-sunburst',                 // null → gpt-image-2.5 (flare for generation, sunburst for edits) on the images API
-    baseURL: "https://api.proxyapi.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
-    apiKey: "{{env:PROXYAPI_API_KEY}}",                     // prefer the OPENAI_API_KEY environment variable
+    baseURL: "https://sprutdock.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
+    apiKey: "{{env:SPRUTDOCK_API_KEY}}",                     // prefer the OPENAI_API_KEY environment variable
     /**
      * Ordered OpenAI-compatible backends — the default pool for every route. The first entry with a
      * URL and a key is the primary host; the rest are tried when it is down. An entry accepts
@@ -167,12 +174,13 @@ export const defaults = Object.freeze({
     fallback: {
         enabled: true,
         models: { ...MODEL_FALLBACKS },
-        providers: [
-            { baseURL: 'https://api.proxyapi.ru/v1', apiKey: "{{env:PROXYAPI_API_KEY}}", env: 'PROXYAPI_API_KEY' },
-            { baseURL: 'https://routerai.ru/api/v1', apiKey: "{{env:ROUTERAI_API_KEY}}", env: 'ROUTERAI_API_KEY' },
-            { baseURL: 'https://sprutdock.ru/v1', apiKey: "{{env:SPRUTDOCK_API_KEY}}", supports: { decisionAPI: false }, env: 'SPRUTDOCK_API_KEY' },
-            { baseURL: 'https://gptunnel.ru/v1', apiKey: '{{env:GPTUNNEL_API_KEY}}', body: { useWalletBalance: false }, env: 'GPTUNNEL_API_KEY' }
-        ],
+        /*providers: []*/
+        get providers() {
+            return [...defaultProviders, ...defaults.backends, ...currentProviders];
+        },
+        set providers(providers) {
+            currentProviders = providers;
+        }
     },
     /**
      * Chat Completions transport. A gateway that has no /v1/responses route (404/405/501 or a
