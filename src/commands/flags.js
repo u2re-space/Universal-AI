@@ -133,6 +133,10 @@ export function overridesFrom(values, { command = null } = {}) {
     }
     if (values.format) o.image.format = values.format;
     if (values['image-background']) o.image.background = values['image-background'];
+    if (values['image-div16']) {
+        if (!['auto', 'always', 'never'].includes(values['image-div16'])) throw new UsageError('--image-div16: auto | always | never');
+        o.image.div16 = values['image-div16'];
+    }
     if (values.partials !== undefined) o.image.partialImages = number(values.partials, 'partials', { integer: true, min: 0 });
     if (values.shell) o.shell = values.shell;
     if (values.role?.length) {

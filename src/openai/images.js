@@ -4,17 +4,25 @@
  * @purpose Image generation and edits through POST /images/generations and /images/edits.
  * @depends node:crypto
  * @usedBy openai/client, agent/loop, agent/tools, commands/image, commands/run
- * @exports PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, IMAGE_SIZES, VECTOR_RATIOS,
+ * @exports PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, PROXY_RIVERFLOW_MODEL, IMAGE_SIZES, VECTOR_RATIOS,
  *   imageTransport, imageModelFor, normalizeImageSize, normalizeImageFormat, resolveImageFormat, normalizeVectorRatio,
  *   isVectorModel, supportsTransparentBackground, backgroundValue, imageFormatField, generationBody, encodeMultipart,
- *   imagePayloads, imageSources, acceptsResponseFormat, pngHasAlphaChannel, sniffImage
+ *   imagePayloads, imageSources, acceptsResponseFormat, pngHasAlphaChannel, sniffImage,
+ *   imageModelProfile, needsDiv16Padding
  * @ai.tags images, proxyapi
  * @ai.hint pure
  * @changed 2026-10-22 gpt-image-2.5 defaults for raster, gpt-image-2 alpha exception, vector model support.
  * @changed 2026-10-30 response_format only where the model takes it; imageSources reads b64_json or url.
+ * @changed 2026-11-04 per-model capability profiles (customSizes, div16Padding, keepProSuffix, omitSizeOnReject);
+ *   sourceful/riverflow-v2.6-pro support; image.div16 (auto|always|never) override.
  */
 
 import { randomBytes } from 'node:crypto';
+
+/** OpenAI gpt-image-2.5 family (sunburst, flare, …). */
+const GPT_IMAGE_25 = /^(?:openai\/)?gpt-image-2\.5(?:-|$)/i;
+/** Sourceful Riverflow family — a Flux-based id such as sourceful/riverflow-v2.6-pro. */
+const RIVERFLOW = /(?:^|\/)riverflow-/i;
 
 /** Default ProxyAPI text-to-image model when imageModel is unset. See https://proxyapi.ru/models/browse/image */
 export const PROXY_IMAGE_MODEL = 'openai/gpt-image-2.5-sunburst';
@@ -27,6 +35,67 @@ export const PROXY_IMAGE_EDIT_MODEL = 'openai/gpt-image-2.5-sunburst';
 
 /** Default ProxyAPI vector (SVG) model. See https://proxyapi.ru/models/recraft/recraft-v4.1-pro-vector */
 export const PROXY_VECTOR_MODEL = 'recraft/recraft-v4.1-pro-vector';
+
+/**
+ * Riverflow V2.6 Pro (Flux-based, https://proxyapi.ru/models/sourceful/riverflow-v2.6-pro). It is
+ * an opt-in id rather than a default: not every gateway serves it, so `--image-model` or
+ * `imageModel` in the config is what selects it.
+ */
+export const PROXY_RIVERFLOW_MODEL = 'sourceful/riverflow-v2.6-pro';
+
+/**
+ * What an image model is known to accept. A model absent from `IMAGE_MODEL_PROFILES` gets these
+ * values, which is the plain `/images/generations` behaviour the vendor presets describe.
+ *   `customSizes`     — an arbitrary WIDTHxHEIGHT goes into `size` instead of an IMAGE_SIZES preset;
+ *   `div16Padding`    — /images/edits inputs must be padded to a 16-pixel multiple first;
+ *   `keepProSuffix`   — the `-pro` suffix survives a small frame (the Recraft tier swap is not for it);
+ *   `omitSizeOnReject` — when the host rejects the frame, retry once with `size` left out entirely.
+ */
+const IMAGE_CAPABILITIES = Object.freeze({
+    customSizes: false, div16Padding: false, keepProSuffix: false, omitSizeOnReject: false,
+});
+
+/**
+ * Rules in match order; the first match wins, so a narrow family comes before a broad one.
+ * Riverflow keeps its `-pro` suffix at any frame — the suffix is the model, not a size tier — and
+ * takes no 16-pixel padding. Its frame support differs between gateways, so a refused frame costs
+ * one retry without the field rather than the whole request.
+ */
+const IMAGE_MODEL_PROFILES = Object.freeze([
+    Object.freeze({ match: GPT_IMAGE_25, customSizes: true, div16Padding: true }),
+    Object.freeze({ match: RIVERFLOW, keepProSuffix: true, omitSizeOnReject: true }),
+]);
+
+/**
+ * Capabilities of one image model id, merged over the defaults.
+ * @param {string | null | undefined} model
+ * @returns {{ customSizes: boolean, div16Padding: boolean, keepProSuffix: boolean, omitSizeOnReject: boolean }}
+ * @exports
+ * @ai.hint pure
+ */
+export function imageModelProfile(model) {
+    const name = String(model ?? '').trim();
+    const rule = IMAGE_MODEL_PROFILES.find((p) => p.match.test(name));
+    if (!rule) return { ...IMAGE_CAPABILITIES };
+    const { match, ...caps } = rule;
+    return { ...IMAGE_CAPABILITIES, ...caps };
+}
+
+/**
+ * Whether /images/edits inputs for this model need the 16-pixel padding. `auto` follows the model
+ * profile; `always` and `never` are the operator override for a gateway whose behaviour the profile
+ * does not describe — padding is a crutch, and a model that accepts the frame as-is gets it as-is.
+ * @param {string | null | undefined} model
+ * @param {'auto' | 'always' | 'never' | null | undefined} setting
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function needsDiv16Padding(model, setting = 'auto') {
+    if (setting === 'always') return true;
+    if (setting === 'never') return false;
+    return imageModelProfile(model).div16Padding;
+}
 
 /** Sizes accepted by POST /images/generations and /images/edits. */
 export const IMAGE_SIZES = Object.freeze(['1024x1024', '1024x1536', '1536x1024']);
@@ -58,13 +127,13 @@ export function normalizeImageSize(size) {
     return height > width ? '1024x1536' : '1536x1024';
 }
 
-const GPT_IMAGE_25 = /^(?:openai\/)?gpt-image-2\.5(?:-|$)/i;
 const MIN_IMAGE_PIXELS = 655_360;
 const MAX_IMAGE_PIXELS = 8_294_400;
 const MAX_IMAGE_EDGE = 3840;
 
 /**
- * Keep custom dimensions for GPT Image 2.5; other image models use their supported frame presets.
+ * Keep custom dimensions for the models that take them (GPT Image 2.5); the rest get their
+ * supported frame presets.
  * @param {string|null|undefined} size
  * @param {string|null|undefined} model
  * @returns {string|null}
@@ -74,7 +143,7 @@ const MAX_IMAGE_EDGE = 3840;
 export function imageRequestSize(size, model) {
     const value = String(size ?? '').trim().toLowerCase();
     if (!value || value === 'auto') return null;
-    if (GPT_IMAGE_25.test(String(model ?? '')) && /^\d+\s*x\s*\d+$/.test(value)) return value.replace(/\s+/g, '');
+    if (imageModelProfile(model).customSizes && /^\d+\s*x\s*\d+$/.test(value)) return value.replace(/\s+/g, '');
     return normalizeImageSize(value);
 }
 
@@ -133,21 +202,30 @@ export function isImageSizeError(error) {
 
 /**
  * Ordered image-size attempts: the exact request, a valid same-ratio size, then the nearest preset.
+ * For models that may reject the `size` field entirely (`omitSizeOnReject`), a null entry is
+ * appended so the caller retries with the field omitted.
  * @param {string|null|undefined} size
  * @param {string|null|undefined} model
- * @returns {string[]}
+ * @returns {(string | null)[]}
  * @exports
  * @ai.hint pure
  */
 export function imageSizeAttempts(size, model) {
     const initial = imageRequestSize(size, model);
-    if (!initial || !GPT_IMAGE_25.test(String(model ?? '')) || !/^\d+x\d+$/.test(initial)) return initial ? [initial] : [];
+    if (!initial) return [];
+    const profile = imageModelProfile(model);
+    if (!profile.customSizes || !/^\d+x\d+$/.test(initial)) {
+        const attempts = [initial];
+        if (profile.omitSizeOnReject) attempts.push(null);
+        return attempts;
+    }
     const attempts = [initial];
     const sameRatio = sameAspectImageSize(initial);
     const preset = normalizeImageSize(initial);
     for (const candidate of [sameRatio, preset]) {
         if (candidate && !attempts.includes(candidate)) attempts.push(candidate);
     }
+    if (profile.omitSizeOnReject) attempts.push(null);
     return attempts;
 }
 
@@ -267,15 +345,19 @@ export function resolveImageFormat({ model, format = null }) {
 }
 
 /**
- * OpenAI image models accept `output_format`; Recraft and most other vendors accept only
- * `image_format`.
+ * OpenAI image models and OpenAI-compatible proxies accept `output_format`; Recraft and most
+ * other vendors accept only `image_format`.
  * @param {string | null | undefined} model
  * @returns {'output_format' | 'image_format'}
  * @exports
  * @ai.hint pure
  */
 export function imageFormatField(model) {
-    return /^(?:openai\/)?gpt-image-/i.test(String(model ?? '').trim()) ? 'output_format' : 'image_format';
+    const name = String(model ?? '').trim();
+    if (/^(?:openai\/)?gpt-image-/i.test(name)) return 'output_format';
+    // Riverflow and Flux-based models on OpenAI-compatible proxies use output_format.
+    if (RIVERFLOW.test(name)) return 'output_format';
+    return 'image_format';
 }
 
 /**
@@ -350,8 +432,14 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
     }
     const frame = imageRequestSize(size, model);
     if (frame) body.size = frame;
-    const size_pair = (frame || body.size)?.trim?.()?.split?.("x")?.map?.((ns)=>parseInt(ns || "0"));
-    if (size_pair?.[0] <= 1024 && size_pair?.[1] <= 1024) body.model = body.model?.replace?.(/\-pro$/, "") || body.model;
+    // Recraft swaps `-pro` for non-pro at small sizes; Riverflow keeps its suffix at any size.
+    const caps = imageModelProfile(model);
+    if (!caps.keepProSuffix) {
+        const sizePair = (frame || body.size)?.split?.('x')?.map((n) => parseInt(n || '0'));
+        if (sizePair?.[0] <= 1024 && sizePair?.[1] <= 1024) {
+            body.model = body.model?.replace?.(/\-pro$/, '') || body.model;
+        }
+    }
     if (quality && quality !== 'auto') body.quality = quality;
     if (Number.isInteger(n) && n > 1) body.n = n;
     const fmt = resolveImageFormat({ model, format });

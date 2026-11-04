@@ -20,7 +20,7 @@ import { CHAT_PATH, chatGaps, createChatStreamReducer, droppedTools, normalizeCh
 import { envValue } from '../core/runtime-env.js';
 import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
 import { rasterPadImageBytes, rasterRemoveImagePadding } from '../agent/image-raster.js';
-import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageRequestSize, imageSources, imageSizeAttempts, isImageSizeError, isVectorModel, normalizeVectorRatio, resolveImageFormat } from './images.js';
+import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSources, imageSizeAttempts, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat } from './images.js';
 
 export { ApiError };
 
@@ -137,7 +137,7 @@ export function createClient({
     headers = null, body: bodySetting = null,
     http, retries = defaults.retries, idleTimeoutMs, connectTimeoutMs, maxErrorBytes = defaults.maxErrorBytes,
     maxResponseBytes = defaults.maxResponseBytes, maxEventBytes = defaults.maxEventBytes,
-    magickPath = null, rasterEngine = 'auto',
+    magickPath = null, rasterEngine = 'auto', imageDiv16 = null,
     chat: chatSetting = null,
     onEvent: globalOnEvent,
 } = {}) {
@@ -679,7 +679,7 @@ export function createClient({
             let requestFiles = files;
             let padding = null;
             let requestedFrame = size;
-            if (!vector && /^(?:openai\/)?gpt-image-2\.5(?:-|$)/i.test(String(model ?? '')) && files?.length) {
+            if (!vector && needsDiv16Padding(model, imageDiv16) && files?.length) {
                 const prepared = [];
                 for (const file of files) {
                     let frame = null;
@@ -687,7 +687,7 @@ export function createClient({
                     catch { frame = null; }
                     if (!frame) {
                         const exe = await detectMagick({ magickPath });
-                        if (!exe) throw new ApiError('Для добавления прозрачного padding к входному изображению GPT Image 2.5 требуется sharp, canvas или ImageMagick.', { code: 'IMAGE_PADDING_UNAVAILABLE' });
+                        if (!exe) throw new ApiError('Для добавления прозрачного padding к входному изображению требуется sharp, canvas или ImageMagick.', { code: 'IMAGE_PADDING_UNAVAILABLE' });
                         frame = await magickPadImageBytes({ exe, bytes: file.bytes, signal });
                         frame.engine = 'magick';
                         frame.exe = exe;
