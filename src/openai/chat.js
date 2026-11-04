@@ -151,6 +151,25 @@ export function droppedTools(tools) {
 }
 
 /**
+ * What this body needs and /v1/chat/completions cannot carry at all: a built-in Responses tool
+ * (`web_search`, `image_generation`, …) and background mode. A `type: 'mcp'` server is not a gap:
+ * the pipeline runs without it (Figma falls back to the attached pictures), it is often added by
+ * the program rather than asked for by the user, and the host is still told about it. Server-side
+ * conversation state has its own error in the client.
+ * @param {object} body Responses API request body
+ * @returns {string[]} names the chat transport cannot serve; empty when the request is portable
+ * @exports
+ * @ai.hint pure
+ */
+export function chatGaps(body = {}) {
+    const tools = Array.isArray(body?.tools) ? body.tools : [];
+    const builtins = tools.filter((tool) => isRecord(tool) && tool.type && tool.type !== 'function' && tool.type !== 'mcp');
+    const gaps = droppedTools(builtins);
+    if (body?.background === true) gaps.push('background');
+    return gaps;
+}
+
+/**
  * `tool_choice` in chat shape. A named Responses function choice becomes the nested chat choice;
  * a shape chat cannot express falls back to `auto`, which never breaks the request.
  * @param {unknown} choice

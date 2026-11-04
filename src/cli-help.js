@@ -260,13 +260,22 @@ MCP:
   Запросы идут на /v1/responses. Если хост отвечает на них 404, 405 или 501 (или «endpoint not supported»),
   тот же запрос переводится на /v1/chat/completions, а ответ переводится обратно: инструменты,
   поток, usage и история работают как обычно. Выбор запоминается на весь запуск процесса.
-  chat: { enabled, force, streamUsage, reasoningEffort } — включено по умолчанию; enabled: false оставляет
-  отсутствующий /v1/responses ошибкой, force сразу ведёт все запросы на /v1/chat/completions.
+  chat: { enabled, force, strict, streamUsage, reasoningEffort } — включено по умолчанию; enabled: false оставляет
+  отсутствующий /v1/responses ошибкой (тогда запрос уходит на следующий бэкенд из backends и остаётся на
+  Responses API), force сразу ведёт все запросы на /v1/chat/completions.
+  Перевод не умеет того, чего просит запрос: встроенных инструментов Responses (web_search, image_generation)
+  и режима background. По умолчанию такой запрос уходит без этих инструментов, и потеря называется одним
+  предупреждением; strict: true вместо этого завершает его ошибкой CHAT_CAPABILITY_MISSING (или
+  ROUTE_UNSUPPORTED, если хост ещё не отказывал), чтобы запрос ушёл на бэкенд с /v1/responses.
+  web_search включён по умолчанию (tools.web), поэтому строгость по умолчанию false: иначе любой запуск
+  на чат-хосте падал бы из-за поиска. Серверы type: mcp запрос не останавливают — без них прогон работает,
+  они только называются в предупреждении.
   streamUsage добавляет stream_options.include_usage, reasoningEffort передаёт reasoning.effort
   как reasoning_effort; поле отбрасывается, если хост его отклонил.
   На транспорте chat не работают previous_response_id (store), /responses/compact, /responses/input_tokens,
   фоновый режим --background и ai resume: они есть только в Responses API.
   supports: { responses: false, chat: true } принудительно отправляет хост на /v1/chat/completions.
+
 
 Прочее:
   --json                 события и результат в формате JSON Lines     --quiet, -q   только ответ

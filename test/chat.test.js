@@ -10,9 +10,9 @@ import { defaults, loadConfig } from '../src/core/config.js';
 import { buildUserMessage } from '../src/core/attachments.js';
 import { createToolset } from '../src/agent/tools.js';
 import { runTurn } from '../src/agent/loop.js';
-import { createFallbackClient, chatOptionsFor, servesRoute, supportsRoute } from '../src/openai/fallback.js';
+import { createFallbackClient, chatOptionsFor, providerDown, servesRoute, supportsRoute } from '../src/openai/fallback.js';
 import { completionChannelList } from '../src/complete/channels.js';
-import { createChatStreamReducer, droppedTools, fromChatCompletion, responsesRouteUnsupported, stripRejectedFields, toChatBody } from '../src/openai/chat.js';
+import { chatGaps, createChatStreamReducer, droppedTools, fromChatCompletion, responsesRouteUnsupported, stripRejectedFields, toChatBody } from '../src/openai/chat.js';
 import { startMockServer } from './helpers/mock-server.js';
 
 /**
@@ -247,6 +247,63 @@ test('a chat host names the Responses-only tools it cannot carry', async () => {
     assert.equal(events.filter((event) => event.type === 'warning' && /figma/.test(event.message)).length, 1,
         'one warning per client, not one per turn');
     api.close();
+});
+
+test('a request the chat route cannot fully carry goes without those tools and says so once', async () => {
+    const api = client({ force: true });
+    const events = [];
+    const onEvent = (event) => events.push(event);
+    const tools = [{ type: 'function', name: 'read_file', parameters: { type: 'object' } }, { type: 'web_search' }];
+    const result = await api.responses.create({ model: 'mock-model', input: 'привет', tools }, { onEvent });
+    assert.equal(result.output_text, 'ok');
+    assert.deepEqual(chatPosts()[0].body.tools.map((tool) => tool.function.name), ['read_file']);
+    const warns = () => events.filter((event) => event.type === 'warning' && /web_search/.test(event.message));
+    assert.equal(warns().length, 1, 'the lost capability is named once');
+    await api.responses.create({ model: 'mock-model', input: 'ещё', tools }, { onEvent });
+    assert.equal(warns().length, 1, 'one notice per client, not one per turn');
+    api.close();
+});
+
+test('chat.strict keeps a request on the Responses route instead of dropping what it asked for', async () => {
+    const api = client({ strict: true });
+    await assert.rejects(
+        () => api.responses.create({ model: 'mock-model', input: 'привет', tools: [{ type: 'web_search' }] }),
+        (error) => {
+            assert.equal(error.code, 'ROUTE_UNSUPPORTED');
+            assert.equal(error.status, 404, 'a refused route advances the fallback chain');
+            assert.match(error.message, /web_search/);
+            assert.equal(providerDown(error), true, 'the next backend gets the request with the tool intact');
+            return true;
+        },
+    );
+    assert.equal(chatPosts().length, 0, 'no request leaves without the capability it asked for');
+
+    const forced = client({ force: true, strict: true });
+    await assert.rejects(
+        () => forced.responses.create({ model: 'mock-model', input: 'привет', tools: [{ type: 'image_generation' }] }),
+        (error) => {
+            assert.equal(error.code, 'CHAT_CAPABILITY_MISSING');
+            assert.match(error.message, /image_generation/);
+            return true;
+        },
+    );
+
+    const calm = client({ strict: true });
+    const result = await calm.responses.create({
+        model: 'mock-model', input: 'привет',
+        tools: [{ type: 'function', name: 'read_file', parameters: { type: 'object' } }],
+    });
+    assert.equal(result.output_text, 'ok', 'a portable request still moves to the chat transport');
+    assert.equal(chatPosts().length, 1);
+    api.close(); forced.close(); calm.close();
+});
+
+test('chatGaps counts only what the chat route cannot carry', () => {
+    assert.deepEqual(chatGaps({ tools: [{ type: 'web_search' }, { type: 'image_generation' }] }), ['web_search', 'image_generation']);
+    assert.deepEqual(chatGaps({ tools: [{ type: 'mcp', server_label: 'figma' }, { type: 'function', name: 'read_file' }] }), [],
+        'an mcp server never stops a request');
+    assert.deepEqual(chatGaps({ background: true }), ['background']);
+    assert.deepEqual(chatGaps({ input: 'привет' }), []);
 });
 
 test('a field the gateway refuses is dropped and the same request goes again', async () => {

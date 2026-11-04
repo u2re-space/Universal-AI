@@ -16,7 +16,7 @@ import { ApiError } from './errors.js';
 import { createHttp, readBody } from './http.js';
 import { parseSSE } from './sse.js';
 import { createStreamReducer, outputText } from './stream.js';
-import { CHAT_PATH, createChatStreamReducer, droppedTools, normalizeChatResult, responsesRouteUnsupported, stripRejectedFields, toChatBody } from './chat.js';
+import { CHAT_PATH, chatGaps, createChatStreamReducer, droppedTools, normalizeChatResult, responsesRouteUnsupported, stripRejectedFields, toChatBody } from './chat.js';
 import { envValue } from '../core/runtime-env.js';
 import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
 import { rasterPadImageBytes, rasterRemoveImagePadding } from '../agent/image-raster.js';
@@ -121,6 +121,8 @@ export function createClient({
     /** Chat transport switches: `enabled: false` keeps a missing /responses route a hard error. */
     const chatSwitches = {
         enabled: chatSetting?.enabled !== false,
+        /** Off by default, like `chat.strict`: a dropped tool is named, not fatal. */
+        strict: chatSetting?.strict === true,
         streamUsage: chatSetting?.streamUsage !== false,
         reasoningEffort: chatSetting?.reasoningEffort !== false,
     };
@@ -359,8 +361,55 @@ export function createClient({
         return out;
     }
 
-    /** Built-in and mcp tools have no chat shape; the host is told about them once, not per turn. */
-    let droppedToolsWarned = false;
+    /** The lost-capability notice is printed once per client, and only by whoever announces the switch. */
+    let chatFitWarned = false;
+
+    /** Names of the `type: 'mcp'` servers in this body; they are reported, never fatal. */
+    const mcpLabels = (body) => droppedTools((Array.isArray(body?.tools) ? body.tools : []).filter((tool) => tool?.type === 'mcp'));
+
+    /**
+     * "нет web_search и серверов type: mcp (figma)" — what this body asks for and the chat route
+     * does not have. Empty string when the request fits the transport.
+     * @param {object} body Responses API body
+     * @returns {string}
+     * @ai.hint pure
+     */
+    const missingOnChat = (body) => {
+        const parts = [];
+        const gaps = chatGaps(body);
+        if (gaps.length) parts.push(gaps.join(', '));
+        const mcp = mcpLabels(body);
+        if (mcp.length) parts.push(`серверов type: mcp (${mcp.join(', ')})`);
+        return parts.length ? `нет ${parts.join(' и ')}` : '';
+    };
+
+    /**
+     * Why this body cannot be answered on the chat transport in full, or null when it can.
+     * `chat.strict: true` refuses such a request instead of quietly dropping a capability it asked
+     * for; the default sends it without those tools and says so once. A `type: 'mcp'` server never
+     * stops a request — the run works without it, so it is only named in the warning.
+     * @param {object} body Responses API body
+     * @param {{ onEvent?: Function, announce?: boolean }} [options] announce: false when the caller states the losses itself
+     * @returns {ApiError|null}
+     * @ai.hint io
+     */
+    function chatFit(body, { onEvent = null, announce: tell = true } = {}) {
+        if (chatGaps(body).length && chatSwitches.strict) {
+            return new ApiError(`Запросу нужен маршрут /v1/responses: на /v1/chat/completions ${missingOnChat(body)}. `
+                + 'Возьмите бэкенд с /v1/responses, выключите эти инструменты (--no-web, --no-images) или напишите '
+                + 'chat.strict: false, чтобы запрос ушёл без них.', { code: 'CHAT_CAPABILITY_MISSING', status: 404 });
+        }
+        const missing = missingOnChat(body);
+        if (tell && missing && !chatFitWarned) {
+            chatFitWarned = true;
+            announce({
+                type: 'warning',
+                message: `На /v1/chat/completions ${missing} — запрос уходит без них; `
+                    + 'chat.strict: true отказывает в таком переводе.',
+            }, onEvent);
+        }
+        return null;
+    }
 
     /**
      * POST /chat/completions with a Responses-shaped body, answered in the Responses shape.
@@ -376,17 +425,8 @@ export function createClient({
             throw new ApiError('Серверное хранение разговора (store / previous_response_id) работает только на /v1/responses; '
                 + 'хост отвечает на /v1/chat/completions — выключите store.', { code: 'CHAT_STATE_UNSUPPORTED', status: 400 });
         }
-        if (!droppedToolsWarned) {
-            const dropped = droppedTools(body?.tools);
-            if (dropped.length) {
-                droppedToolsWarned = true;
-                announce({
-                    type: 'warning',
-                    message: 'На /v1/chat/completions нет встроенных инструментов Responses и серверов type: mcp — не вызываются: '
-                        + `${dropped.join(', ')}.`,
-                }, options.onEvent);
-            }
-        }
+        const gap = chatFit(body, { onEvent: options.onEvent });
+        if (gap) throw gap;
         let chatBody = toChatBody(body, { includeUsage: chatSwitches.streamUsage, withReasoning: chatSwitches.reasoningEffort });
         for (let attempt = 0; ; attempt++) {
             try {
@@ -435,8 +475,23 @@ export function createClient({
                 return withText(await call('responses', { body, stream: Boolean(body?.stream), ...options }));
             } catch (error) {
                 if (!chatSwitches.enabled || !responsesRouteUnsupported(error)) throw error;
+                const gaps = chatGaps(body);
+                // The route is missing for sure: remember it even when this request cannot move.
                 chatOnly = true;
-                announce({ type: 'warning', message: 'Хост не отвечает на /v1/responses — запросы идут через /v1/chat/completions.' }, options.onEvent);
+                if (gaps.length && chatSwitches.strict) {
+                    throw new ApiError('Хост не отвечает на /v1/responses, а запросу нужен именно он: '
+                        + `на /v1/chat/completions нет ${gaps.join(', ')}. Возьмите бэкенд с /v1/responses, `
+                        + 'выключите эти инструменты (--no-web, --no-images) или напишите chat.strict: false.',
+                    { code: 'ROUTE_UNSUPPORTED', status: 404, cause: error });
+                }
+                const missing = missingOnChat(body);
+                // One line says both facts; chatCreate must not repeat the capability part.
+                if (missing) chatFitWarned = true;
+                announce({
+                    type: 'warning',
+                    message: 'Хост не отвечает на /v1/responses — запросы идут через /v1/chat/completions'
+                        + (missing ? `; там ${missing}, запрос уходит без них (chat.strict: true отказывает в переводе)` : '') + '.',
+                }, options.onEvent);
                 return chatCreate(body, options);
             }
         },

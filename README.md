@@ -817,20 +817,32 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 `client.transport` показывает, каким маршрутом отвечает хост (`responses` или `chat`).
 
 ```json
-"chat": { "enabled": true, "force": false, "streamUsage": true, "reasoningEffort": true }
+"chat": { "enabled": true, "force": false, "strict": false, "streamUsage": true, "reasoningEffort": true }
 ```
 
-* `enabled: false` — отсутствующий `/v1/responses` остаётся ошибкой, транспорт не подменяется.
+* `enabled: false` — отсутствующий `/v1/responses` остаётся ошибкой, транспорт не подменяется. Тогда
+  `404` воспринимается как отказ хоста, и запрос уходит на следующий бэкенд из `backends`: выбор в пользу
+  исходного API, а не совместимости.
 * `force: true` — сразу вести все запросы на `/v1/chat/completions`; то же включает у бэкенда запись
   `supports: { responses: false, chat: true }`, чтобы не платить отклонённым вызовом `/responses`.
+* `strict: true` — не переводить запрос, которому чат-транспорт не даёт запрошенного: встроенных
+  инструментов Responses (`web_search`, `image_generation`) и `background`. Такой запрос завершается
+  ошибкой `CHAT_CAPABILITY_MISSING` (или `ROUTE_UNSUPPORTED`, если хост ещё не отказывал) и уходит на
+  бэкенд с `/v1/responses`. По умолчанию `false`: `tools.web` включён всегда, и строгий отказ ронял бы
+  любой запуск на чат-хосте из-за поиска.
 * `streamUsage` — добавляет `stream_options.include_usage`, чтобы стрим принёс usage; хост, который не
   знает этого поля, получает тот же запрос без него.
 * `reasoningEffort` — передаёт `reasoning.effort` как `reasoning_effort`.
 
+Потеря возможностей не бывает тихой: при переходе на чат-транспорт клиент одним предупреждением называет
+то, чего на нём нет (`web_search`, `image_generation`, серверы `type: mcp`), и это же поле можно
+исключить из запроса явно — `--no-web`, `--no-images`, `tools.web: false`. Сервер `type: mcp` запрос не
+останавливает: без него прогон работает (Figma остаётся на приложенных картинках).
+
 Конвертация сохраняет: `instructions` → первое `system`-сообщение, `input` → `messages`
 (`input_image` → `image_url`, `input_file` → `file`, `function_call` → `tool_calls`,
-`function_call_output` → роль `tool`), `tools` → инструменты chat (`web_search` и `image_generation`
-отбрасываются — их в этом API нет), `text.format` → `response_format`, `max_output_tokens` →
+`function_call_output` → роль `tool`), `tools` → инструменты chat (кроме отброшенных встроенных
+и `type: mcp`), `text.format` → `response_format`, `max_output_tokens` →
 `max_completion_tokens`, `temperature`, `top_p`, `service_tier`. Поля, которых в чате нет
 (`store`, `background`, `previous_response_id`, `include`, `truncation`, `text.verbosity`), отбрасываются,
 а поле, которое хост отклонил по имени, убирается из повтора запроса. Ответы только для Responses API —
