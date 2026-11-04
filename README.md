@@ -524,6 +524,7 @@ ai run --template quest.md --file notes.md "допиши шейдер"
 ```bash
 ai mcp add design --mcp-command node --mcp-arg servers/design.js
 ai mcp add openai_docs --mcp-url https://developers.openai.com/mcp --mcp-description "OpenAI docs"
+ai mcp add figma --mcp-url https://mcp.figma.com/mcp --mcp-header "Authorization=Bearer {{env:FIGMA_TOKEN}}"
 ai mcp list
 ai mcp probe design
 ai mcp remove design
@@ -535,12 +536,28 @@ ai mcp remove design
 "mcp": {
   "servers": [
     { "id": "design", "command": "node", "args": ["servers/design.js"], "env": { "TOKEN": "…" }, "enabled": true },
-    { "id": "openai_docs", "server_url": "https://developers.openai.com/mcp", "server_description": "OpenAI docs", "require_approval": "never" }
+    {
+      "id": "openai_docs",
+      "server_url": "https://developers.openai.com/mcp",
+      "server_description": "OpenAI docs",
+      "require_approval": "never",
+      "allowed_tools": ["search_openai_docs"],
+      "headers": { "Api-Key": "{{env:MCP_DOCS_KEY}}" }
+    }
   ]
 }
 ```
 
 `tools.mcp` по умолчанию `true`. Пустой список серверов ничего не добавляет. `--no-tools` и `--tools` без `mcp` отключают и локальные источники, и сторонние адреса. `require_approval` по умолчанию `never`: API вызывает сервер сам. Значение `always` записывается, но ход не отвечает на `mcp_approval_request`.
+
+### Заголовки сервера с адресом
+
+`headers` у сервера с `server_url` уходит в `tools[]` запроса вместе с `server_url` и `server_label`, поэтому шлюз или сам MCP-сервер получает авторизацию и прочий контекст вызывающей стороны. Флаг `--mcp-header` повторяется и пишет те же значения в `~/.ai-agent/config.json`; относится он только к серверу с `--mcp-url`.
+
+* Имя заголовка — токен (`Authorization`, `X-Trace-Id`), значение — одна строка. Число и флаг становятся строкой, `null` убирает заголовок. Значение из переменной окружения пишется как `{{env:NAME}}`: подстановка разворачивается при загрузке конфигурации, поэтому в файл секрет не попадает.
+* `authorization` — отдельное поле с bearer-токеном; `headers` для всего остального. Оба поля сервер получает как есть.
+* `ai config` и `ai mcp list` показывают имена заголовков, значения скрыты (`…`).
+* На транспорте `/v1/chat/completions` инструменты `type: mcp` не вызываются — маршрут их не знает. Клиент один раз предупреждает в stderr и перечисляет отброшенные серверы.
 
 ### Figma
 
@@ -551,8 +568,10 @@ ai mcp remove design
 
 Сервер отдаёт фреймы, слои, стили и узлы по `nodeId`; ими пользуются `decomposer` (разбор макета на экраны) и
 `measurer` (числа для вёрстки). Figma пускает в этот MCP только авторизованных клиентов: авторизация выполняется
-на стороне Responses API или шлюза, локальный ключ OpenAI её не заменяет. Если авторизации нет, ссылка всё равно
-полезна как источник задачи, а разбор и замеры идут по приложенным картинкам.
+на стороне Responses API или шлюза, локальный ключ OpenAI её не заменяет. Если шлюз не подставляет авторизацию сам,
+её отдаёт сам сервер Figma в `headers` — `ai mcp add figma --mcp-url https://mcp.figma.com/mcp --mcp-header
+"Authorization=Bearer {{env:FIGMA_TOKEN}}"`. Если авторизации нет, ссылка всё равно полезна как источник задачи,
+а разбор и замеры идут по приложенным картинкам.
 
 ## Чаты, решения и Telegram
 
@@ -751,13 +770,14 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 ]
 ```
 
-Поля записи: `baseUrl` (или `baseURL`) — корень, к которому добавляются `/responses`, `/images/...` и `/decisions`;
+Поля записи: `baseUrl` (или `baseURL`) — корень, к которому добавляются `/responses`, `/chat/completions`, `/images/...` и `/decisions`;
 `apiKey` — ключ, обычно через `{{env:NAME}}` (вместо него можно указать `env` с именем переменной); `headers` —
 свои заголовки (значения `true` и числа становятся строками; `Authorization`, `Content-Type`, `Accept` и
-заголовки организации/проекта не перезаписываются); `supports` — выключатели маршрутов `responses`, `images`,
-`decisions`, `moderations`. `decisionAPI` — старое имя `decisions`. Значение `false` исключает бэкенд из маршрута;
+заголовки организации/проекта не перезаписываются); `supports` — выключатели маршрутов `responses`, `chat`,
+`images`, `decisions`, `moderations`. `decisionAPI` — старое имя `decisions`. Значение `false` исключает бэкенд из маршрута;
 для `images-edit` и `images-vector` действует выключатель `images`. Решения и модерация перебирают только
-поддерживающие хосты; если таких нет, шаг решений пропускается.
+поддерживающие хосты; если таких нет, шаг решений пропускается. Бэкенд с `responses: false` и `chat: true`
+остаётся в списке: его запросы идут сразу на `/v1/chat/completions`.
 
 Подстановки работают в любой строке конфигурации и в промптах:
 
@@ -784,6 +804,38 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 обратно в зашифрованном виде (`include: ["reasoning.encrypted_content"]`) — ничего не остаётся на
 сервере. `--store` переключает на серверное состояние через `previous_response_id`.
 Фоновый режим API (`--background`) требует `store: true` и включает его сам.
+На транспорте `/v1/chat/completions` серверного состояния нет: с `--store` запрос завершается ошибкой,
+поэтому историю держит только сессия CLI.
+
+### Транспорт: /v1/responses и /v1/chat/completions
+
+Основной маршрут — `/v1/responses`. Если хост отвечает на него `404`, `405`, `501` или сообщением
+«endpoint not supported», клиент переводит тот же запрос на `/v1/chat/completions`, а ответ переводит
+обратно в форму Responses API: `output`-элементы, `output_text`, `usage`, вызовы инструментов и события
+потока остаются прежними, поэтому цикл агента, роли, учёт токенов и `--json` не знают о подмене.
+Отказ хоста запоминается до конца процесса, чтобы не платить лишним запросом на каждый ход;
+`client.transport` показывает, каким маршрутом отвечает хост (`responses` или `chat`).
+
+```json
+"chat": { "enabled": true, "force": false, "streamUsage": true, "reasoningEffort": true }
+```
+
+* `enabled: false` — отсутствующий `/v1/responses` остаётся ошибкой, транспорт не подменяется.
+* `force: true` — сразу вести все запросы на `/v1/chat/completions`; то же включает у бэкенда запись
+  `supports: { responses: false, chat: true }`, чтобы не платить отклонённым вызовом `/responses`.
+* `streamUsage` — добавляет `stream_options.include_usage`, чтобы стрим принёс usage; хост, который не
+  знает этого поля, получает тот же запрос без него.
+* `reasoningEffort` — передаёт `reasoning.effort` как `reasoning_effort`.
+
+Конвертация сохраняет: `instructions` → первое `system`-сообщение, `input` → `messages`
+(`input_image` → `image_url`, `input_file` → `file`, `function_call` → `tool_calls`,
+`function_call_output` → роль `tool`), `tools` → инструменты chat (`web_search` и `image_generation`
+отбрасываются — их в этом API нет), `text.format` → `response_format`, `max_output_tokens` →
+`max_completion_tokens`, `temperature`, `top_p`, `service_tier`. Поля, которых в чате нет
+(`store`, `background`, `previous_response_id`, `include`, `truncation`, `text.verbosity`), отбрасываются,
+а поле, которое хост отклонил по имени, убирается из повтора запроса. Ответы только для Responses API —
+`/responses/compact`, `/responses/input_tokens`, `retrieve`, `cancel`, `--background`, `ai resume` —
+на чат-транспорте сообщают о недоступности маршрута.
 
 ## Инструменты агента и безопасность
 
@@ -918,7 +970,9 @@ src/cli-help.js           текст `ai --help`
 src/openai/http.js        транспорт на node:https (явный таймаут простоя, без скрытых лимитов undici)
 src/openai/sse.js         ограниченный по размеру парсер Server-Sent Events
 src/openai/stream.js      события Responses API → события приложения, финальный объект ответа
-src/openai/client.js      /responses (create, retrieve+resume, cancel, compact, input_tokens), /models, повторы
+src/openai/chat.js        перевод запросов и ответов между /responses и /v1/chat/completions
+src/openai/client.js      /responses (create, retrieve+resume, cancel, compact, input_tokens), /models, повторы,
+                          автопереход на /chat/completions, если хост не знает /responses
 src/core/config-defaults.js  значения по умолчанию и списки допустимых полей
 src/core/config.js        конфигурация, роли (resolveRole) и валидация
 src/core/session.js       история разговора (stateless / previous_response_id), сохранение сессий
@@ -976,8 +1030,9 @@ src/server/publish.js     --serve: публикация событий терм�
 npm test
 ```
 
-Тесты (node:test) используют локальный мок Responses API (`test/helpers/mock-server.js`) и покрывают
-SSE-парсер, клиент (повторы, ошибки, обрыв и возобновление потока, фон), цикл агента (инструменты,
+Тесты (node:test) используют локальный мок Responses API и `/v1/chat/completions` (`test/helpers/mock-server.js`) и покрывают
+SSE-парсер, клиент (повторы, ошибки, обрыв и возобновление потока, фон, переход на чат-транспорт),
+конвертеры `/v1/chat/completions` (история, инструменты, поток, отклонённые поля), цикл агента (инструменты,
 политика, лимиты, картинки, бюджеты), команду ролей (план → сбор → шаги → ревью → память, разные модели
 по ролям, делегирование vision, кеш сводок), память (SQLite/FTS5), общий контекст, сессии, вложения, пути,
 запуск команд и CLI целиком (включая `--detach`, `jobs`, `memory`). Сетевые вызовы к OpenAI в тестах не выполняются.
@@ -986,5 +1041,8 @@ SSE-парсер, клиент (повторы, ошибки, обрыв и во
 
 * Hosted-агенты OpenAI (бета `/agents`, `/agents/sessions`) не используются — всё построено на
   Responses API; `src/openai/client.js` и `runTurn` — точка расширения.
+* На хостах без `/v1/responses` работают только возможности `/v1/chat/completions`: без серверного
+  состояния (`store`), компактизации, счёта входных токенов, фонового режима и встроенных инструментов
+  `web_search` / `image_generation` (`src/openai/chat.js` — точка расширения этого перевода).
 * Цены моделей не встроены: без `prices` в конфигурации показываются только токены.
 * Прокси для соединения с API не поддерживается транспортом (`OPENAI_BASE_URL` позволяет указать шлюз).

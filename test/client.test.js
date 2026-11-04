@@ -48,15 +48,24 @@ test('a dropped network can be retried and a persistent status cannot', async ()
     assert.equal(transientNetwork({ code: 'ENETRESET' }), true);
     assert.equal(transientNetwork({ message: 'read ECONNRESET: network changed' }), true);
     assert.equal(transientNetwork({ code: 'EACCES' }), false);
+    // The chat transport is off here: a 404 must stay one call, not become a route switch.
+    const strict = () => createClient({ apiKey: 'sk-test', baseURL: server.baseURL, retries: 2, chat: { enabled: false } });
     for (const status of [400, 401, 403, 404]) {
         server.reset();
         scenarios = [{ httpStatus: status, httpBody: { error: { message: 'постоянная ошибка', code: 'denied' } } }];
         const events = [];
-        await assert.rejects(client().responses.create({ model: 'mock-model', input: 'hi', stream: false }, { onEvent: (event) => events.push(event) }), (error) => error.status === status);
+        await assert.rejects(strict().responses.create({ model: 'mock-model', input: 'hi', stream: false }, { onEvent: (event) => events.push(event) }), (error) => error.status === status);
         assert.equal(server.requests.length, 1);
         assert.equal(events.some((event) => event.type === 'request.retry'), false); // test line disabled due of issues with fallback system
         //assert.ok(events.some((event) => event.type === 'warning' && String(event.message).includes(String(status))));
     }
+});
+
+test('a 404 on /responses costs one call before the chat transport takes over', async () => {
+    server.reset();
+    scenarios = [{ httpStatus: 404, httpBody: { error: { message: 'Unrecognized request URL (POST: /v1/responses)' } } }];
+    await assert.rejects(client().responses.create({ model: 'mock-model', input: 'hi' }), (error) => error.status === 404);
+    assert.deepEqual(server.requests.map((entry) => entry.path), ['/v1/responses', '/v1/chat/completions']);
 });
 
 test('a 429 waits at least 3 seconds and honors a longer Retry-After', () => {

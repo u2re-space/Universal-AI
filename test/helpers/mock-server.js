@@ -9,8 +9,13 @@ import { randomUUID } from 'node:crypto';
  *     status?: 'completed'|'incomplete'|'failed', usage?, error?, httpStatus?, httpBody?, background?: 'queued' }
  * Every POST /responses produces SSE when body.stream is true, JSON otherwise.
  * Background responses stay 'queued' for `backgroundPolls` GETs, then complete.
+ *
+ * `noResponses: true` answers POST /responses the way a chat-only gateway does, and
+ * chatScript(body, index) then serves POST /chat/completions with a chat scenario:
+ *   { content?, reasoningContent?, refusal?, toolCalls?: [{ id?, name, arguments }],
+ *     finishReason?, usage?, httpStatus?, httpBody? }
  */
-export async function startMockServer({ script, imageScript, backgroundPolls = 2, decisions = null } = {}) {
+export async function startMockServer({ script, chatScript = null, imageScript, backgroundPolls = 2, decisions = null, noResponses = false } = {}) {
     const requests = [];
     const responses = new Map();   // id -> { body, scenario, polls }
     let counter = 0;
@@ -111,6 +116,56 @@ export async function startMockServer({ script, imageScript, backgroundPolls = 2
         res.end();
     }
 
+    /** Chat completion JSON for one chat scenario. */
+    function chatCompletion(id, body, scenario) {
+        const message = { role: 'assistant' };
+        if (scenario.content !== undefined) message.content = scenario.content;
+        if (scenario.reasoningContent) message.reasoning_content = scenario.reasoningContent;
+        if (scenario.refusal) message.refusal = scenario.refusal;
+        if (scenario.toolCalls?.length) {
+            message.tool_calls = scenario.toolCalls.map((call, index) => ({
+                id: call.id ?? `call_${id}_${index}`,
+                type: 'function',
+                function: { name: call.name, arguments: typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments ?? {}) },
+            }));
+        }
+        return {
+            id, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model: body.model ?? 'mock-model',
+            choices: [{ index: 0, message, finish_reason: scenario.finishReason ?? (scenario.toolCalls?.length ? 'tool_calls' : 'stop') }],
+            usage: scenario.usage ?? { prompt_tokens: 40, completion_tokens: 12, total_tokens: 52,
+                prompt_tokens_details: { cached_tokens: 8 }, completion_tokens_details: { reasoning_tokens: 0 } },
+        };
+    }
+
+    /** Chat Completions SSE: chunks carry no `type` field and end with the `[DONE]` sentinel. */
+    function writeChatSSE(res, id, body, scenario) {
+        let seq = 0;
+        const send = (payload) => {
+            res.write(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+                model: body.model ?? 'mock-model', choices: [{ index: 0, delta: payload.delta ?? {}, finish_reason: payload.finish_reason ?? null }],
+                ...('usage' in payload ? { usage: payload.usage } : {}), __seq: seq++ })}\n\n`);
+        };
+        send({ delta: { role: 'assistant' } });
+        if (scenario.reasoningContent) {
+            for (const piece of scenario.reasoningContent.match(/.{1,6}/gs) ?? []) send({ delta: { reasoning_content: piece } });
+        }
+        if (scenario.content) {
+            for (const piece of scenario.content.match(/.{1,6}/gs) ?? []) send({ delta: { content: piece } });
+        }
+        (scenario.toolCalls ?? []).forEach((call, index) => {
+            const callId = call.id ?? `call_${id}_${index}`;
+            const args = typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments ?? {});
+            send({ delta: { tool_calls: [{ index, id: callId, type: 'function', function: { name: call.name, arguments: '' } }] } });
+            for (const piece of args.match(/.{1,8}/gs) ?? []) send({ delta: { tool_calls: [{ index, function: { arguments: piece } }] } });
+        });
+        send({ delta: {}, finish_reason: scenario.finishReason ?? (scenario.toolCalls?.length ? 'tool_calls' : 'stop') });
+        if (body.stream_options?.include_usage) {
+            res.write(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000),
+                model: body.model ?? 'mock-model', choices: [], usage: chatCompletion(id, body, scenario).usage })}\n\n`);
+        }
+        res.end('data: [DONE]\n\n');
+    }
+
     const server = http.createServer(async (req, res) => {
         res.on('error', () => {});
         req.on('error', () => {});
@@ -160,7 +215,26 @@ export async function startMockServer({ script, imageScript, backgroundPolls = 2
             const ready = stored.polls > backgroundPolls || !stored.body.background;
             return json(200, finalResponse(stored.body, stored.scenario, match[1], ready ? (stored.scenario.status ?? 'completed') : stored.polls === 1 ? 'queued' : 'in_progress'));
         }
+        if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
+            if (typeof chatScript !== 'function') {
+                return json(404, { error: { message: 'no chat completions route', type: 'invalid_request_error', code: 'not_found' } });
+            }
+            const index = requests.filter((r) => r.path === '/v1/chat/completions' && r.method === 'POST').length - 1;
+            let scenario;
+            try { scenario = await chatScript(body, index); }
+            catch (error) {
+                return json(500, { error: { message: `mock chat script error: ${error.message}`, type: 'server_error', code: 'mock_script_error' } });
+            }
+            if (scenario.httpStatus) return json(scenario.httpStatus, scenario.httpBody ?? { error: { message: 'mock chat http error', type: 'server_error', code: 'mock_error' } });
+            const id = `chatcmpl_${++counter}`;
+            if (!body.stream) return json(200, chatCompletion(id, body, scenario));
+            res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'x-request-id': `req_${id}` });
+            return writeChatSSE(res, id, body, scenario);
+        }
         if (req.method === 'POST' && url.pathname === '/v1/responses') {
+            if (noResponses) {
+                return json(404, { error: { message: 'Unrecognized request URL (POST: /v1/responses)', type: 'invalid_request_error' } });
+            }
             const index = requests.filter((r) => r.path === '/v1/responses' && r.method === 'POST').length - 1;
             let scenario;
             try { scenario = await script(body, index); }

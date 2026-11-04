@@ -7,9 +7,43 @@
  * @exports normalizeMcpServer, mcpToolName, remoteMcpTools
  * @ai.tags mcp, config
  * @ai.hint pure
- * @changed 2026-10-19 Remote HTTPS servers become Responses API mcp tools.
+ * @changed 2026-11-04 headers of a URL server are checked as header names and stringified scalars.
  */
 import { createHash } from 'node:crypto';
+
+/** Header name as RFC 7230 defines a token: a space or a colon means a typo, not a header. */
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * Header values for a remote server. Scalars become strings, a `null` value drops the entry, and a
+ * value stays on one line so it cannot smuggle a second header into the upstream request.
+ * @param {unknown} headers
+ * @param {string} id Server id, for the message.
+ * @returns {object|null} null when nothing is left to send.
+ * @ai.hint pure
+ */
+function normalizeServerHeaders(headers, id) {
+    if (headers == null) return null;
+    if (typeof headers !== 'object' || Array.isArray(headers)) {
+        throw new Error(`Конфигурация: mcp.servers.${id}.headers — объект со строковыми значениями`);
+    }
+    const out = {};
+    for (const [name, value] of Object.entries(headers)) {
+        if (name === '__proto__' || !HEADER_NAME.test(name)) {
+            throw new Error(`Конфигурация: mcp.servers.${id}.headers.${name} — некорректное имя заголовка`);
+        }
+        if (value == null) continue;
+        if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
+            throw new Error(`Конфигурация: mcp.servers.${id}.headers.${name} — строка, число или флаг`);
+        }
+        const text = String(value);
+        if (/[\r\n]/.test(text)) {
+            throw new Error(`Конфигурация: mcp.servers.${id}.headers.${name} — строка без перевода строки`);
+        }
+        out[name] = text;
+    }
+    return Object.keys(out).length ? out : null;
+}
 
 /**
  * Copy a server entry into the shape the client expects, or throw.
@@ -77,10 +111,7 @@ function normalizeRemoteServer(entry) {
     if (authorization != null && (typeof authorization !== 'string' || !authorization.trim() || /[\r\n]/.test(authorization))) {
         throw new Error('Конфигурация: mcp.servers.authorization — строка без перевода строки');
     }
-    const headers = entry.headers ?? null;
-    if (headers != null && (!headers || typeof headers !== 'object' || Array.isArray(headers) || Object.values(headers).some((value) => typeof value !== 'string'))) {
-        throw new Error('Конфигурация: mcp.servers.headers — объект со строковыми значениями');
-    }
+    const headers = normalizeServerHeaders(entry.headers, entry.id);
     if (entry.enabled != null && typeof entry.enabled !== 'boolean') throw new Error('Конфигурация: mcp.servers.enabled: true | false');
     return {
         id: entry.id,
@@ -90,7 +121,7 @@ function normalizeRemoteServer(entry) {
         require_approval: approval,
         allowed_tools: allowed ? [...allowed] : null,
         authorization,
-        headers: headers ? { ...headers } : null,
+        headers,
         enabled: entry.enabled !== false,
     };
 }

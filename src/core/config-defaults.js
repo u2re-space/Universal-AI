@@ -143,6 +143,18 @@ export const defaults = Object.freeze({
             { baseURL: 'https://gptunnel.ru/v1', apiKey: '{{env:GPTUNNEL_API_KEY}}', headers: { useWalletBalance: false }, env: 'GPTUNNEL_API_KEY' }
         ],
     },
+    /**
+     * Chat Completions transport. A gateway that has no /v1/responses route (404/405/501 or a
+     * "not supported" answer) is served through /v1/chat/completions instead: the same request is
+     * translated there and the answer is translated back, so tools, streaming, and usage keep working.
+     * Set `enabled: false` to let the missing route fail loudly instead of switching transports.
+     */
+    chat: {
+        enabled: true,          // fall back to /v1/chat/completions when /v1/responses is missing
+        force: false,           // skip /v1/responses altogether (a backend with `supports: { responses: false }` is forced on its own)
+        streamUsage: true,      // ask for stream_options.include_usage so a streamed answer still reports usage
+        reasoningEffort: true,  // send reasoning.effort as reasoning_effort (dropped when the host refuses it)
+    },
     approve: null,                    // ask | read | write | all; null → ask (TTY) or read (no TTY)
     shell: null,                      // run_command shell: null (cmd.exe / sh) | powershell | pwsh | bash | sh | zsh | cmd
     magickPath: null,                 // ImageMagick executable (magick or convert); null → look it up in PATH

@@ -1,13 +1,13 @@
 /**
  * @file src/commands/mcp.js
  * @module commands/mcp
- * @purpose `ai mcp` — list, add, remove, and probe user stdio MCP servers.
+ * @purpose `ai mcp` — list, add, remove, and probe user MCP servers, stdio and by URL.
  * @depends node:path, node:fs/promises, commands/shared, mcp/servers, mcp/session
  * @usedBy cli
- * @exports mcpCommand
+ * @exports mcpCommand, parseHeaderArgs
  * @ai.tags cli, mcp
  * @ai.hint io
- * @changed 2026-10-15 Home config edits and a stdio probe.
+ * @changed 2026-11-04 --mcp-header stores headers of a URL server; list shows their names.
  */
 import path from 'node:path';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
@@ -52,6 +52,32 @@ async function saveHomeFile(file, raw) {
 }
 
 /**
+ * `--mcp-header Name=value` and `--mcp-header "Name: value"` into one header map.
+ * A repeated flag adds a header; the same name twice keeps the last value.
+ * @param {string[]|undefined} items Raw values of the flag.
+ * @returns {object|null} null when the flag was not used.
+ * @exports
+ * @ai.hint pure
+ */
+export function parseHeaderArgs(items) {
+    const list = Array.isArray(items) ? items : (items == null ? [] : [items]);
+    if (!list.length) return null;
+    const out = {};
+    for (const item of list) {
+        const text = String(item ?? '');
+        const split = text.indexOf('=');
+        const colon = text.indexOf(':');
+        const at = split === -1 ? colon : (colon === -1 ? split : Math.min(split, colon));
+        if (at <= 0) throw new UsageError(`--mcp-header: ожидается "Имя=значение", получено "${text}"`);
+        const name = text.slice(0, at).trim();
+        const value = text.slice(at + 1).trim();
+        if (!name) throw new UsageError(`--mcp-header: пустое имя заголовка в "${text}"`);
+        out[name] = value;
+    }
+    return Object.keys(out).length ? out : null;
+}
+
+/**
  * Servers stored in the home file, still un-normalized until add/remove.
  * @param {object} raw
  * @returns {object[]}
@@ -83,7 +109,8 @@ export async function mcpCommand(ctx) {
         for (const server of servers) {
             const state = server.enabled ? 'включён' : 'выключен';
             const where = server.transport === 'http' ? server.server_url : `${server.command} ${(server.args ?? []).join(' ')}`;
-            renderer.write(`${server.id}\t${state}\t${where}\n`);
+            const names = server.transport === 'http' ? Object.keys(server.headers ?? {}) : [];
+            renderer.write(`${server.id}\t${state}\t${where}${names.length ? `\tзаголовки: ${names.join(', ')}` : ''}\n`);
         }
         return 0;
     }
@@ -91,14 +118,19 @@ export async function mcpCommand(ctx) {
         const id = positionals[1];
         if (!id) throw new UsageError('Укажите id: ai mcp add <id> --mcp-command <команда> или --mcp-url <https://…>');
         if (!values['mcp-command'] && !values['mcp-url']) throw new UsageError('Укажите --mcp-command или --mcp-url.');
+        const headers = parseHeaderArgs(values['mcp-header']);
+        if (headers && !values['mcp-url']) throw new UsageError('--mcp-header относится к серверу с --mcp-url: локальному серверу заголовки не нужны.');
         const entry = values['mcp-url']
             ? normalizeMcpServer({
                 id, server_url: values['mcp-url'], server_description: values['mcp-description'] ?? '',
-                require_approval: values['mcp-approval'] ?? 'never',
+                require_approval: values['mcp-approval'] ?? 'never', ...(headers ? { headers } : {}),
             })
             : normalizeMcpServer({ id, command: values['mcp-command'], args: values['mcp-arg'] ?? [] });
         const stored = entry.transport === 'http'
-            ? { id: entry.id, server_url: entry.server_url, server_description: entry.server_description, require_approval: entry.require_approval }
+            ? {
+                id: entry.id, server_url: entry.server_url, server_description: entry.server_description,
+                require_approval: entry.require_approval, ...(entry.headers ? { headers: entry.headers } : {}),
+            }
             : { id: entry.id, transport: entry.transport, command: entry.command, args: entry.args };
         const { file, raw } = await loadHomeFile(config.home);
         const servers = homeServers(raw);
@@ -106,7 +138,8 @@ export async function mcpCommand(ctx) {
         raw.mcp = { ...(raw.mcp ?? {}), servers: [...servers, stored] };
         await saveHomeFile(file, raw);
         const detail = entry.transport === 'http' ? entry.server_url : `stdio: ${entry.command} ${entry.args.join(' ')}`;
-        renderer.write(`Добавлен MCP-сервер ${id} (${detail})\n`);
+        const sent = entry.headers ? `, заголовки: ${Object.keys(entry.headers).join(', ')}` : '';
+        renderer.write(`Добавлен MCP-сервер ${id} (${detail}${sent})\n`);
         return 0;
     }
     if (sub === 'remove') {

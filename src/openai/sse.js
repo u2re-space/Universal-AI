@@ -1,13 +1,13 @@
 /**
  * @file src/openai/sse.js
  * @module openai/sse
- * @purpose Parse a Responses API server-sent event byte stream into JSON events.
+ * @purpose Parse a server-sent event byte stream into JSON events (Responses API and chat chunks).
  * @depends openai/errors
  * @usedBy openai/client
  * @exports parseSSE
- * @ai.tags sse, stream
+ * @ai.tags sse, chat
  * @ai.hint pure
- * @changed 2026-10-15 JSDoc card, 4-space indent.
+ * @changed 2026-11-04 Chat Completions chunks carry no type field, so the type check became optional.
  */
 import { ApiError } from './errors.js';
 
@@ -19,9 +19,14 @@ const isRecord = (value) => value !== null && typeof value === 'object' && !Arra
  * Handles split UTF-8 sequences, CR / LF / CRLF line endings, comments, multiple `data:` lines
  * and a final event without a trailing blank line. Yields parsed JSON events; the literal
  * `[DONE]` sentinel is yielded as `{ type: '__done' }`.
+ *
+ * `requireType` is true for the Responses API, where every event names itself. Chat Completions
+ * chunks carry no `type`, so that transport parses with `requireType: false` and takes the type
+ * from the SSE `event:` field when one is present.
  */
 export async function* parseSSE(source, {
     maxEventBytes = 16 * 1024 * 1024, maxStreamBytes = 512 * 1024 * 1024, maxEvents = 1_000_000,
+    requireType = true,
 } = {}) {
     const decoder = new TextDecoder('utf-8', { fatal: false });
     let streamBytes = 0, events = 0, eventBytes = 0;
@@ -55,8 +60,13 @@ export async function* parseSSE(source, {
         if (data.trim() === '[DONE]') return { type: '__done' };
         let event;
         try { event = JSON.parse(data); } catch { fail('SSE data не является корректным JSON.'); }
-        if (!isRecord(event) || typeof event.type !== 'string' || !event.type) fail('SSE-событие без поля type.');
-        if (name && name !== 'message' && name !== event.type) fail('Имя SSE-события не совпадает с JSON type.');
+        if (!isRecord(event)) fail('SSE-событие должно быть JSON-объектом.');
+        if (typeof event.type !== 'string' || !event.type) {
+            if (requireType) fail('SSE-событие без поля type.');
+            // A chat.completion.chunk names itself only through the SSE `event:` field, if at all.
+            if (name) event.type = name;
+        }
+        if (name && name !== 'message' && event.type && name !== event.type) fail('Имя SSE-события не совпадает с JSON type.');
         return event;
     }
     /**

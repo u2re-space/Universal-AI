@@ -4,10 +4,10 @@
  * @purpose Try another model channel, then another OpenAI-compatible host, when the first choice is unavailable.
  * @depends openai/client, openai/errors, openai/model-map, core/config
  * @usedBy commands/shared
- * @exports MODEL_FALLBACKS, fallbackModel, modelMissing, providerDown, routeMissing, supportsRoute, attemptChain, providerList, primaryBackend, createFallbackClient
- * @ai.tags openai, fallback
+ * @exports MODEL_FALLBACKS, fallbackModel, modelMissing, providerDown, routeMissing, supportsRoute, servesRoute, chatOptionsFor, attemptChain, providerList, primaryBackend, createFallbackClient
+ * @ai.tags openai, fallback, chat
  * @ai.hint io
- * @changed 2026-10-27 Ordered backends with custom headers and route switches; decisions skip unsupported hosts.
+ * @changed 2026-11-04 A host that only answers /v1/chat/completions stays in the chain for the responses route.
  */
 
 import { createClient } from './client.js';
@@ -111,6 +111,37 @@ export function supportsRoute(supports, kind) {
     if (key === 'decisions' && Object.hasOwn(supports, 'decisionAPI')) return supports.decisionAPI !== false;
     if (key === 'images' && Object.hasOwn(supports, 'imageAPI')) return supports.imageAPI !== false;
     return supports[key] !== false;
+}
+
+/**
+ * Whether a host can carry a route, counting the chat transport: an entry with
+ * `responses: false, chat: true` has no /v1/responses but still answers the same request on
+ * /v1/chat/completions, so it stays in the chain.
+ * @param {object|null|undefined} supports
+ * @param {string} kind
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function servesRoute(supports, kind) {
+    if (supportsRoute(supports, kind)) return true;
+    return kind === 'responses' && supportsRoute(supports, 'chat');
+}
+
+/**
+ * Chat switches for one host. A backend that declares `responses: false` while keeping `chat`
+ * starts on /v1/chat/completions at once, instead of paying for a refused /responses call first.
+ * @param {object} config
+ * @param {object|null|undefined} supports
+ * @returns {object}
+ * @exports
+ * @ai.hint pure
+ */
+export function chatOptionsFor(config, supports = null) {
+    const options = { ...(config?.chat ?? {}) };
+    const chatWanted = options.enabled !== false && options.force !== true;
+    if (chatWanted && !supportsRoute(supports, 'responses') && supportsRoute(supports, 'chat')) options.force = true;
+    return options;
 }
 
 /**
@@ -253,10 +284,12 @@ export function createFallbackClient(config, { create = createClient } = {}) {
         retries: config.retries, idleTimeoutMs: config.limits?.idleTimeoutMs, connectTimeoutMs: config.limits?.connectTimeoutMs,
         organization: config.organization, project: config.project,
     };
+    /** Chat transport switches, shared by every host this router opens. */
     const primarySpec = primaryBackend(config);
     const rasterOptions = { magickPath: config.magickPath ?? null, rasterEngine: config.image?.rasterEngine ?? 'auto' };
     const primary = create({
-        apiKey: primarySpec.apiKey, baseURL: primarySpec.baseURL, headers: primarySpec.headers, ...timeouts, ...rasterOptions,
+        apiKey: primarySpec.apiKey, baseURL: primarySpec.baseURL, headers: primarySpec.headers,
+        chat: chatOptionsFor(config, primarySpec.supports), ...timeouts, ...rasterOptions,
     });
     const opened = [];
     const map = config.fallback?.models ?? MODEL_FALLBACKS;
@@ -284,7 +317,8 @@ export function createFallbackClient(config, { create = createClient } = {}) {
                 found = {
                     ...item,
                     client: create({
-                        apiKey: item.apiKey, baseURL: item.baseURL, headers: item.headers, retries: config.retries,
+                        apiKey: item.apiKey, baseURL: item.baseURL, headers: item.headers,
+                        chat: chatOptionsFor(config, item.supports), retries: config.retries,
                         idleTimeoutMs: timeouts.idleTimeoutMs, connectTimeoutMs: timeouts.connectTimeoutMs, ...rasterOptions,
                     }),
                 };
@@ -292,7 +326,7 @@ export function createFallbackClient(config, { create = createClient } = {}) {
             }
             return endpointOf(item, found.client);
         }),
-    ].filter((endpoint) => supportsRoute(endpoint.supports, kind));
+    ].filter((endpoint) => servesRoute(endpoint.supports, kind));
     let active = primary;
 
     /**
@@ -329,6 +363,13 @@ export function createFallbackClient(config, { create = createClient } = {}) {
             compact: (...args) => active.responses.compact(...args),
             inputTokens: (...args) => active.responses.inputTokens(...args),
         },
+        chat: {
+            /** Force the chat transport on the host that answered last. */
+            create: (body, options = {}) => active.chat.create(body, options),
+            get isFallback() { return active.transport === 'chat'; },
+        },
+        /** Route of the host that answered last: `responses` or `chat`. */
+        get transport() { return active.transport ?? 'responses'; },
         images: {
             ...primary.images,
             generate: (args = {}) => sendBody(args, { signal: args.signal, onEvent: args.onEvent }, 'images'),

@@ -220,9 +220,15 @@ context=false запускает роль на чистом контексте. 
 MCP:
   ai mcp add <id> --mcp-command <команда> [--mcp-arg <аргумент> ...]
   ai mcp add <id> --mcp-url <https://…> [--mcp-description <текст>] [--mcp-approval never|always]
-  ai mcp remove <id>     ai mcp probe <id>
+      [--mcp-header "Имя=значение" ...]
+  ai mcp remove <id>     ai mcp list     ai mcp probe <id>
   Локальный сервер — stdio. Сторонний https-адрес уходит в API как type mcp, процесс не запускается.
+  --mcp-header повторяется; пишет headers сервера в ~/.ai-agent/config.json. В конфиге то же поле
+  headers: { "Authorization": "{{env:FIGMA_TOKEN}}" } — скаляр становится строкой, имя заголовка
+  должно быть токеном, значение — одной строкой. ai config и ai mcp list показывают имена заголовков,
+  значения скрыты. Поле authorization — отдельный bearer-токен сервера.
   add/remove правят ~/.ai-agent/config.json. Вызовы локальных инструментов MCP подтверждаются как сеть.
+  На транспорте chat серверы type mcp не вызываются: этот маршрут их не знает, о них сообщает warning.
   Figma: ссылка figma.com в --url или в тексте задачи сама добавляет сервер figma
   (transport http, https://mcp.figma.com/mcp, require_approval never) в запрос и в .ai/generation.json —
   отдельный ai mcp add не нужен. Decomposer и measurer читают макет через этот сервер; сервер требует
@@ -245,10 +251,22 @@ MCP:
 Бэкенды и подстановки:
   backends: [{ baseUrl, apiKey: "{{env:NAME}}", headers: {...}, supports: { decisions: false } }, ...]
   Первый бэкенд с URL и ключом — основной, остальные — резервные по порядку; без ключа бэкенд пропускается.
-  supports: responses | images | decisions | moderations; decisionAPI — старое имя decisions; false выключает маршрут.
+  supports: responses | chat | images | decisions | moderations; decisionAPI — старое имя decisions; false выключает маршрут.
   Заголовки бэкенда не заменяют Authorization, Content-Type, Accept и заголовки организации/проекта.
   Подстановки в конфигурации и промптах: {{env:NAME}}, {{task:PROMPT}}, {{delegated:PROMPT}}, {{fs:путь}}.
   {{fs:}} читает UTF-8 файл внутри рабочего каталога, не секрет и не больше limits.maxFileReadBytes.
+
+Транспорт:
+  Запросы идут на /v1/responses. Если хост отвечает на них 404, 405 или 501 (или «endpoint not supported»),
+  тот же запрос переводится на /v1/chat/completions, а ответ переводится обратно: инструменты,
+  поток, usage и история работают как обычно. Выбор запоминается на весь запуск процесса.
+  chat: { enabled, force, streamUsage, reasoningEffort } — включено по умолчанию; enabled: false оставляет
+  отсутствующий /v1/responses ошибкой, force сразу ведёт все запросы на /v1/chat/completions.
+  streamUsage добавляет stream_options.include_usage, reasoningEffort передаёт reasoning.effort
+  как reasoning_effort; поле отбрасывается, если хост его отклонил.
+  На транспорте chat не работают previous_response_id (store), /responses/compact, /responses/input_tokens,
+  фоновый режим --background и ai resume: они есть только в Responses API.
+  supports: { responses: false, chat: true } принудительно отправляет хост на /v1/chat/completions.
 
 Прочее:
   --json                 события и результат в формате JSON Lines     --quiet, -q   только ответ

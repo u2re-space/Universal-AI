@@ -38,10 +38,11 @@ import { expandConfigStrings } from './placeholders.js';
 const KiB = 1024;
 
 /** Route switches a backend may turn off. `decisionAPI` is the older spelling of `decisions`. */
-const BACKEND_ROUTES = Object.freeze(['decisions', 'responses', 'images', 'moderations']);
+const BACKEND_ROUTES = Object.freeze(['decisions', 'responses', 'chat', 'images', 'moderations']);
 const SUPPORT_ALIASES = Object.freeze({
     decisionapi: 'decisions', decisions: 'decisions',
     responseapi: 'responses', responses: 'responses',
+    chatapi: 'chat', chat: 'chat', chatcompletions: 'chat', completions: 'chat',
     imageapi: 'images', images: 'images',
     moderationapi: 'moderations', moderations: 'moderations',
 });
@@ -456,6 +457,11 @@ function validateConfig(c) {
     if (!isRecord(c.fallback.models)) fail('fallback.models должен быть объектом');
     for (const [key, value] of Object.entries(c.fallback.models)) {
         if (typeof key !== 'string' || !key.trim() || typeof value !== 'string' || !value.trim()) fail(`fallback.models.${key} должен быть непустой строкой`);
+    }
+    if (!isRecord(c.chat)) fail('chat должен быть объектом');
+    for (const [key, value] of Object.entries(c.chat)) {
+        if (!(key in defaults.chat)) fail(`chat.${key}: неизвестное поле`);
+        if (typeof value !== 'boolean') fail(`chat.${key}: true | false`);
     }
     if (!Array.isArray(c.backends)) fail('backends должен быть массивом');
     validateBackends(c.backends, 'backends', fail);

@@ -1,13 +1,13 @@
 /**
  * @file src/openai/client.js
  * @module openai/client
- * @purpose Responses API client on node:https: create, retrieve, cancel, compact, and count tokens.
- * @depends node:crypto, node:timers/promises, openai/errors, openai/http, openai/sse, openai/stream
+ * @purpose API client on node:https: Responses routes, with a /chat/completions transport when the host lacks them.
+ * @depends node:crypto, node:timers/promises, openai/errors, openai/http, openai/sse, openai/stream, openai/chat
  * @usedBy commands/shared
  * @exports ApiError, createClient, retryDelayMs
- * @ai.tags openai, http
+ * @ai.tags openai, http, chat
  * @ai.hint io
- * @changed 2026-10-22 Vector models use aspect_ratio and svg on the edit route.
+ * @changed 2026-11-04 createClient answers /v1/chat/completions when the host has no /v1/responses route.
  */
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -16,6 +16,7 @@ import { ApiError } from './errors.js';
 import { createHttp, readBody } from './http.js';
 import { parseSSE } from './sse.js';
 import { createStreamReducer, outputText } from './stream.js';
+import { CHAT_PATH, createChatStreamReducer, droppedTools, normalizeChatResult, responsesRouteUnsupported, stripRejectedFields, toChatBody } from './chat.js';
 import { envValue } from '../core/runtime-env.js';
 import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
 import { rasterPadImageBytes, rasterRemoveImagePadding } from '../agent/image-raster.js';
@@ -94,6 +95,10 @@ export function retryDelayMs(attempt, retryAfter, status = null) {
  * OpenAI Responses API client (plus /models) on node:https; no SDK.
  * All request bodies are passed through as documented by the API reference.
  *
+ * When the host has no /v1/responses route, `responses.create` translates the request to
+ * /v1/chat/completions and translates the answer back, so the rest of the program keeps reading
+ * Responses-shaped output items. `transport` reports which one the host actually answers.
+ *
  * `onEvent` receives the normalized streaming events described in stream.js plus
  * transport events: request.start / request.retry / request.headers / request.done.
  */
@@ -104,6 +109,7 @@ export function createClient({
     http, retries = defaults.retries, idleTimeoutMs, connectTimeoutMs, maxErrorBytes = defaults.maxErrorBytes,
     maxResponseBytes = defaults.maxResponseBytes, maxEventBytes = defaults.maxEventBytes,
     magickPath = null, rasterEngine = 'auto',
+    chat: chatSetting = null,
     onEvent: globalOnEvent,
 } = {}) {
     if (typeof apiKey !== 'string' || !apiKey.trim() || /[\r\n]/.test(apiKey)) {
@@ -112,6 +118,23 @@ export function createClient({
     const root = normalizeBaseURL(baseURL);
     const customHeaders = normalizeHeaders(headers);
     const transport = http ?? createHttp({ idleTimeoutMs, connectTimeoutMs });
+    /** Chat transport switches: `enabled: false` keeps a missing /responses route a hard error. */
+    const chatSwitches = {
+        enabled: chatSetting?.enabled !== false,
+        streamUsage: chatSetting?.streamUsage !== false,
+        reasoningEffort: chatSetting?.reasoningEffort !== false,
+    };
+    /** Sticky once the host has refused /responses (or `chat.force` said so up front). */
+    let chatOnly = chatSetting?.force === true;
+
+    /**
+     * Forward an event that belongs to the transport rather than to one HTTP call.
+     * @param {object} event
+     * @param {Function} [onEvent]
+     * @returns {void}
+     * @ai.hint io
+     */
+    const announce = (event, onEvent) => { try { onEvent?.(event); globalOnEvent?.(event); } catch { /* observer */ } };
 
     /**
      * Auth and content headers for one call. Accept is event-stream only when streaming.
@@ -155,10 +178,12 @@ export function createClient({
 
     /**
    * Core call. `stream` = expect text/event-stream and reduce it; otherwise parse JSON.
+   * `streamReducer` swaps the Responses reducer for another one over the same byte stream
+   * (`eventTypesRequired: false` for transports whose events carry no type field).
    * Retries only before any response byte has been consumed, and only for retryable failures.
    * A foreground stream that drops after it started is restarted once; a background one is resumed by the caller.
    */
-    async function call(path, { method = 'POST', body, rawBody, contentType, query, stream = false, signal, onEvent, idleTimeout, extraHeaders = null } = {}) {
+    async function call(path, { method = 'POST', body, rawBody, contentType, query, stream = false, signal, onEvent, idleTimeout, extraHeaders = null, streamReducer = null, eventTypesRequired = true } = {}) {
         const url = new URL(path, root);
         for (const [key, value] of Object.entries(query ?? {})) {
             if (value === undefined || value === null) continue;
@@ -223,9 +248,9 @@ export function createClient({
             try {
                 let result;
                 if (mime === 'text/event-stream') {
-                    reducer = createStreamReducer({ emit });
+                    reducer = streamReducer ? streamReducer({ emit }) : createStreamReducer({ emit });
                     let done = false;
-                    for await (const event of parseSSE(res.body, { maxEventBytes, maxStreamBytes: maxResponseBytes })) {
+                    for await (const event of parseSSE(res.body, { maxEventBytes, maxStreamBytes: maxResponseBytes, requireType: eventTypesRequired })) {
                         if (event.type === '__done') break;
                         reducer.handle(event);
                         if (['response.completed', 'response.failed', 'response.incomplete'].includes(event.type)) { done = true; break; }
@@ -334,24 +359,106 @@ export function createClient({
         return out;
     }
 
+    /** Built-in and mcp tools have no chat shape; the host is told about them once, not per turn. */
+    let droppedToolsWarned = false;
+
+    /**
+     * POST /chat/completions with a Responses-shaped body, answered in the Responses shape.
+     * A host that refuses one optional chat field gets the same request once without that field.
+     * @param {object} body Responses API body
+     * @param {{ signal?: AbortSignal, onEvent?: Function }} [options]
+     * @returns {Promise<object>}
+     * @ai.hint io
+     */
+    async function chatCreate(body, options = {}) {
+        const stream = Boolean(body?.stream);
+        if (body?.previous_response_id) {
+            throw new ApiError('Серверное хранение разговора (store / previous_response_id) работает только на /v1/responses; '
+                + 'хост отвечает на /v1/chat/completions — выключите store.', { code: 'CHAT_STATE_UNSUPPORTED', status: 400 });
+        }
+        if (!droppedToolsWarned) {
+            const dropped = droppedTools(body?.tools);
+            if (dropped.length) {
+                droppedToolsWarned = true;
+                announce({
+                    type: 'warning',
+                    message: 'На /v1/chat/completions нет встроенных инструментов Responses и серверов type: mcp — не вызываются: '
+                        + `${dropped.join(', ')}.`,
+                }, options.onEvent);
+            }
+        }
+        let chatBody = toChatBody(body, { includeUsage: chatSwitches.streamUsage, withReasoning: chatSwitches.reasoningEffort });
+        for (let attempt = 0; ; attempt++) {
+            try {
+                const result = await call(CHAT_PATH, {
+                    body: chatBody,
+                    stream,
+                    eventTypesRequired: false,
+                    ...(stream ? { streamReducer: ({ emit }) => createChatStreamReducer({ emit, model: body?.model }) } : {}),
+                    ...options,
+                });
+                return withText(normalizeChatResult(result, { model: body?.model }));
+            } catch (error) {
+                if (attempt > 0) throw error;
+                const stripped = stripRejectedFields(chatBody, error);
+                if (!stripped.removed.length) throw error;
+                chatBody = stripped.body;
+                announce({ type: 'warning', message: `Хост отклонил ${stripped.removed.join(', ')} в /v1/chat/completions — запрос повторён без этих полей.` }, options.onEvent);
+            }
+        }
+    }
+
+    /**
+     * Guard a route that exists only on /responses, so a chat-only host says why it cannot answer
+     * instead of sending a request nobody serves.
+     * @param {string} route Route name for the message.
+     * @param {Function} fn The real call.
+     * @returns {Function}
+     * @ai.hint io
+     */
+    const responsesOnly = (route, fn) => async (...args) => {
+        if (!chatOnly) return fn(...args);
+        throw new ApiError(`${route} есть только в Responses API; этот хост отвечает на /v1/chat/completions.`, {
+            code: 'ROUTE_UNAVAILABLE', status: 404,
+        });
+    };
+
     const responses = {
-        /** POST /responses — streams when body.stream is true; resolves with the final response. */
+        /**
+         * POST /responses — streams when body.stream is true; resolves with the final response.
+         * A host without this route is answered through /v1/chat/completions instead, once and
+         * then remembered for the life of the client.
+         */
         async create(body, options = {}) {
-            return withText(await call('responses', { body, stream: Boolean(body?.stream), ...options }));
+            if (chatOnly) return chatCreate(body, options);
+            try {
+                return withText(await call('responses', { body, stream: Boolean(body?.stream), ...options }));
+            } catch (error) {
+                if (!chatSwitches.enabled || !responsesRouteUnsupported(error)) throw error;
+                chatOnly = true;
+                announce({ type: 'warning', message: 'Хост не отвечает на /v1/responses — запросы идут через /v1/chat/completions.' }, options.onEvent);
+                return chatCreate(body, options);
+            }
         },
         /** GET /responses/{id}; with {stream:true, startingAfter} resumes a background stream. */
-        async retrieve(id, { stream = false, startingAfter, include, ...options } = {}) {
+        retrieve: responsesOnly('GET /responses/{id}', async (id, { stream = false, startingAfter, include, ...options } = {}) => {
             const query = { ...(stream ? { stream: 'true' } : {}), ...(startingAfter != null ? { starting_after: startingAfter } : {}),
                 ...(Array.isArray(include) && include.length ? { 'include[]': include } : {}) };
             return withText(await call(`responses/${encodeURIComponent(id)}`, { method: 'GET', query, stream, ...options }));
-        },
-        cancel: (id, options = {}) => call(`responses/${encodeURIComponent(id)}/cancel`, { method: 'POST', ...options }),
-        delete: (id, options = {}) => call(`responses/${encodeURIComponent(id)}`, { method: 'DELETE', ...options }),
+        }),
+        cancel: responsesOnly('POST /responses/{id}/cancel', (id, options = {}) => call(`responses/${encodeURIComponent(id)}/cancel`, { method: 'POST', ...options })),
+        delete: responsesOnly('DELETE /responses/{id}', (id, options = {}) => call(`responses/${encodeURIComponent(id)}`, { method: 'DELETE', ...options })),
         /** POST /responses/compact — server-side context compaction. */
-        compact: (body, options = {}) => call('responses/compact', { body, ...options }),
+        compact: responsesOnly('POST /responses/compact', (body, options = {}) => call('responses/compact', { body, ...options })),
         /** POST /responses/input_tokens — count input tokens without generating. */
-        inputTokens: (body, options = {}) => call('responses/input_tokens', { body, ...options }),
-        inputItems: (id, options = {}) => call(`responses/${encodeURIComponent(id)}/input_items`, { method: 'GET', ...options }),
+        inputTokens: responsesOnly('POST /responses/input_tokens', (body, options = {}) => call('responses/input_tokens', { body, ...options })),
+        inputItems: responsesOnly('GET /responses/{id}/input_items', (id, options = {}) => call(`responses/${encodeURIComponent(id)}/input_items`, { method: 'GET', ...options })),
+    };
+    const chat = {
+        /** POST /chat/completions: takes a Responses body, resolves with a Responses-shaped answer. */
+        create: (body, options = {}) => chatCreate(body, options),
+        /** Whether this host is served by the chat transport. */
+        get isFallback() { return chatOnly; },
     };
     const images = {
         /** POST /images/generations. Returns base64 payloads from data[].b64_json or data[].url. */
@@ -465,5 +572,10 @@ export function createClient({
         create: (body, options = {}) => call('moderations', { body, ...options }),
     };
 
-    return Object.freeze({ responses, images, models, decisions, moderations, call, baseURL: root.href, close: () => transport.close() });
+    return Object.freeze({
+        responses, chat, images, models, decisions, moderations, call, baseURL: root.href,
+        /** Which route this host answers: `responses`, or `chat` after a missing /responses route. */
+        get transport() { return chatOnly ? 'chat' : 'responses'; },
+        close: () => transport.close(),
+    });
 }

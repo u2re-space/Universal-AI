@@ -12,7 +12,8 @@
  * Public programmatic API (Node.js 26+, ESM).
  *
  * The CLI (bin/ai.js) is built on top of exactly these primitives:
- *   - createClient      — OpenAI Responses API over node:https (streaming SSE, background mode)
+ *   - createClient      — OpenAI Responses API over node:https (streaming SSE, background mode),
+ *                         answered through /v1/chat/completions when the host has no /v1/responses
  *   - createSession     — local conversation history (stateless store:false or previous_response_id)
  *   - createLedger      — token / cost accounting with budgets
  *   - createToolset     — local tools (filesystem, shell, fetch, images) with an approval policy

@@ -5,15 +5,15 @@
  * @depends node:perf_hooks, openai/client, openai/errors, openai/fallback, core/config, complete/models
  * @usedBy complete/complete, commands/complete, commands/serve, index.js
  * @exports completionChannelList, buildProbeBody, createCompletionChannels
- * @ai.tags complete, openai
+ * @ai.tags complete, openai, chat
  * @ai.hint io
- * @changed 2026-10-21 The fastest channel is probed per model and cached; a failed channel moves to the next one.
+ * @changed 2026-11-04 A channel that only answers /v1/chat/completions is kept and gets the translated probe.
  */
 
 import { performance } from 'node:perf_hooks';
 import { createClient } from '../openai/client.js';
 import { ApiError, isAbortError } from '../openai/errors.js';
-import { modelMissing, primaryBackend, providerDown, providerList, supportsRoute } from '../openai/fallback.js';
+import { chatOptionsFor, modelMissing, primaryBackend, providerDown, providerList, servesRoute } from '../openai/fallback.js';
 import { isReasoningModel, supportsVerbosity } from '../core/config.js';
 import { liveEnv } from '../core/runtime-env.js';
 import { resolveCompletionModel } from './models.js';
@@ -48,7 +48,7 @@ export function completionChannelList(config, env = null) {
     const add = (baseURL, apiKey, primary, headers = null, supports = null) => {
         const url = String(baseURL ?? '').trim();
         const key = String(apiKey ?? '').trim();
-        if (!url || !key || /[\r\n]/.test(key) || !supportsRoute(supports, 'responses')) return;
+        if (!url || !key || /[\r\n]/.test(key) || !servesRoute(supports, 'responses')) return;
         const normalized = url.replace(/\/+$/, '');
         const id = `${normalized}\u0000${key}`;
         if (seen.has(id)) return;
@@ -143,6 +143,7 @@ export function createCompletionChannels(config, { create = createClient, env = 
             headers: endpoint.headers ?? null,
             organization: config.organization,
             project: config.project,
+            chat: chatOptionsFor(config, endpoint.supports),
             retries: 0,
             idleTimeoutMs: config.limits?.idleTimeoutMs,
             connectTimeoutMs: config.limits?.connectTimeoutMs,

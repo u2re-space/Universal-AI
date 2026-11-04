@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { encodeMessage, createFrameParser } from '../src/mcp/frame.js';
 import { connectMcp } from '../src/mcp/client.js';
 import { mcpToolName, normalizeMcpServer, remoteMcpTools } from '../src/mcp/servers.js';
+import { parseHeaderArgs } from '../src/commands/mcp.js';
 import { builtinTools } from '../src/agent/loop.js';
 import { createSession } from '../src/core/session.js';
 import { ensureLocalEnv } from './helpers/local-env.js';
@@ -17,6 +18,27 @@ import { defaults } from '../src/core/config-defaults.js';
 
 const fixture = fileURLToPath(new URL('./helpers/mcp-stdio.js', import.meta.url));
 const bin = fileURLToPath(new URL('../bin/ai.js', import.meta.url));
+
+/**
+ * One `ai` process against a throwaway home and work directory.
+ * @param {string} home AI_AGENT_HOME
+ * @param {string} work working directory
+ * @param {string[]} args CLI arguments
+ * @returns {Promise<{ code: number|null, stdout: string, stderr: string }>}
+ */
+const runCli = (home, work, args) => new Promise((resolve) => {
+    const child = spawn(process.execPath, [bin, ...args], {
+        cwd: work,
+        env: { ...process.env, OPENAI_API_KEY: '', AI_AGENT_HOME: home, AI_MODEL: 'mock-model', NO_COLOR: '1' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.once('close', (code) => resolve({ code, stdout, stderr }));
+});
 
 test('frames survive a split chunk and a second message', () => {
     const first = encodeMessage({ jsonrpc: '2.0', id: 1, result: { ok: true } });
@@ -68,6 +90,67 @@ test('a remote MCP server becomes a Responses API mcp tool and is not spawned', 
     const session = createSession({ store: false });
     session.recordResponse({ id: 'resp_1', output: [{ type: 'mcp_call', id: 'mcp_1', name: 'search_openai_docs', server_label: 'openai_docs' }] });
     assert.equal(session.requestInput().input.some((item) => item.type === 'mcp_call'), true);
+});
+
+test('headers of a URL server reach the mcp tool as header strings', () => {
+    const server = normalizeMcpServer({
+        id: 'figma',
+        server_url: 'https://mcp.figma.com/mcp',
+        headers: { Authorization: 'Bearer fig_token', 'X-Trace-Id': 7, 'X-Debug': false, 'X-Skip': null },
+    });
+    assert.deepEqual(server.headers, { Authorization: 'Bearer fig_token', 'X-Trace-Id': '7', 'X-Debug': 'false' });
+    const [tool] = remoteMcpTools([server]);
+    assert.deepEqual(tool.headers, { Authorization: 'Bearer fig_token', 'X-Trace-Id': '7', 'X-Debug': 'false' });
+    const bare = normalizeMcpServer({ id: 'plain', server_url: 'https://a.example/mcp', headers: {} });
+    assert.equal(bare.headers, null);
+    assert.equal('headers' in remoteMcpTools([bare])[0], false);
+});
+
+test('a header the server cannot receive is refused while the config loads', () => {
+    const base = { id: 'figma', server_url: 'https://mcp.figma.com/mcp' };
+    assert.throws(() => normalizeMcpServer({ ...base, headers: { 'Bad Name': 'x' } }), /имя заголовка/);
+    assert.throws(() => normalizeMcpServer({ ...base, headers: { 'X': 'a\r\nY: b' } }), /без перевода строки/);
+    assert.throws(() => normalizeMcpServer({ ...base, headers: { ['__proto__']: 'x' } }), /имя заголовка/);
+    assert.throws(() => normalizeMcpServer({ ...base, headers: ['Authorization=x'] }), /объект со строковыми/);
+    assert.throws(() => normalizeMcpServer({ ...base, headers: { 'X-Json': { a: 1 } } }), /строка, число или флаг/);
+});
+
+test('--mcp-header takes Name=value and "Name: value"', () => {
+    assert.deepEqual(parseHeaderArgs(['X-Trace=abc', 'Authorization: Bearer t']), { 'X-Trace': 'abc', Authorization: 'Bearer t' });
+    assert.deepEqual(parseHeaderArgs(['X-Url=http://a.example/mcp?x=1']), { 'X-Url': 'http://a.example/mcp?x=1' });
+    assert.deepEqual(parseHeaderArgs('X-Trace=abc'), { 'X-Trace': 'abc' });
+    assert.equal(parseHeaderArgs(undefined), null);
+    assert.equal(parseHeaderArgs([]), null);
+    assert.throws(() => parseHeaderArgs(['without a separator']), /Имя=значение/);
+});
+
+test('ai mcp add --mcp-url stores headers, and nothing prints their values', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-mcp-url-home-'));
+    const work = await mkdtemp(path.join(os.tmpdir(), 'ai-mcp-url-work-'));
+    await ensureLocalEnv(work);
+    const run = (args) => runCli(home, work, args);
+    try {
+        const added = await run(['mcp', 'add', 'docs', '--mcp-url', 'https://developers.openai.com/mcp',
+            '--mcp-header', 'Authorization=Bearer sk-mcp-secret', '--mcp-header', 'X-Trace: abc']);
+        assert.equal(added.code, 0, added.stderr);
+        assert.match(added.stdout, /заголовки: Authorization, X-Trace/);
+        const file = JSON.parse(await readFile(path.join(home, 'config.json'), 'utf8'));
+        assert.deepEqual(file.mcp.servers[0].headers, { Authorization: 'Bearer sk-mcp-secret', 'X-Trace': 'abc' });
+        const listed = await run(['mcp', 'list']);
+        assert.equal(listed.code, 0, listed.stderr);
+        assert.match(listed.stdout, /^docs\tвключён\thttps:\/\/developers\.openai\.com\/mcp\tзаголовки: Authorization, X-Trace/m);
+        assert.doesNotMatch(listed.stdout, /sk-mcp-secret/);
+        const shown = await run(['config']);
+        assert.equal(shown.code, 0, shown.stderr);
+        assert.match(shown.stdout, /"Authorization": "…"/);
+        assert.doesNotMatch(shown.stdout, /sk-mcp-secret/);
+        const wrong = await run(['mcp', 'add', 'local', '--mcp-command', process.execPath, '--mcp-header', 'X=1']);
+        assert.equal(wrong.code, 2);
+        assert.match(wrong.stderr, /--mcp-header относится к серверу с --mcp-url/);
+    } finally {
+        await rm(home, { recursive: true, force: true });
+        await rm(work, { recursive: true, force: true });
+    }
 });
 
 test('MCP children do not inherit secret environment variables', async () => {
@@ -155,19 +238,7 @@ test('ai mcp add, list, and probe do not need an API key', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-mcp-home-'));
     const work = await mkdtemp(path.join(os.tmpdir(), 'ai-mcp-work-'));
     await ensureLocalEnv(work);
-    const run = (args) => new Promise((resolve) => {
-        const child = spawn(process.execPath, [bin, ...args], {
-            cwd: work,
-            env: { ...process.env, OPENAI_API_KEY: '', AI_AGENT_HOME: home, AI_MODEL: 'mock-model', NO_COLOR: '1' },
-            stdio: ['ignore', 'pipe', 'pipe'],
-            windowsHide: true,
-        });
-        let stdout = '';
-        let stderr = '';
-        child.stdout.on('data', (chunk) => { stdout += chunk; });
-        child.stderr.on('data', (chunk) => { stderr += chunk; });
-        child.once('close', (code) => resolve({ code, stdout, stderr }));
-    });
+    const run = (args) => runCli(home, work, args);
     try {
         const empty = await run(['mcp', 'list']);
         assert.equal(empty.code, 0, empty.stderr);
