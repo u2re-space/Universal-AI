@@ -547,7 +547,7 @@ export function createClient({
     function chatFit(body, { onEvent = null, announce: tell = true } = {}) {
         if (chatGaps(body).length && chatSwitches.strict) {
             return new ApiError(`Запросу нужен маршрут /v1/responses: на /v1/chat/completions ${missingOnChat(body)}. `
-                + 'Возьмите бэкенд с /v1/responses, выключите эти инструменты (--no-web, --no-images) или напишите '
+                + 'Возьмите бэкенд с /v1/responses, выключите эти инструменты или режим (--no-web, --no-images, reasoning.mode: off) или напишите '
                 + 'chat.strict: false, чтобы запрос ушёл без них.', { code: 'CHAT_CAPABILITY_MISSING', status: 404 });
         }
         const missing = missingOnChat(body);
@@ -623,7 +623,7 @@ export function createClient({
                 if (gaps.length && chatSwitches.strict) {
                     throw new ApiError('Хост не отвечает на /v1/responses, а запросу нужен именно он: '
                         + `на /v1/chat/completions нет ${gaps.join(', ')}. Возьмите бэкенд с /v1/responses, `
-                        + 'выключите эти инструменты (--no-web, --no-images) или напишите chat.strict: false.',
+                        + 'выключите эти инструменты или режим (--no-web, --no-images, reasoning.mode: off) или напишите chat.strict: false.',
                     { code: 'ROUTE_UNSUPPORTED', status: 404, cause: error });
                 }
                 const missing = missingOnChat(body);

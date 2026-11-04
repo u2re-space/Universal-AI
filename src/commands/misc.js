@@ -129,7 +129,7 @@ export async function configCommand(ctx) {
     if (sub === 'init') {
         if (await stat(file).then(() => true).catch(() => false)) throw new UsageError(`Файл уже существует: ${file}`);
         const template = {
-            model: defaults.model, imageModel: null, reasoning: { effort: 'medium', summary: 'auto' }, store: false,
+            model: defaults.model, imageModel: null, reasoning: { effort: 'medium', summary: 'auto', mode: 'off' }, store: false,
             backends: [],
             approve: 'ask', tools: { ...defaults.tools }, limits: { maxTurns: 60, budgetUsd: null, budgetTokens: null },
             roles: {
@@ -161,7 +161,8 @@ export async function configCommand(ctx) {
             `Модели по сложности — roles.<имя>.tiers: лестница [{ "model", "effort": [...] }, ...] или запись на каждый размер (trivial, normal, complex).\n` +
             `Провайдеры — backends: [{ "baseUrl", "apiKey": "{{env:NAME}}", "headers": {...}, "supports": { "decisions": false } }, ...].\n` +
             `  Первый бэкенд с ключом — основной, остальные — резервные. Подстановки: {{env:NAME}}, {{fs:путь}}, {{task:PROMPT}}, {{delegated:PROMPT}}.\n` +
-            `Потолки и лестницы effort моделей — в models.<id> (ceiling, efforts); порядок этапов команды — agent.pipeline.\n` +
+            `Потолки и лестницы effort моделей — в models.<id> (ceiling, efforts, modes); порядок этапов команды — agent.pipeline.\n` +
+            `reasoning.mode: "pro" — расширенный режим шлюза (по умолчанию "off", поля нет); models.<id>.modes: [] запрещает его модели.\n` +
             `Чтобы видеть стоимость, добавьте актуальные цены (USD за 1M токенов), например:\n` +
             `  "prices": { "${defaults.model}": { "input": 1.25, "cachedInput": 0.125, "output": 10 }, "gpt-6-luna*": { "input": 0.25, "output": 2 } }\n`);
         return 0;

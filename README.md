@@ -218,7 +218,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 
 ### Чат
 
-Команды внутри `ai chat`: `/image <путь>`, `/file <путь>`, `/model`, `/effort`, `/tools fs,shell,fetch`,
+Команды внутри `ai chat`: `/image <путь>`, `/file <путь>`, `/model`, `/effort`, `/mode off|pro`, `/tools fs,shell,fetch`,
 `/approve`, `/web on`, `/images on`, `/system <текст>`, `/usage`, `/tokens` (подсчёт входных токенов через API),
 `/compact` (серверная компактизация контекста), `/history`, `/save`, `/clear`, `/exit`.
 Многострочный ввод: строка с `\` на конце или блок `""" … """`. Ctrl-C во время ответа прерывает только ответ.
@@ -282,7 +282,7 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 "models": {
   "gpt-6.1-sol":  { "ceiling": "xhigh", "efforts": ["low", "medium", "high", "xhigh"] },
   "gpt-6-luna":   { "window": 262144, "maxOutput": 16384, "ceiling": "max" },
-  "gpt-6-astra":  { "ceiling": null, "maxOutput": 32768 }
+  "gpt-6-astra":  { "ceiling": null, "maxOutput": 32768, "modes": [] }
 }
 ```
 
@@ -290,6 +290,15 @@ ai --json "список 5 идей" | jq -r 'select(.type=="result").text'
 уровней, которые модель реально понимает: запрошенный уровень прижимается к ближайшему разрешённому снизу (вверх —
 только если запрос ниже всей лестницы). `null` в `ceiling` снимает встроенный предел, `window` и `maxOutput` задают
 окно и потолок ответа в токенах. Неизвестная модель получает профиль по умолчанию (128 КиБ окна, 16384 токена ответа).
+
+`modes` — список reasoning-режимов, которые модель получает. Режимы (`reasoning.mode`) — расширение шлюза, а не
+Responses API: в теле запроса поле едет рядом с effort (`"reasoning": { "effort", "summary", "mode" }`), значений
+два — `off` (поля нет вовсе, запрос выглядит как раньше) и `pro`. Включают их `reasoning.mode` в конфигурации,
+`roles.<имя>.mode` или `--reasoning-mode pro`; `/mode` меняет режим на ходу в чате. Роль получает режим только
+если модель его принимает: `modes: null` (по умолчанию) не ограничивает, `modes: []` держит поле подальше от
+модели, список перечисляет разрешённые имена. В отличие от effort, режимы не упорядочены — потолка и лестницы
+у них нет. На `/v1/chat/completions` имени для режима нет (там только `reasoning_effort`), поэтому запрос уходит
+без него, а потеря называется одним предупреждением; `chat.strict: true` вместо этого отказывает.
 
 Потолок роли задаётся `roles.<имя>.maxEffort` (или третьим полем `--role`, например
 `--role worker=gpt-6-luna:high:xhigh`) и действует вместе с потолком модели: побеждает более строгий. Флаг
@@ -664,7 +673,7 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
     { "baseUrl": "https://gptunnel.ru/v1", "apiKey": "{{env:GPTUNNEL_API_KEY}}", "body": { "useWalletBalance": true } }
   ],
   "imageModel": null,
-  "reasoning": { "effort": "medium", "summary": "auto" },
+  "reasoning": { "effort": "medium", "summary": "auto", "mode": "off" },
   "store": false,
   "approve": "ask",
   "shell": null,
@@ -728,7 +737,7 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
 }
 ```
 
-Поля роли: `model`, `effort`, `summary`, `verbosity`, `maxOutputTokens`, `temperature`, `instructions`
+Поля роли: `model`, `effort`, `summary`, `mode`, `verbosity`, `maxOutputTokens`, `temperature`, `instructions`
 (дополнительные инструкции только для этой роли), `maxEffort` (потолок effort роли), `context` (уровень или байты
 бюджета контекста роли), `tools` (список разрешённых инструментов), `turns` (лимит ходов вложенного запуска)
 и `tiers` — модель и effort под размер работы. `tiers` пишется в одной из двух форм:
@@ -837,22 +846,24 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 * `force: true` — сразу вести все запросы на `/v1/chat/completions`; то же включает у бэкенда запись
   `supports: { responses: false, chat: true }`, чтобы не платить отклонённым вызовом `/responses`.
 * `strict: true` — не переводить запрос, которому чат-транспорт не даёт запрошенного: встроенных
-  инструментов Responses (`web_search`, `image_generation`) и `background`. Такой запрос завершается
+  инструментов Responses (`web_search`, `image_generation`), `background` и `reasoning.mode`. Такой запрос завершается
   ошибкой `CHAT_CAPABILITY_MISSING` (или `ROUTE_UNSUPPORTED`, если хост ещё не отказывал) и уходит на
   бэкенд с `/v1/responses`. По умолчанию `false`: `tools.web` включён всегда, и строгий отказ ронял бы
   любой запуск на чат-хосте из-за поиска.
 * `streamUsage` — добавляет `stream_options.include_usage`, чтобы стрим принёс usage; хост, который не
   знает этого поля, получает тот же запрос без него. Свой `stream_options` задаётся в `body` бэкенда:
   он сливается с этим и при отказе отбрасывается вместе с ним.
-* `reasoningEffort` — передаёт `reasoning.effort` как `reasoning_effort`.
+* `reasoningEffort` — передаёт `reasoning.effort` как `reasoning_effort`. У `reasoning.mode` имени в чате
+  нет, поэтому на этом транспорте режим отбрасывается, а потеря называется.
 
 Поля `body` бэкенда подмешиваются к запросу на обоих маршрутах, поэтому `useWalletBalance` доезжает и до
 `/v1/chat/completions`. Поле, которое хост отклонил по имени, не отправляется до конца запуска — этот же
 повтор спасает и `stream_options`, `reasoning_effort`, `max_completion_tokens`.
 
 Потеря возможностей не бывает тихой: при переходе на чат-транспорт клиент одним предупреждением называет
-то, чего на нём нет (`web_search`, `image_generation`, серверы `type: mcp`), и это же поле можно
-исключить из запроса явно — `--no-web`, `--no-images`, `tools.web: false`. Сервер `type: mcp` запрос не
+то, чего на нём нет (`web_search`, `image_generation`, `reasoning.mode`, серверы `type: mcp`), и это же поле можно
+исключить из запроса явно — `--no-web`, `--no-images`, `tools.web: false`, `reasoning.mode: off`.
+Сервер `type: mcp` запрос не
 останавливает: без него прогон работает (Figma остаётся на приложенных картинках).
 
 Конвертация сохраняет: `instructions` → первое `system`-сообщение, `input` → `messages`
@@ -860,7 +871,7 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 `function_call_output` → роль `tool`), `tools` → инструменты chat (кроме отброшенных встроенных
 и `type: mcp`), `text.format` → `response_format`, `max_output_tokens` →
 `max_completion_tokens`, `temperature`, `top_p`, `service_tier`. Поля, которых в чате нет
-(`store`, `background`, `previous_response_id`, `include`, `truncation`, `text.verbosity`), отбрасываются,
+(`store`, `background`, `previous_response_id`, `include`, `truncation`, `text.verbosity`, `reasoning.mode`), отбрасываются,
 а поле, которое хост отклонил по имени, убирается из повтора запроса. Ответы только для Responses API —
 `/responses/compact`, `/responses/input_tokens`, `retrieve`, `cancel`, `--background`, `ai resume` —
 на чат-транспорте сообщают о недоступности маршрута.

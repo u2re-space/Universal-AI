@@ -224,6 +224,18 @@ test('buildRequestBody respects model capabilities and configuration', () => {
     assert.equal(stored.include, undefined);
 });
 
+test('buildRequestBody sends reasoning.mode only when the model serves it', () => {
+    const cfg = { ...config(), reasoning: { effort: 'high', summary: 'auto', mode: 'pro' } };
+    assert.deepEqual(buildRequestBody({ config: cfg, model: 'gpt-6.1-sol', input: [] }).reasoning,
+        { effort: 'high', summary: 'auto', mode: 'pro' });
+    // mode: 'off' sends no field at all.
+    const off = buildRequestBody({ config: { ...cfg, reasoning: { effort: 'high', summary: 'auto', mode: 'off' } }, model: 'gpt-6.1-sol', input: [] });
+    assert.equal(off.reasoning.mode, undefined);
+    // A model whose profile lists no modes never sees it.
+    const barred = buildRequestBody({ config: { ...cfg, models: { 'gpt-6.1-sol': { modes: [] } } }, model: 'gpt-6.1-sol', input: [] });
+    assert.equal(barred.reasoning.mode, undefined);
+});
+
 test('session store mode sends only new items with previous_response_id', async () => {
     const seen = [];
     script = (body) => { seen.push(body); return { text: `answer ${seen.length}` }; };

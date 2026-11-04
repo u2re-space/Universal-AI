@@ -307,6 +307,12 @@ test('chatGaps counts only what the chat route cannot carry', () => {
         'an mcp server never stops a request');
     assert.deepEqual(chatGaps({ background: true }), ['background']);
     assert.deepEqual(chatGaps({ input: 'привет' }), []);
+    // A gateway reasoning mode has no chat spelling: the loss is named, not silent.
+    assert.deepEqual(chatGaps({ reasoning: { effort: 'low', mode: 'pro' } }), ['reasoning.mode']);
+    assert.deepEqual(chatGaps({ reasoning: { effort: 'low', mode: 'off' } }), [], 'off sends no field, so nothing is lost');
+    const modeBody = toChatBody({ model: 'm', input: 'привет', reasoning: { effort: 'low', mode: 'pro' } });
+    assert.equal(modeBody.reasoning_effort, 'low');
+    assert.ok(!('reasoning' in modeBody) && !('reasoning_mode' in modeBody), 'the mode itself never reaches the chat route');
 });
 
 test('a field the gateway refuses is dropped and the same request goes again', async () => {

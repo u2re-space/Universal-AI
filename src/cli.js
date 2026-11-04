@@ -42,6 +42,7 @@ export { HELP };
 
 const OPTIONS = {
     model: { type: 'string', short: 'm' }, effort: { type: 'string' }, 'max-effort': { type: 'string' }, summary: { type: 'string' },
+    'reasoning-mode': { type: 'string' },
     reasoning: { type: 'boolean', default: true }, instructions: { type: 'string', short: 'i' },
     image: { type: 'string', multiple: true }, file: { type: 'string', short: 'f', multiple: true }, url: { type: 'string', multiple: true }, detail: { type: 'string' },
     out: { type: 'string', short: 'o' }, session: { type: 'string', short: 's' }, store: { type: 'boolean', default: false },

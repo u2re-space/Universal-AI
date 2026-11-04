@@ -3,10 +3,11 @@
  * @module core/config-defaults
  * @purpose Frozen default configuration and the enums that validate it.
  * @usedBy core/config, commands/flags
- * @exports defaults, ROLE_NAMES, REASONING_EFFORTS, REASONING_SUMMARIES, APPROVAL_LEVELS, IMAGE_DETAILS, CONTEXT_LEVEL_NAMES
+ * @exports defaults, ROLE_NAMES, REASONING_EFFORTS, REASONING_SUMMARIES, REASONING_MODES, APPROVAL_LEVELS, IMAGE_DETAILS, CONTEXT_LEVEL_NAMES
  * @ai.tags config
  * @ai.hint pure
  * @changed 2026-10-31 tester, vision, extractor, summarizer, and writer merged into reviewer, encoder, and orchestrator.
+ * @changed 2026-11-04 reasoning.mode (gateway reasoning modes, off by default).
  */
 import { MODEL_FALLBACKS } from '../openai/model-map.js';
 import { CONTEXT_LEVELS } from '../openai/model-profiles.js';
@@ -15,6 +16,12 @@ const MiB = KiB * KiB;
 
 export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 export const REASONING_SUMMARIES = ['auto', 'concise', 'detailed', 'none'];
+/**
+ * Extra reasoning modes a gateway may serve next to `effort`. `off` sends no `reasoning.mode` field
+ * at all, so a host that has never heard of modes sees the same request as before. Unlike effort,
+ * modes are not ordered: there is no ceiling or ladder, only whether a model lists the mode.
+ */
+export const REASONING_MODES = ['off', 'pro'];
 export const APPROVAL_LEVELS = ['ask', 'read', 'write', 'all'];
 export const IMAGE_DETAILS = ['auto', 'low', 'high', 'original'];
 /** Word levels of a context budget, plus `auto`, which follows the window of the model in use. */
@@ -29,6 +36,8 @@ const ROLE_FIELDS = Object.freeze({
     maxOutputTokens: null, temperature: null, instructions: null,
     /** Hardest reasoning effort this role may use; the stricter of this and the model ceiling wins. */
     maxEffort: null,
+    /** Reasoning mode of this role (off | pro); null inherits the top-level reasoning.mode. */
+    mode: null,
     /** Context budget of the role: a word level (small | normal | large | max | auto) or bytes. */
     context: null,
     /** Tool names the role is limited to; null keeps the tools of the run. */
@@ -67,7 +76,8 @@ export const defaults = Object.freeze({
     backends: [],
     /**
      * Per-model overrides of the registry in `openai/model-profiles.js`.
-     * Accepts `window` (bytes), `maxOutput` (tokens), `ceiling` (effort string), `efforts` (effort array).
+     * Accepts `window` (bytes), `maxOutput` (tokens), `ceiling` (effort string), `efforts` (effort array),
+     * and `modes` (reasoning mode array; an empty array means the model never gets a `reasoning.mode`).
      * All fields are optional; omitted ones keep the registry default.
      */
     models: {},
@@ -120,7 +130,12 @@ export const defaults = Object.freeze({
             styler: ['mdnCss', 'sass', 'canIUse', 'cssLogical', 'cssProperty', 'cssLayer', 'cssConditional', 'cssAnchor', 'cssUnits', 'cssAnimation', 'cssShapes', 'cssMotion', 'cssTransform', 'cssCascade', 'cssContain', 'cssImages', 'cssMasking', 'cssFonts', 'stylelint', 'prettier', 'googleFonts'],
         },
     },
-    reasoning: { effort: "low", summary: 'auto' },
+    /**
+     * `effort` and `summary` are Responses API fields. `mode` is a gateway extension: `off` sends no
+     * field, `pro` sends `reasoning.mode: "pro"`. A model that must not receive it lists `modes: []`
+     * in the `models` section; the chat transport cannot carry a mode at all and says so once.
+     */
+    reasoning: { effort: "low", summary: 'auto', mode: 'off' },
     verbosity: "low",                  // low | medium | high (GPT-5 family)
     temperature: null,
     maxOutputTokens: null,

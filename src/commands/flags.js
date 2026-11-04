@@ -10,7 +10,7 @@
  * @changed 2026-10-26 --role accepts a user-defined role name, --max-effort, and --context.
  * @changed 2026-10-31 The run header shows roles as `model:role`; --role syntax stays `name=model:effort`.
  */
-import { APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, CUSTOM_ROLE_NAME } from '../core/config.js';
+import { APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, REASONING_MODES, ROLE_NAMES, CUSTOM_ROLE_NAME } from '../core/config.js';
 import { defaults } from '../core/config-defaults.js';
 import { CONTEXT_LEVELS } from '../openai/model-profiles.js';
 import { PLATFORMS } from '../generate/platform.js';
@@ -100,6 +100,10 @@ export function overridesFrom(values, { command = null } = {}) {
     if (values.summary) {
         if (!REASONING_SUMMARIES.includes(values.summary)) throw new UsageError(`--summary: ${REASONING_SUMMARIES.join(' | ')}`);
         o.reasoning.summary = values.summary;
+    }
+    if (values['reasoning-mode']) {
+        if (!REASONING_MODES.includes(values['reasoning-mode'])) throw new UsageError(`--reasoning-mode: ${REASONING_MODES.join(' | ')}`);
+        o.reasoning.mode = values['reasoning-mode'];
     }
     if (values.verbosity) o.verbosity = values.verbosity || "low";
     if (values.temperature !== undefined) o.temperature = number(values.temperature, 'temperature');

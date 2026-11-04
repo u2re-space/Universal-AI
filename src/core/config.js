@@ -4,10 +4,11 @@
  * @purpose Load, validate, and redact configuration, and resolve per-role settings.
  * @depends node:os, node:path, node:fs/promises, util/text, core/config-defaults, core/placeholders, generate/platform, mcp/servers, channels/questions
  * @usedBy cli, commands/shared, commands/flags, commands/ask, commands/run, commands/chat, commands/misc, agent/loop, agent/roles
- * @exports APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, ROLE_NAMES, BUILTIN_ROLE_NAMES, roleNames, defaults, resolveRole, defaultHome, loadConfig, isReasoningModel, supportsVerbosity, redactConfig
+ * @exports APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, REASONING_MODES, ROLE_NAMES, BUILTIN_ROLE_NAMES, roleNames, defaults, resolveRole, defaultHome, loadConfig, isReasoningModel, supportsVerbosity, redactConfig
  * @ai.tags config
  * @ai.hint io
  * @changed 2026-10-26 Model ceilings, word context levels, user-defined roles, and the stage pipeline.
+ * @changed 2026-11-04 reasoning.mode validated and resolved per role; unknown `reasoning` keys rejected.
  */
 import os from 'node:os';
 import path from 'node:path';
@@ -21,6 +22,7 @@ import {
     IMAGE_DETAILS,
     REASONING_EFFORTS,
     REASONING_SUMMARIES,
+    REASONING_MODES,
     ROLE_NAMES,
     BUILTIN_ROLE_NAMES,
     CUSTOM_ROLE_NAME,
@@ -30,7 +32,7 @@ import {
 import { COMPLETION_MODEL_CHOICES, resolveCompletionModel } from '../complete/models.js';
 import { assertPaceBudget, FINE_QUALITY_KEYS } from '../agent/pace.js';
 import { FORBIDDEN_MODELS as REVIEWER_FORBIDDEN, safeReviewerModel } from '../roles/reviewer.js';
-import { profileFor, snapEffort, lowerEffort, contextBytes, DEFAULT_PROFILE } from '../openai/model-profiles.js';
+import { profileFor, snapEffort, lowerEffort, contextBytes, modeFor, DEFAULT_PROFILE } from '../openai/model-profiles.js';
 import { tierChoice } from './role-tiers.js';
 import { PIPELINE_STAGE_IDS } from '../agent/pipeline.js';
 import { expandConfigStrings } from './placeholders.js';
@@ -53,6 +55,7 @@ export {
     IMAGE_DETAILS,
     REASONING_EFFORTS,
     REASONING_SUMMARIES,
+    REASONING_MODES,
     ROLE_NAMES,
     BUILTIN_ROLE_NAMES,
     CUSTOM_ROLE_NAME,
@@ -67,7 +70,8 @@ export {
  * model ladder with its effort levels, or one entry per tier); an explicit role model or effort
  * still wins over the tier. Returns a config-like object usable by runTurn (same shape as the main
  * config). Effort is snapped to the model ladder and capped by the stricter of the model ceiling
- * and the role ceiling (roles.<name>.maxEffort).
+ * and the role ceiling (roles.<name>.maxEffort). A reasoning mode is kept only when the resolved
+ * model serves it (`models.<id>.modes`); otherwise the role resolves to `off` and no field is sent.
  * @param {object} config
  * @param {string} [name]
  * @param {'trivial'|'normal'|'complex'|null} [complexity]
@@ -83,6 +87,8 @@ export function resolveRole(config, name = 'default', complexity = null) {
     const ceiling = lowerEffort(profile.ceiling, pick('maxEffort', null));
     const effort = snapEffort(pick('effort', config.reasoning.effort), { ...profile, ceiling });
     const summary = pick('summary', config.reasoning.summary);
+    /** Reasoning mode of this role: `off` when nobody asked for one or the model does not list it. */
+    const mode = modeFor(pick('mode', config.reasoning.mode), profile) ?? 'off';
     const verbosity = pick('verbosity', config.verbosity);
     const maxOutputTokens = pick('maxOutputTokens', config.maxOutputTokens);
     /** The profile's answer limit: an explicit role cap is never raised above what the model accepts. */
@@ -92,7 +98,7 @@ export function resolveRole(config, name = 'default', complexity = null) {
     const rawContext = pick('context', null);
     const context = rawContext != null ? contextBytes(rawContext, profile) : null;
     return {
-        name, model, effort, summary, verbosity, maxOutputTokens: outputLimit, temperature,
+        name, model, effort, summary, mode, verbosity, maxOutputTokens: outputLimit, temperature,
         /** The ceiling that bounded this role: the stricter of model ceiling and roles.<name>.maxEffort. */
         ceiling,
         /** The model's own answer limit from its profile. */
@@ -105,7 +111,7 @@ export function resolveRole(config, name = 'default', complexity = null) {
         /** A config object with this role's settings applied (for runTurn / buildRequestBody). */
         config: {
             ...config, model,
-            reasoning: { effort, summary },
+            reasoning: { effort, summary, mode },
             verbosity, maxOutputTokens: outputLimit, temperature,
         },
     };
@@ -459,15 +465,22 @@ function validateConfig(c) {
     for (const [modelId, profile] of Object.entries(c.models)) {
         if (!isRecord(profile)) fail(`models.${modelId} должен быть объектом`);
         for (const key of Object.keys(profile)) {
-            if (!['window', 'maxOutput', 'ceiling', 'efforts'].includes(key)) fail(`models.${modelId}.${key}: неизвестное поле`);
+            if (!['window', 'maxOutput', 'ceiling', 'efforts', 'modes'].includes(key)) fail(`models.${modelId}.${key}: неизвестное поле`);
         }
         if (typeof profile.window === 'number' && !(Number.isSafeInteger(profile.window) && profile.window > 0)) fail(`models.${modelId}.window: целое > 0`);
         if (typeof profile.maxOutput === 'number' && !(Number.isSafeInteger(profile.maxOutput) && profile.maxOutput > 0)) fail(`models.${modelId}.maxOutput: целое > 0`);
-        if (profile.ceiling !== null && !REASONING_EFFORTS.includes(profile.ceiling)) fail(`models.${modelId}.ceiling: ${REASONING_EFFORTS.join(' | ')}`);
-        if (profile.efforts !== null && (!Array.isArray(profile.efforts) || profile.efforts.some((e) => !REASONING_EFFORTS.includes(e)))) fail(`models.${modelId}.efforts: массив уровней`);
+        if (profile.ceiling != null && !REASONING_EFFORTS.includes(profile.ceiling)) fail(`models.${modelId}.ceiling: ${REASONING_EFFORTS.join(' | ')}`);
+        if (profile.efforts != null && (!Array.isArray(profile.efforts) || profile.efforts.some((e) => !REASONING_EFFORTS.includes(e)))) fail(`models.${modelId}.efforts: массив уровней`);
+        // An empty array is a real answer here: this model must never receive `reasoning.mode`.
+        if (profile.modes != null && (!Array.isArray(profile.modes) || profile.modes.some((m) => !REASONING_MODES.includes(m)))) fail(`models.${modelId}.modes: массив режимов (${REASONING_MODES.join(' | ')})`);
+    }
+    if (!isRecord(c.reasoning)) fail('reasoning должен быть объектом');
+    for (const key of Object.keys(c.reasoning)) {
+        if (!(key in defaults.reasoning)) fail(`reasoning.${key}: неизвестное поле`);
     }
     if (c.reasoning.effort !== null && !REASONING_EFFORTS.includes(c.reasoning.effort)) fail(`reasoning.effort: ${REASONING_EFFORTS.join(' | ')}`);
     if (c.reasoning.summary !== null && !REASONING_SUMMARIES.includes(c.reasoning.summary)) fail(`reasoning.summary: ${REASONING_SUMMARIES.join(' | ')}`);
+    if (c.reasoning.mode !== null && !REASONING_MODES.includes(c.reasoning.mode)) fail(`reasoning.mode: ${REASONING_MODES.join(' | ')}`);
     if (c.verbosity !== null && !['low', 'medium', 'high'].includes(c.verbosity)) fail('verbosity: low | medium | high');
     if (c.temperature !== null && !(Number.isFinite(c.temperature) && c.temperature >= 0 && c.temperature <= 2)) fail('temperature: 0..2');
     if (c.maxOutputTokens !== null && !(Number.isSafeInteger(c.maxOutputTokens) && c.maxOutputTokens >= 16)) fail('maxOutputTokens ≥ 16');
@@ -577,6 +590,7 @@ function validateConfig(c) {
         if (role.maxOutputTokens != null && !(Number.isSafeInteger(role.maxOutputTokens) && role.maxOutputTokens >= 16)) fail(`roles.${name}.maxOutputTokens ≥ 16`);
         if (role.instructions != null && typeof role.instructions !== 'string') fail(`roles.${name}.instructions должен быть строкой`);
         if (role.maxEffort != null && !REASONING_EFFORTS.includes(role.maxEffort)) fail(`roles.${name}.maxEffort: ${REASONING_EFFORTS.join(' | ')}`);
+        if (role.mode != null && !REASONING_MODES.includes(role.mode)) fail(`roles.${name}.mode: ${REASONING_MODES.join(' | ')}`);
         if (role.context != null && typeof role.context !== 'string' && !(Number.isSafeInteger(role.context) && role.context > 0)) fail(`roles.${name}.context: уровень или целое > 0`);
         if (role.tools != null && !Array.isArray(role.tools)) fail(`roles.${name}.tools: массив имён`);
         if (role.turns != null && !(Number.isSafeInteger(role.turns) && role.turns > 0)) fail(`roles.${name}.turns: целое > 0`);

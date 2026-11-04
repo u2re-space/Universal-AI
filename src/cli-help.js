@@ -9,7 +9,8 @@
  * @changed 2026-10-26 0.2.0: --max-effort, --context, role ceilings, delegate_role, and the stage pipeline.
  * @changed 2026-10-31 --url for run/gen, the decomposer role and decompose stage, Figma MCP, and decomposition examples.
  * @changed 2026-10-31 Merged roles (writer, tester, vision → reviewer; extractor → encoder; summarizer → orchestrator)
- *   and the `model:role` header format.
+  *   and the `model:role` header format.
+ * @changed 2026-11-04 --reasoning-mode and the reasoning.mode limits.
  */
 export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
 
@@ -56,6 +57,8 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   --context <уровень|байты>  бюджет общего контекста: small 16 КиБ, normal 96 КиБ, large 512 КиБ, max 8 МиБ,
                          auto — окно модели. Слово принимают и agent.*MaxContextBytes, roles.<имя>.context
   --summary <режим>      показ рассуждений: auto|concise|detailed|none      --no-reasoning  скрыть
+  --reasoning-mode <режим> reasoning.mode шлюза: off|pro. off не отправляет поле вовсе; pro уходит
+                         только моделям, которые его принимают (models.<id>.modes), и не работает на чат-транспорте
   --verbosity low|medium|high   --temperature <n>   --max-output-tokens <n>
   --out, -o <путь>       сохранить ответ в файл (для image — путь/каталог изображений)
   --session, -s <имя>    постоянная сессия (история сохраняется в ~/.ai-agent/sessions)
@@ -268,8 +271,8 @@ MCP:
   chat: { enabled, force, strict, streamUsage, reasoningEffort } — включено по умолчанию; enabled: false оставляет
   отсутствующий /v1/responses ошибкой (тогда запрос уходит на следующий бэкенд из backends и остаётся на
   Responses API), force сразу ведёт все запросы на /v1/chat/completions.
-  Перевод не умеет того, чего просит запрос: встроенных инструментов Responses (web_search, image_generation)
-  и режима background. По умолчанию такой запрос уходит без этих инструментов, и потеря называется одним
+  Перевод не умеет того, чего просит запрос: встроенных инструментов Responses (web_search, image_generation),
+  режима background и поля reasoning.mode. По умолчанию такой запрос уходит без этих инструментов, и потеря называется одним
   предупреждением; strict: true вместо этого завершает его ошибкой CHAT_CAPABILITY_MISSING (или
   ROUTE_UNSUPPORTED, если хост ещё не отказывал), чтобы запрос ушёл на бэкенд с /v1/responses.
   web_search включён по умолчанию (tools.web), поэтому строгость по умолчанию false: иначе любой запуск
@@ -277,6 +280,8 @@ MCP:
   они только называются в предупреждении.
   streamUsage добавляет stream_options.include_usage, reasoningEffort передаёт reasoning.effort
   как reasoning_effort; поле отбрасывается, если хост его отклонил.
+  У reasoning.mode имени в чате нет (там только reasoning_effort): на этом транспорте запрос уходит
+  без него, потеря называется одним предупреждением, а chat.strict: отказывает в таком переводе.
   На транспорте chat не работают previous_response_id (store), /responses/compact, /responses/input_tokens,
   фоновый режим --background и ai resume: они есть только в Responses API.
   supports: { responses: false, chat: true } принудительно отправляет хост на /v1/chat/completions.

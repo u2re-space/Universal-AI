@@ -35,7 +35,7 @@ import { CompletionError } from '../complete/errors.js';
 
 const COMMANDS = { ask, run, chat, image };
 const FIELD_MAP = {
-    effort: 'effort', summary: 'summary', instructions: 'instructions', images: 'image', files: 'file',
+    effort: 'effort', summary: 'summary', reasoningMode: 'reasoning-mode', instructions: 'instructions', images: 'image', files: 'file',
     detail: 'detail', out: 'out', session: 'session', store: 'store', web: 'web', imagesTool: 'images',
     tools: 'tools', noTools: 'no-tools', maxTurns: 'max-turns', budgetUsd: 'budget-usd', budgetTokens: 'budget-tokens',
     maxOutputTokens: 'max-output-tokens', temperature: 'temperature', verbosity: 'verbosity', shell: 'shell',

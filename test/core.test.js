@@ -251,6 +251,52 @@ test('browser engine defaults, validation, and CLI switches', async () => {
     }
 });
 
+test('reasoning.mode is validated, resolved per role, and gated by the model', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'ai-mode-cfg-'));
+    const env = { AI_AGENT_HOME: home };
+    const write = (object) => writeFile(path.join(home, 'config.json'), JSON.stringify(object));
+    try {
+        const plain = await loadConfig({ env, ensureHome: false });
+        assert.equal(plain.reasoning.mode, 'off');
+        assert.equal(resolveRole(plain, 'default').mode, 'off');
+
+        await write({ reasoning: { mode: 'pro' } });
+        const pro = await loadConfig({ env, ensureHome: false });
+        assert.equal(resolveRole(pro, 'planner').mode, 'pro');
+        assert.equal(resolveRole(pro, 'planner').config.reasoning.mode, 'pro');
+        // A profile without modes (the decisions model) keeps the field away.
+        assert.equal(resolveRole({ ...pro, model: 'gpt-6-luna-decisions' }, 'default').mode, 'off');
+
+        await write({ reasoning: { mode: 'pro' }, roles: { worker: { mode: 'off' } } });
+        const mixed = await loadConfig({ env, ensureHome: false });
+        assert.equal(resolveRole(mixed, 'worker').mode, 'off');
+        assert.equal(resolveRole(mixed, 'planner').mode, 'pro');
+
+        await write({ reasoning: { mode: 'pro' }, models: { 'gpt-6.1-terra': { modes: [] } } });
+        const barred = await loadConfig({ env, ensureHome: false });
+        assert.equal(resolveRole(barred, 'default').mode, 'off');
+        // Every field of a model profile stays optional: an entry names only what it changes.
+        await write({ models: { 'gpt-6.1-sol': { window: 262144 } } });
+        const partial = await loadConfig({ env, ensureHome: false });
+        assert.equal(partial.models['gpt-6.1-sol'].window, 262144);
+
+        await write({ reasoning: { mode: 'ultra' } });
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /reasoning\.mode: off \| pro/);
+        // An unknown key in this section used to be accepted and silently dropped.
+        await write({ reasoning: { effort: 'high', sumary: 'auto' } });
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /reasoning\.sumary: неизвестное поле/);
+        await write({ roles: { worker: { mode: 'ultra' } } });
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /roles\.worker\.mode: off \| pro/);
+        await write({ models: { 'gpt-6.1-terra': { modes: ['ultra'] } } });
+        await assert.rejects(loadConfig({ env, ensureHome: false }), /models\.gpt-6\.1-terra\.modes/);
+
+        assert.equal(overridesFrom({ 'reasoning-mode': 'pro' }).reasoning.mode, 'pro');
+        assert.throws(() => overridesFrom({ 'reasoning-mode': 'ultra' }), /--reasoning-mode: off \| pro/);
+    } finally {
+        await rm(home, { recursive: true, force: true });
+    }
+});
+
 test('a retired scanner role in config is dropped', async () => {
     const home = await mkdtemp(path.join(os.tmpdir(), 'ai-scanner-cfg-'));
     try {

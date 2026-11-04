@@ -17,7 +17,7 @@ const APPROVE = new Set(['ask', 'read', 'write', 'all']);
 const DECISIONS = new Set(['yes', 'no', 'always', 'abort']);
 const END_STATUS = new Set(['completed', 'failed', 'cancelled']);
 const START_FIELDS = new Set([
-    'type', 'command', 'prompt', 'cwd', 'approve', 'effort', 'summary', 'instructions', 'images', 'files', 'detail',
+    'type', 'command', 'prompt', 'cwd', 'approve', 'effort', 'summary', 'reasoningMode', 'instructions', 'images', 'files', 'detail',
     'out', 'session', 'store', 'web', 'imagesTool', 'tools', 'noTools', 'maxTurns', 'budgetUsd', 'budgetTokens',
     'maxOutputTokens', 'temperature', 'verbosity', 'shell', 'stream', 'size', 'quality', 'format', 'imageBackground',
     'partials', 'imageModel', 'count', 'schema', 'role', 'single', 'team', 'memory', 'processing', 'extract', 'noExtract',

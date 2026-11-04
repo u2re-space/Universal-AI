@@ -9,6 +9,7 @@
  * @ai.hint hot
  * @changed 2026-10-22 onMaxTurns lets the operator extend the turn budget.
  * @changed 2026-10-29 Old tool screenshots leave the replayed history, and a context-window rejection is retried once without images.
+ * @changed 2026-11-04 buildRequestBody adds reasoning.mode when the model serves it.
  */
 
 import { ApiError, BudgetError, CancelledError, isAbortError } from '../openai/errors.js';
@@ -20,7 +21,7 @@ import { attachBackground, awaitBackground, TERMINAL_STATUSES } from '../core/ba
 import { byteSize, clipMiddle, estimateTokens, errorMessage, formatBytes } from '../util/text.js';
 import { guardCommandInput } from './command-risk.js';
 import { remoteMcpTools } from '../mcp/servers.js';
-import { profileFor, snapEffort } from '../openai/model-profiles.js';
+import { profileFor, snapEffort, modeFor } from '../openai/model-profiles.js';
 
 /** Built-in tool definitions derived from the configuration. */
 export function builtinTools(config, { web = false, images = false } = {}) {
@@ -45,6 +46,7 @@ export function buildRequestBody({
     config, model = config.model, instructions = null, input, previousResponseId = null, tools = [], toolChoice = null,
     stream = config.stream, background = false, textFormat = null, maxOutputTokens = config.maxOutputTokens, store = config.store,
     reasoningEffort = config.reasoning.effort, reasoningSummary = config.reasoning.summary,
+    reasoningMode = config.reasoning.mode,
 }) {
     const body = { model, input, stream: Boolean(stream), store: background ? true : Boolean(store) };
     if (instructions) body.instructions = instructions;
@@ -57,10 +59,14 @@ export function buildRequestBody({
     }
     const include = [];
     if (isReasoningModel(model)) {
+        const profile = profileFor(model, config.models);
         const reasoning = {};
         // The ceiling is a hard limit: whatever asked for this level, the model never gets more.
-        if (reasoningEffort) reasoning.effort = snapEffort(reasoningEffort, profileFor(model, config.models));
+        if (reasoningEffort) reasoning.effort = snapEffort(reasoningEffort, profile);
         if (reasoningSummary && reasoningSummary !== 'none') reasoning.summary = reasoningSummary;
+        // A gateway extension: sent only when the model serves it, so an unknown host sees the old body.
+        const mode = modeFor(reasoningMode, profile);
+        if (mode) reasoning.mode = mode;
         if (Object.keys(reasoning).length) body.reasoning = reasoning;
         if (!body.store) include.push('reasoning.encrypted_content');
     } else if (config.temperature !== null && config.temperature !== undefined) {

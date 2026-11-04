@@ -15,7 +15,8 @@ import { renderPlaceholders } from '../core/placeholders.js';
 import { liveEnv } from '../core/runtime-env.js';
 import { runTurn, builtinTools, compactSession } from '../agent/loop.js';
 import { createToolset, enabledToolNames } from '../agent/tools.js';
-import { REASONING_EFFORTS, APPROVAL_LEVELS } from '../core/config.js';
+import { REASONING_EFFORTS, REASONING_MODES, APPROVAL_LEVELS } from '../core/config.js';
+import { profileFor, modeFor } from '../openai/model-profiles.js';
 import { formatNumber } from '../util/text.js';
 import { ASSISTANT_BASE } from './instructions.js';
 import { discoverAgents } from '../core/agents-md.js';
@@ -31,6 +32,7 @@ const HELP = `Команды чата:
   /file <путь>              приложить файл (PDF, текст) к следующему сообщению
   /model [id]               показать / сменить модель
   /effort [уровень]         reasoning effort: ${REASONING_EFFORTS.join(' | ')}
+  /mode [off|pro]           reasoning.mode шлюза: ${REASONING_MODES.join(' | ')} (поле уходит только моделям из models.<id>.modes)
   /tools [fs,shell,fetch,channels|none]  локальные инструменты (файлы, команды, загрузка URL, решения и Telegram)
   /approve <уровень>        политика подтверждений: ${APPROVAL_LEVELS.join(' | ')}
   /web [on|off]             поиск в интернете (web_search)
@@ -161,6 +163,16 @@ export async function chat(ctx) {
                 if (arg && !REASONING_EFFORTS.includes(arg)) { renderer.line('warn', `Допустимо: ${REASONING_EFFORTS.join(' | ')}`); return true; }
                 if (arg) config.reasoning.effort = arg;
                 renderer.line('info', `reasoning.effort: ${config.reasoning.effort ?? 'по умолчанию модели'}`); return true;
+            case 'mode': {
+                if (arg && !REASONING_MODES.includes(arg)) { renderer.line('warn', `Допустимо: ${REASONING_MODES.join(' | ')}`); return true; }
+                if (arg) config.reasoning.mode = arg;
+                const wanted = config.reasoning.mode;
+                const sent = modeFor(wanted, profileFor(model, config.models));
+                renderer.line('info', !wanted || wanted === 'off'
+                    ? 'reasoning.mode: выключен'
+                    : (sent ? `reasoning.mode: ${sent}` : `reasoning.mode: ${wanted} — модель ${model} его не получает (models.<id>.modes)`));
+                return true;
+            }
             case 'tools': renderer.line('info', arg ? enableLocalTools(arg) : toolset ? `локальные инструменты: ${toolset.names().join(', ')}` : 'локальные инструменты выключены (/tools fs,shell,fetch)'); return true;
             case 'approve':
                 if (!APPROVAL_LEVELS.includes(arg)) { renderer.line('warn', `Допустимо: ${APPROVAL_LEVELS.join(' | ')}`); return true; }

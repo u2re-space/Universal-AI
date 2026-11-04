@@ -3,10 +3,11 @@
  * @module openai/model-profiles
  * @purpose Model metadata registry: context window, max output, supported reasoning levels, and the effort ceiling.
  * @usedBy core/config, agent/loop, agent/pace, roles/*
- * @exports EFFORT_ORDER, CONTEXT_LEVELS, DEFAULT_PROFILE, MODEL_PROFILES, profileFor, effortRank, capEffort, snapEffort, contextBytes
+ * @exports EFFORT_ORDER, CONTEXT_LEVELS, DEFAULT_PROFILE, MODEL_PROFILES, profileFor, effortRank, capEffort, snapEffort, modeFor, contextBytes
  * @ai.tags models, profiles, effort, context
  * @ai.hint pure
  * @changed 2026-10-26 Registry for 0.2.0: every model declares its window, output cap, effort ladder and ceiling.
+ * @changed 2026-11-04 Gateway reasoning modes (`modes`, modeFor).
  */
 
 /**
@@ -28,7 +29,7 @@ export const CONTEXT_LEVELS = Object.freeze({
 /**
  * Profile of a model the registry does not list. No ceiling and no ladder, so nothing is restricted.
  */
-export const DEFAULT_PROFILE = Object.freeze({ window: 128 * 1024, maxOutput: 16384, ceiling: null, efforts: null });
+export const DEFAULT_PROFILE = Object.freeze({ window: 128 * 1024, maxOutput: 16384, ceiling: null, efforts: null, modes: null });
 
 /**
  * Known models.
@@ -37,15 +38,17 @@ export const DEFAULT_PROFILE = Object.freeze({ window: 128 * 1024, maxOutput: 16
  * `ceiling`   — hardest stop for reasoning effort: a request above it is lowered to it. Null means no stop.
  * `efforts`   — the ladder this model is configured to tear across. Null means the whole ladder down to the ceiling.
  *               A request snaps to the nearest level of the set, preferring the one below it.
+ * `modes`     — gateway reasoning modes this model receives (`reasoning.mode`). Null means the
+ *               configuration is sent as asked; an empty array keeps the field away from the model.
  * Override any field for one installation in the `models.<id>` section of the configuration.
  */
 export const MODEL_PROFILES = Object.freeze({
-    'gpt-6.1-sol': { window: 256 * 1024, maxOutput: 32768, ceiling: 'xhigh', efforts: null },
-    'gpt-6.1-terra': { window: 256 * 1024, maxOutput: 32768, ceiling: 'max', efforts: null },
-    'gpt-6-luna': { window: 256 * 1024, maxOutput: 16384, ceiling: 'max', efforts: null },
-    'gpt-6-astra': { window: 200 * 1024, maxOutput: 32768, ceiling: 'xhigh', efforts: null },
-    'gpt-6-luna-decisions': { window: 128 * 1024, maxOutput: 256, ceiling: null, efforts: null },
-    'openai/gpt-6-luna-decisions': { window: 128 * 1024, maxOutput: 256, ceiling: null, efforts: null }
+    'gpt-6.1-sol': { window: 256 * 1024, maxOutput: 32768, ceiling: 'xhigh', efforts: null, modes: null },
+    'gpt-6.1-terra': { window: 256 * 1024, maxOutput: 32768, ceiling: 'max', efforts: null, modes: null },
+    'gpt-6-luna': { window: 256 * 1024, maxOutput: 16384, ceiling: 'max', efforts: null, modes: null },
+    'gpt-6-astra': { window: 200 * 1024, maxOutput: 32768, ceiling: 'xhigh', efforts: null, modes: null },
+    'gpt-6-luna-decisions': { window: 128 * 1024, maxOutput: 256, ceiling: null, efforts: null, modes: [] },
+    'openai/gpt-6-luna-decisions': { window: 128 * 1024, maxOutput: 256, ceiling: null, efforts: null, modes: [] }
 });
 
 /** Vendor prefixes, so a qualified id resolves to the same profile as the bare one. */
@@ -69,7 +72,7 @@ function bareModel(model) {
  * Profile of one model: registry values, then the `models.<id>` overrides of the configuration.
  * @param {string} model
  * @param {object} [overrides] the `models` section of the config
- * @returns {{ window: number, maxOutput: number, ceiling: string | null, efforts: string[] | null }}
+ * @returns {{ window: number, maxOutput: number, ceiling: string | null, efforts: string[] | null, modes: string[] | null }}
  * @exports
  * @ai.hint pure
  */
@@ -77,19 +80,42 @@ export function profileFor(model, overrides = null) {
     const name = bareModel(model);
     const base = MODEL_PROFILES[name] ?? DEFAULT_PROFILE;
     const extra = overrides && typeof overrides === 'object' ? (overrides[name] ?? overrides[model]) : null;
-    if (!extra || typeof extra !== 'object') return { ...base };
+    if (!extra || typeof extra !== 'object') return { modes: null, ...base };
     const ceiling = Object.hasOwn(extra, 'ceiling')
         ? (extra.ceiling === null || EFFORT_ORDER.includes(extra.ceiling) ? extra.ceiling : base.ceiling)
         : base.ceiling;
     const efforts = Array.isArray(extra.efforts) && extra.efforts.length
         ? extra.efforts.filter((level) => EFFORT_ORDER.includes(level))
         : base.efforts;
+    // An explicit empty list is a decision of its own: this model must never receive the field.
+    const modes = Array.isArray(extra.modes)
+        ? [...new Set(extra.modes.filter((mode) => typeof mode === 'string' && mode.trim()))]
+        : base.modes;
     return {
         window: Number.isSafeInteger(extra.window) && extra.window > 0 ? extra.window : base.window,
         maxOutput: Number.isSafeInteger(extra.maxOutput) && extra.maxOutput > 0 ? extra.maxOutput : base.maxOutput,
         ceiling,
         efforts: efforts && efforts.length ? efforts : null,
+        modes: modes ?? null,
     };
+}
+
+/**
+ * The reasoning mode to send for one model, or null when nothing should be sent.
+ * `off`, an empty name, and a mode the model does not list all mean no field, so a gateway that has
+ * never heard of `reasoning.mode` receives exactly the request it received before.
+ * @param {string | null} mode
+ * @param {{ modes?: string[] | null }} profile
+ * @returns {string|null}
+ * @exports
+ * @ai.hint pure
+ */
+export function modeFor(mode, profile) {
+    const name = typeof mode === 'string' ? mode.trim() : '';
+    if (!name || name === 'off') return null;
+    const list = profile?.modes;
+    if (!Array.isArray(list)) return name;
+    return list.includes(name) ? name : null;
 }
 
 /**

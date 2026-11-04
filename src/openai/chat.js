@@ -8,6 +8,7 @@
  * @ai.tags openai, chat, transport
  * @ai.hint pure
  * @changed 2026-11-04 droppedTools names the mcp and built-in tools a chat host cannot carry.
+ * @changed 2026-11-04 chatGaps names reasoning.mode, which has no chat spelling.
  */
 import { ApiError } from './errors.js';
 
@@ -152,9 +153,10 @@ export function droppedTools(tools) {
 
 /**
  * What this body needs and /v1/chat/completions cannot carry at all: a built-in Responses tool
- * (`web_search`, `image_generation`, …) and background mode. A `type: 'mcp'` server is not a gap:
- * the pipeline runs without it (Figma falls back to the attached pictures), it is often added by
- * the program rather than asked for by the user, and the host is still told about it. Server-side
+ * (`web_search`, `image_generation`, …), background mode, and the gateway field `reasoning.mode`
+ * (chat has only `reasoning_effort`, so a mode has no name to travel under). A `type: 'mcp'` server
+ * is not a gap: the pipeline runs without it (Figma falls back to the attached pictures), it is often
+ * added by the program rather than asked for by the user, and the host is still told about it. Server-side
  * conversation state has its own error in the client.
  * @param {object} body Responses API request body
  * @returns {string[]} names the chat transport cannot serve; empty when the request is portable
@@ -166,6 +168,9 @@ export function chatGaps(body = {}) {
     const builtins = tools.filter((tool) => isRecord(tool) && tool.type && tool.type !== 'function' && tool.type !== 'mcp');
     const gaps = droppedTools(builtins);
     if (body?.background === true) gaps.push('background');
+    // `off` never reaches the body (modeFor drops it), so a body naming it is a real loss.
+    const mode = textOf(body?.reasoning?.mode);
+    if (mode && mode !== 'off') gaps.push('reasoning.mode');
     return gaps;
 }
 
@@ -267,7 +272,7 @@ function pushItem(messages, item) {
  * Responses body → Chat Completions body. `instructions` becomes the leading system message,
  * `input` items become messages, and the options chat hosts understand are copied under chat names.
  * Fields with no chat meaning (store, background, previous_response_id, include, truncation,
- * prompt_cache_key, text.verbosity) are dropped.
+ * prompt_cache_key, text.verbosity, reasoning.mode) are dropped.
  * @param {object} body Responses API request body
  * @param {{ includeUsage?: boolean, withReasoning?: boolean }} [options]
  * @returns {object}
@@ -309,6 +314,7 @@ export function toChatBody(body = {}, { includeUsage = true, withReasoning = tru
     if (textOf(body.service_tier)) chatBody.service_tier = body.service_tier;
     const effort = textOf(body.reasoning?.effort);
     if (withReasoning && effort) chatBody.reasoning_effort = effort;
+    // body.reasoning.mode is a Responses/gateway field with no chat spelling: chatGaps names it.
     const format = chatResponseFormat(body.text?.format);
     if (format) chatBody.response_format = format;
     return chatBody;
