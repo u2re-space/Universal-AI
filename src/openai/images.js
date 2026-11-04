@@ -63,7 +63,7 @@ const IMAGE_CAPABILITIES = Object.freeze({
  */
 const IMAGE_MODEL_PROFILES = Object.freeze([
     Object.freeze({ match: GPT_IMAGE_25, customSizes: true, div16Padding: true }),
-    Object.freeze({ match: RIVERFLOW, keepProSuffix: true, omitSizeOnReject: true }),
+    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true }),
 ]);
 
 /**
