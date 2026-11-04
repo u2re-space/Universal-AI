@@ -46,7 +46,8 @@
   реестр ролей и раннер общие с `run_subagent`.
 * **Порядок этапов как данные** — `plan.pipeline` и `agent.pipeline` задают, какие этапы выполнять и в каком порядке.
 * **Список бэкендов** — `backends`: несколько OpenAI-совместимых хостов по порядку, у каждого свой ключ,
-  заголовки и выключатели маршрутов (`supports`). Первый хост с ключом становится основным, остальные — резервными.
+  заголовки, поля тела запроса (`body`) и выключатели маршрутов (`supports`). Первый хост с ключом
+  становится основным, остальные — резервными.
 * **Подстановки** — `{{env:NAME}}`, `{{task:PROMPT}}`, `{{delegated:PROMPT}}` и `{{fs:путь}}` в конфигурации,
   инструкциях ролей и тексте задач.
 
@@ -147,7 +148,7 @@ ai serve --port 8765
 
 Сервер слушает только `127.0.0.1`. Секрет `--token` или `AI_COMPLETE_TOKEN` (либо `completion.token` в конфигурации) передаётся заголовком `Authorization: Bearer` или параметром `?token=`. У `ai serve` тот же заголовок принимает токен из `serve.json`.
 
-Для каждой модели дополнение ищет самый быстрый канал. Каналы — `backends` (у каждого свой ключ, заголовки и маршруты), а если список пуст — основной `baseURL` с `OPENAI_API_KEY` и `fallback.providers`. При первом запросе и после `completion.probeTtlMs` (60 с) каналы параллельно получают короткий пробный запрос; побеждает первый ответивший, остальные остаются запасными в порядке задержки. Если канал не обслуживает модель или отвечает ошибкой, запрос уходит следующему. Выбор запоминается отдельно для каждой модели. `completion.channelProbe: false` отключает поиск (порядок: основной, затем запасные), `completion.probeTimeoutMs` (1500 мс) ограничивает пробу.
+Для каждой модели дополнение ищет самый быстрый канал. Каналы — `backends` (у каждого свой ключ, заголовки, поля тела и маршруты), а если список пуст — основной `baseURL` с `OPENAI_API_KEY` и `fallback.providers`. При первом запросе и после `completion.probeTtlMs` (60 с) каналы параллельно получают короткий пробный запрос; побеждает первый ответивший, остальные остаются запасными в порядке задержки. Если канал не обслуживает модель или отвечает ошибкой, запрос уходит следующему. Выбор запоминается отдельно для каждой модели. `completion.channelProbe: false` отключает поиск (порядок: основной, затем запасные), `completion.probeTimeoutMs` (1500 мс) ограничивает пробу.
 
 Тот же сервер принимает правку структуры: `POST /v1/structure` и кадр WebSocket `{"type":"structure"}`. В `tasks` — `sort-imports`, `dedupe`, `merge`, `group-properties`, `group-selectors`, `sort-rules`, `sort-properties`, `layers`, `clean`, `sort-lines`. В `rules` — свой порядок импортов, группы свойств и слои. `prompt` описывает задачу, которую встроенные шаги не покрывают. `selection` ограничивает правку открытым диапазоном; без `write` сервер только возвращает текст. Агент делает то же самое инструментом `structure_file`.
 
@@ -660,7 +661,7 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   "backends": [
     { "baseUrl": "https://api.proxyapi.ru/v1", "apiKey": "{{env:OPENAI_API_KEY}}" },
     { "baseUrl": "https://sprutdock.ru/v1", "apiKey": "{{env:SPRUTDOCK_API_KEY}}", "supports": { "decisions": false } },
-  { "baseUrl": "https://gptunnel.ru/v1", "apiKey": "{{env:GPTUNNEL_API_KEY}}", "headers": { "useWalletBalance": true } }
+    { "baseUrl": "https://gptunnel.ru/v1", "apiKey": "{{env:GPTUNNEL_API_KEY}}", "body": { "useWalletBalance": true } }
   ],
   "imageModel": null,
   "reasoning": { "effort": "medium", "summary": "auto" },
@@ -766,18 +767,28 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 "backends": [
   { "baseUrl": "https://api.proxyapi.ru/v1", "apiKey": "{{env:OPENAI_API_KEY}}" },
   { "baseUrl": "https://sprutdock.ru/v1", "apiKey": "{{env:SPRUTDOCK_API_KEY}}", "supports": { "decisions": false } },
-  { "baseUrl": "https://gptunnel.ru/v1", "apiKey": "{{env:GPTUNNEL_API_KEY}}", "headers": { "useWalletBalance": "true" } }
+  { "baseUrl": "https://gptunnel.ru/v1", "apiKey": "{{env:GPTUNNEL_API_KEY}}", "body": { "useWalletBalance": true } }
 ]
 ```
 
 Поля записи: `baseUrl` (или `baseURL`) — корень, к которому добавляются `/responses`, `/chat/completions`, `/images/...` и `/decisions`;
 `apiKey` — ключ, обычно через `{{env:NAME}}` (вместо него можно указать `env` с именем переменной); `headers` —
 свои заголовки (значения `true` и числа становятся строками; `Authorization`, `Content-Type`, `Accept` и
-заголовки организации/проекта не перезаписываются); `supports` — выключатели маршрутов `responses`, `chat`,
+заголовки организации/проекта не перезаписываются); `body` — поля, которые шлюз ждёт в теле запроса;
+`supports` — выключатели маршрутов `responses`, `chat`,
 `images`, `decisions`, `moderations`. `decisionAPI` — старое имя `decisions`. Значение `false` исключает бэкенд из маршрута;
 для `images-edit` и `images-vector` действует выключатель `images`. Решения и модерация перебирают только
 поддерживающие хосты; если таких нет, шаг решений пропускается. Бэкенд с `responses: false` и `chat: true`
 остаётся в списке: его запросы идут сразу на `/v1/chat/completions`.
+
+`body` нужен шлюзам, которые берут настройки из тела запроса, а не из заголовков: у gptunnel
+`useWalletBalance` — параметр `/v1/chat/completions`, в заголовках его никто не читает. В отличие от
+`headers` значения сохраняют тип JSON — `true` уходит как `true`, а не как строка `"true"`. Поле
+дописывается в запрос только тогда, когда сам запрос его не задал: `model`, `input`, `tools` и способ
+передачи (`stream`, `stream_options`) всегда решает клиент. Хост, которому поле неизвестно, отвечает
+`400` с его именем — клиент повторяет запрос без этого поля и до конца запуска его не отправляет,
+поэтому одно лишнее поле не ломает каждый запрос. О том, что поле добавлено или отклонено,
+сообщает warning.
 
 Подстановки работают в любой строке конфигурации и в промптах:
 
@@ -831,8 +842,13 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
   бэкенд с `/v1/responses`. По умолчанию `false`: `tools.web` включён всегда, и строгий отказ ронял бы
   любой запуск на чат-хосте из-за поиска.
 * `streamUsage` — добавляет `stream_options.include_usage`, чтобы стрим принёс usage; хост, который не
-  знает этого поля, получает тот же запрос без него.
+  знает этого поля, получает тот же запрос без него. Свой `stream_options` задаётся в `body` бэкенда:
+  он сливается с этим и при отказе отбрасывается вместе с ним.
 * `reasoningEffort` — передаёт `reasoning.effort` как `reasoning_effort`.
+
+Поля `body` бэкенда подмешиваются к запросу на обоих маршрутах, поэтому `useWalletBalance` доезжает и до
+`/v1/chat/completions`. Поле, которое хост отклонил по имени, не отправляется до конца запуска — этот же
+повтор спасает и `stream_options`, `reasoning_effort`, `max_completion_tokens`.
 
 Потеря возможностей не бывает тихой: при переходе на чат-транспорт клиент одним предупреждением называет
 то, чего на нём нет (`web_search`, `image_generation`, серверы `type: mcp`), и это же поле можно

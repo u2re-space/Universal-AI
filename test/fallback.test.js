@@ -57,7 +57,8 @@ test('sprutdock is used only when its key is present', () => {
     assert.deepEqual(providerList(config, {}), [
         { baseURL: 'https://api.proxyapi.ru/v1', apiKey: "{{env:PROXYAPI_API_KEY}}" },
         { baseURL: 'https://sprutdock.ru/v1', apiKey: "{{env:SPRUTDOCK_API_KEY}}", supports: { decisionAPI: false } },
-        { baseURL: 'https://gptunnel.ru/v1', apiKey: '{{env:GPTUNNEL_API_KEY}}', headers: { useWalletBalance: false } }
+        // `useWalletBalance` is a request-body parameter of the gateway, not a header.
+        { baseURL: 'https://gptunnel.ru/v1', apiKey: '{{env:GPTUNNEL_API_KEY}}', body: { useWalletBalance: false } }
     ]);
     assert.equal(providerList(config, { PROXYAPI_API_KEY: '{{env:PROXYAPI_API_KEY}}' })[0].baseURL, 'https://api.proxyapi.ru/v1');
     assert.equal(providerList(config, { PROXYAPI_API_KEY: '{{env:PROXYAPI_API_KEY}}' })[0].apiKey, '{{env:PROXYAPI_API_KEY}}');

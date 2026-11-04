@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { CancelledError } from '../openai/errors.js';
 import { createClient } from '../openai/client.js';
+import { primaryBackend } from '../openai/fallback.js';
 import { detectImageMime } from '../core/attachments.js';
 import { errorMessage, formatBytes, truncate, clipMiddle } from '../util/text.js';
 import { resolveInside, NOISY_DIRS } from './paths.js';
@@ -424,8 +425,11 @@ export function createToolset({
                 start: { line: args.selection_start_line ?? 0, character: args.selection_start_character ?? 0 },
                 end: { line: args.selection_end_line ?? args.selection_start_line ?? 0, character: args.selection_end_character ?? 0 },
             };
+            /** The same host settings as every other call: a gateway field belongs to the host, not to one tool. */
+            const backend = primaryBackend(config);
             const client = prompt.trim() && config.apiKey ? createClient({
                 apiKey: config.apiKey, baseURL: config.baseURL, organization: config.organization, project: config.project,
+                headers: backend.headers, body: backend.body,
             }) : null;
             try {
                 const result = await structureCode({

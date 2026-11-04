@@ -287,7 +287,9 @@ function normalizeHeaderValues(value) {
 }
 
 /**
- * Read `baseUrl`/`baseURL`, `headers`, and `supports` of a backend list without changing its order.
+ * Read `baseUrl`/`baseURL`, `headers`, `body`, and `supports` of a backend list without changing
+ * its order. Header values become strings; body values keep their JSON type, because a gateway flag
+ * such as `useWalletBalance` has to arrive as `true`.
  * @param {unknown} list
  * @returns {unknown}
  * @ai.hint pure
@@ -296,10 +298,11 @@ function normalizeBackendEntries(list) {
     if (!Array.isArray(list)) return list;
     return list.map((item) => {
         if (!isRecord(item)) return item;
-        const { baseUrl, baseURL, headers, supports, ...rest } = item;
+        const { baseUrl, baseURL, headers, body, supports, ...rest } = item;
         const out = { ...rest };
         if (baseUrl !== undefined || baseURL !== undefined) out.baseURL = baseUrl ?? baseURL;
         if (headers !== undefined) out.headers = normalizeHeaderValues(headers);
+        if (body !== undefined) out.body = isRecord(body) ? { ...body } : body;
         if (supports !== undefined) out.supports = normalizeSupports(supports);
         return out;
     });
@@ -398,6 +401,27 @@ function validateSupports(supports, where, fail) {
 }
 
 /**
+ * Validate extra request-body fields of a backend: JSON field names and values.
+ * @param {unknown} body
+ * @param {string} where
+ * @param {(message: string) => never} fail
+ * @returns {void}
+ * @ai.hint pure
+ */
+function validateBodyFields(body, where, fail) {
+    if (body == null) return;
+    if (!isRecord(body)) fail(`${where} должен быть объектом`);
+    for (const [name, value] of Object.entries(body)) {
+        if (!name.trim()) fail(`${where} содержит пустое имя поля`);
+        try {
+            JSON.stringify({ [name]: value });
+        } catch {
+            fail(`${where}.${name}: значение должно быть сериализуемо в JSON`);
+        }
+    }
+}
+
+/**
  * Validate a backend or provider list.
  * @param {unknown} list
  * @param {string} where
@@ -410,12 +434,13 @@ function validateBackends(list, where, fail) {
     for (const [index, item] of list.entries()) {
         if (!isRecord(item)) fail(`${where}[${index}] должен быть объектом`);
         for (const key of Object.keys(item)) {
-            if (!['baseURL', 'apiKey', 'env', 'headers', 'supports'].includes(key)) fail(`${where}[${index}].${key}: неизвестное поле`);
+            if (!['baseURL', 'apiKey', 'env', 'headers', 'body', 'supports'].includes(key)) fail(`${where}[${index}].${key}: неизвестное поле`);
         }
         try { new URL(item.baseURL); } catch { fail(`${where}[${index}].baseURL должен быть URL`); }
         if (item.apiKey != null && (typeof item.apiKey !== 'string' || /[\r\n]/.test(item.apiKey))) fail(`${where}[${index}].apiKey: строка или null`);
         if (item.env != null && (typeof item.env !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(item.env))) fail(`${where}[${index}].env: имя переменной или null`);
         validateHeaders(item.headers, `${where}[${index}].headers`, fail);
+        validateBodyFields(item.body, `${where}[${index}].body`, fail);
         validateSupports(item.supports, `${where}[${index}].supports`, fail);
     }
 }
@@ -768,13 +793,17 @@ export function supportsVerbosity(model) {
 export function redactConfig(config) {
     const copy = structuredClone(config);
     if (copy.apiKey) copy.apiKey = `${copy.apiKey.slice(0, 7)}…${copy.apiKey.slice(-4)}`;
-    /** Hide the key and any credential-shaped header of one backend entry. */
+    /** Hide the key and any credential-shaped header or body field of one backend entry. */
     const redactBackend = (item) => {
         if (!item || typeof item !== 'object') return;
         if (item.apiKey) item.apiKey = '…';
-        if (item.headers && typeof item.headers === 'object') {
-            item.headers = Object.fromEntries(Object.entries(item.headers)
-                .map(([key, value]) => [key, /auth|key|token|secret/i.test(key) ? '…' : value]));
+        // A backend can carry gateway settings in headers or in the request body; either may hold a
+        // token, so both are filtered by name.
+        for (const field of ['headers', 'body']) {
+            if (item[field] && typeof item[field] === 'object') {
+                item[field] = Object.fromEntries(Object.entries(item[field])
+                    .map(([key, value]) => [key, /auth|key|token|secret/i.test(key) ? '…' : value]));
+            }
         }
     };
     if (Array.isArray(copy.backends)) for (const item of copy.backends) redactBackend(item);

@@ -138,3 +138,52 @@ test('rejects a missing API key and non-https base URLs', () => {
     assert.throws(() => createClient({ apiKey: '' }), /OPENAI_API_KEY/);
     assert.throws(() => createClient({ apiKey: 'x', baseURL: 'https://u:p@api.openai.com/v1/' }), /учётные/);
 });
+
+test('a backend body field rides on every request and keeps its JSON type', async () => {
+    scenarios = [{ text: 'ok' }, { text: 'again' }];
+    const events = [];
+    const c = createClient({
+        apiKey: 'sk-test', baseURL: server.baseURL, retries: 0,
+        body: { useWalletBalance: true, obfuscate: false, tag: 'team' },
+    });
+    await c.responses.create({ model: 'mock-model', input: 'hi' }, { onEvent: (event) => events.push(event) });
+    const sent = server.requests.at(-1).body;
+    // A gateway flag has to arrive as a boolean, not as the string "true".
+    assert.deepEqual([sent.useWalletBalance, sent.obfuscate, sent.tag], [true, false, 'team']);
+    const notices = () => events.filter((event) => event.type === 'warning' && /useWalletBalance/.test(String(event.message))).length;
+    assert.equal(notices(), 1);
+    await c.responses.create({ model: 'mock-model', input: 'again' });
+    assert.equal(server.requests.at(-1).body.useWalletBalance, true);
+    assert.equal(notices(), 1, 'the notice is printed once, the field is sent every time');
+});
+
+test('a configured body field never rewrites what the call itself decided', async () => {
+    scenarios = [{ text: 'ok' }];
+    const c = createClient({
+        apiKey: 'sk-test', baseURL: server.baseURL, retries: 0,
+        body: { model: 'other-model', stream: true, temperature: 0.3 },
+    });
+    await c.responses.create({ model: 'mock-model', input: 'hi', temperature: 0.9 });
+    const sent = server.requests.at(-1).body;
+    assert.equal(sent.model, 'mock-model');
+    assert.equal(sent.temperature, 0.9);
+    // `stream` decides how the answer is read: a configured copy would ask for SSE on a JSON call.
+    assert.equal(sent.stream, undefined);
+});
+
+test('a configured field the host refuses by name is dropped and not sent again', async () => {
+    scenarios = [
+        { httpStatus: 400, httpBody: { error: { message: "Unrecognized request parameter: 'useWalletBalance'", param: 'useWalletBalance', type: 'invalid_request_error' } } },
+        { text: 'after the drop' },
+        { text: 'next call' },
+    ];
+    const events = [];
+    const c = createClient({ apiKey: 'sk-test', baseURL: server.baseURL, retries: 0, body: { useWalletBalance: true } });
+    const first = await c.responses.create({ model: 'mock-model', input: 'hi' }, { onEvent: (event) => events.push(event) });
+    assert.equal(first.output_text, 'after the drop');
+    const second = await c.responses.create({ model: 'mock-model', input: 'again' });
+    assert.equal(second.output_text, 'next call');
+    // One rejected call teaches the client the name: the repeat and every later call omit it.
+    assert.deepEqual(server.requests.map((request) => request.body.useWalletBalance), [true, undefined, undefined]);
+    assert.ok(events.some((event) => event.type === 'warning' && /useWalletBalance/.test(String(event.message))));
+});

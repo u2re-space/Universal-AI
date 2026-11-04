@@ -140,7 +140,7 @@ export const defaults = Object.freeze({
         providers: [
             { baseURL: 'https://api.proxyapi.ru/v1', apiKey: "{{env:PROXYAPI_API_KEY}}", env: 'PROXYAPI_API_KEY' },
             { baseURL: 'https://sprutdock.ru/v1', apiKey: "{{env:SPRUTDOCK_API_KEY}}", supports: { decisionAPI: false }, env: 'SPRUTDOCK_API_KEY' },
-            { baseURL: 'https://gptunnel.ru/v1', apiKey: '{{env:GPTUNNEL_API_KEY}}', headers: { useWalletBalance: false }, env: 'GPTUNNEL_API_KEY' }
+            { baseURL: 'https://gptunnel.ru/v1', apiKey: '{{env:GPTUNNEL_API_KEY}}', body: { useWalletBalance: false }, env: 'GPTUNNEL_API_KEY' }
         ],
     },
     /**

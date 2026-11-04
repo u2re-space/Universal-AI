@@ -11,6 +11,7 @@
  */
 
 import { createClient } from '../openai/client.js';
+import { primaryBackend } from '../openai/fallback.js';
 import { clipMiddle } from '../util/text.js';
 import { dispatchChannel } from './dispatch.js';
 import { createTelegram, TELEGRAM_METHODS } from '../telegram/client.js';
@@ -31,8 +32,11 @@ export function createChannelHandlers({ client = null, config, signal, ledger = 
      */
     async function withClient(fn) {
         if (client) return fn(client);
+        /** The host's own headers and body fields apply to this call too, as they do everywhere else. */
+        const backend = primaryBackend(config);
         const owned = createClient({
             apiKey: config.apiKey, baseURL: config.baseURL, organization: config.organization, project: config.project,
+            headers: backend.headers, body: backend.body,
             retries: config.retries, idleTimeoutMs: config.limits?.idleTimeoutMs, connectTimeoutMs: config.limits?.connectTimeoutMs,
         });
         try { return await fn(owned); }

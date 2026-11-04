@@ -6,7 +6,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createClient } from '../src/openai/client.js';
 import { createSession } from '../src/core/session.js';
 import { createLedger } from '../src/core/usage.js';
-import { defaults, loadConfig } from '../src/core/config.js';
+import { defaults, loadConfig, redactConfig } from '../src/core/config.js';
 import { buildUserMessage } from '../src/core/attachments.js';
 import { createToolset } from '../src/agent/tools.js';
 import { runTurn } from '../src/agent/loop.js';
@@ -204,11 +204,12 @@ test('chat.force starts on the chat route without a rejected Responses request',
 test('a chat-only backend stays in the responses chain and is forced onto the chat transport', async () => {
     const config = {
         apiKey: 'sk-test', model: 'mock-model',
-        backends: [{ baseURL: server.baseURL, apiKey: 'k', supports: { responses: false, chat: true } }],
+        backends: [{ baseURL: server.baseURL, apiKey: 'k', body: { useWalletBalance: true }, supports: { responses: false, chat: true } }],
     };
     const channels = completionChannelList(config, {});
     assert.equal(channels.length, 2, 'the host is not dropped for missing /v1/responses');
     assert.deepEqual(channels[1].supports, { responses: false, chat: true });
+    assert.deepEqual(channels[1].body, { useWalletBalance: true }, 'the channel carries the host body fields too');
 
     const declared = { ...config, baseURL: server.baseURL, apiKey: 'sk-test' };
     declared.backends = [{ ...config.backends[0], apiKey: 'sk-test' }];
@@ -219,6 +220,8 @@ test('a chat-only backend stays in the responses chain and is forced onto the ch
     assert.ok(api.chat.isFallback);
     assert.equal(responsePosts().length, 0, 'the chat-only host is not probed with /v1/responses');
     assert.equal(chatPosts().length, 1);
+    // The gateway flag belongs to the body, and a boolean stays a boolean on the wire.
+    assert.equal(chatPosts()[0].body.useWalletBalance, true);
     api.close();
 });
 
@@ -368,13 +371,26 @@ test('runTurn completes a tool round-trip over the chat transport', async () => 
 
 test('config accepts the chat section and the chat route switch', async () => {
     const config = await loadConfig({
-        env: { OPENAI_API_KEY: 'sk-test', AI_AGENT_HOME: root },
-        overrides: { chat: { enabled: false }, backends: [{ baseUrl: 'https://gw.example/v1', apiKey: 'k', supports: { responses: false, chat: true } }] },
+        env: { OPENAI_API_KEY: 'sk-test', AI_AGENT_HOME: root, WALLET_TOKEN: 'wt-1' },
+        overrides: {
+            chat: { enabled: false },
+            backends: [{
+                baseUrl: 'https://gw.example/v1',
+                apiKey: 'k',
+                body: { useWalletBalance: true, walletToken: '{{env:WALLET_TOKEN}}' },
+                supports: { responses: false, chat: true },
+            }],
+        },
         ensureHome: false, cwd: root,
     });
     assert.equal(config.chat.enabled, false);
     assert.equal(config.chat.streamUsage, true);
     assert.deepEqual(config.backends[0].supports, { responses: false, chat: true });
+    // A body flag keeps its JSON type, an env reference inside it is expanded, and a token-shaped
+    // value of it is hidden from anything that prints the config.
+    assert.deepEqual(config.backends[0].body, { useWalletBalance: true, walletToken: 'wt-1' });
+    assert.equal(redactConfig(config).backends[0].body.walletToken, '…');
+    assert.equal(redactConfig(config).backends[0].body.useWalletBalance, true);
     await assert.rejects(() => loadConfig({
         env: { OPENAI_API_KEY: 'sk-test', AI_AGENT_HOME: root }, overrides: { chat: { enabled: 'yes' } }, ensureHome: false, cwd: root,
     }), /chat\.enabled: true \| false/);
@@ -383,4 +399,9 @@ test('config accepts the chat section and the chat route switch', async () => {
         overrides: { backends: [{ baseUrl: 'https://gw.example/v1', apiKey: 'k', supports: { chatapi: 'x' } }] },
         ensureHome: false, cwd: root,
     }), /supports\.chat/);
+    await assert.rejects(() => loadConfig({
+        env: { OPENAI_API_KEY: 'sk-test', AI_AGENT_HOME: root },
+        overrides: { backends: [{ baseUrl: 'https://gw.example/v1', apiKey: 'k', body: 'useWalletBalance' }] },
+        ensureHome: false, cwd: root,
+    }), /body должен быть объектом/);
 });

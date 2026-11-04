@@ -150,7 +150,7 @@ export function chatOptionsFor(config, supports = null) {
  * `.env` is found — `process.env` never sees it.
  * @param {object} item
  * @param {object} env
- * @returns {{ baseURL: string, apiKey: string, headers?: object, supports?: object } | null}
+ * @returns {{ baseURL: string, apiKey: string, headers?: object, body?: object, supports?: object } | null}
  * @ai.hint pure
  */
 function usableBackend(item, env) {
@@ -159,6 +159,7 @@ function usableBackend(item, env) {
     if (!baseURL || !apiKey) return null;
     const entry = { baseURL, apiKey };
     if (item.headers && typeof item.headers === 'object') entry.headers = item.headers;
+    if (item.body && typeof item.body === 'object') entry.body = item.body;
     if (item.supports && typeof item.supports === 'object') entry.supports = item.supports;
     return entry;
 }
@@ -168,7 +169,7 @@ function usableBackend(item, env) {
  * `backends` is the ordered list when configured; otherwise the legacy `fallback.providers` is read.
  * @param {object} config
  * @param {object} [env]
- * @returns {{ baseURL: string, apiKey: string, headers?: object, supports?: object }[]}
+ * @returns {{ baseURL: string, apiKey: string, headers?: object, body?: object, supports?: object }[]}
  * @exports
  * @ai.hint pure
  */
@@ -252,10 +253,10 @@ function adaptBody(body, model, switchedHost) {
 }
 
 /**
- * The primary backend entry, including its custom headers and route switches.
+ * The primary backend entry, including its custom headers, extra body fields and route switches.
  * A `backends` list names it explicitly; otherwise only the top-level URL and key exist.
  * @param {object} config
- * @returns {{ baseURL: string, apiKey: string, headers?: object|null, supports?: object|null }}
+ * @returns {{ baseURL: string, apiKey: string, headers?: object|null, body?: object|null, supports?: object|null }}
  * @exports
  * @ai.hint pure
  */
@@ -267,6 +268,7 @@ export function primaryBackend(config) {
         baseURL: config.baseURL,
         apiKey: config.apiKey ?? envValue('OPENAI_API_KEY'),
         headers: match?.headers ?? null,
+        body: match?.body ?? null,
         supports: match?.supports ?? null,
     };
 }
@@ -288,7 +290,7 @@ export function createFallbackClient(config, { create = createClient } = {}) {
     const primarySpec = primaryBackend(config);
     const rasterOptions = { magickPath: config.magickPath ?? null, rasterEngine: config.image?.rasterEngine ?? 'auto' };
     const primary = create({
-        apiKey: primarySpec.apiKey, baseURL: primarySpec.baseURL, headers: primarySpec.headers,
+        apiKey: primarySpec.apiKey, baseURL: primarySpec.baseURL, headers: primarySpec.headers, body: primarySpec.body,
         chat: chatOptionsFor(config, primarySpec.supports), ...timeouts, ...rasterOptions,
     });
     const opened = [];
@@ -310,14 +312,15 @@ export function createFallbackClient(config, { create = createClient } = {}) {
     const endpoints = (kind) => [
         endpointOf(primarySpec, primary),
         ...providerList(config).map((item) => {
-            const signature = JSON.stringify(item.headers ?? null);
+            // Two entries on one host differ by what they send, so both maps belong to the cache key.
+            const signature = JSON.stringify([item.headers ?? null, item.body ?? null]);
             let found = opened.find((entry) => entry.baseURL === item.baseURL && entry.apiKey === item.apiKey
-                && JSON.stringify(entry.headers ?? null) === signature);
+                && JSON.stringify([entry.headers ?? null, entry.body ?? null]) === signature);
             if (!found) {
                 found = {
                     ...item,
                     client: create({
-                        apiKey: item.apiKey, baseURL: item.baseURL, headers: item.headers,
+                        apiKey: item.apiKey, baseURL: item.baseURL, headers: item.headers, body: item.body,
                         chat: chatOptionsFor(config, item.supports), retries: config.retries,
                         idleTimeoutMs: timeouts.idleTimeoutMs, connectTimeoutMs: timeouts.connectTimeoutMs, ...rasterOptions,
                     }),

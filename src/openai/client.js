@@ -54,6 +54,17 @@ const RESERVED_HEADERS = new Set(['authorization', 'content-type', 'accept', 'x-
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 /**
+ * Copy the extra body fields of one backend. Values keep their JSON type — a gateway flag such as
+ * `useWalletBalance` has to arrive as `true`, not as the string `"true"`. What the request already
+ * sets is decided by `withBackendBody`, which never overwrites a field the call itself produced.
+ * @param {object|null|undefined} body
+ * @returns {Record<string, unknown>}
+ * @ai.hint pure
+ */
+const RESERVED_BODY = new Set(['model', 'input', 'messages', 'instructions', 'stream', 'tools', 'tool_choice',
+    'parallel_tool_calls', 'previous_response_id', 'store', 'background', 'include']);
+
+/**
  * Stringify and check per-backend headers. Reserved names are ignored, because auth and content
  * headers belong to the client.
  * @param {object|null|undefined} headers
@@ -68,6 +79,24 @@ function normalizeHeaders(headers) {
         const text = String(value);
         if (/[\r\n]/.test(text)) throw new TypeError(`Заголовок ${name} содержит перевод строки.`);
         out[name] = text;
+    }
+    return out;
+}
+
+/**
+ * Copy the extra body fields of one backend. Values keep their JSON type — a gateway flag such as
+ * `useWalletBalance` has to arrive as `true`, not as the string `"true"`. A field the client owns is
+ * kept out here so it cannot reach the wire twice under another meaning.
+ * @param {object|null|undefined} body
+ * @returns {Record<string, unknown>}
+ * @ai.hint pure
+ */
+function normalizeBodyFields(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return {};
+    const out = {};
+    for (const [name, value] of Object.entries(body)) {
+        if (value === undefined) continue;
+        out[name] = value;
     }
     return out;
 }
@@ -105,7 +134,7 @@ export function retryDelayMs(attempt, retryAfter, status = null) {
 export function createClient({
     apiKey = envValue('OPENAI_API_KEY'), baseURL = envValue('OPENAI_BASE_URL') || defaults.baseURL,
     organization = envValue('OPENAI_ORG_ID'), project = envValue('OPENAI_PROJECT_ID'),
-    headers = null,
+    headers = null, body: bodySetting = null,
     http, retries = defaults.retries, idleTimeoutMs, connectTimeoutMs, maxErrorBytes = defaults.maxErrorBytes,
     maxResponseBytes = defaults.maxResponseBytes, maxEventBytes = defaults.maxEventBytes,
     magickPath = null, rasterEngine = 'auto',
@@ -117,6 +146,8 @@ export function createClient({
     }
     const root = normalizeBaseURL(baseURL);
     const customHeaders = normalizeHeaders(headers);
+    /** Gateway fields this host expects in the JSON body; dropped when the host refuses them by name. */
+    let backendBody = normalizeBodyFields(bodySetting);
     const transport = http ?? createHttp({ idleTimeoutMs, connectTimeoutMs });
     /** Chat transport switches: `enabled: false` keeps a missing /responses route a hard error. */
     const chatSwitches = {
@@ -179,12 +210,106 @@ export function createClient({
     }
 
     /**
-   * Core call. `stream` = expect text/event-stream and reduce it; otherwise parse JSON.
-   * `streamReducer` swaps the Responses reducer for another one over the same byte stream
-   * (`eventTypesRequired: false` for transports whose events carry no type field).
-   * Retries only before any response byte has been consumed, and only for retryable failures.
-   * A foreground stream that drops after it started is restarted once; a background one is resumed by the caller.
-   */
+     * Body fields this host expects beyond the OpenAI schema, the names it refused, and the names
+     * already announced. A refused name is dropped for the rest of the client's life, so an unknown
+     * gateway flag costs one rejected call instead of failing every request.
+     */
+    const refusedBodyNames = new Set();
+    const warnedBodyNames = new Set();
+
+    /**
+     * `stream_options` for one chat call: what the request already asked for, plus what the backend
+     * configuration adds. The whole field disappears once the host has refused it by name.
+     * @param {object} request
+     * @returns {void}
+     * @ai.hint io
+     */
+    function applyStreamOptions(request) {
+        if (refusedBodyNames.has('stream_options')) { delete request.stream_options; return; }
+        const extra = backendBody.stream_options;
+        if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return;
+        request.stream_options = { ...(request.stream_options ?? {}), ...extra };
+    }
+
+    /**
+     * Merge the configured body fields into a request the client built. A field the request already
+     * carries keeps its value: `model`, `input`, and `stream` say what the call is, and a config
+     * entry may not rewrite them.
+     * @param {object} request
+     * @param {Function} emit
+     * @returns {object}
+     * @ai.hint io
+     */
+    function withBackendBody(request, emit) {
+        // `stream` and `stream_options` are the transport's own decision: a configured copy of them
+        // would ask for SSE on a call that reads JSON.
+        const skip = new Set(['stream', 'stream_options']);
+        const extra = Object.entries(backendBody).filter(([name]) => !skip.has(name) && request[name] === undefined);
+        if (!extra.length) return request;
+        for (const [name] of extra) {
+            if (warnedBodyNames.has(name)) continue;
+            warnedBodyNames.add(name);
+            announce({ type: 'warning', message: `В запрос добавлено поле ${name} из конфигурации бэкенда.` }, emit);
+        }
+        return Object.assign({}, request, Object.fromEntries(extra));
+    }
+
+    /**
+     * Forget the configured body fields this host rejected by name, so the next call omits them.
+     * @param {Error & { status?: number, param?: string, message?: string }} error
+     * @returns {string[]} the configured names it refused
+     * @ai.hint io
+     */
+    function refuseBackendBody(error) {
+        if (error?.status !== 400) return [];
+        const words = `${error?.param ?? ''} ${error?.message ?? ''}`.toLowerCase().split(/[^a-z0-9_-]+/);
+        const refused = Object.keys(backendBody).filter((name) => words.includes(name.toLowerCase()));
+        for (const name of refused) {
+            delete backendBody[name];
+            refusedBodyNames.add(name);
+        }
+        return refused;
+    }
+
+    /**
+     * Repeat a refused request once without the fields the host does not know — the client's own
+     * optional fields and the configured ones alike. Returns the request to send again, or null when
+     * the error names nothing the request can lose.
+     * @param {{ body?: object, rawBody?: string }} sent the request as it was sent
+     * @param {Error & { status?: number }} error
+     * @param {Function} emit
+     * @returns {{ body?: object, rawBody?: string }|null}
+     * @ai.hint io
+     */
+    function retryWithoutRejected(sent, error, emit) {
+        // The names have to be read before `refuseBackendBody` forgets them: the retry strips them
+        // out of the body this very call is repeating.
+        const configured = Object.keys(backendBody);
+        const refused = refuseBackendBody(error);
+        if (sent.rawBody !== undefined) {
+            if (!refused.length) return null;
+            try {
+                const parsed = JSON.parse(sent.rawBody);
+                if (!parsed || typeof parsed !== 'object') return null;
+                for (const name of refused) delete parsed[name];
+                return { rawBody: JSON.stringify(parsed) };
+            } catch { return null; }
+        }
+        const stripped = stripRejectedFields(sent.body ?? {}, error, configured);
+        if (!stripped.removed.length) return null;
+        announce({ type: 'warning', message: `Хост отклонил ${stripped.removed.join(', ')} — запрос повторён без этих полей.` }, emit);
+        return { body: stripped.body };
+    }
+
+    /**
+     * Core call. `stream` = expect text/event-stream and reduce it; otherwise parse JSON.
+     * `streamReducer` swaps the Responses reducer for another one over the same byte stream
+     * (`eventTypesRequired: false` for transports whose events carry no type field).
+     * A request body is completed with this host's configured `body` fields, and a field the host
+     * refuses by name costs one repeated call without it.
+     * Retries only before any response byte has been consumed, and only for retryable failures.
+     * A foreground stream that drops after it started is restarted once; a background one is resumed by the caller.
+     */
     async function call(path, { method = 'POST', body, rawBody, contentType, query, stream = false, signal, onEvent, idleTimeout, extraHeaders = null, streamReducer = null, eventTypesRequired = true } = {}) {
         const url = new URL(path, root);
         for (const [key, value] of Object.entries(query ?? {})) {
@@ -192,16 +317,37 @@ export function createClient({
             for (const item of Array.isArray(value) ? value : [value]) url.searchParams.append(key, String(item));
         }
         const emit = (event) => { try { onEvent?.(event); globalOnEvent?.(event); } catch { /* observer */ } };
-        const payload = rawBody !== undefined ? rawBody : (body === undefined ? undefined : JSON.stringify(body));
-        const background = body?.background === true;
+        const sendsBody = rawBody !== undefined || body !== undefined;
+        const sent = rawBody !== undefined
+            ? { rawBody }
+            : (sendsBody ? { body: withBackendBody(body, emit) } : {});
+        let payload = rawBody !== undefined ? rawBody : (sendsBody ? JSON.stringify(sent.body) : undefined);
+        let background = (sendsBody ? sent.body?.background : undefined) === true;
+        let rejectedRetry = false;
         let attempt = 0;
         let streamRestarts = 0;
         /**
-         * Retry a timeout or a dropped connection. A persistent status ends the call at once.
-         * @param {Error} error
+         * Retry a refused field or a dropped connection. A persistent status ends the call at once.
+         * @param {Error & { status?: number }} error
          * @returns {Promise<boolean>}
          */
         const retryOrStop = async (error) => {
+            /**
+             * A host that refuses a field by name gets the same request once without it. This is not
+             * a network retry: `attempt` stays as it is, and the client's own optional fields
+             * (`stream_options`, `reasoning_effort`, …) are dropped the same way as configured ones.
+             */
+            const retryWithoutField = async () => {
+                if (rejectedRetry || !sendsBody || error?.status !== 400) return false;
+                const next = retryWithoutRejected(sent, error, emit);
+                if (!next) return false;
+                rejectedRetry = true;
+                if (next.rawBody !== undefined) { sent.rawBody = next.rawBody; payload = next.rawBody; }
+                else { sent.body = next.body; payload = JSON.stringify(next.body); }
+                background = sent.body?.background === true;
+                return true;
+            };
+            if (await retryWithoutField()) return true;
             /*if (PERSISTENT_STATUS.has(error?.status)) {
                 emit({ type: 'warning', message: `HTTP ${error.status}: повтор не выполняется, выполнение остановлено.` });
                 return false;
@@ -224,6 +370,11 @@ export function createClient({
         };
         for (;;) {
             signal?.throwIfAborted();
+            /** `stream_options` and the refused-field retry both rebuild what goes on the wire. */
+            if (stream && sent.body) {
+                applyStreamOptions(sent.body);
+                payload = JSON.stringify(sent.body);
+            }
             const clientRequestId = randomUUID();
             const startedAt = Date.now();
             emit({ type: 'request.start', method, path: url.pathname, clientRequestId, attempt,
@@ -413,7 +564,8 @@ export function createClient({
 
     /**
      * POST /chat/completions with a Responses-shaped body, answered in the Responses shape.
-     * A host that refuses one optional chat field gets the same request once without that field.
+     * A field this host refuses by name — one the client adds itself or one configured in the
+     * backend's `body` — is dropped and the request repeated once inside `call`.
      * @param {object} body Responses API body
      * @param {{ signal?: AbortSignal, onEvent?: Function }} [options]
      * @returns {Promise<object>}
@@ -427,25 +579,15 @@ export function createClient({
         }
         const gap = chatFit(body, { onEvent: options.onEvent });
         if (gap) throw gap;
-        let chatBody = toChatBody(body, { includeUsage: chatSwitches.streamUsage, withReasoning: chatSwitches.reasoningEffort });
-        for (let attempt = 0; ; attempt++) {
-            try {
-                const result = await call(CHAT_PATH, {
-                    body: chatBody,
-                    stream,
-                    eventTypesRequired: false,
-                    ...(stream ? { streamReducer: ({ emit }) => createChatStreamReducer({ emit, model: body?.model }) } : {}),
-                    ...options,
-                });
-                return withText(normalizeChatResult(result, { model: body?.model }));
-            } catch (error) {
-                if (attempt > 0) throw error;
-                const stripped = stripRejectedFields(chatBody, error);
-                if (!stripped.removed.length) throw error;
-                chatBody = stripped.body;
-                announce({ type: 'warning', message: `Хост отклонил ${stripped.removed.join(', ')} в /v1/chat/completions — запрос повторён без этих полей.` }, options.onEvent);
-            }
-        }
+        const chatBody = toChatBody(body, { includeUsage: chatSwitches.streamUsage, withReasoning: chatSwitches.reasoningEffort });
+        const result = await call(CHAT_PATH, {
+            body: chatBody,
+            stream,
+            eventTypesRequired: false,
+            ...(stream ? { streamReducer: ({ emit }) => createChatStreamReducer({ emit, model: body?.model }) } : {}),
+            ...options,
+        });
+        return withText(normalizeChatResult(result, { model: body?.model }));
     }
 
     /**

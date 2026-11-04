@@ -249,10 +249,15 @@ MCP:
   Инструменты decide, moderate_text, channel_reply, telegram_call включаются tools.channels или --tools channels.
 
 Бэкенды и подстановки:
-  backends: [{ baseUrl, apiKey: "{{env:NAME}}", headers: {...}, supports: { decisions: false } }, ...]
+  backends: [{ baseUrl, apiKey: "{{env:NAME}}", headers: {...}, body: {...}, supports: { decisions: false } }, ...]
   Первый бэкенд с URL и ключом — основной, остальные — резервные по порядку; без ключа бэкенд пропускается.
   supports: responses | chat | images | decisions | moderations; decisionAPI — старое имя decisions; false выключает маршрут.
   Заголовки бэкенда не заменяют Authorization, Content-Type, Accept и заголовки организации/проекта.
+  body — поля, которые шлюз ждёт в теле запроса (у gptunnel это useWalletBalance). Значение сохраняет тип
+  JSON: true остаётся true, а не строкой "true". Поле добавляется, только если запрос сам его не задал;
+  stream и stream_options задаёт клиент. Имя, которое хост отклонил, забывается на весь запуск: запрос
+  повторяется без него и в дальнейшем это поле не шлёт.
+  Значения headers и body, имя которых похоже на токен (token, key, secret, authorization), скрыты в ai config.
   Подстановки в конфигурации и промптах: {{env:NAME}}, {{task:PROMPT}}, {{delegated:PROMPT}}, {{fs:путь}}.
   {{fs:}} читает UTF-8 файл внутри рабочего каталога, не секрет и не больше limits.maxFileReadBytes.
 

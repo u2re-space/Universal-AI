@@ -429,16 +429,18 @@ export function responsesRouteUnsupported(error) {
  * what was dropped, so the caller can repeat the call once and tell the user why.
  * @param {object} body the chat body that was refused
  * @param {Error & { status?: number, param?: string, message?: string }} error
+ * @param {string[]} [configured] extra field names the caller added from its configuration
  * @returns {{ body: object, removed: string[] }}
  * @exports
  * @ai.hint pure
  */
-export function stripRejectedFields(body, error) {
+export function stripRejectedFields(body, error, configured = []) {
     if (error?.status !== 400) return { body, removed: [] };
     const details = `${textOf(error?.param ? ` ${error.param}` : '')} ${textOf(error?.message)}`;
     const removed = [];
     const next = { ...body };
-    for (const field of REJECTABLE) {
+    const fields = [...new Set([...REJECTABLE, ...configured])];
+    for (const field of fields) {
         if (!Object.hasOwn(next, field)) continue;
         if (!new RegExp(`\\b${field.replace(/_/g, '[_\\s-]?')}\\b`, 'i').test(details)) continue;
         delete next[field];

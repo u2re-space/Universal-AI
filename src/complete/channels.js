@@ -29,7 +29,7 @@ const PROBE_MAX_OUTPUT_TOKENS = 32;
  * The primary entry comes first; duplicates are dropped by base URL and key.
  * @param {object} config Resolved config: baseURL, apiKey, backends, fallback.
  * @param {object} [env] Environment for apiKey and provider env names.
- * @returns {{ baseURL: string, apiKey: string, label: string, primary: boolean, headers?: object, supports?: object }[]}
+ * @returns {{ baseURL: string, apiKey: string, label: string, primary: boolean, headers?: object, body?: object, supports?: object }[]}
  * @exports
  * @ai.hint pure
  */
@@ -41,11 +41,12 @@ export function completionChannelList(config, env = null) {
      * @param {string} apiKey
      * @param {boolean} primary
      * @param {object|null} [headers]
+     * @param {object|null} [body]
      * @param {object|null} [supports]
      * @returns {void}
      * @ai.hint pure
      */
-    const add = (baseURL, apiKey, primary, headers = null, supports = null) => {
+    const add = (baseURL, apiKey, primary, headers = null, body = null, supports = null) => {
         const url = String(baseURL ?? '').trim();
         const key = String(apiKey ?? '').trim();
         if (!url || !key || /[\r\n]/.test(key) || !servesRoute(supports, 'responses')) return;
@@ -55,13 +56,14 @@ export function completionChannelList(config, env = null) {
         seen.add(id);
         const entry = { baseURL: url, apiKey: key, label: normalized, primary };
         if (headers && typeof headers === 'object') entry.headers = headers;
+        if (body && typeof body === 'object') entry.body = body;
         if (supports && typeof supports === 'object') entry.supports = supports;
         out.push(entry);
     };
     env ??= liveEnv() ?? process.env;
     const first = primaryBackend({ ...config, apiKey: config?.apiKey || env.OPENAI_API_KEY });
-    add(first.baseURL || 'https://api.openai.com/v1/', first.apiKey || env.OPENAI_API_KEY, true, first.headers, first.supports);
-    for (const item of providerList(config, env)) add(item.baseURL, item.apiKey, false, item.headers, item.supports);
+    add(first.baseURL || 'https://api.openai.com/v1/', first.apiKey || env.OPENAI_API_KEY, true, first.headers, first.body, first.supports);
+    for (const item of providerList(config, env)) add(item.baseURL, item.apiKey, false, item.headers, item.body, item.supports);
     return out;
 }
 
@@ -141,6 +143,7 @@ export function createCompletionChannels(config, { create = createClient, env = 
             apiKey: endpoint.apiKey,
             baseURL: endpoint.baseURL,
             headers: endpoint.headers ?? null,
+            body: endpoint.body ?? null,
             organization: config.organization,
             project: config.project,
             chat: chatOptionsFor(config, endpoint.supports),
