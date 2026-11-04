@@ -34,6 +34,10 @@ const configFor = (backends, baseURL, apiKey) => ({
     backends,
     fallback: { enabled: true, providers: [], models: {} },
     limits: {},
+    completionsBackends: [],
+    imagesBackends: [],
+    decisionsBackends: [],
+    moderationsBackends: [],
 });
 
 // ── configuration ──────────────────────────────────────────────────────────
@@ -153,6 +157,122 @@ test('decisions skip a backend that turned the route off', async () => {
     } finally {
         client.close();
     }
+});
+
+test('decisions use decisionsBackends when configured', async () => {
+    const textHost = await host({ script: () => ({ text: 'ok' }), decisions: () => ({ answers: [{ label: 'text' }] }) });
+    const decisionHost = await host({ script: () => ({ text: 'ok' }), decisions: () => ({ answers: [{ label: 'decision' }] }) });
+    const config = {
+        baseURL: textHost.baseURL, apiKey: 'sk-text', retries: 0,
+        backends: [{ baseURL: textHost.baseURL, apiKey: 'sk-text' }],
+        decisionsBackends: [{ baseURL: decisionHost.baseURL, apiKey: 'sk-decision' }],
+        fallback: { enabled: true, providers: [], models: {} },
+        limits: {},
+    };
+    const client = createFallbackClient(config);
+    try {
+        const answer = await client.decisions.create({ model: 'openai/gpt-6-luna-decisions', input: 'is it spam?' });
+        assert.deepEqual(answer.answers, [{ label: 'decision' }]);
+        assert.equal(textHost.requests.filter((request) => request.path === '/v1/decisions').length, 0);
+        assert.equal(decisionHost.requests.filter((request) => request.path === '/v1/decisions').length, 1);
+    } finally {
+        client.close();
+    }
+});
+
+test('images use imagesBackends when configured', async () => {
+    const textHost = await host({
+        script: () => ({ text: 'ok' }),
+        images: () => ({ data: [{ b64_json: Buffer.from('image').toString('base64') }] }),
+    });
+    const imageHost = await host({
+        script: () => ({ text: 'ok' }),
+        images: () => ({ data: [{ b64_json: Buffer.from('image').toString('base64') }] }),
+    });
+    const config = {
+        baseURL: textHost.baseURL, apiKey: 'sk-text', retries: 0,
+        backends: [{ baseURL: textHost.baseURL, apiKey: 'sk-text' }],
+        imagesBackends: [{ baseURL: imageHost.baseURL, apiKey: 'sk-image' }],
+        fallback: { enabled: true, providers: [], models: {} },
+        limits: {},
+    };
+    const client = createFallbackClient(config);
+    try {
+        await client.images.generate({ model: 'openai/gpt-image-2.5-sunburst', prompt: 'a cat' });
+        assert.equal(textHost.requests.filter((request) => request.path === '/v1/images/generations').length, 0);
+        assert.equal(imageHost.requests.filter((request) => request.path === '/v1/images/generations').length, 1);
+    } finally {
+        client.close();
+    }
+});
+
+test('an empty pool falls back to backends', async () => {
+    const primary = await host({ script: () => ({ text: 'ok' }), decisions: () => ({ answers: [{ label: 'primary' }] }) });
+    const fallback = await host({ script: () => ({ text: 'ok' }), decisions: () => ({ answers: [{ label: 'fallback' }] }) });
+    const config = {
+        baseURL: primary.baseURL, apiKey: 'sk-primary', retries: 0,
+        backends: [
+            { baseURL: primary.baseURL, apiKey: 'sk-primary' },
+            { baseURL: fallback.baseURL, apiKey: 'sk-fallback' },
+        ],
+        decisionsBackends: [],
+        fallback: { enabled: true, providers: [], models: {} },
+        limits: {},
+    };
+    const client = createFallbackClient(config);
+    try {
+        const answer = await client.decisions.create({ model: 'openai/gpt-6-luna-decisions', input: 'is it spam?' });
+        assert.deepEqual(answer.answers, [{ label: 'primary' }]);
+    } finally {
+        client.close();
+    }
+});
+
+test('providerList reads the kind pool', () => {
+    const config = {
+        baseURL: 'https://a.example/v1/', apiKey: 'sk-a',
+        backends: [{ baseURL: 'https://a.example/v1', apiKey: 'sk-a' }, { baseURL: 'https://b.example/v1', apiKey: 'sk-b' }],
+        decisionsBackends: [{ baseURL: 'https://c.example/v1', apiKey: 'sk-c' }, { baseURL: 'https://d.example/v1', apiKey: 'sk-d' }],
+        fallback: { enabled: true, providers: [] },
+    };
+    // decisions primary = c (first usable), so providerList returns d
+    assert.deepEqual(providerList(config, {}, 'decisions'), [
+        { baseURL: 'https://d.example/v1', apiKey: 'sk-d' },
+    ]);
+    // responses primary = a, so providerList returns b
+    assert.deepEqual(providerList(config, {}, 'responses'), [
+        { baseURL: 'https://b.example/v1', apiKey: 'sk-b' },
+    ]);
+});
+
+test('a legacy fallback.providers entry is merged into backends', async () => {
+    const config = await loadConfig({
+        env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6.1-terra', OPENAI_API_KEY: 'sk-primary' },
+        overrides: {
+            baseURL: 'https://api.proxyapi.ru/v1', apiKey: '{{env:OPENAI_API_KEY}}',
+            backends: [],
+            fallback: {
+                enabled: true,
+                providers: [{ baseURL: 'https://gptunnel.ru/v1', apiKey: '{{env:OPENAI_API_KEY}}' }],
+            },
+        },
+        ensureHome: false,
+    });
+    assert.equal(config.backends.length, 1);
+    assert.equal(config.backends[0].baseURL, 'https://gptunnel.ru/v1');
+    assert.equal(config.fallback.providers.length, 0);
+});
+
+test('new backend pools are validated', async () => {
+    const load = (branch) => loadConfig({
+        env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6.1-terra' },
+        overrides: { [branch]: [{ baseUrl: 'https://x/v1', apiKey: 'sk', unknownField: 1 }] },
+        ensureHome: false,
+    });
+    await assert.rejects(load('imagesBackends'), /imagesBackends\[0\]\.unknownField/);
+    await assert.rejects(load('decisionsBackends'), /decisionsBackends\[0\]\.unknownField/);
+    await assert.rejects(load('completionsBackends'), /completionsBackends\[0\]\.unknownField/);
+    await assert.rejects(load('moderationsBackends'), /moderationsBackends\[0\]\.unknownField/);
 });
 
 test('custom headers reach the request and cannot replace Authorization', async () => {

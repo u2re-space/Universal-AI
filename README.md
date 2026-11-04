@@ -148,7 +148,7 @@ ai serve --port 8765
 
 Сервер слушает только `127.0.0.1`. Секрет `--token` или `AI_COMPLETE_TOKEN` (либо `completion.token` в конфигурации) передаётся заголовком `Authorization: Bearer` или параметром `?token=`. У `ai serve` тот же заголовок принимает токен из `serve.json`.
 
-Для каждой модели дополнение ищет самый быстрый канал. Каналы — `backends` (у каждого свой ключ, заголовки, поля тела и маршруты), а если список пуст — основной `baseURL` с `OPENAI_API_KEY` и `fallback.providers`. При первом запросе и после `completion.probeTtlMs` (60 с) каналы параллельно получают короткий пробный запрос; побеждает первый ответивший, остальные остаются запасными в порядке задержки. Если канал не обслуживает модель или отвечает ошибкой, запрос уходит следующему. Выбор запоминается отдельно для каждой модели. `completion.channelProbe: false` отключает поиск (порядок: основной, затем запасные), `completion.probeTimeoutMs` (1500 мс) ограничивает пробу.
+Для каждой модели дополнение ищет самый быстрый канал. Каналы — `completionsBackends` (у каждого свой ключ, заголовки, поля тела и маршруты), а если список пуст — общий `backends` или основной `baseURL` с `OPENAI_API_KEY`. При первом запросе и после `completion.probeTtlMs` (60 с) каналы параллельно получают короткий пробный запрос; побеждает первый ответивший, остальные остаются запасными в порядке задержки. Если канал не обслуживает модель или отвечает ошибкой, запрос уходит следующему. Выбор запоминается отдельно для каждой модели. `completion.channelProbe: false` отключает поиск (порядок: основной, затем запасные), `completion.probeTimeoutMs` (1500 мс) ограничивает пробу.
 
 Тот же сервер принимает правку структуры: `POST /v1/structure` и кадр WebSocket `{"type":"structure"}`. В `tasks` — `sort-imports`, `dedupe`, `merge`, `group-properties`, `group-selectors`, `sort-rules`, `sort-properties`, `layers`, `clean`, `sort-lines`. В `rules` — свой порядок импортов, группы свойств и слои. `prompt` описывает задачу, которую встроенные шаги не покрывают. `selection` ограничивает правку открытым диапазоном; без `write` сервер только возвращает текст. Агент делает то же самое инструментом `structure_file`.
 
@@ -763,14 +763,12 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
 с целевым runtime и конфигурацией проекта, а также ориентируют роли на уже настроенные линтеры, форматтеры и проверки.
 Цены в примере условные — проверьте актуальные.
 
-### Бэкенды и подстановки
+### Бэкенды и пулы
 
 `backends` — упорядоченный список OpenAI-совместимых хостов. Первый бэкенд с URL и ключом становится основным
 (`baseURL` и `apiKey`), остальные — резервными в порядке списка. Бэкенд без ключа пропускается, а
 `fallback.enabled: false` выключает резервные хосты. Если ключа нет ни у одного, основной — первый бэкенд с URL,
-а ключ берётся из `OPENAI_API_KEY`. Если `backends` пуст, работают прежние `baseURL` +
-`OPENAI_API_KEY` и `fallback.providers`. `AI_FALLBACK_BASE_URL` вместе с `AI_FALLBACK_API_KEY` добавляет ещё
-один резервный хост после списка.
+а ключ берётся из `OPENAI_API_KEY`. Если `backends` пуст, работают прежние `baseURL` + `OPENAI_API_KEY`.
 
 ```json
 "backends": [
@@ -779,6 +777,25 @@ ECMA-262, TypeScript, Sass, ESLint, Stylelint и Prettier); `documentation.roles
   { "baseUrl": "https://gptunnel.ru/v1", "apiKey": "{{env:GPTUNNEL_API_KEY}}", "body": { "useWalletBalance": true } }
 ]
 ```
+
+**Пулы по типам API.** Маршрут может идти по своему списку бэкендов, если он настроен:
+- `imagesBackends` — `/images/generations`, `/images/edits`, векторизация;
+- `decisionsBackends` — `/decisions`;
+- `completionsBackends` — inline completion (`ai complete`);
+- `moderationsBackends` — `/moderations`.
+
+Пустой (или отсутствующий) пул означает, что маршрут использует общий `backends`.
+Запись внутри пула поддерживает те же поля, что и `backends`.
+
+```json
+"imagesBackends": [
+  { "baseUrl": "https://image-gateway.ru/v1", "apiKey": "{{env:IMAGE_API_KEY}}" }
+]
+```
+
+`fallback.providers` устарел: при загрузке конфига его записи мёржатся в `backends` (дубликаты
+отсекаются по URL+ключу), результат записывается обратно в `config.json`, и список очищается.
+Новые хосты нужно добавлять в `backends` или в один из `<name>Backends` пулов.
 
 Поля записи: `baseUrl` (или `baseURL`) — корень, к которому добавляются `/responses`, `/chat/completions`, `/images/...` и `/decisions`;
 `apiKey` — ключ, обычно через `{{env:NAME}}` (вместо него можно указать `env` с именем переменной); `headers` —

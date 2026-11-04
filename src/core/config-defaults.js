@@ -68,12 +68,25 @@ export const defaults = Object.freeze({
     baseURL: "https://api.proxyapi.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
     apiKey: "{{env:PROXYAPI_API_KEY}}",                     // prefer the OPENAI_API_KEY environment variable
     /**
-     * Ordered OpenAI-compatible backends. The first entry with a URL and a key is the primary host;
-     * the rest are tried when it is down. An entry accepts `baseUrl` (or `baseURL`), `apiKey` with
-     * `{{env:NAME}}`, extra `headers`, and `supports` route switches (`decisions: false`).
-     * When the list is empty, `baseURL` + `apiKey` and `fallback.providers` are used.
+     * Ordered OpenAI-compatible backends — the default pool for every route. The first entry with a
+     * URL and a key is the primary host; the rest are tried when it is down. An entry accepts
+     * `baseUrl` (or `baseURL`), `apiKey` with `{{env:NAME}}`, extra `headers`, and `supports` route
+     * switches (`decisions: false`). When the list is empty, `baseURL` + `apiKey` are the primary.
+     * A route whose own `<name>Backends` pool is set and non-empty ignores this list entirely.
      */
     backends: [],
+    /**
+     * Pool for POST /images/generations, /images/edits and the vector route. Same entry shape as
+     * `backends`. Empty means images ride the `backends` pool, which is the pre-branch behaviour.
+     * A host here only has to serve the images routes, so an image-only gateway fits.
+     */
+    imagesBackends: [],
+    /** Pool for POST /decisions. Empty means decisions ride the `backends` pool. */
+    decisionsBackends: [],
+    /** Pool for inline completion (`ai complete`), which probes its channels for latency. Empty → `backends`. */
+    completionsBackends: [],
+    /** Pool for POST /moderations. Empty means moderations ride the `backends` pool. */
+    moderationsBackends: [],
     /**
      * Per-model overrides of the registry in `openai/model-profiles.js`.
      * Accepts `window` (bytes), `maxOutput` (tokens), `ceiling` (effort string), `efforts` (effort array),
@@ -147,7 +160,9 @@ export const defaults = Object.freeze({
     retries: 4,                    // repeats after the first try for a timeout or a dropped network; persistent HTTP statuses are not repeated
     /**
      * When a model or the whole gateway is missing, try another channel and then another host.
-     * A provider entry is used only when its apiKey or its env variable is set.
+     * `providers` is deprecated: on the first load its entries are merged into `backends` (duplicates
+     * dropped by URL and key), the merged list is written back to config.json, and `providers` is
+     * cleared. New configuration belongs in `backends` or in one of the `<name>Backends` pools.
      */
     fallback: {
         enabled: true,

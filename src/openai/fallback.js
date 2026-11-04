@@ -8,6 +8,7 @@
  * @ai.tags openai, fallback, chat
  * @ai.hint io
  * @changed 2026-11-04 A host that only answers /v1/chat/completions stays in the chain for the responses route.
+ * @changed 2026-11-04 Route pools: providerList/primaryBackend accept `kind` to read from named backends.
  */
 
 import { createClient } from './client.js';
@@ -145,6 +146,43 @@ export function chatOptionsFor(config, supports = null) {
 }
 
 /**
+ * The backend pool for a route plus whether it is a named branch.
+ * A named branch (`imagesBackends`, `decisionsBackends`, `completionsBackends`, `moderationsBackends`)
+ * replaces the whole pool, so its own first entry is the primary host of that route.
+ * `backends` and the legacy `fallback.providers` are the default pool: the top-level URL stays
+ * the primary there, exactly as before the branches existed.
+ * @param {object} config
+ * @param {string} kind
+ * @returns {{ list: object[], named: boolean }}
+ * @ai.hint pure
+ */
+function poolOf(config, kind) {
+    const key = kind === 'images-edit' || kind === 'images-vector' ? 'images' : kind;
+    const branchName = { images: 'imagesBackends', decisions: 'decisionsBackends', completions: 'completionsBackends', moderations: 'moderationsBackends' }[key];
+    if (branchName) {
+        const branch = config?.[branchName];
+        if (Array.isArray(branch) && branch.length) return { list: branch, named: true };
+    }
+    const backends = config?.backends;
+    if (Array.isArray(backends) && backends.length) return { list: backends, named: false };
+    // Deprecated pool: still read so a config that never migrated keeps working.
+    return { list: Array.isArray(config?.fallback?.providers) ? config.fallback.providers : [], named: false };
+}
+
+/**
+ * The backend pool that carries a route kind. A named pool overrides `backends` when set and
+ * non-empty; an empty or absent pool falls back to `backends`. When both are empty, the legacy
+ * `fallback.providers` is read as a soft fallback (deprecated; new configs should use `backends`).
+ * @param {object} config
+ * @param {string} kind
+ * @returns {object[]}
+ * @ai.hint pure
+ */
+function poolFor(config, kind) {
+    return poolOf(config, kind).list;
+}
+
+/**
  * One backend entry with a key, or null when it cannot be used.
  * The key of an `env` entry is read from the live environment, so a value that exists only in
  * `.env` is found — `process.env` never sees it.
@@ -166,26 +204,24 @@ function usableBackend(item, env) {
 
 /**
  * Hosts to try after the primary one. Entries without a key are skipped.
- * `backends` is the ordered list when configured; otherwise the legacy `fallback.providers` is read.
+ * `kind` selects the pool: an empty named pool falls back to `backends`.
  * @param {object} config
  * @param {object} [env]
+ * @param {string} [kind='responses']
  * @returns {{ baseURL: string, apiKey: string, headers?: object, body?: object, supports?: object }[]}
  * @exports
  * @ai.hint pure
  */
-export function providerList(config, env = liveEnv()) {
+export function providerList(config, env = liveEnv(), kind = 'responses') {
     if (config?.fallback?.enabled === false) return [];
-    const declared = Array.isArray(config?.backends) && config.backends.length
-        ? config.backends
-        : (Array.isArray(config?.fallback?.providers) ? config.fallback.providers : []);
-    const extra = env.AI_FALLBACK_BASE_URL && env.AI_FALLBACK_API_KEY
-        ? [{ baseURL: env.AI_FALLBACK_BASE_URL, apiKey: env.AI_FALLBACK_API_KEY }]
-        : [];
-    const primaryURL = String(config?.baseURL ?? '').replace(/\/+$/, '');
-    const primaryKey = String(config?.apiKey ?? '');
+    const declared = poolFor(config, kind);
+    // The primary of this very pool is skipped: it heads the chain, it is not a fallback of it.
+    const primary = primaryBackend(config, kind);
+    const primaryURL = String(primary?.baseURL ?? '').replace(/\/+$/, '');
+    const primaryKey = String(primary?.apiKey ?? '');
     const seen = new Set();
     const out = [];
-    for (const item of [...declared, ...extra]) {
+    for (const item of declared) {
         const entry = usableBackend(item, env);
         if (!entry) continue;
         const id = `${entry.baseURL.replace(/\/+$/, '')}\u0000${entry.apiKey}`;
@@ -254,23 +290,38 @@ function adaptBody(body, model, switchedHost) {
 
 /**
  * The primary backend entry, including its custom headers, extra body fields and route switches.
- * A `backends` list names it explicitly; otherwise only the top-level URL and key exist.
+ * `kind` selects the pool. A named branch (`imagesBackends`, `decisionsBackends`, …) owns its route
+ * outright, so when it does not name the top-level host its first usable entry becomes the primary
+ * of that route. The default pool (`backends`, legacy `fallback.providers`) never displaces the
+ * top-level URL: that host is the primary and the list only adds the fallbacks after it.
  * @param {object} config
+ * @param {string} [kind='responses']
  * @returns {{ baseURL: string, apiKey: string, headers?: object|null, body?: object|null, supports?: object|null }}
  * @exports
  * @ai.hint pure
  */
-export function primaryBackend(config) {
-    const declared = Array.isArray(config?.backends) ? config.backends : [];
-    const match = declared.find((item) => item?.baseURL === config.baseURL && String(item.apiKey ?? '') === String(config.apiKey ?? ''))
-        ?? declared.find((item) => item?.baseURL === config.baseURL);
-    return {
+export function primaryBackend(config, kind = 'responses') {
+    const { list: pool, named } = poolOf(config, kind);
+    const topLevel = {
         baseURL: config.baseURL,
         apiKey: config.apiKey ?? envValue('OPENAI_API_KEY'),
-        headers: match?.headers ?? null,
-        body: match?.body ?? null,
-        supports: match?.supports ?? null,
+        headers: null,
+        body: null,
+        supports: null,
     };
+    const match = pool.find((item) => item?.baseURL === config.baseURL && String(item.apiKey ?? '') === String(config.apiKey ?? ''))
+        ?? pool.find((item) => item?.baseURL === config.baseURL);
+    if (match) {
+        return {
+            baseURL: match.baseURL,
+            apiKey: match.apiKey ?? envValue('OPENAI_API_KEY'),
+            headers: match.headers ?? null,
+            body: match.body ?? null,
+            supports: match.supports ?? null,
+        };
+    }
+    if (!named) return topLevel;
+    return usableBackend(pool[0], liveEnv()) ?? topLevel;
 }
 
 /**
@@ -287,13 +338,32 @@ export function createFallbackClient(config, { create = createClient } = {}) {
         organization: config.organization, project: config.project,
     };
     /** Chat transport switches, shared by every host this router opens. */
-    const primarySpec = primaryBackend(config);
+    const primarySpec = primaryBackend(config, 'responses');
     const rasterOptions = { magickPath: config.magickPath ?? null, rasterEngine: config.image?.rasterEngine ?? 'auto', imageDiv16: config.image?.div16 ?? null };
     const primary = create({
         apiKey: primarySpec.apiKey, baseURL: primarySpec.baseURL, headers: primarySpec.headers, body: primarySpec.body,
         chat: chatOptionsFor(config, primarySpec.supports), ...timeouts, ...rasterOptions,
     });
-    const opened = [];
+    const fallbackClients = new Map();
+    /**
+     * Client by spec key (baseURL + apiKey). Caches clients so the same host isn't opened twice.
+     * @param {object} spec
+     * @returns {object}
+     * @ai.hint io
+     */
+    const clientForSpec = (spec) => {
+        const key = `${spec.baseURL.replace(/\/+$/, '')}\u0000${spec.apiKey}`;
+        let c = fallbackClients.get(key);
+        if (!c) {
+            c = create({
+                apiKey: spec.apiKey, baseURL: spec.baseURL, headers: spec.headers, body: spec.body,
+                chat: chatOptionsFor(config, spec.supports), ...timeouts, ...rasterOptions,
+            });
+            fallbackClients.set(key, c);
+        }
+        return c;
+    };
+    const opened = new Map();
     const map = config.fallback?.models ?? MODEL_FALLBACKS;
     /**
      * One endpoint object for a backend. `supports` decides which routes may reach it.
@@ -309,27 +379,32 @@ export function createFallbackClient(config, { create = createClient } = {}) {
      * @returns {{ label: string, client: object, supports: object|null }[]}
      * @ai.hint pure
      */
-    const endpoints = (kind) => [
-        endpointOf(primarySpec, primary),
-        ...providerList(config).map((item) => {
-            // Two entries on one host differ by what they send, so both maps belong to the cache key.
-            const signature = JSON.stringify([item.headers ?? null, item.body ?? null]);
-            let found = opened.find((entry) => entry.baseURL === item.baseURL && entry.apiKey === item.apiKey
-                && JSON.stringify([entry.headers ?? null, entry.body ?? null]) === signature);
-            if (!found) {
-                found = {
-                    ...item,
-                    client: create({
-                        apiKey: item.apiKey, baseURL: item.baseURL, headers: item.headers, body: item.body,
-                        chat: chatOptionsFor(config, item.supports), retries: config.retries,
-                        idleTimeoutMs: timeouts.idleTimeoutMs, connectTimeoutMs: timeouts.connectTimeoutMs, ...rasterOptions,
-                    }),
-                };
-                opened.push(found);
-            }
-            return endpointOf(item, found.client);
-        }),
-    ].filter((endpoint) => servesRoute(endpoint.supports, kind));
+    const endpoints = (kind) => {
+        const primaryForPool = primaryBackend(config, kind);
+        const primaryClient = (primaryForPool.baseURL === primarySpec.baseURL && primaryForPool.apiKey === primarySpec.apiKey)
+            ? primary
+            : clientForSpec(primaryForPool);
+        const chain = [
+            endpointOf(primaryForPool, primaryClient),
+            ...providerList(config, liveEnv(), kind).map((item) => {
+                const poolKey = `${kind}\u0000${item.baseURL.replace(/\/+$/, '')}\u0000${item.apiKey}`;
+                let found = opened.get(poolKey);
+                if (!found) {
+                    found = {
+                        ...item,
+                        client: create({
+                            apiKey: item.apiKey, baseURL: item.baseURL, headers: item.headers, body: item.body,
+                            chat: chatOptionsFor(config, item.supports), retries: config.retries,
+                            idleTimeoutMs: timeouts.idleTimeoutMs, connectTimeoutMs: timeouts.connectTimeoutMs, ...rasterOptions,
+                        }),
+                    };
+                    opened.set(poolKey, found);
+                }
+                return endpointOf(item, found.client);
+            }),
+        ];
+        return chain.filter((endpoint) => servesRoute(endpoint.supports, kind));
+    };
     let active = primary;
 
     /**
@@ -428,7 +503,8 @@ export function createFallbackClient(config, { create = createClient } = {}) {
         },
         close: () => {
             primary.close();
-            for (const entry of opened) entry.client.close();
+            for (const entry of opened.values()) entry.client.close();
+            for (const client of fallbackClients.values()) try { client.close(); } catch { /* */ }
         },
     };
 }

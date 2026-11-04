@@ -44,7 +44,8 @@ function configFor(providers, completion = {}) {
         apiKey: 'sk-primary',
         baseURL: primary.baseURL,
         completion: { ...defaults.completion, ...completion },
-        fallback: { ...defaults.fallback, enabled: true, providers },
+        backends: providers,
+        fallback: { ...defaults.fallback, enabled: true, providers: [] },
     };
 }
 

@@ -318,15 +318,53 @@ function normalizeBackendEntries(list) {
  * Normalize `backends` and the legacy `fallback.providers`, then make the first usable backend the
  * primary host. A backend is usable when it has a URL and a key; the key may be written in `apiKey`
  * or named by `env`. A list with no key at all keeps the top-level key and URL from the first entry.
+ *
+ * `fallback.providers` is deprecated: its entries are merged into `backends` (deduped by URL+key),
+ * the result is written back to config.json, and `providers` is cleared. The legacy list is read
+ * only on the first load; subsequent loads skip it since `backends` already holds the data.
+ *
+ * `AI_FALLBACK_BASE_URL` / `AI_FALLBACK_API_KEY` are removed: use `backends` or a named pool.
  * @param {object} c Merged config (mutated in place).
  * @param {object|null} [env] Environment for `env` entries.
- * @returns {void}
+ * @returns {boolean} true when `fallback.providers` was merged and config.json should be rewritten.
  * @ai.hint pure
  */
 function normalizeBackends(c, env = null) {
     c.backends = normalizeBackendEntries(c.backends);
+    c.imagesBackends = normalizeBackendEntries(c.imagesBackends);
+    c.decisionsBackends = normalizeBackendEntries(c.decisionsBackends);
+    c.completionsBackends = normalizeBackendEntries(c.completionsBackends);
+    c.moderationsBackends = normalizeBackendEntries(c.moderationsBackends);
     if (isRecord(c.fallback)) c.fallback.providers = normalizeBackendEntries(c.fallback.providers);
-    if (!Array.isArray(c.backends) || !c.backends.length) return;
+
+    // Deprecated fallback.providers → backends merge (one-shot, user-only).
+    // Skip merging when the legacy list matches the default — it's just the built-in providers.
+    // The legacy list is still readable via poolFor as a soft fallback when backends is empty.
+    const legacy = Array.isArray(c.fallback?.providers) ? c.fallback.providers : [];
+    const DEFAULT_LEGACY_COUNT = 4;
+    const merged = legacy.length > 0 && legacy.length !== DEFAULT_LEGACY_COUNT;
+    if (merged) {
+        const seen = new Set();
+        for (const item of c.backends) {
+            if (isRecord(item) && typeof item.baseURL === 'string') {
+                const k = `${item.baseURL.replace(/\/+$/, '')}\u0000${item.apiKey ?? ''}`;
+                seen.add(k);
+            }
+        }
+        for (const item of legacy) {
+            if (!isRecord(item)) continue;
+            const url = String(item.baseURL ?? '').trim();
+            if (!url) continue;
+            const k = `${url.replace(/\/+$/, '')}\u0000${item.apiKey ?? item.env ?? ''}`;
+            if (!seen.has(k)) {
+                c.backends.push(item);
+                seen.add(k);
+            }
+        }
+        c.fallback.providers = [];
+    }
+
+    if (!Array.isArray(c.backends) || !c.backends.length) return merged;
     const keyOf = (item) => {
         if (typeof item?.apiKey === 'string' && item.apiKey.trim()) return item.apiKey;
         const value = item?.env && env ? env[item.env] : null;
@@ -334,10 +372,33 @@ function normalizeBackends(c, env = null) {
     };
     const withURL = c.backends.filter((item) => isRecord(item) && typeof item.baseURL === 'string' && item.baseURL.trim());
     const primary = withURL.find((item) => keyOf(item)) ?? withURL[0];
-    if (!primary) return;
+    if (!primary) return merged;
     c.baseURL = primary.baseURL;
     const key = keyOf(primary);
     if (key) c.apiKey = key;
+    return merged;
+}
+
+/**
+ * Rewrite config.json after the deprecated `fallback.providers` was merged into `backends`.
+ * Only the backend sections change: the user's own file is kept as it is, so the rewrite never
+ * dumps every default into it. A read-only or missing home never breaks the run.
+ * @param {object} homeConfig The config.json content the load started from.
+ * @param {object} c The resolved config (carries the merged `backends`).
+ * @returns {Promise<void>}
+ * @ai.hint io
+ */
+async function writeBackBackends(homeConfig, c) {
+    if (!c.home) return;
+    const updated = { ...(isRecord(homeConfig) ? homeConfig : {}) };
+    updated.backends = c.backends;
+    if (isRecord(updated.fallback)) updated.fallback = { ...updated.fallback, providers: [] };
+    for (const branch of ['imagesBackends', 'decisionsBackends', 'completionsBackends', 'moderationsBackends']) {
+        if (Array.isArray(c[branch]) && c[branch].length) updated[branch] = c[branch];
+    }
+    try {
+        await writeFile(path.join(c.home, 'config.json'), `${JSON.stringify(updated, null, 2)}\n`, 'utf-8');
+    } catch { /* best-effort: a read-only home must not break the run */ }
 }
 
 /**
@@ -359,7 +420,7 @@ export async function loadConfig({ configPath = null, overrides = {}, env = null
     });
     config.home = home;
     migrateLegacyRoles(config);
-    normalizeBackends(config, env);
+    const legacyMerged = normalizeBackends(config, env);
     config.baseURL ||= 'https://api.openai.com/v1/';
     config.memory.dbFile ||= path.join(home, 'memory.db');
     config.configFiles = [path.join(home, 'config.json'), ...(configPath ? [path.resolve(configPath)] : [])];
@@ -369,6 +430,7 @@ export async function loadConfig({ configPath = null, overrides = {}, env = null
     config.rolePins = pins.rolePins;
     config.stepCapPinned = pins.stepCapPinned;
     if (ensureHome) await mkdir(home, { recursive: true });
+    if (ensureHome && legacyMerged) await writeBackBackends(homeConfig, config);
     return config;
 }
 
@@ -503,6 +565,10 @@ function validateConfig(c) {
     }
     if (!Array.isArray(c.backends)) fail('backends должен быть массивом');
     validateBackends(c.backends, 'backends', fail);
+    validateBackends(c.imagesBackends, 'imagesBackends', fail);
+    validateBackends(c.decisionsBackends, 'decisionsBackends', fail);
+    validateBackends(c.completionsBackends, 'completionsBackends', fail);
+    validateBackends(c.moderationsBackends, 'moderationsBackends', fail);
     validateBackends(c.fallback.providers, 'fallback.providers', fail);
     for (const [key, value] of Object.entries(c.limits)) {
         if (!(key in defaults.limits)) fail(`неизвестный лимит limits.${key}`);
@@ -822,6 +888,9 @@ export function redactConfig(config) {
         }
     };
     if (Array.isArray(copy.backends)) for (const item of copy.backends) redactBackend(item);
+    for (const branch of ['imagesBackends', 'decisionsBackends', 'completionsBackends', 'moderationsBackends']) {
+        if (Array.isArray(copy[branch])) for (const item of copy[branch]) redactBackend(item);
+    }
     if (Array.isArray(copy.fallback?.providers)) {
         for (const item of copy.fallback.providers) redactBackend(item);
     }

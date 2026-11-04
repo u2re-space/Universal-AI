@@ -137,7 +137,13 @@ test('a provider key that exists only in .env reaches the fallback list', async 
         await writeFile(path.join(cwd, '.env'), 'SPRUTDOCK_API_KEY=from-dotenv\n');
         const env = await refreshRuntimeEnv({ cwd, platform: 'linux', env: {} });
         setLiveEnv(env);
-        const providers = providerList({ baseURL: 'https://api.proxyapi.ru/v1/', fallback: { enabled: true, providers: [{ baseURL: 'https://sprutdock.ru/v1', apiKey: null, env: 'SPRUTDOCK_API_KEY' }] } });
+        const providers = providerList({
+            baseURL: 'https://api.proxyapi.ru/v1/', apiKey: 'sk-primary',
+            backends: [
+                { baseURL: 'https://api.proxyapi.ru/v1', apiKey: 'sk-primary' },
+                { baseURL: 'https://sprutdock.ru/v1', apiKey: null, env: 'SPRUTDOCK_API_KEY' },
+            ],
+        });
         assert.equal(providers.length, 1);
         assert.equal(providers[0].apiKey, 'from-dotenv');
         // The .env value wins even when the process inherited a different key.
@@ -165,7 +171,8 @@ test('images edit and vectorize move to the fallback host when the primary rejec
     const { createFallbackClient } = await import('../src/openai/fallback.js');
     const client = createFallbackClient({
         apiKey: 'sk-dead', baseURL: 'http://127.0.0.1:1/v1/', retries: 0,
-        fallback: { enabled: true, providers: [{ baseURL: `http://127.0.0.1:${port}/v1/`, apiKey: 'sk-live' }] },
+        backends: [{ baseURL: `http://127.0.0.1:${port}/v1/`, apiKey: 'sk-live' }],
+        fallback: { enabled: true, providers: [] },
         limits: {},
     });
     try {

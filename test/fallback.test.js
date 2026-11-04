@@ -53,14 +53,15 @@ test('a persistent request error does not move to the next host', async () => {
 });
 
 test('sprutdock is used only when its key is present', () => {
-    const config = { baseURL: 'https://api.proxyapi.ru/v1', fallback: defaults.fallback };
+    const config = { baseURL: 'https://api.proxyapi.ru/v1', backends: defaults.fallback.providers };
+    // The first backend (proxyapi) is the primary, so providerList returns the remaining 3
     assert.deepEqual(providerList(config, {}), [
-        { baseURL: 'https://api.proxyapi.ru/v1', apiKey: "{{env:PROXYAPI_API_KEY}}" },
         { baseURL: 'https://routerai.ru/api/v1', apiKey: "{{env:ROUTERAI_API_KEY}}" },
         { baseURL: 'https://sprutdock.ru/v1', apiKey: "{{env:SPRUTDOCK_API_KEY}}", supports: { decisionAPI: false } },
         // `useWalletBalance` is a request-body parameter of the gateway, not a header.
         { baseURL: 'https://gptunnel.ru/v1', apiKey: '{{env:GPTUNNEL_API_KEY}}', body: { useWalletBalance: false } }
     ]);
-    assert.equal(providerList(config, { PROXYAPI_API_KEY: '{{env:PROXYAPI_API_KEY}}' })[0].baseURL, 'https://api.proxyapi.ru/v1');
-    assert.equal(providerList(config, { PROXYAPI_API_KEY: '{{env:PROXYAPI_API_KEY}}' })[0].apiKey, '{{env:PROXYAPI_API_KEY}}');
+    // A literal `{{env:...}}` value in the env map is passed through untouched, not expanded.
+    assert.equal(providerList(config, { PROXYAPI_API_KEY: '{{env:PROXYAPI_API_KEY}}' })[0].baseURL, 'https://routerai.ru/api/v1');
+    assert.equal(providerList(config, { ROUTERAI_API_KEY: '{{env:ROUTERAI_API_KEY}}' })[0].apiKey, '{{env:ROUTERAI_API_KEY}}');
 });

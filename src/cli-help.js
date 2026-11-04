@@ -243,8 +243,7 @@ MCP:
 Чаты и решения:
   ai decide и POST /v1/decisions — модель openai/gpt-6.1-terra-decisions (или decisions.model). Если маршрута нет, шаг решений пропускается.
   Запасные модели: gpt-6.1-terra → anthropic/claude-haiku-5-5, gpt-6.1-sol → anthropic/claude-sonnet-5.5, решения → typesafe/jev-1.14.
-  Если провайдер недоступен, запрос уходит на следующий бэкенд из backends (или fallback.providers) с ключом.
-  AI_FALLBACK_BASE_URL вместе с AI_FALLBACK_API_KEY добавляет ещё один резервный хост после списка.
+  Если провайдер недоступен, запрос уходит на следующий бэкенд из backends с ключом.
   ai moderate в режиме auto сначала вызывает /moderations (omni-moderation-latest). Если шлюз отвечает 404, 405 или 501,
   тот же текст уходит в decisions. Пороги decisions.reviewAt (0.5) и blockAt (0.9) дают allow, review или hide.
   Наборы вопросов: community (группы и каналы), support (клиенты), smm (публикация), guard (подмена инструкций), route (encode или plan).
@@ -254,9 +253,16 @@ MCP:
   Личные сообщения и сообщения о вреде себе не удаляются. Ответ клиенту включается telegram.reply.
   Инструменты decide, moderate_text, channel_reply, telegram_call включаются tools.channels или --tools channels.
 
-Бэкенды и подстановки:
-  backends: [{ baseUrl, apiKey: "{{env:NAME}}", headers: {...}, body: {...}, supports: { decisions: false } }, ...]
-  Первый бэкенд с URL и ключом — основной, остальные — резервные по порядку; без ключа бэкенд пропускается.
+ Бэкенды и пулы:
+   backends: [{ baseUrl, apiKey: "{{env:NAME}}", headers: {...}, body: {...}, supports: { decisions: false } }, ...]
+   Первый бэкенд с URL и ключом — основной, остальные — резервные по порядку; без ключа бэкенд пропускается.
+   Пулы по типам API перекрывают backends для своего маршрута:
+     imagesBackends     — /images/generations, /images/edits, векторизация
+     decisionsBackends  — /decisions
+     completionsBackends — inline completion
+     moderationsBackends — /moderations
+   Пустой пул означает, что маршрут идёт через backends (общий пул).
+   fallback.providers устарел: при загрузке его записи мёржатся в backends и список очищается.
   supports: responses | chat | images | decisions | moderations; decisionAPI — старое имя decisions; false выключает маршрут.
   Заголовки бэкенда не заменяют Authorization, Content-Type, Accept и заголовки организации/проекта.
   body — поля, которые шлюз ждёт в теле запроса (у gptunnel это useWalletBalance). Значение сохраняет тип

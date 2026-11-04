@@ -97,8 +97,8 @@ async function main() {
     // Credentials come from .env or the environment — never from the script.
     const env = await refreshRuntimeEnv({ cwd: root });
     setLiveEnv(env);
-    if (!envValue('OPENAI_API_KEY') && !envValue('AI_FALLBACK_API_KEY') && !envValue('SPRUTDOCK_API_KEY')) {
-        throw new Error('Нет ключа: задайте OPENAI_API_KEY или AI_FALLBACK_API_KEY в .env либо в окружении.');
+    if (!envValue('OPENAI_API_KEY') && !envValue('SPRUTDOCK_API_KEY')) {
+        throw new Error('Нет ключа: задайте OPENAI_API_KEY в .env либо в окружении.');
     }
     const config = await loadConfig({ env, ensureHome: false });
     const model = values.model || config.imageModel || 'openai/gpt-image-2.5-sunburst';

@@ -27,6 +27,7 @@ const PROBE_MAX_OUTPUT_TOKENS = 32;
 /**
  * The primary host and every fallback provider that has its own key.
  * The primary entry comes first; duplicates are dropped by base URL and key.
+ * Channels are read from `completionsBackends` (or `backends` when empty).
  * @param {object} config Resolved config: baseURL, apiKey, backends, fallback.
  * @param {object} [env] Environment for apiKey and provider env names.
  * @returns {{ baseURL: string, apiKey: string, label: string, primary: boolean, headers?: object, body?: object, supports?: object }[]}
@@ -61,9 +62,9 @@ export function completionChannelList(config, env = null) {
         out.push(entry);
     };
     env ??= liveEnv() ?? process.env;
-    const first = primaryBackend({ ...config, apiKey: config?.apiKey || env.OPENAI_API_KEY });
+    const first = primaryBackend({ ...config, apiKey: config?.apiKey || env.OPENAI_API_KEY }, 'completions');
     add(first.baseURL || 'https://api.openai.com/v1/', first.apiKey || env.OPENAI_API_KEY, true, first.headers, first.body, first.supports);
-    for (const item of providerList(config, env)) add(item.baseURL, item.apiKey, false, item.headers, item.body, item.supports);
+    for (const item of providerList(config, env, 'completions')) add(item.baseURL, item.apiKey, false, item.headers, item.body, item.supports);
     return out;
 }
 

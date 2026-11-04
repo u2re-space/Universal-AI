@@ -30,8 +30,6 @@ function runCli(args, { input = null, env = {} } = {}) {
     delete childEnv.SPRUTDOCK_API_KEY;
     delete childEnv.PROXYAPI_API_KEY;
     delete childEnv.GPTUNNEL_API_KEY;
-    delete childEnv.AI_FALLBACK_API_KEY;
-    delete childEnv.AI_FALLBACK_BASE_URL;
     Object.assign(childEnv, {
         OPENAI_API_KEY: 'sk-test', OPENAI_BASE_URL: server.baseURL, AI_AGENT_HOME: home, AI_MODEL: 'gpt-6-luna', NO_COLOR: '1', ...env,
     });

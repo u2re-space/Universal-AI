@@ -232,9 +232,10 @@ export function imageSizeAttempts(size, model) {
 /**
  * `images` uses /images/generations and /images/edits. `responses` uses the Responses image_generation tool.
  * A proxyapi.ru host selects `images` unless image.transport is set. Any other gateway only gets the
- * images route when its own backend entry declares it, because the Responses image tool is a
- * server-side feature most OpenAI-compatible hosts do not implement, while /images/generations is.
- * @param {{ baseURL?: string, apiKey?: string, backends?: object[], image?: { transport?: string | null } }} config
+ * images route when its own backend entry declares it or when `imagesBackends` is configured.
+ * The Responses image tool is a server-side feature most OpenAI-compatible hosts do not implement,
+ * while /images/generations is.
+ * @param {{ baseURL?: string, apiKey?: string, backends?: object[], imagesBackends?: object[], image?: { transport?: string | null } }} config
  * @returns {'images' | 'responses'}
  * @exports
  * @ai.hint pure
@@ -242,6 +243,8 @@ export function imageSizeAttempts(size, model) {
 export function imageTransport(config) {
     const chosen = config?.image?.transport;
     if (chosen === 'images' || chosen === 'responses') return chosen;
+    // A named images pool selects the images transport: the entries only have to serve /images routes.
+    if (Array.isArray(config?.imagesBackends) && config.imagesBackends.length) return 'images';
     const declared = Array.isArray(config?.backends) ? config.backends : [];
     const primary = String(config?.baseURL ?? '').replace(/\/+$/, '');
     const entry = declared.find((item) => String(item?.baseURL ?? '').replace(/\/+$/, '') === primary);
