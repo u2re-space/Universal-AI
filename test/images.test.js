@@ -9,7 +9,7 @@ import { createClient } from '../src/openai/client.js';
 import { TINY_PNG } from './helpers/mock-server.js';
 import { rasterInfo, rasterIsOpaque, rasterPadImageBytes } from '../src/agent/image-raster.js';
 import { runProgram } from '../src/agent/shell.js';
-import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFor, imagePayloads, imageRequestSize, imageSizeAttempts, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL, VECTOR_RATIOS } from '../src/openai/images.js';
+import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFor, imageModelProfile, imagePayloads, imageRequestSize, imageSizeAttempts, imageSizeFields, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_RIVERFLOW_MODEL, PROXY_VECTOR_MODEL, VECTOR_RATIOS } from '../src/openai/images.js';
 import { builtinTools } from '../src/agent/loop.js';
 import { enabledToolNames } from '../src/agent/tool-specs.js';
 import { createToolset } from '../src/agent/tools.js';
@@ -95,6 +95,40 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(builtinTools(proxy, { images: imageTransport(proxy) !== 'images' }).some((tool) => tool.type === 'image_generation'), false);
     assert.ok(enabledToolNames({ images: true, fs: true }, { imageApi: true }).includes('generate_image'));
     assert.ok(enabledToolNames({ images: true, fs: true }, { imageApi: true }).includes('edit_image'));
+});
+
+test('Riverflow keeps custom sizes, maps resolution/aspect_ratio, keeps -pro suffix', () => {
+    assert.equal(PROXY_RIVERFLOW_MODEL, 'sourceful/riverflow-v2.6-pro');
+    const profile = imageModelProfile('sourceful/riverflow-v2.6-pro');
+    assert.equal(profile.customSizes, true);
+    assert.equal(profile.keepProSuffix, true);
+    assert.equal(profile.omitSizeOnReject, true);
+    assert.equal(profile.div16Padding, false);
+
+    // Pixel sizes pass through unchanged (customSizes: true).
+    assert.equal(imageRequestSize('512x512', 'sourceful/riverflow-v2.6-pro'), '512x512');
+    assert.equal(imageRequestSize('800x800', 'sourceful/riverflow-v2.6-pro'), '800x800');
+    assert.equal(imageRequestSize('1024x1536', 'sourceful/riverflow-v2.6-pro'), '1024x1536');
+
+    // imageSizeFields: pixel size → size, tier → resolution, ratio → aspect_ratio.
+    assert.deepEqual(imageSizeFields('512x512', 'sourceful/riverflow-v2.6-pro'), { size: '512x512' });
+    assert.deepEqual(imageSizeFields('512', 'sourceful/riverflow-v2.6-pro'), { resolution: '512' });
+    assert.deepEqual(imageSizeFields('1K', 'sourceful/riverflow-v2.6-pro'), { resolution: '1K' });
+    assert.deepEqual(imageSizeFields('2k', 'sourceful/riverflow-v2.6-pro'), { resolution: '2K' });
+    assert.deepEqual(imageSizeFields('4K', 'sourceful/riverflow-v2.6-pro'), { resolution: '4K' });
+    assert.deepEqual(imageSizeFields('16:9', 'sourceful/riverflow-v2.6-pro'), { aspect_ratio: '16:9' });
+    assert.deepEqual(imageSizeFields('9:16', 'sourceful/riverflow-v2.6-pro'), { aspect_ratio: '9:16' });
+    assert.deepEqual(imageSizeFields('auto', 'sourceful/riverflow-v2.6-pro'), {});
+    // Non-riverflow: pixel size goes into size as usual.
+    assert.deepEqual(imageSizeFields('512x512', 'gpt-image-2.5-sunburst'), { size: '512x512' });
+    assert.deepEqual(imageSizeFields('512', 'gpt-image-2.5-sunburst'), { size: '512' });
+
+    // generationBody: pixel size → size field; tier → resolution field.
+    assert.equal(generationBody({ model: 'sourceful/riverflow-v2.6-pro', prompt: 'test', size: '512x512' }).size, '512x512');
+    assert.equal(generationBody({ model: 'sourceful/riverflow-v2.6-pro', prompt: 'test', size: '1K' }).resolution, '1K');
+    assert.equal(generationBody({ model: 'sourceful/riverflow-v2.6-pro', prompt: 'test', size: '16:9' }).aspect_ratio, '16:9');
+    // -pro suffix is kept at any size.
+    assert.equal(generationBody({ model: 'sourceful/riverflow-v2.6-pro', prompt: 'test', size: '512x512' }).model, 'sourceful/riverflow-v2.6-pro');
 });
 
 test('vector model uses aspect_ratio and svg output', () => {

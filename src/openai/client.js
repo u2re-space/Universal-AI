@@ -20,7 +20,7 @@ import { CHAT_PATH, chatGaps, createChatStreamReducer, droppedTools, normalizeCh
 import { envValue } from '../core/runtime-env.js';
 import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
 import { rasterPadImageBytes, rasterRemoveImagePadding } from '../agent/image-raster.js';
-import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSources, imageSizeAttempts, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat } from './images.js';
+import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat } from './images.js';
 
 export { ApiError };
 
@@ -658,12 +658,12 @@ export function createClient({
         get isFallback() { return chatOnly; },
     };
     const images = {
-        /** POST /images/generations. Returns base64 payloads from data[].b64_json or data[].url. */
+         /** POST /images/generations. Returns base64 payloads from data[].b64_json or data[].url. */
         async generate({ model, prompt, size, quality, n, format, background, signal } = {}) {
             const attempts = imageSizeAttempts(size, model);
             let result;
             for (let index = 0; ; index++) {
-                const requestedSize = attempts[index] ?? size;
+                const requestedSize = index < attempts.length ? attempts[index] : size;
                 try {
                     result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, quality, n, format, background }), signal });
                     break;
@@ -701,10 +701,21 @@ export function createClient({
                 padding = prepared[0].frame;
                 requestedFrame = `${padding.width}x${padding.height}`;
             }
+            // No explicit frame and no padding: derive the frame from the source image itself,
+            // so edits preserve the input image's size and aspect ratio instead of the gateway
+            // default square (1024×1024).  Uses sharp when available; silently falls through for
+            // gateways without a raster engine.
+            if (!vector && !requestedFrame && files?.length) {
+                try {
+                    const sharp = (await import('sharp')).default;
+                    const meta = await sharp(files[0].bytes).metadata();
+                    if (meta?.width && meta?.height) requestedFrame = `${meta.width}x${meta.height}`;
+                } catch { /* no raster engine: gateway default stands */ }
+            }
             const attempts = vector ? [] : imageSizeAttempts(requestedFrame, model);
             let result;
             for (let index = 0; ; index++) {
-                const attemptSize = attempts[index] ?? requestedFrame;
+                const attemptSize = index < attempts.length ? attempts[index] : requestedFrame;
                 const fields = { model, prompt };
                 if (isVectorModel(model)) {
                     const aspect = normalizeVectorRatio(attemptSize);
@@ -712,8 +723,10 @@ export function createClient({
                     //if (acceptsResponseFormat(model)) fields.response_format = 'b64_json';
                     fields[imageFormatField(model)] = 'svg';
                 } else {
-                    const frame = imageRequestSize(attemptSize, model);
-                    if (frame) fields.size = frame;
+                    const sizeFields = imageSizeFields(attemptSize, model);
+                    if (sizeFields.size) fields.size = sizeFields.size;
+                    if (sizeFields.resolution) fields.resolution = sizeFields.resolution;
+                    if (sizeFields.aspect_ratio) fields.aspect_ratio = sizeFields.aspect_ratio;
                     const fmt = resolveImageFormat({ model, format });
                     if (fmt) fields[imageFormatField(model)] = fmt;
                     const backgroundField = backgroundValue({ model, format: fmt, background });

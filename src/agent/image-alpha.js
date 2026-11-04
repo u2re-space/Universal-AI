@@ -56,6 +56,8 @@ const MODEL_MATES = new Set(['auto', 'mask']);
 
 /**
  * Pick the frame that keeps the source aspect ratio, so the matte is not squeezed into a square.
+ * The matte is resampled back onto the picture afterwards, so a preset frame is enough here;
+ * the exact source frame is preserved on the main edit path inside the client instead.
  * @param {{ width: number, height: number }|null} info
  * @returns {string|null}
  * @ai.hint pure

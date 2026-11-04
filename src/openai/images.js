@@ -5,16 +5,17 @@
  * @depends node:crypto
  * @usedBy openai/client, agent/loop, agent/tools, commands/image, commands/run
  * @exports PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, PROXY_RIVERFLOW_MODEL, IMAGE_SIZES, VECTOR_RATIOS,
+ *   RIVERFLOW_RATIOS, RIVERFLOW_RESOLUTIONS,
  *   imageTransport, imageModelFor, normalizeImageSize, normalizeImageFormat, resolveImageFormat, normalizeVectorRatio,
  *   isVectorModel, supportsTransparentBackground, backgroundValue, imageFormatField, generationBody, encodeMultipart,
  *   imagePayloads, imageSources, acceptsResponseFormat, pngHasAlphaChannel, sniffImage,
- *   imageModelProfile, needsDiv16Padding
+ *   imageModelProfile, needsDiv16Padding, imageSizeFields
  * @ai.tags images, proxyapi
  * @ai.hint pure
  * @changed 2026-10-22 gpt-image-2.5 defaults for raster, gpt-image-2 alpha exception, vector model support.
  * @changed 2026-10-30 response_format only where the model takes it; imageSources reads b64_json or url.
  * @changed 2026-11-04 per-model capability profiles (customSizes, div16Padding, keepProSuffix, omitSizeOnReject);
- *   sourceful/riverflow-v2.6-pro support; image.div16 (auto|always|never) override.
+ *   sourceful/riverflow-v2.6-pro support (presets only, no custom sizes); image.div16 (auto|always|never) override.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -103,6 +104,12 @@ export const IMAGE_SIZES = Object.freeze(['1024x1024', '1024x1536', '1536x1024']
 /** Aspect ratios accepted by recraft vector models. */
 export const VECTOR_RATIOS = Object.freeze(['1:1', '4:3', '3:4', '16:9', '9:16', 'auto']);
 
+/** Aspect ratios accepted by Riverflow (Sourceful). */
+export const RIVERFLOW_RATIOS = Object.freeze(['1:1', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '16:9', '9:16', '21:9', 'auto']);
+
+/** Resolution tiers accepted by Riverflow (Sourceful). */
+export const RIVERFLOW_RESOLUTIONS = Object.freeze(['512', '1K', '2K', '4K']);
+
 /**
  * Map a requested size to the nearest supported one. `auto` and an empty value omit the field.
  * Common words portrait, landscape, and square are accepted.
@@ -145,6 +152,36 @@ export function imageRequestSize(size, model) {
     if (!value || value === 'auto') return null;
     if (imageModelProfile(model).customSizes && /^\d+\s*x\s*\d+$/.test(value)) return value.replace(/\s+/g, '');
     return normalizeImageSize(value);
+}
+
+/**
+ * Split one requested frame into the fields the model actually takes. Riverflow and the other
+ * tier-based gateways read three shapes, and the order is a priority, not a set:
+ *   `WIDTHxHEIGHT`  → `size`   (the exact frame, the cheapest and most faithful — used first);
+ *   `W:H` ratio      → `aspect_ratio` (a shape with no fixed pixel count);
+ *   `512`/`1K`/`2K`/`4K` → `resolution` (a quality tier, alone or with an aspect_ratio).
+ * A model that is not tier-based keeps the single `size` field, so a gpt-image or Recraft request
+ * is unchanged. `auto` and an empty value return nothing, which leaves every field out.
+ * @param {string|null|undefined} size
+ * @param {string|null|undefined} model
+ * @returns {{ size?: string, resolution?: string, aspect_ratio?: string }}
+ * @exports
+ * @ai.hint pure
+ */
+export function imageSizeFields(size, model) {
+    const value = String(size ?? '').trim().toLowerCase();
+    if (!value || value === 'auto') return {};
+    if (RIVERFLOW.test(String(model ?? '').trim())) {
+        if (/^\d+\s*x\s*\d+$/.test(value)) return { size: value.replace(/\s+/g, '') };
+        if (/^\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?$/.test(value)) {
+            const ratio = value.replace(/\s+/g, '');
+            return { aspect_ratio: RIVERFLOW_RATIOS.includes(ratio) ? ratio : 'auto' };
+        }
+        if (/^512$/.test(value)) return { resolution: '512' };
+        if (/^\d+k$/.test(value)) return { resolution: value.toUpperCase() };
+    }
+    const frame = imageRequestSize(value, model);
+    return frame ? { size: frame } : {};
 }
 
 /**
@@ -434,7 +471,11 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
         return body;
     }
     const frame = imageRequestSize(size, model);
-    if (frame) body.size = frame;
+    const fields = imageSizeFields(size, model);
+    if (fields.size) body.size = fields.size;
+    else if (frame) body.size = frame;
+    if (fields.resolution) body.resolution = fields.resolution;
+    if (fields.aspect_ratio) body.aspect_ratio = fields.aspect_ratio;
     // Recraft swaps `-pro` for non-pro at small sizes; Riverflow keeps its suffix at any size.
     const caps = imageModelProfile(model);
     if (!caps.keepProSuffix) {
