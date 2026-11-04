@@ -69,6 +69,7 @@ let defaultProviders = [
     { baseURL: 'https://routerai.ru/api/v1', apiKey: "{{env:ROUTERAI_API_KEY}}", env: 'ROUTERAI_API_KEY' },
     { baseURL: 'https://gptunnel.ru/v1', apiKey: '{{env:GPTUNNEL_API_KEY}}', body: { useWalletBalance: false }, env: 'GPTUNNEL_API_KEY' }
 ];
+let providersRef = null;
 export const defaults = Object.freeze({
     model: 'gpt-6.1-terra',
     imageModel: 'openai/gpt-image-2.5-sunburst',                 // null → gpt-image-2.5 (flare for generation, sunburst for edits) on the images API
@@ -176,10 +177,10 @@ export const defaults = Object.freeze({
         models: { ...MODEL_FALLBACKS },
         /*providers: []*/
         get providers() {
-            return [...defaultProviders, ...defaults.backends, ...currentProviders];
+            return (providersRef ??= [...defaultProviders, ...defaults.backends, ...currentProviders]);
         },
         set providers(providers) {
-            currentProviders = providers;
+            providersRef = [...defaultProviders, ...defaults.backends, ...(currentProviders = providers)];
         }
     },
     /**
