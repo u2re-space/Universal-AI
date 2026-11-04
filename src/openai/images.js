@@ -134,9 +134,9 @@ export function normalizeImageSize(size) {
     return height > width ? '1024x1536' : '1536x1024';
 }
 
-const MIN_IMAGE_PIXELS = 655_360;
-const MAX_IMAGE_PIXELS = 8_294_400;
-const MAX_IMAGE_EDGE = 3840;
+const MIN_IMAGE_PIXELS = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?16_384:655_360;
+const MAX_IMAGE_PIXELS = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?16_777_216:8_294_400;
+const MAX_IMAGE_EDGE   = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?4096:3840;
 
 /**
  * Keep custom dimensions for the models that take them (GPT Image 2.5); the rest get their
@@ -192,7 +192,7 @@ export function imageSizeFields(size, model) {
  * @exports
  * @ai.hint pure
  */
-export function sameAspectImageSize(size) {
+export function sameAspectImageSize(size, model = null) {
     const match = /^(\d+)\s*x\s*(\d+)$/i.exec(String(size ?? '').trim());
     if (!match) return null;
     const width = Number(match[1]);
@@ -200,8 +200,8 @@ export function sameAspectImageSize(size) {
     if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || !width || !height
         || Math.max(width, height) / Math.min(width, height) > 3) return null;
     const area = width * height;
-    if (width % 16 === 0 && height % 16 === 0 && area >= MIN_IMAGE_PIXELS && area <= MAX_IMAGE_PIXELS
-        && Math.max(width, height) <= MAX_IMAGE_EDGE) return null;
+    if (width % 16 === 0 && height % 16 === 0 && area >= MIN_IMAGE_PIXELS(model) && area <= MAX_IMAGE_PIXELS(model)
+        && Math.max(width, height) <= MAX_IMAGE_EDGE(model)) return null;
 
     const gcd = (a, b) => {
         while (b) [a, b] = [b, a % b];
@@ -216,8 +216,8 @@ export function sameAspectImageSize(size) {
     const heightStep = 16 / gcd(ratioHeight, 16);
     const multiplierStep = (widthStep * heightStep) / gcd(widthStep, heightStep);
     const ratioArea = ratioWidth * ratioHeight;
-    const minimum = Math.ceil(Math.sqrt(MIN_IMAGE_PIXELS / ratioArea) / multiplierStep) * multiplierStep;
-    const maximum = Math.floor(Math.min(MAX_IMAGE_EDGE / Math.max(ratioWidth, ratioHeight), Math.sqrt(MAX_IMAGE_PIXELS / ratioArea)) / multiplierStep) * multiplierStep;
+    const minimum = Math.ceil(Math.sqrt(MIN_IMAGE_PIXELS(model) / ratioArea) / multiplierStep) * multiplierStep;
+    const maximum = Math.floor(Math.min(MAX_IMAGE_EDGE(model) / Math.max(ratioWidth, ratioHeight), Math.sqrt(MAX_IMAGE_PIXELS(model) / ratioArea)) / multiplierStep) * multiplierStep;
     if (minimum > maximum) return null;
     const target = Math.max(minimum, Math.min(maximum, Math.round(divisor / multiplierStep) * multiplierStep));
     const result = `${ratioWidth * target}x${ratioHeight * target}`;
@@ -257,7 +257,7 @@ export function imageSizeAttempts(size, model) {
         return attempts;
     }
     const attempts = [initial];
-    const sameRatio = sameAspectImageSize(initial);
+    const sameRatio = sameAspectImageSize(initial, model);
     const preset = normalizeImageSize(initial);
     for (const candidate of [sameRatio, preset]) {
         if (candidate && !attempts.includes(candidate)) attempts.push(candidate);
