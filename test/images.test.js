@@ -158,19 +158,23 @@ test('readImageSize reads the frame from encoded bytes without a raster engine',
     assert.equal(readImageSize(null), null);
 });
 
-test('edit_image keeps the source frame when no size is asked for', async () => {
+test('riverflow edits travel through generations and keep the source frame', async () => {
     const canvas = createCanvas(800, 600);
     canvas.getContext('2d').fillRect(0, 0, 800, 600);
     const png = canvas.toBuffer('image/png');
-    const sizes = [];
+    const seen = [];
     const server = http.createServer(async (req, res) => {
         const chunks = [];
         for await (const chunk of req) chunks.push(chunk);
-        const form = Buffer.concat(chunks).toString('latin1');
-        sizes.push({
-            size: /name="size"\r\n\r\n([^\r]+)/.exec(form)?.[1] ?? null,
-            resolution: /name="resolution"\r\n\r\n([^\r]+)/.exec(form)?.[1] ?? null,
-            aspect: /name="aspect_ratio"\r\n\r\n([^\r]+)/.exec(form)?.[1] ?? null,
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        seen.push({
+            route: req.url,
+            size: body.size ?? null,
+            resolution: body.resolution ?? null,
+            aspect: body.aspect_ratio ?? null,
+            quality: body.quality ?? null,
+            reasoning: body.reasoning ?? null,
+            refs: body.input_references?.map((r) => r.image_url.url.slice(0, 24)) ?? null,
         });
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ data: [{ b64_json: TINY_PNG }] }));
@@ -179,18 +183,28 @@ test('edit_image keeps the source frame when no size is asked for', async () => 
     const { port } = server.address();
     const client = createClient({ apiKey: 'sk-test', baseURL: `http://127.0.0.1:${port}/v1/`, retries: 0 });
     try {
-        // Riverflow takes the exact source frame instead of the gateway default square.
-        await client.images.edit({
+        // Riverflow answers /images/edits with the default square, so the edit is routed through
+        // /images/generations: the source frame survives and the tuning fields go along.
+        const payloads = await client.images.edit({
             model: 'sourceful/riverflow-v2.6-pro', prompt: 'edit', size: 'auto', format: 'png',
             files: [{ filename: 'shot.png', mime: 'image/png', bytes: png }],
         });
-        assert.deepEqual(sizes.pop(), { size: '800x600', resolution: null, aspect: null });
+        assert.equal(payloads[0], TINY_PNG);
+        assert.deepEqual(seen.pop(), {
+            route: '/v1/images/generations',
+            size: '800x600', resolution: null, aspect: null,
+            quality: 'high', reasoning: { effort: 'high' },
+            refs: ['data:image/png;base64,iV'],
+        });
         // A frame the caller named still wins over the source.
         await client.images.edit({
             model: 'sourceful/riverflow-v2.6-pro', prompt: 'edit', size: '2K', format: 'png',
             files: [{ filename: 'shot.png', mime: 'image/png', bytes: png }],
         });
-        assert.deepEqual(sizes.pop(), { size: null, resolution: '2K', aspect: null });
+        const named = seen.pop();
+        assert.equal(named.route, '/v1/images/generations');
+        assert.equal(named.resolution, '2K');
+        assert.equal(named.size, null);
     } finally {
         client.close();
         await new Promise((resolve) => server.close(resolve));

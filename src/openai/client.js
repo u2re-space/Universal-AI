@@ -659,13 +659,13 @@ export function createClient({
     };
     const images = {
          /** POST /images/generations. Returns base64 payloads from data[].b64_json or data[].url. */
-        async generate({ model, prompt, size, quality, n, format, background, signal } = {}) {
+        async generate({ model, prompt, size, quality, n, format, background, reasoning, references, signal } = {}) {
             const attempts = imageSizeAttempts(size, model);
             let result;
             for (let index = 0; ; index++) {
                 const requestedSize = index < attempts.length ? attempts[index] : size;
                 try {
-                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, quality, n, format, background }), signal });
+                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, quality, n, format, background, reasoning, references }), signal });
                     break;
                 } catch (error) {
                     if (index >= attempts.length - 1 || !isImageSizeError(error)) throw error;
@@ -676,6 +676,19 @@ export function createClient({
         /** POST /images/edits as multipart form data. `files` are { filename, mime, bytes }. */
         async edit({ model, prompt, files, size, format, background, quality, reasoning, signal } = {}) {
             const vector = isVectorModel(model);
+            // Some families (riverflow) answer /images/edits with the gateway default square and
+            // silently drop size, resolution, aspect_ratio, quality and reasoning. The same
+            // request on /images/generations with the sources as `input_references` honors every
+            // field, so an edit for those models travels through the generation route instead.
+            if (!vector && imageModelProfile(model).routeEditsThroughGeneration && files?.length) {
+                let frame = size;
+                if (!Object.keys(imageSizeFields(frame, model)).length && files[0]?.bytes) {
+                    const source = readImageSize(files[0].bytes);
+                    if (source) frame = `${source.width}x${source.height}`;
+                }
+                const references = files.map((file) => `data:${file.mime || 'image/png'};base64,${Buffer.from(file.bytes).toString('base64')}`);
+                return images.generate({ model, prompt, size: frame, quality, format, background, reasoning, references, signal });
+            }
             let requestFiles = files;
             let padding = null;
             let requestedFrame = size;

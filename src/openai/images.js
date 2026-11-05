@@ -52,11 +52,13 @@ export const PROXY_RIVERFLOW_MODEL = 'sourceful/riverflow-v2.6-pro';
  *   `keepProSuffix`   — the `-pro` suffix survives a small frame (the Recraft tier swap is not for it);
  *   `omitSizeOnReject` — when the host rejects the frame, retry once with `size` left out entirely;
  *   `reasoning`       — reasoning effort string the model understands (e.g. 'high' for riverflow);
- *   `defaultQuality`  — quality tier the model accepts when caller does not specify one.
+ *   `defaultQuality`  — quality tier the model accepts when caller does not specify one;
+ *   `routeEditsThroughGeneration` — /images/edits drops the frame and tuning fields for this
+ *                     family; send the source as `input_references` on /images/generations instead.
  */
 const IMAGE_CAPABILITIES = Object.freeze({
     customSizes: false, div16Padding: false, keepProSuffix: false, omitSizeOnReject: false,
-    reasoning: null, defaultQuality: null,
+    reasoning: null, defaultQuality: null, routeEditsThroughGeneration: false,
 });
 
 /**
@@ -66,10 +68,14 @@ const IMAGE_CAPABILITIES = Object.freeze({
  * one retry without the field rather than the whole request.
  * Riverflow also supports reasoning effort (`reasoning: { effort }`) and quality; it accepts
  * aspect ratios via `aspect_ratio` and resolution tiers via `resolution` instead of pixel presets.
+ * `routeEditsThroughGeneration` — the multipart /images/edits route silently drops the size,
+ * resolution, aspect_ratio, quality and reasoning fields for this family and answers with the
+ * gateway default square. The source picture travels as `input_references` on /images/generations
+ * instead, where every field is honored.
  */
 const IMAGE_MODEL_PROFILES = Object.freeze([
     Object.freeze({ match: GPT_IMAGE_25, customSizes: true, div16Padding: true }),
-    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true, reasoning: 'high', defaultQuality: 'high' }),
+    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true, reasoning: 'high', defaultQuality: 'high', routeEditsThroughGeneration: true }),
 ]);
 
 /**
@@ -542,13 +548,18 @@ export function acceptsResponseFormat(model) {
  *
  * For vector models (`recraft/...-vector`) the body uses `aspect_ratio` and forces `image_format:
  * svg`; image-conditioned vectorization goes through /images/edits with a multipart file.
- * @param {{ model: string, prompt: string, size?: string | null, quality?: string | null, n?: number | null, format?: string | null, background?: string | null }} request
+ * `references` are `data:` URLs of source pictures for an image-conditioned generation
+ * (`input_references`), used by the families whose edit route ignores the tuning fields.
+ * @param {{ model: string, prompt: string, size?: string | null, quality?: string | null, n?: number | null, format?: string | null, background?: string | null, reasoning?: string | null, references?: string[] | null }} request
  * @returns {object}
  * @exports
  * @ai.hint pure
  */
-export function generationBody({ model, prompt, size = null, quality = null, n = null, format = null, background = null, reasoning = null }) {
+export function generationBody({ model, prompt, size = null, quality = null, n = null, format = null, background = null, reasoning = null, references = null }) {
     const body = { model, prompt };
+    if (Array.isArray(references) && references.length) {
+        body.input_references = references.map((url) => ({ type: 'image_url', image_url: { url } }));
+    }
     if (isVectorModel(model)) {
         const aspect = normalizeVectorRatio(size);
         if (aspect) body.aspect_ratio = aspect;
@@ -557,16 +568,20 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
         //if (acceptsResponseFormat(model)) body.response_format = 'b64_json';
         return body;
     }
-    const frame = imageRequestSize(size, model);
     const fields = imageSizeFields(size, model);
+    // A tier or ratio request carries its own field; `normalizeImageSize` leaves an unknown token
+    // like `2K` untouched, so it must not leak into `size` beside `resolution`.
     if (fields.size) body.size = fields.size;
-    else if (frame) body.size = frame;
+    else if (!fields.resolution && !fields.aspect_ratio) {
+        const frame = imageRequestSize(size, model);
+        if (frame) body.size = frame;
+    }
     if (fields.resolution) body.resolution = fields.resolution;
     if (fields.aspect_ratio) body.aspect_ratio = fields.aspect_ratio;
     // Recraft swaps `-pro` for non-pro at small sizes; Riverflow keeps its suffix at any size.
     const caps = imageModelProfile(model);
     if (!caps.keepProSuffix) {
-        const sizePair = (frame || body.size)?.split?.('x')?.map((n) => parseInt(n || '0'));
+        const sizePair = body.size?.split?.('x')?.map((n) => parseInt(n || '0'));
         if (sizePair?.[0] <= 1024 && sizePair?.[1] <= 1024) {
             body.model = body.model?.replace?.(/\-pro$/, '') || body.model;
         }
