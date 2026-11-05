@@ -81,7 +81,7 @@ const IMAGE_MODEL_PROFILES = Object.freeze([
 /**
  * Capabilities of one image model id, merged over the defaults.
  * @param {string | null | undefined} model
- * @returns {{ customSizes: boolean, div16Padding: boolean, keepProSuffix: boolean, omitSizeOnReject: boolean }}
+ * @returns {{ customSizes: boolean, div16Padding: boolean, keepProSuffix: boolean, omitSizeOnReject: boolean, reasoning: string|null, defaultQuality: string|null, routeEditsThroughGeneration: boolean }}
  * @exports
  * @ai.hint pure
  */

@@ -16,7 +16,7 @@ import path from 'node:path';
 import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { detectMagick, ensureTransparentBackground, magickApplyAlphaMask, magickContourAlphaMask, magickDetectFakeTransparency, magickIdentify, magickIsOpaque, magickSaturationAlphaMask } from './image-magick.js';
 import { rasterApplyAlphaMask, rasterDetectFakeTransparency, rasterEngine, rasterInfo, rasterIsOpaque, rasterLocalAlphaMatte } from './image-raster.js';
-import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, sniffImage } from '../openai/images.js';
+import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, imageModelProfile, sniffImage } from '../openai/images.js';
 
 /**
  * Prompt for the A-mask pass. The model composes the final RGBA by combining the painted RGB
@@ -64,15 +64,20 @@ const RGB_SOURCE_EXT = /\.(png|webp)$/i;
 const MODEL_MATES = new Set(['auto', 'mask']);
 
 /**
- * Pick the frame that keeps the source aspect ratio, so the matte is not squeezed into a square.
- * The matte is resampled back onto the picture afterwards, so a preset frame is enough here;
- * the exact source frame is preserved on the main edit path inside the client instead.
+ * Pick the frame for a technical pass so the matte is not squeezed into a square.
+ *
+ * A model that takes an arbitrary frame (`customSizes`) gets the source frame exactly: the painted
+ * picture this pass returns becomes the RGB base of the final file, so a preset frame here would
+ * rescale the whole result to the preset and the caller would lose the source dimensions.
+ * A preset-only model cannot take anything else, so the nearest frame that keeps the aspect wins.
  * @param {{ width: number, height: number }|null} info
+ * @param {string|null} [model]
  * @returns {string|null}
  * @ai.hint pure
  */
-function frameFor(info) {
+function frameFor(info, model = null) {
     if (!info?.width || !info?.height) return null;
+    if (imageModelProfile(model).customSizes) return `${info.width}x${info.height}`;
     if (info.width === info.height) return '1024x1024';
     return info.height > info.width ? '1024x1536' : '1536x1024';
 }
@@ -105,7 +110,7 @@ async function askModel({ client, config = null, file, prompt, signal, model = n
         const payloads = await client.images.edit({
             model: techModel,
             prompt,
-            size: frameFor(info),
+            size: frameFor(info, techModel),
             format: 'png',
             signal,
             files: [{ filename: path.basename(abs), mime: kind.mime, bytes }],

@@ -16,7 +16,7 @@ import { mkdir, readFile, writeFile, stat, unlink, readdir } from 'node:fs/promi
 import { resolveInside } from './paths.js';
 import { detectMagick, magickConvert, magickIsOpaque, magickRemoveFlatBackground, assessVectorSuitability, magickTrimImage } from './image-magick.js';
 import { applyGeneratedAlphaMask } from './image-alpha.js';
-import { imageModelFor, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL, imageRequestSize, readImageSize } from '../openai/images.js';
+import { imageModelFor, imageModelProfile, imageSizeFields, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL, imageRequestSize, readImageSize } from '../openai/images.js';
 import { formatBytes } from '../util/text.js';
 
 /** Prompt the vector model gets when the caller did not describe the artwork. */
@@ -92,6 +92,8 @@ export function createImageHandlers({ root, client, config, signal, describeImag
         }
         await writeFile(abs, buffer);
 
+        // The frame the model actually answered with, before any local pass touches the file.
+        const returned = readImageSize(buffer);
         let alpha = null;
         if (transparent) {
             alpha = await hasRealAlpha(abs)
@@ -114,7 +116,9 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                 }
             } catch { /* trim failure is non-fatal */ }
         }
-        return { rel: safe, bytes: buffer.length, alpha };
+        // The final frame after all passes, so the caller can see if the model honored the request.
+        const final_ = readImageSize(await readFile(abs).catch(() => null));
+        return { rel: safe, bytes: buffer.length, alpha, returned, final: final_ };
     }
 
     /**
@@ -186,6 +190,24 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             for (const item of saved) {
                 const cut = item.alpha?.trimmed;
                 if (cut?.changed) notes.push(`${item.rel}: прозрачный padding обрезан — ${cut.before.width}×${cut.before.height} → ${cut.after.width}×${cut.after.height}.`);
+            }
+        }
+        // Frame diagnostics: requested → model returned → final file, plus the route the request took.
+        const caps = imageModelProfile(options.model);
+        const sent = options.frame && imageSizeFields(options.frame, options.model);
+        const field = sent && Object.keys(sent).length
+            ? Object.entries(sent).map(([key, value]) => `${key}=${value}`).join(' ')
+            : 'size не передан';
+        notes.push(`Канал: POST /images/${options.route ?? 'generations'} · ${options.model ?? 'модель не задана'} · ${field}`);
+        for (const item of saved) {
+            const req = options.frame ?? '';
+            const ret = item.returned ? `${item.returned.width}×${item.returned.height}` : '?';
+            const fin = item.final ? `${item.final.width}×${item.final.height}` : ret;
+            const note = [req, ret, fin].filter(Boolean).join(' → ');
+            if (note && note !== '→') notes.push(`${item.rel}: кадр ${note}`);
+            if (item.returned && item.final
+                && (item.returned.width !== item.final.width || item.returned.height !== item.final.height)) {
+                notes.push(`${item.rel}: локальный проход изменил кадр — проверьте maskModel.`);
             }
         }
         const vectors = await toVectors(saved, options);
@@ -477,7 +499,9 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                     format, background: effectiveBackground(model, requested), signal,
                     files,
                 });
-                return saveAll(payloads, args.path, { transparent, alphaSource: ref, model, toSvg, frame: Boolean(String(args.size ?? '').trim()) });
+                const caps = imageModelProfile(model);
+                const route = caps.routeEditsThroughGeneration ? 'generations' : 'edits';
+                return saveAll(payloads, args.path, { transparent, alphaSource: ref, model, toSvg, frame: args.size || null, route });
             }
 
             if (String(args.extra_images ?? '').trim()) throw new Error('generate_image: extra_images требует reference.');
@@ -489,7 +513,8 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                 format, background: effectiveBackground(model, requested), signal,
                 background_mode: effectiveBackground(model, requested),
             });
-            return saveAll(payloads, args.path, { transparent, model, toSvg, frame: Boolean(args.size?.trim()) });
+            const caps = imageModelProfile(model);
+            return saveAll(payloads, args.path, { transparent, model, toSvg, frame: args.size && args.size !== 'auto' ? args.size : null, route: 'generations' });
         },
         /**
          * POST /images/edits with one required source image and optional extra references.
@@ -515,7 +540,9 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                 background_mode: effectiveBackground(model, requested),
                 files,
             });
-            return saveAll(payloads, args.path, { transparent, alphaSource: args.image, model, toSvg, frame: Boolean(String(args.size ?? '').trim()) });
+            const caps = imageModelProfile(model);
+            const route = caps.routeEditsThroughGeneration ? 'generations' : 'edits';
+            return saveAll(payloads, args.path, { transparent, alphaSource: args.image, model, toSvg, frame: args.size && args.size !== 'auto' ? args.size : null, route });
         },
         /**
          * Vectorize a flat raster (logo, badge, icon) into an SVG document with the vector model.
