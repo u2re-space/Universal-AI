@@ -14,7 +14,7 @@
 | Один запрос → ответ | `ai "объясни event loop в Node"` |
 | Чат с историей | `ai chat --session work` (сессии сохраняются между запусками) |
 | Код, документы, тексты | `ai "напиши README для проекта" --out README.md`, структурированный вывод `--schema` |
-| Картинки | `ai image "кот-космонавт" --size 1024x1024 --quality high` (инструмент `image_generation`, черновики пишутся по мере генерации) |
+ | Картинки | `ai image "кот-космонавт" --size 1024x1024 --image-complexity high` (инструмент `image_generation`, черновики пишутся по мере генерации) |
 | Векторизация логотипов и бейджей | `ai run "конвертируй логотипы PNG/WebP в SVG"` — инструмент `vectorize_image` (`recraft/recraft-v4.1-pro-vector`) с локальным удалением фона; источник — кроп из `.tmp/<id>/crops/` |
 | Изображения и файлы во входе | `ai --image screenshot.png "что не так на экране?"`, `ai -f spec.pdf "сделай план"` |
 | Автономные задачи | `ai run "добавь тесты для src/utils.js и прогони их"` — инструменты: файлы, команды, URL, web-поиск, картинки |
@@ -724,7 +724,7 @@ Telegram — Bot API без SDK: `getUpdates`, `sendMessage`, `deleteMessage`, `
   "memory": { "enabled": true, "autoSave": true, "maxRecall": 8, "notesFile": "AGENTS.md", "dbFile": null },
   "agents": { "enabled": true, "filenames": ["AGENTS.md", "agents.md"], "globalFile": null,
               "maxBytes": 16384, "maxTotalBytes": 65536, "discoverUpward": true, "nested": true },
-  "image": { "size": "auto", "quality": "auto", "format": "png", "partialImages": 2, "outputDir": ".", "image_format": "png" },
+  "image": { "size": "auto", "complexity": "auto", "format": "png", "partialImages": 2, "outputDir": ".", "image_format": "png" },
   "completion": { "model": "gpt-6-luna", "effort": "none", "maxLineBytes": 524288, "maxContextBytes": 24576,
                   "channelProbe": true, "probeTtlMs": 60000, "probeTimeoutMs": 1500 },
   "compaction": { "auto": false, "afterInputTokens": 200000 },

@@ -20,7 +20,7 @@ import { CHAT_PATH, chatGaps, createChatStreamReducer, droppedTools, normalizeCh
 import { envValue } from '../core/runtime-env.js';
 import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
 import { rasterPadImageBytes, rasterRemoveImagePadding } from '../agent/image-raster.js';
-import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, readImageSize, imageQualityValue, imageReasoningValue, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat, withSizeHint } from './images.js';
+import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, readImageSize, imageComplexityValue, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat, withSizeHint } from './images.js';
 
 export { ApiError };
 
@@ -659,13 +659,13 @@ export function createClient({
     };
     const images = {
          /** POST /images/generations. Returns base64 payloads from data[].b64_json or data[].url. */
-        async generate({ model, prompt, size, quality, n, format, background, reasoning, references, resolution, signal } = {}) {
+        async generate({ model, prompt, size, complexity, n, format, background, references, resolution, signal } = {}) {
             const attempts = imageSizeAttempts(size, model, resolution);
             let result;
             for (let index = 0; ; index++) {
                 const requestedSize = index < attempts.length ? attempts[index] : size;
                 try {
-                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, quality, n, format, background, reasoning, references, resolution, sizeHint: imageSizeHint }), signal });
+                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, complexity, n, format, background, references, resolution, sizeHint: imageSizeHint }), signal });
                     break;
                 } catch (error) {
                     if (index >= attempts.length - 1 || !isImageSizeError(error)) throw error;
@@ -674,10 +674,10 @@ export function createClient({
             return await payloadList(result, signal, 'images/generations');
         },
         /** POST /images/edits as multipart form data. `files` are { filename, mime, bytes }. */
-        async edit({ model, prompt, files, size, format, background, quality, reasoning, resolution, signal } = {}) {
+        async edit({ model, prompt, files, size, format, background, complexity, resolution, signal } = {}) {
             const vector = isVectorModel(model);
-            // Some families (riverflow) answer /images/edits with the gateway default square and
-            // silently drop size, resolution, aspect_ratio, quality and reasoning. The same
+             // Some families (riverflow) answer /images/edits with the gateway default square and
+             // silently drop size, resolution, aspect_ratio and complexity. The same
             // request on /images/generations with the sources as `input_references` honors every
             // field, so an edit for those models travels through the generation route instead.
             if (!vector && imageModelProfile(model).routeEditsThroughGeneration && files?.length) {
@@ -687,7 +687,7 @@ export function createClient({
                     if (source) frame = `${source.width}x${source.height}`;
                 }
                 const references = files.map((file) => `data:${file.mime || 'image/png'};base64,${Buffer.from(file.bytes).toString('base64')}`);
-                return images.generate({ model, prompt, size: frame, quality, format, background, reasoning, references, resolution, signal });
+                return images.generate({ model, prompt, size: frame, complexity, format, background, references, resolution, signal });
             }
             let requestFiles = files;
             let padding = null;
@@ -741,11 +741,9 @@ export function createClient({
                     if (fmt) fields[imageFormatField(model)] = fmt;
                     const backgroundField = backgroundValue({ model, format: fmt, background });
                     if (backgroundField) fields.background = backgroundField;
-                    // Tier-based models (riverflow) accept quality and reasoning.
-                    const q = imageQualityValue({ model, quality });
-                    if (q) fields.quality = q;
-                    const reasoningObj = imageReasoningValue({ model, reasoning });
-                    if (reasoningObj) fields.reasoning = JSON.stringify(reasoningObj);
+                    // Tier-based models (riverflow) accept complexity.
+                    const cx = imageComplexityValue({ model, complexity });
+                    if (cx) fields.complexity = cx;
                     //if (acceptsResponseFormat(model)) fields.response_format = 'b64_json';
                 }
                 // The frame this attempt asks for is repeated in the text for the size-sensitive

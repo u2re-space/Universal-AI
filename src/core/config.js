@@ -603,7 +603,7 @@ function validateConfig(c) {
     }
     if (typeof c.browser.spaceName !== 'string' || !c.browser.spaceName.trim()) fail('browser.spaceName: непустая строка');
     if (!['png', 'webp', 'jpeg'].includes(c.image.format)) fail('image.format: png | webp | jpeg');
-    if (!['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(c.image.quality)) fail('image.quality: auto | low | medium | high | xhigh | max');
+    if (!['auto', 'low', 'medium', 'high'].includes(c.image.complexity)) fail('image.complexity: auto | low | medium | high');
     if (!['auto', 'transparent', 'opaque'].includes(c.image.background)) fail('image.background: auto | transparent | opaque');
     // `image.size` also accepts a resolution tier (`512`, `2K`) and a ratio (`9:16`): a family that
     // is tuned by a tier reads those instead of a pixel frame, and refusing them here would make the

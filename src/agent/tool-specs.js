@@ -299,7 +299,7 @@ export const TOOL_SPECS = {
             path: str('Relative output path such as assets/portrait.png. Empty string lets the tool choose a name.'),
             size: str('WIDTHxHEIGHT, a resolution tier (512, 1K, 2K, 4K), a ratio (16:9, 9:16), or the words portrait/landscape/square. A family that takes any frame uses WIDTHxHEIGHT as asked; a family tuned by tiers reads the tier as `resolution` and the ratio as `aspect_ratio`, so a bare number like 2048 never collapses to the server default square. Empty string uses the server default.'),
             resolution: str('Resolution tier for the models tuned by one: 512, 1K, 2K, 4K, or an empty string for image.resolution. It sets the pixel budget; size then only sets the shape.'),
-            quality: str('low, medium, high, or an empty string for the server default. Ignored when reference is set.'),
+            complexity: str('low, medium, high, or an empty string for the server default. Replaces the former `quality` field.'),
             reference: str('Relative path to a reference image (e.g. .ai/refs/abc.png or a ready crop from .tmp/<id>/crops/*.png). The generator conditions on this image, and the same file is the RGB base for the alpha channel. Empty string = pure text-to-image.'),
             extra_images: str('JSON array of additional reference paths sent with reference, e.g. ["assets/ref1.png",".tmp/<id>/crops/icon.png"]. Empty string = none.'),
             background: str('transparent, opaque, or an empty string for image.background. transparent asks the model for real alpha and falls back to the matte pipeline.'),

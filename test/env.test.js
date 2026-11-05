@@ -178,7 +178,7 @@ test('images edit and vectorize move to the fallback host when the primary rejec
     try {
         const png = Buffer.from(TINY_PNG, 'base64');
         const edited = await client.images.edit({
-            model: 'openai/gpt-image-2.5-sunburst', prompt: 'paint', format: 'png',
+            model: 'openai/gpt-image-2.6-sunburst', prompt: 'paint', format: 'png',
             files: [{ filename: 'src.png', mime: 'image/png', bytes: png }],
         });
         assert.equal(edited[0], svgB64);
@@ -189,7 +189,7 @@ test('images edit and vectorize move to the fallback host when the primary rejec
         assert.equal(vectored[0], svgB64);
         assert.equal(seen.length, 2);
         assert.match(seen[0].url, /\/images\/edits/);
-        assert.equal(seen[0].model, 'openai/gpt-image-2.5-sunburst');
+        assert.equal(seen[0].model, 'openai/gpt-image-2.6-sunburst');
         assert.equal(seen[1].model, 'recraft/recraft-v4.1-pro-vector');
     } finally {
         client.close();

@@ -9,30 +9,33 @@
  *   imageTransport, imageModelFor, normalizeImageSize, normalizeImageFormat, resolveImageFormat, normalizeVectorRatio,
  *   isVectorModel, supportsTransparentBackground, backgroundValue, imageFormatField, generationBody, encodeMultipart,
  *   imagePayloads, imageSources, acceptsResponseFormat, pngHasAlphaChannel, sniffImage,
- *   imageModelProfile, needsDiv16Padding, imageSizeFields
+ *   imageModelProfile, needsDiv16Padding, imageSizeFields, imageComplexityValue
  * @ai.tags images, proxyapi
  * @ai.hint pure
- * @changed 2026-10-22 gpt-image-2.5 defaults for raster, gpt-image-2 alpha exception, vector model support.
+ * @changed 2026-10-22 gpt-image-2.6 defaults for raster, gpt-image-2 alpha exception, vector model support.
  * @changed 2026-10-30 response_format only where the model takes it; imageSources reads b64_json or url.
  * @changed 2026-11-04 per-model capability profiles (customSizes, div16Padding, keepProSuffix, omitSizeOnReject);
  *   sourceful/riverflow-v2.6-pro support (presets only, no custom sizes); image.div16 (auto|always|never) override.
+ * @changed 2026-11-05 `reasoning` and `quality` removed from images API; replaced by `complexity`
+ *   (low | medium | high, default high) for gpt-image-2.6 and riverflow.
  */
 
 import { randomBytes } from 'node:crypto';
 
 /** OpenAI gpt-image-2.5 family (sunburst, flare, …). */
 const GPT_IMAGE_25 = /^(?:openai\/)?gpt-image-2\.5(?:-|$)/i;
+const GPT_IMAGE_26 = /^(?:openai\/)?gpt-image-2\.6(?:-|$)/i;
 /** Sourceful Riverflow family — a Flux-based id such as sourceful/riverflow-v2.6-pro. */
 const RIVERFLOW = /(?:^|\/)riverflow-/i;
 
 /** Default ProxyAPI text-to-image model when imageModel is unset. See https://proxyapi.ru/models/browse/image */
-export const PROXY_IMAGE_MODEL = 'openai/gpt-image-2.5-sunburst';
+export const PROXY_IMAGE_MODEL = 'openai/gpt-image-2.6-sunburst';
 
 /**
  * Default ProxyAPI model for edits and image-conditioned generation. Same gpt-image-2.5 family as
  * the generation default; both ids accept a source image and are interchangeable through --image-model.
  */
-export const PROXY_IMAGE_EDIT_MODEL = 'openai/gpt-image-2.5-sunburst';
+export const PROXY_IMAGE_EDIT_MODEL = 'openai/gpt-image-2.6-sunburst';
 
 /** Default ProxyAPI vector (SVG) model. See https://proxyapi.ru/models/recraft/recraft-v4.1-pro-vector */
 export const PROXY_VECTOR_MODEL = 'recraft/recraft-v4.1-pro-vector';
@@ -47,18 +50,17 @@ export const PROXY_RIVERFLOW_MODEL = 'sourceful/riverflow-v2.6-pro';
 /**
  * What an image model is known to accept. A model absent from `IMAGE_MODEL_PROFILES` gets these
  * values, which is the plain `/images/generations` behaviour the vendor presets describe.
- *   `customSizes`     — an arbitrary WIDTHxHEIGHT goes into `size` instead of an IMAGE_SIZES preset;
- *   `div16Padding`    — /images/edits inputs must be padded to a 16-pixel multiple first;
- *   `keepProSuffix`   — the `-pro` suffix survives a small frame (the Recraft tier swap is not for it);
- *   `omitSizeOnReject` — when the host rejects the frame, retry once with `size` left out entirely;
- *   `reasoning`       — reasoning effort string the model understands (e.g. 'high' for riverflow);
- *   `defaultQuality`  — quality tier the model accepts when caller does not specify one;
- *   `routeEditsThroughGeneration` — /images/edits drops the frame and tuning fields for this
+ *   `customSizes`             — an arbitrary WIDTHxHEIGHT goes into `size` instead of an IMAGE_SIZES preset;
+ *   `div16Padding`            — /images/edits inputs must be padded to a 16-pixel multiple first;
+ *   `keepProSuffix`           — the `-pro` suffix survives a small frame (the Recraft tier swap is not for it);
+ *   `omitSizeOnReject`        — when the host rejects the frame, retry once with `size` left out entirely;
+ *   `complexity`              — complexity tier the model understands (e.g. 'high' for riverflow);
+ *   `routeEditsThroughGeneration` — /images/edits drops the size and tuning fields for this
  *                     family; send the source as `input_references` on /images/generations instead.
  */
 const IMAGE_CAPABILITIES = Object.freeze({
     customSizes: false, div16Padding: false, keepProSuffix: false, omitSizeOnReject: false,
-    reasoning: null, defaultQuality: null, routeEditsThroughGeneration: false, resolutionTiers: false,
+    complexity: null, routeEditsThroughGeneration: false, resolutionTiers: false,
     /** The gateway answers `background: transparent` with a painted plate instead of an alpha channel. */
     paintsFakeTransparency: false,
 });
@@ -68,7 +70,7 @@ const IMAGE_CAPABILITIES = Object.freeze({
  * Riverflow keeps its `-pro` suffix at any frame — the suffix is the model, not a size tier — and
  * takes no 16-pixel padding. Its frame support differs between gateways, so a refused frame costs
  * one retry without the field rather than the whole request.
- * Riverflow also supports reasoning effort (`reasoning: { effort }`) and quality; it accepts
+ * Riverflow also supports complexity (`complexity: 'high'`); it accepts
  * aspect ratios via `aspect_ratio` and resolution tiers via `resolution` instead of pixel presets.
  * `routeEditsThroughGeneration` — the multipart /images/edits route silently drops the size,
  * resolution, aspect_ratio, quality and reasoning fields for this family and answers with the
@@ -76,14 +78,15 @@ const IMAGE_CAPABILITIES = Object.freeze({
  * instead, where every field is honored.
  */
 const IMAGE_MODEL_PROFILES = Object.freeze([
+    Object.freeze({ match: GPT_IMAGE_26, customSizes: true, div16Padding: true, complexity: 'high' }),
     Object.freeze({ match: GPT_IMAGE_25, customSizes: true, div16Padding: true }),
-    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true, reasoning: 'high', defaultQuality: 'high', routeEditsThroughGeneration: true, resolutionTiers: true, paintsFakeTransparency: true }),
+    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true, complexity: 'high', routeEditsThroughGeneration: true, resolutionTiers: true, paintsFakeTransparency: true }),
 ]);
 
 /**
  * Capabilities of one image model id, merged over the defaults.
  * @param {string | null | undefined} model
- * @returns {{ customSizes: boolean, div16Padding: boolean, keepProSuffix: boolean, omitSizeOnReject: boolean, reasoning: string|null, defaultQuality: string|null, routeEditsThroughGeneration: boolean }}
+ * @returns {{ customSizes: boolean, div16Padding: boolean, keepProSuffix: boolean, omitSizeOnReject: boolean, complexity: string|null, routeEditsThroughGeneration: boolean, resolutionTiers: boolean, paintsFakeTransparency: boolean }}
  * @exports
  * @ai.hint pure
  */
@@ -325,37 +328,23 @@ const MAX_IMAGE_EDGE   = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-
 const MAX_IMAGE_RATIO  = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?16:3;
 
 /**
- * Resolve a reasoning effort for the model: the caller's value when it names one of the known
- * levels, otherwise the model's own default from the profile. `auto`, `off`, `none`, and empty
- * strings return null so the field is omitted.
- * @param {{ model: string, reasoning?: string | null }} request
- * @returns {{ effort: string } | null}
- * @exports
- * @ai.hint pure
- */
-export function imageReasoningValue({ model, reasoning = null }) {
-    const name = String(model ?? '').trim();
-    const value = String(reasoning ?? imageModelProfile(model).reasoning ?? '').trim().toLowerCase();
-    if (!value || value === 'auto' || value === 'off' || value === 'none') return null;
-    return { effort: value };
-}
-
-/**
- * Resolve a quality tier for the model: the caller's value when it names one, otherwise the
- * model's own default from the profile. `auto` and empty strings return null so the field is omitted.
- * @param {{ model: string, quality?: string | null }} request
+ * Resolve an image complexity tier: the caller's value when it names one, otherwise the
+ * model's own default from the profile. `auto` and empty strings return null so the field is
+ * omitted. Accepted values: `low`, `medium`, `high` — the default for models that support it is
+ * `high`. Replaces the former `reasoning` and `quality` fields in the images API.
+ * @param {{ model: string, complexity?: string | null }} request
  * @returns {string | null}
  * @exports
  * @ai.hint pure
  */
-export function imageQualityValue({ model, quality = null }) {
-    const value = String(quality ?? imageModelProfile(model).defaultQuality ?? '').trim().toLowerCase();
+export function imageComplexityValue({ model, complexity = null }) {
+    const value = String(complexity ?? imageModelProfile(model).complexity ?? '').trim().toLowerCase();
     if (!value || value === 'auto') return null;
     return value;
 }
 
 /**
- * Keep custom dimensions for the models that take them (GPT Image 2.5); a family that serves
+ * Keep custom dimensions for the models that take them (GPT Image 2.6); a family that serves
  * resolution tiers gets the frame of the tier its request names; every other model gets its
  * supported frame presets.
  * @param {string|null|undefined} size
@@ -580,7 +569,7 @@ export function imageTransport(config) {
 }
 
 /**
- * Model id for an images API call. ProxyAPI needs an explicit id such as openai/gpt-image-2.5-sunburst.
+ * Model id for an images API call. ProxyAPI needs an explicit id such as openai/gpt-image-2.6-sunburst.
  * Requests with a source image use the edit default.
  * @param {{ imageModel?: string | null, baseURL?: string, image?: { transport?: string | null } }} config
  * @param {{ hasImage?: boolean }} [request]
@@ -742,12 +731,12 @@ export function acceptsResponseFormat(model) {
  * `references` are `data:` URLs of source pictures for an image-conditioned generation
  * (`input_references`), used by the families whose edit route ignores the tuning fields.
  * `resolution` is an optional tier (512/1K/2K/4K) that selects a frame from the tier table.
- * @param {{ model: string, prompt: string, size?: string | null, quality?: string | null, n?: number | null, format?: string | null, background?: string | null, reasoning?: string | null, references?: string[] | null, resolution?: string | null }} request
+ * @param {{ model: string, prompt: string, size?: string | null, complexity?: string | null, n?: number | null, format?: string | null, background?: string | null, references?: string[] | null, resolution?: string | null }} request
  * @returns {object}
  * @exports
  * @ai.hint pure
  */
-export function generationBody({ model, prompt, size = null, quality = null, n = null, format = null, background = null, reasoning = null, references = null, resolution = null, sizeHint = 'auto' }) {
+export function generationBody({ model, prompt, size = null, complexity = null, n = null, format = null, background = null, references = null, resolution = null, sizeHint = 'auto' }) {
     const body = { model, prompt };
     if (Array.isArray(references) && references.length) {
         body.input_references = references.map((url) => ({ type: 'image_url', image_url: { url } }));
@@ -782,10 +771,8 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
             body.model = body.model?.replace?.(/\-pro$/, '') || body.model;
         }
     }
-    const q = imageQualityValue({ model, quality });
-    if (q) body.quality = q;
-    const reasoningObj = imageReasoningValue({ model, reasoning });
-    if (reasoningObj) body.reasoning = reasoningObj;
+    const cx = imageComplexityValue({ model, complexity });
+    if (cx) body.complexity = cx;
     if (Number.isInteger(n) && n > 1) body.n = n;
     const fmt = resolveImageFormat({ model, format });
     if (fmt) body[imageFormatField(model)] = fmt;

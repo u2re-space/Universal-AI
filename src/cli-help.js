@@ -192,17 +192,17 @@ context=false запускает роль на чистом контексте. 
   --port <n>             порт ai serve, ai complete --listen и ai channels --listen. 0 — свободный порт
 
 Изображения (image / --images):
-  --size WxH|auto  --quality low|medium|high|xhigh|max|auto  --format png|webp|jpeg
-  Целое --quality задаёт качество работы, слово low|medium|high|xhigh|max|auto — качество картинки.
+  --size WxH|auto  --image-complexity low|medium|high|auto  --format png|webp|jpeg
+  --image-complexity задаёт уровень планирования модели (заменяет бывшее 'quality'); целое --quality относится к pace работы.
   --image-background transparent|opaque|auto  --image-div16 auto|always|never  --partials 0..3  --image-model <id>  --count, -n <n>
-  Для api.proxyapi.ru картинки идут через /images/generations и /images/edits (openai/gpt-image-2.5-sunburst для генерации по тексту,
-  openai/gpt-image-2.5-sunburst для правки и генерации по картинке, если не задана --image-model).
+  Для api.proxyapi.ru картинки идут через /images/generations и /images/edits (openai/gpt-image-2.6-sunburst для генерации по тексту,
+  openai/gpt-image-2.6-sunburst для правки и генерации по картинке, если не задана --image-model).
    --image-model можно использовать для выбора любой модели-посредника, например \u0060sourceful/riverflow-v2.6-pro\u0060.
    Эта модель не требует padding до кратности 16 (image.div16: auto по умолчанию), но поддерживается не всеми хостами.
    transparent: gpt-image-* (кроме gpt-image-2) получают нативную альфу; у recraft и подобных моделей
    модель рисует чёрно-белую маску, и локальный растровый движок (sharp/canvas) вливает её в RGB+A —
    ImageMagick подключается только если оба движка недоступны.
-   GPT Image 2.5 дополняет входной растр прозрачными пикселями справа/снизу до кратности 16 без масштабирования,
+   GPT Image 2.6 дополняет входной растр прозрачными пикселями справа/снизу до кратности 16 без масштабирования,
    а после правки снимает padding тем же движком, что и добавлял (image.div16: auto — только для моделей, которые требуют padding;
    \u0060always\u0060 включает padding для любой модели, \u0060never\u0060 отключает).
   PNG с настоящей альфой сохраняется; если нужен WebP, используйте локальную конверсию, а не повторную генерацию.

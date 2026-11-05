@@ -72,7 +72,7 @@ let defaultProviders = [
 let providersRef = null;
 export const defaults = Object.freeze({
     model: 'gpt-6.1-terra',
-    imageModel: 'openai/gpt-image-2.5-sunburst',                 // null → gpt-image-2.5 (flare for generation, sunburst for edits) on the images API
+    imageModel: 'openai/gpt-image-2.6-sunburst',                 // null → gpt-image-2.6 (flare for generation, sunburst for edits) on the images API
     baseURL: "https://sprutdock.ru/v1",                    // null → OPENAI_BASE_URL or https://api.openai.com/v1/
     apiKey: "{{env:SPRUTDOCK_API_KEY}}",                     // prefer the OPENAI_API_KEY environment variable
     /**
@@ -236,7 +236,7 @@ export const defaults = Object.freeze({
         pollIntervalMs: 2_000,
     },
     image: {
-        size: 'auto', quality: 'auto', format: 'png', background: 'auto', partialImages: 2, outputDir: '.', transport: null,
+        size: 'auto', complexity: 'auto', format: 'png', background: 'auto', partialImages: 2, outputDir: '.', transport: null,
         /**
          * Resolution tier for the families that are tuned by one (sourceful/riverflow): 512 | 1K |
          * 2K | 4K. A tier decides the pixel budget; `size` then only decides orientation. A bare
@@ -244,11 +244,11 @@ export const defaults = Object.freeze({
          * request that names no frame at all. Preset-only models (gpt-image, recraft) ignore it.
          */
         resolution: null,
-        maskModel: null,             // null → the edit model draws the alpha matte (openai/gpt-image-2.5-sunburst)
+        maskModel: null,             // null → the edit model draws the alpha matte (openai/gpt-image-2.6-sunburst)
         rasterEngine: 'auto',        // auto | sharp | canvas | magick; auto prefers sharp, then node-canvas, then ImageMagick
         /**
          * 16-pixel padding for /images/edits inputs. auto follows the model profile
-         * (gpt-image-2.5 pads; riverflow and most others do not); always and never are
+         * (gpt-image-2.6 pads; riverflow and most others do not); always and never are
          * the operator override for a gateway whose behaviour the profile does not describe.
          */
          div16: 'auto',               // auto | always | never

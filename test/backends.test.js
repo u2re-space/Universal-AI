@@ -198,7 +198,7 @@ test('images use imagesBackends when configured', async () => {
     };
     const client = createFallbackClient(config);
     try {
-        await client.images.generate({ model: 'openai/gpt-image-2.5-sunburst', prompt: 'a cat' });
+        await client.images.generate({ model: 'openai/gpt-image-2.6-sunburst', prompt: 'a cat' });
         assert.equal(textHost.requests.filter((request) => request.path === '/v1/images/generations').length, 0);
         assert.equal(imageHost.requests.filter((request) => request.path === '/v1/images/generations').length, 1);
     } finally {

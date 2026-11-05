@@ -34,7 +34,7 @@ export function builtinTools(config, { web = false, images = false } = {}) {
         const image = { type: 'image_generation', output_format: config.image.format, partial_images: config.image.partialImages };
         if (config.imageModel) image.model = config.imageModel;
         if (config.image.size !== 'auto') image.size = config.image.size;
-        if (config.image.quality !== 'auto') image.quality = config.image.quality;
+        if (config.image.complexity !== 'auto') image.complexity = config.image.complexity;
         if (config.image.background !== 'auto') image.background = config.image.background;
         tools.push(image);
     }

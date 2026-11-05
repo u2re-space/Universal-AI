@@ -40,7 +40,7 @@ export async function image(ctx) {
     if (imageTransport(config) === 'images') return runImagesEndpoint(ctx, prompt, count);
     const builtin = builtinTools({ ...config, tools: { ...config.tools, images: true } }, { images: true, web: true });
     const target = values.out ?? config.image.outputDir;
-    renderer.line('info', `Генерация: ${config.imageModel ?? 'модель по умолчанию инструмента'} · ${config.image.size} · качество ${config.image.quality} · ${config.image.format} → ${target}`, { dim: true });
+    renderer.line('info', `Генерация: ${config.imageModel ?? 'модель по умолчанию инструмента'} · ${config.image.size} · сложность ${config.image.complexity} · ${config.image.format} → ${target}`, { dim: true });
 
     let code = 0;
     const produced = [];
@@ -85,7 +85,7 @@ async function runImagesEndpoint(ctx, prompt, count) {
                     return { filename: path.basename(located.rel), mime: sniffImage(bytes).mime, bytes };
                 })),
             })
-            : await client.images.generate({ model, prompt, size: config.image.size, quality: config.image.quality, n: count, format, background, signal, resolution: config.image.resolution });
+            : await client.images.generate({ model, prompt, size: config.image.size, complexity: config.image.complexity, n: count, format, background, signal, resolution: config.image.resolution });
         const sink = createImageSink({ target: path.resolve(ctx.cwd, target), format, prefix: 'image' });
         const saved = [];
         for (const [index, b64] of payloads.entries()) {

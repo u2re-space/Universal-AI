@@ -19,7 +19,7 @@ const END_STATUS = new Set(['completed', 'failed', 'cancelled']);
 const START_FIELDS = new Set([
     'type', 'command', 'prompt', 'cwd', 'approve', 'effort', 'summary', 'reasoningMode', 'instructions', 'images', 'files', 'detail',
     'out', 'session', 'store', 'web', 'imagesTool', 'tools', 'noTools', 'maxTurns', 'budgetUsd', 'budgetTokens',
-    'maxOutputTokens', 'temperature', 'verbosity', 'shell', 'stream', 'size', 'quality', 'format', 'imageBackground',
+    'maxOutputTokens', 'temperature', 'verbosity', 'shell', 'stream', 'size', 'complexity', 'format', 'imageBackground',
     'partials', 'imageModel', 'count', 'schema', 'role', 'single', 'team', 'memory', 'processing', 'extract', 'noExtract',
 ]);
 const REJECTED = new Set(['background', 'detach', 'job']);

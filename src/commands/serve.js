@@ -39,7 +39,7 @@ const FIELD_MAP = {
     detail: 'detail', out: 'out', session: 'session', store: 'store', web: 'web', imagesTool: 'images',
     tools: 'tools', noTools: 'no-tools', maxTurns: 'max-turns', budgetUsd: 'budget-usd', budgetTokens: 'budget-tokens',
     maxOutputTokens: 'max-output-tokens', temperature: 'temperature', verbosity: 'verbosity', shell: 'shell',
-    stream: 'stream', size: 'size', quality: 'quality', format: 'format', imageBackground: 'image-background',
+    stream: 'stream', size: 'size', quality: 'quality', complexity: 'image-complexity', format: 'format', imageBackground: 'image-background',
     partials: 'partials', imageModel: 'image-model', count: 'count', schema: 'schema', role: 'role',
     single: 'single', team: 'team', memory: 'memory', coordinator: 'coordinator', orchestrator: 'orchestrator',
     extract: 'extract', noExtract: 'no-extract', architect: 'architect', noArchitect: 'no-architect',

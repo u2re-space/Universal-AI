@@ -55,6 +55,7 @@ const OPTIONS = {
     stream: { type: 'boolean', default: true }, config: { type: 'string' }, 'base-url': { type: 'string' }, timeout: { type: 'string' },
     size: { type: 'string' }, quality: { type: 'string' }, format: { type: 'string' }, 'image-background': { type: 'string' },
     'image-resolution': { type: 'string' },
+    'image-complexity': { type: 'string' },
      'image-div16': { type: 'string' },
     'image-size-hint': { type: 'string' },
     partials: { type: 'string' }, 'image-model': { type: 'string' }, count: { type: 'string', short: 'n' }, schema: { type: 'string' },

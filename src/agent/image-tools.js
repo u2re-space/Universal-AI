@@ -540,7 +540,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             const model = imageModelFor(config);
             const flatPlate = transparent && imageModelProfile(model).paintsFakeTransparency;
             const payloads = await client.images.generate({
-                model, prompt: FIX_PROMPT(args.prompt, { flatPlate }), size: imageRequestSize(args.size || null, model, resolution) || args.size, quality: args.quality || null,
+                model, prompt: FIX_PROMPT(args.prompt, { flatPlate }), size: imageRequestSize(args.size || null, model, resolution) || args.size, complexity: args.complexity || null,
                 format, background: effectiveBackground(model, requested), signal,
                 background_mode: effectiveBackground(model, requested), resolution,
             });

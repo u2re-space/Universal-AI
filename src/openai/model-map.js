@@ -22,6 +22,11 @@ export const MODEL_FALLBACKS = Object.freeze({
     'gpt-image-2.5-flare'   : 'openai/gpt-image-2.5-flare',
     'gpt-image-2.5-sunburst': 'openai/gpt-image-2.5-sunburst',
 
+    // non-prefixed to prefixed image API
+    'gpt-image-2.6'         : 'openai/gpt-image-2.6',
+    'gpt-image-2.6-flare'   : 'openai/gpt-image-2.6-flare',
+    'gpt-image-2.6-sunburst': 'openai/gpt-image-2.6-sunburst',
+
     // non-prefixed to prefixed other models
     'claude-haiku-5-5'        : 'anthropic/claude-haiku-5-5',
     'claude-sonnet-5-5'       : 'anthropic/claude-sonnet-5-5',

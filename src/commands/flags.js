@@ -55,7 +55,7 @@ function number(value, name, { integer = false, min = 0 } = {}) {
  * @exports
  * @ai.hint pure
  */
-const IMAGE_QUALITY = ['low', 'medium', 'high', 'xhigh', 'max', 'auto'];
+const IMAGE_COMPLEXITY = ['low', 'medium', 'high', 'auto'];
 
 /** The retired collector/coordinator roles are accepted as aliases for the unified orchestrator role. */
 const ROLE_ALIASES = { collector: 'orchestrator', coordinator: 'orchestrator' };
@@ -121,15 +121,19 @@ export function overridesFrom(values, { command = null } = {}) {
     if (values.timeout !== undefined) o.limits.idleTimeoutMs = number(values.timeout, 'timeout', { integer: true, min: 1 }) * 1000;
     if (values.size) o.image.size = values.size;
     if (values.quality !== undefined) {
-        if (IMAGE_QUALITY.includes(values.quality)) o.image.quality = values.quality;
+        if (IMAGE_COMPLEXITY.includes(values.quality)) o.image.complexity = values.quality;
         else if (command !== 'serve') {
             let quality;
             try { quality = number(values.quality, 'quality', { integer: true, min: 0 }); }
-            catch { throw new UsageError('--quality: 0..200 или low|medium|high|xhigh|max|auto'); }
+            catch { throw new UsageError('--quality: 0..200 или low|medium|high|auto'); }
             if (quality > 200) throw new UsageError(PACE_QUALITY_MESSAGE);
-            if (command === 'image') throw new UsageError('Для image --quality: low | medium | high | xhigh | max | auto');
+            if (command === 'image') throw new UsageError('Для image --quality: low | medium | high | auto');
             (o.pace ??= {}).quality = quality;
         }
+    }
+    if (values['image-complexity'] !== undefined) {
+        if (IMAGE_COMPLEXITY.includes(values['image-complexity'])) o.image.complexity = values['image-complexity'];
+        else throw new UsageError(`--image-complexity: ${IMAGE_COMPLEXITY.join(' | ')}`);
     }
     if (values.format) o.image.format = values.format;
     if (values['image-background']) o.image.background = values['image-background'];
