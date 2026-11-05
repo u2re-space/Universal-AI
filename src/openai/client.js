@@ -665,7 +665,7 @@ export function createClient({
             for (let index = 0; ; index++) {
                 const requestedSize = index < attempts.length ? attempts[index] : size;
                 try {
-                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, complexity, n, format, background, references, resolution, sizeHint: imageSizeHint }), signal });
+                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, complexity, quality: complexity || "high", n, format, background, references, resolution, sizeHint: imageSizeHint }), signal });
                     break;
                 } catch (error) {
                     if (index >= attempts.length - 1 || !isImageSizeError(error)) throw error;
@@ -687,7 +687,7 @@ export function createClient({
                     if (source) frame = `${source.width}x${source.height}`;
                 }
                 const references = files.map((file) => `data:${file.mime || 'image/png'};base64,${Buffer.from(file.bytes).toString('base64')}`);
-                return images.generate({ model, prompt, size: frame, complexity, format, background, references, resolution, signal });
+                return images.generate({ model, prompt, size: frame, complexity, quality: complexity || "high", format, background, references, resolution, signal });
             }
             let requestFiles = files;
             let padding = null;
