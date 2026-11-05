@@ -25,14 +25,18 @@ import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, imageModelProfile, sniffImage } 
  * silhouette is what keeps the cut free of stair-stepping, while a wide soft gradient would make
  * the rim milky and eat into the artwork.
  */
-export const ALPHA_MASK_PROMPT = 'Return an alpha matte of the attached image as a grayscale picture. '
-    + 'White marks the subject that must stay visible (the artwork, logo, product, or person); '
-    + 'black marks everything that must become transparent, including a checkerboard, grid, or flat '
-    + 'plate that only imitates transparency. '
+export const ALPHA_MASK_PROMPT = ''//'Return an alpha matte of the attached image as a grayscale picture. '
+    + 'Return an A-mask (matte) for the attached image that will be composited onto an RGB background to produce the final RGBA image. '
+    + 'This is the alpha channel of a two-part composition: RGB + A-mask = RGBA. '
+    + 'White (255) marks the subject that must stay visible — the artwork, logo, product, or person. '
+    + 'Black (0) marks everything that must become transparent, including any checkerboard, grid, or flat plate that only imitates transparency. '
     + 'Keep the exact framing and proportions of the source. '
-    + 'Edges must be anti-aliased: a one- or two-pixel gray transition exactly on the silhouette, '
-    + 'not a wide soft glow, and the interior of the subject pure white. '
-    + 'Output the matte only: grayscale, no colors, no text, no border, no shadow.';
+    + 'Edges must be anti-aliased: a one- or two-pixel gray transition exactly on the silhouette, not a wide soft glow, and the interior of the subject pure white. '
+    + 'The mask must trace the subject contour tightly: a one- or two-pixel gray transition exactly on the silhouette creates a clean anti-aliased edge in the final composite. '
+    + 'Do not widen the transition into a soft glow — that makes the rim milky and eats into the artwork. '
+    + 'Do not make alpha edges too blurry! '
+    + 'The interior of the subject must be pure white; the transparent area must be pure black. '
+    + 'Output the matte/mask only: grayscale, no colors, no text, no border, no shadow.';
 
 /*
 export const ALPHA_MASK_PROMPT = 'Return an A-mask for the attached image that will be composited '
@@ -60,15 +64,11 @@ export const ALPHA_MASK_PROMPT = 'Return an A-mask for the attached image that w
     + 'Paint a single flat color only where the background is now — including any checkerboard, grid, or '
     + 'pattern that imitates transparency. No gradients, no texture, no shadow, no new objects.';*/
 
-export const BACKGROUND_PAINT_PROMPT = 'You are creating the RGB channel for a two-part RGBA '
-    + 'composition (RGB + A-mask = RGBA). '
+export const BACKGROUND_PAINT_PROMPT = 'You are creating the RGB channel for a two-part RGBA composition (RGB + A-mask = RGBA). '
     + 'Fill the whole background of the attached image with the dominant color of the subject. '
-    + 'Do not change the subject: keep every pixel of it identical, in the same position, with the same '
-    + 'proportions and framing. '
-    + 'Paint a single flat color only where the background is now — including any checkerboard, grid, or '
-    + 'pattern that imitates transparency. '
-    + 'This flat color will serve as the RGB base that the A-mask composites over: no gradients, '
-    + 'no texture, no shadow, no new objects.';
+    + 'Do not change the subject: keep every pixel of it identical, in the same position, with the same proportions and framing. '
+    + 'Paint a single flat color only where the background is now — including any checkerboard, grid, or pattern that imitates transparency. '
+    + 'This flat color will serve as the RGB base that the A-mask composites over: no gradients, no texture, no shadow, no new objects.';
 
 /** Raster matte formats ImageMagick can read. */
 const MASK_EXT = /\.(png|webp|jpe?g)$/i;
