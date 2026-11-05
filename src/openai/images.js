@@ -59,6 +59,8 @@ export const PROXY_RIVERFLOW_MODEL = 'sourceful/riverflow-v2.6-pro';
 const IMAGE_CAPABILITIES = Object.freeze({
     customSizes: false, div16Padding: false, keepProSuffix: false, omitSizeOnReject: false,
     reasoning: null, defaultQuality: null, routeEditsThroughGeneration: false, resolutionTiers: false,
+    /** The gateway answers `background: transparent` with a painted plate instead of an alpha channel. */
+    paintsFakeTransparency: false,
 });
 
 /**
@@ -75,7 +77,7 @@ const IMAGE_CAPABILITIES = Object.freeze({
  */
 const IMAGE_MODEL_PROFILES = Object.freeze([
     Object.freeze({ match: GPT_IMAGE_25, customSizes: true, div16Padding: true }),
-    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true, reasoning: 'high', defaultQuality: 'high', routeEditsThroughGeneration: true, resolutionTiers: true }),
+    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true, reasoning: 'high', defaultQuality: 'high', routeEditsThroughGeneration: true, resolutionTiers: true, paintsFakeTransparency: true }),
 ]);
 
 /**

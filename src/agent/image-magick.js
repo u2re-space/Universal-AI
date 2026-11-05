@@ -405,6 +405,46 @@ export async function magickDetectFakeTransparency({ exe, input, cwd, signal, pa
 }
 
 /**
+ * Share of the frame whose alpha is fully cleared (0). A real cut-out has a large share; a
+ * painted plate with an anti-aliased fringe has almost none. This is what tells the model's
+ * honest transparency apart from a picture that only imitates it near the silhouette.
+ * @param {{ exe: string, input: string, cwd: string, signal?: AbortSignal }} opts
+ * @returns {Promise<number|null>} 0..1, or null when ImageMagick cannot answer
+ * @exports
+ * @ai.hint io
+ */
+export async function magickAlphaShare({ exe, input, cwd, signal }) {
+    // `-alpha extract` puts the alpha channel into gray: 1 = opaque, 0 = transparent, so `1 - mean`
+    // is the cleared share of the frame.
+    const res = await magickRun(exe, [input, '-alpha', 'extract', '-format', '%[fx:mean]', 'info:'], { cwd, signal }).catch(() => null);
+    const value = Number(String(res?.stdout ?? '').trim());
+    if (!Number.isFinite(value)) return null;
+    return Math.min(1, Math.max(0, 1 - value));
+}
+
+/**
+ * Share of the frame whose alpha sits in the soft band, i.e. neither cleared nor opaque
+ * (`4% <= alpha < 96%`). A tight cut-out leaves only a one- or two-pixel anti-aliased ring here,
+ * a fraction of a percent; a matte the model drew with a wide glow puts a fifth of the frame in
+ * that band, which is exactly the halo a transparent PNG shows against a light page.
+ * @param {{ exe: string, input: string, cwd: string, signal?: AbortSignal }} opts
+ * @returns {Promise<number|null>} 0..1, or null when ImageMagick cannot answer
+ * @exports
+ * @ai.hint io
+ */
+export async function magickAlphaSoftShare({ exe, input, cwd, signal }) {
+    const share = async (threshold) => {
+        const res = await magickRun(exe, [input, '-alpha', 'extract', '-threshold', threshold, '-format', '%[fx:mean]', 'info:'], { cwd, signal }).catch(() => null);
+        const value = Number(String(res?.stdout ?? '').trim());
+        return Number.isFinite(value) ? value : null;
+    };
+    const opaque = await share('96%');
+    const nonEmpty = await share('4%');
+    if (opaque === null || nonEmpty === null) return null;
+    return Math.min(1, Math.max(0, nonEmpty - opaque));
+}
+
+/**
  * Draw a matte from the object contour without any API request: the canny edges of the picture are
  * thickened into a closed barrier, painted over the source, and the background is flooded away from
  * all four corners. What stays opaque is the subject, and `-alpha extract` turns it into a grayscale

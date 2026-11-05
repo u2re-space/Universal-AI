@@ -5,17 +5,19 @@
  *          subject color, draw an anti-aliased matte from the clean source, and merge the matte as alpha.
  * @depends node:path, node:fs/promises, agent/image-magick, openai/images
  * @usedBy commands/image, agent/image-tools
- * @exports ALPHA_MASK_PROMPT, BACKGROUND_PAINT_PROMPT, applyGeneratedAlphaMask
+ * @exports ALPHA_MASK_PROMPT, BACKGROUND_PAINT_PROMPT, applyGeneratedAlphaMask, hasRealAlpha
  * @ai.tags images, alpha, imagemagick
  * @ai.hint io
  * @changed 2026-10-23 Paint + anti-aliased matte pipeline; the matte is drawn from the clean source,
  *           never from the painted picture.
+ * @changed 2026-11-05 A picture counts as already transparent only by its cleared share, so a painted
+ *           plate with a translucent fringe runs the matte pipeline instead of being kept as is.
  */
 
 import path from 'node:path';
 import { readFile, writeFile, unlink } from 'node:fs/promises';
-import { detectMagick, ensureTransparentBackground, magickApplyAlphaMask, magickContourAlphaMask, magickDetectFakeTransparency, magickIdentify, magickIsOpaque, magickSaturationAlphaMask } from './image-magick.js';
-import { rasterApplyAlphaMask, rasterDetectFakeTransparency, rasterEngine, rasterInfo, rasterIsOpaque, rasterLocalAlphaMatte } from './image-raster.js';
+import { detectMagick, ensureTransparentBackground, magickAlphaShare, magickAlphaSoftShare, magickApplyAlphaMask, magickContourAlphaMask, magickDetectFakeTransparency, magickIdentify, magickIsOpaque, magickSaturationAlphaMask } from './image-magick.js';
+import { rasterAlphaShare, rasterAlphaSoftShare, rasterApplyAlphaMask, rasterDetectFakeTransparency, rasterEngine, rasterInfo, rasterIsOpaque, rasterLocalAlphaMatte } from './image-raster.js';
 import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, imageModelProfile, sniffImage } from '../openai/images.js';
 
 /**
@@ -67,6 +69,101 @@ export const BACKGROUND_PAINT_PROMPT = 'You are creating the RGB channel for a t
 
 /** Raster matte formats ImageMagick can read. */
 const MASK_EXT = /\.(png|webp|jpe?g)$/i;
+
+/**
+ * Share of the frame that must be fully cleared before a picture counts as a real cut-out.
+ * A model that cannot emit alpha paints a plate instead, and the only transparent pixels such a
+ * reply carries form a thin fringe along the silhouette — well under this share. A genuine
+ * background removal clears a large part of the frame, so the threshold separates the two.
+ */
+const MIN_CLEARED_SHARE = 0.03;
+
+/**
+ * Largest share of the frame allowed to sit in the soft alpha band before a cut-out counts as
+ * sloppy. A real one leaves a one- or two-pixel anti-aliased ring (well under 1%); a matte the
+ * model drew with a wide glow scores around 20%, and that band is the halo a transparent PNG shows.
+ */
+const MAX_SOFT_SHARE = 0.05;
+
+/**
+ * Cleared share of the frame (`1 - mean(alpha)`), measured by whichever engine is available.
+ * @param {{ abs: string, cwd?: string, raster?: object|null, engine?: string, exe?: string|null, signal?: AbortSignal }} options
+ * @returns {Promise<number|null>}
+ * @ai.hint io
+ */
+async function clearedShare({ abs, cwd = path.dirname(abs), raster = null, engine = 'auto', exe = null, signal }) {
+    if (raster) return await rasterAlphaShare({ input: abs, cwd, engine }).catch(() => null);
+    if (exe) return await magickAlphaShare({ exe, input: abs, cwd, signal });
+    return null;
+}
+
+/**
+ * Share of the frame whose alpha is neither cleared nor opaque — the width of the edge transition.
+ * @param {{ abs: string, cwd?: string, raster?: object|null, engine?: string, exe?: string|null, signal?: AbortSignal }} options
+ * @returns {Promise<number|null>}
+ * @ai.hint io
+ */
+async function softShare({ abs, cwd = path.dirname(abs), raster = null, engine = 'auto', exe = null, signal }) {
+    if (raster) return await rasterAlphaSoftShare({ input: abs, cwd, engine }).catch(() => null);
+    if (exe) return await magickAlphaSoftShare({ exe, input: abs, cwd, signal });
+    return null;
+}
+
+/**
+ * Minimum frame size in pixels below which softShare is meaningless.
+ * For a 1×1 image softShare=1 (the only pixel sits in the mid-alpha band) does not mean a
+ * soft edge — it just means the frame is too small for the metric.
+ */
+const MIN_SOFT_PIXELS = 100;
+
+/**
+ * Judge an alpha channel the picture already carries.
+ *
+ * `magickIsOpaque` alone is not enough: it answers "not opaque" for a single semi-transparent
+ * pixel, so a painted plate passes, and it says nothing about edge quality, so a matte drawn with
+ * a wide glow passes too. Two shares settle it — how much of the frame is cleared, and how much of
+ * it sits in the soft band. A null share means the engine could not measure, and the alpha is then
+ * taken at its word rather than forcing a rebuild. `totalPixels` below MIN_SOFT_PIXELS skips the
+ * soft check: a tiny frame gives a meaningless ratio.
+ * @param {{ abs: string, cwd?: string, raster?: object|null, engine?: string, exe?: string|null, signal?: AbortSignal, totalPixels?: number }} options
+ * @returns {Promise<{ usable: boolean, cleared: number|null, soft: number|null }>}
+ * @ai.hint io
+ */
+async function judgeAlphaShares(options) {
+    const { totalPixels = Infinity } = options;
+    const [cleared, rawSoft] = await Promise.all([clearedShare(options), softShare(options)]);
+    const soft = totalPixels < MIN_SOFT_PIXELS ? null : rawSoft;
+    const usable
+        = (cleared === null || cleared >= MIN_CLEARED_SHARE)
+        && (soft === null || soft <= MAX_SOFT_SHARE);
+    return { usable, cleared, soft };
+}
+
+/**
+ * Whether a saved picture carries a usable alpha channel: a real cut-out, not a painted plate and
+ * not a genuine channel whose soft edge would leave a halo.
+ * @param {{ abs: string, cwd?: string, raster?: object|null, engine?: string, exe?: string|null, signal?: AbortSignal }} options
+ * @returns {Promise<boolean>}
+ * @exports
+ * @ai.hint io
+ */
+export async function hasRealAlpha(options) {
+    const { abs, cwd = path.dirname(abs), raster = null, engine = 'auto', exe = null, signal } = options;
+    const opaque = raster
+        ? await rasterIsOpaque(abs, { cwd, engine }).catch(() => null)
+        : exe ? await magickIsOpaque({ exe, input: abs, cwd, signal }).catch(() => null) : null;
+    if (opaque !== false) return false;
+    // Fetch frame dimensions so judgeAlphaShares can skip softShare for tiny images.
+    let totalPixels = Infinity;
+    if (raster) {
+        const info = await rasterInfo(abs, { cwd, engine }).catch(() => null);
+        if (info?.width && info?.height) totalPixels = info.width * info.height;
+    } else if (exe) {
+        const info = await magickIdentify({ exe, input: abs, cwd, signal }).catch(() => null);
+        if (info?.width && info?.height) totalPixels = info.width * info.height;
+    }
+    return (await judgeAlphaShares({ abs, cwd, raster, engine, exe, signal, totalPixels })).usable;
+}
 
 /** Extensions that can carry a clean RGB source (no alpha, no fake plate). */
 const RGB_SOURCE_EXT = /\.(png|webp)$/i;
@@ -219,8 +316,24 @@ export async function applyGeneratedAlphaMask({
     const opaque = raster
         ? await rasterIsOpaque(abs, { cwd, engine })
         : await magickIsOpaque({ exe, input: abs, cwd, signal }).catch(() => null);
-    if (opaque === false) return { changed: false, reason: 'already' };
     if (opaque === null) return { changed: false, reason: 'unknown' };
+    // A frame the model already cleared may still be unusable: a plate leaves only a fringe, and a
+    // matte drawn with a wide glow leaves a halo. Both go through the pipeline rather than staying.
+    // softShare is meaningless for a tiny frame, so pass totalPixels.
+    let totalPixels = Infinity;
+    if (raster) {
+        const info = await rasterInfo(abs, { cwd, engine }).catch(() => null);
+        if (info?.width && info?.height) totalPixels = info.width * info.height;
+    } else if (exe) {
+        const info = await magickIdentify({ exe, input: abs, cwd, signal }).catch(() => null);
+        if (info?.width && info?.height) totalPixels = info.width * info.height;
+    }
+    let softEdge = false;
+    if (opaque === false) {
+        const verdict = await judgeAlphaShares({ abs, cwd, raster, engine, exe, signal, totalPixels });
+        if (verdict.usable) return { changed: false, reason: 'already' };
+        softEdge = (verdict.cleared ?? 0) >= MIN_CLEARED_SHARE;
+    }
 
     // The base for the matte: a clean RGB file when the caller named one, otherwise the saved picture.
     const base = alphaSource && RGB_SOURCE_EXT.test(path.extname(alphaSource).toLowerCase())
@@ -230,6 +343,8 @@ export async function applyGeneratedAlphaMask({
         model: null,
         painted: false,
         source: base === abs ? null : path.relative(process.cwd(), base).split(path.sep).join('/'),
+        // The reply did carry an alpha channel, just a soft-edged one, so the rebuild is a fix-up.
+        ...(softEdge ? { softEdge: true } : {}),
     };
     /** Why the model passes did not deliver a matte; reported with the local fallback result. */
     let lastError = null;

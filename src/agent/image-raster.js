@@ -305,6 +305,55 @@ export async function rasterIsOpaque(file, { cwd = process.cwd(), engine = 'auto
 }
 
 /**
+ * Cleared share of the frame: `1 - mean(alpha)`, the same measure `magickAlphaShare` reports.
+ * A real cut-out removes a large part of the picture; a painted transparency plate leaves only a
+ * thin fringe along the silhouette, which this measure reports as near zero.
+ * @param {{ input: string, cwd?: string, engine?: string }} options
+ * @returns {Promise<number|null>} 0..1, or null when the picture cannot be decoded
+ * @exports
+ * @ai.hint io
+ */
+export async function rasterAlphaShare({ input, cwd = process.cwd(), engine = 'auto' }) {
+    try {
+        const frame = await decodeRgba(await readFile(toAbs(cwd, input)), engine);
+        const total = frame.width * frame.height;
+        if (!total) return null;
+        let sum = 0;
+        for (let i = 3; i < frame.data.length; i += 4) sum += frame.data[i];
+        return 1 - sum / (total * 255);
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Share of the frame whose alpha sits in the soft band (`4% <= alpha < 96%`) — the same measure
+ * `magickAlphaSoftShare` reports. A tight anti-aliased cut-out scores a fraction of a percent;
+ * a matte drawn with a wide glow scores a fifth of the frame, which reads as a halo.
+ * @param {{ input: string, cwd?: string, engine?: string }} options
+ * @returns {Promise<number|null>} 0..1, or null when the picture cannot be decoded
+ * @exports
+ * @ai.hint io
+ */
+export async function rasterAlphaSoftShare({ input, cwd = process.cwd(), engine = 'auto' }) {
+    try {
+        const frame = await decodeRgba(await readFile(toAbs(cwd, input)), engine);
+        const total = frame.width * frame.height;
+        if (!total) return null;
+        let opaque = 0;
+        let nonEmpty = 0;
+        for (let i = 3; i < frame.data.length; i += 4) {
+            const a = frame.data[i];
+            if (a >= 245) opaque++;
+            if (a >= 10) nonEmpty++;
+        }
+        return (nonEmpty - opaque) / total;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Decode one picture into raw RGBA.
  * @param {Buffer} bytes
  * @returns {Promise<{ width: number, height: number, channels: 4, data: Buffer }>}

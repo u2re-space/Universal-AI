@@ -15,8 +15,9 @@ import path from 'node:path';
 import { mkdir, readFile, writeFile, stat, unlink, readdir } from 'node:fs/promises';
 import { resolveInside } from './paths.js';
 import { detectMagick, magickConvert, magickIsOpaque, magickRemoveFlatBackground, assessVectorSuitability, magickTrimImage } from './image-magick.js';
-import { applyGeneratedAlphaMask } from './image-alpha.js';
+import { applyGeneratedAlphaMask, hasRealAlpha as sharedHasRealAlpha } from './image-alpha.js';
 import { imageModelFor, imageModelProfile, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL, imageRequestSize, readImageSize } from '../openai/images.js';
+import { rasterEngine } from './image-raster.js';
 import { formatBytes } from '../util/text.js';
 
 /** Prompt the vector model gets when the caller did not describe the artwork. */
@@ -150,19 +151,19 @@ export function createImageHandlers({ root, client, config, signal, describeImag
     }
 
     /**
-     * True when the saved picture already carries a real transparent pixel: the model honored
-     * `background: transparent`, so no matte is needed.
+     * True when the saved picture already carries a real transparent background: the model honored
+     * `background: transparent`, so no matte is needed. A painted plate with only a fringe of
+     * semi-transparent pixels along the subject is not a real alpha channel — see `hasRealAlpha`.
      * @param {string} abs
      * @returns {Promise<boolean>}
      * @ai.hint io
      */
     async function hasRealAlpha(abs) {
-        const exe = await detectMagick({ magickPath: config.magickPath ?? null });
-        if (!exe) return pngHasAlphaChannel(await readFile(abs).catch(() => null));
-        const opaque = await magickIsOpaque({ exe, input: abs, cwd: path.dirname(abs), signal }).catch(() => null);
-        if (opaque === false) return true;
-        if (opaque === true) return false;
-        return pngHasAlphaChannel(await readFile(abs).catch(() => null));
+        const engine = config?.image?.rasterEngine ?? 'auto';
+        const raster = engine !== 'magick' ? await rasterEngine(engine) : null;
+        const exe = raster ? null : await detectMagick({ magickPath: config.magickPath ?? null });
+        if (!raster && !exe) return pngHasAlphaChannel(await readFile(abs).catch(() => null));
+        return sharedHasRealAlpha({ abs, cwd: path.dirname(abs), raster, engine, exe, signal });
     }
 
     /**
@@ -185,6 +186,11 @@ export function createImageHandlers({ root, client, config, signal, describeImag
              if (count('opaque')) notes.push('Прозрачность: фоном оказался сам объект — файл оставлен непрозрачным.');
              if (count('no-magick')) notes.push('Прозрачность: ImageMagick не найден, альфа-канал не гарантирован.');
              if (count('format')) notes.push('Прозрачность: JPEG не хранит альфа-канал, сохраните результат в PNG.');
+             // A reply may carry a real alpha channel whose edge is still a wide glow: the matte was
+             // rebuilt from the clean source, and saying so keeps the extra pass from looking random.
+             if (saved.some((item) => item.alpha?.softEdge)) {
+                 notes.push('Прозрачность: альфа-канал модели был с широким мягким краем (ореол) — маска перестроена с чистого исходника.');
+             }
              for (const item of saved) {
                  const cut = item.alpha?.trimmed;
                  if (cut?.changed) notes.push(`${item.rel}: прозрачный padding обрезан — ${cut.before.width}×${cut.before.height} → ${cut.after.width}×${cut.after.height}.`);
@@ -475,10 +481,21 @@ export function createImageHandlers({ root, client, config, signal, describeImag
      */
     const SOURCE_GUARD = 'Do not add text, numbers, watermarks, or frames. Do not invent a new background or extra objects: keep the subject exactly as in the source unless the request changes it.';
 
-    const FIX_PROMPT = (prompt, { hasSource = false } = {}) => {
+    /**
+     * One extra line for the families whose gateway answers `background: transparent` with a drawn
+     * plate: a single flat color is what the local matte can remove cleanly, while a checkerboard
+     * or a gradient survives as a halo. This is not the two-pass RGBA recipe — the model returns one
+     * picture, so only the RGB base is asked for here, and the matte stays a local step.
+     */
+    const FLAT_PLATE_NOTE = 'Background: one flat solid color, uniform across the whole area, with no checkerboard, grid, gradient, texture, or shadow.';
+
+    const FIX_PROMPT = (prompt, { hasSource = false, flatPlate = false } = {}) => {
         const text = String(prompt ?? '').trim();
-        if (!text) return hasSource ? SOURCE_GUARD : '';
-        return hasSource ? `${text}\n${SOURCE_GUARD}` : text;
+        const notes = [];
+        if (hasSource) notes.push(SOURCE_GUARD);
+        if (flatPlate) notes.push(FLAT_PLATE_NOTE);
+        if (!notes.length) return text;
+        return text ? `${text}\n${notes.join('\n')}` : notes.join('\n');
     };
 
     return {
@@ -505,8 +522,9 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                     const source = readImageSize(files?.[0]?.bytes);
                     if (source) args.size = `${source.width}x${source.height}`;
                 }
+                const flatPlate = transparent && imageModelProfile(model).paintsFakeTransparency;
                 const payloads = await client.images.edit({
-                    model, prompt: FIX_PROMPT(args.prompt, { hasSource: true }),
+                    model, prompt: FIX_PROMPT(args.prompt, { hasSource: true, flatPlate }),
                     size: imageRequestSize(args.size || null, model, resolution) || args.size,
                     format, background: effectiveBackground(model, requested), signal, resolution,
                     background_mode: effectiveBackground(model, requested),
@@ -520,8 +538,9 @@ export function createImageHandlers({ root, client, config, signal, describeImag
 
             // No reference: pure text-to-image generation.
             const model = imageModelFor(config);
+            const flatPlate = transparent && imageModelProfile(model).paintsFakeTransparency;
             const payloads = await client.images.generate({
-                model, prompt: args.prompt || '', size: imageRequestSize(args.size || null, model, resolution) || args.size, quality: args.quality || null,
+                model, prompt: FIX_PROMPT(args.prompt, { flatPlate }), size: imageRequestSize(args.size || null, model, resolution) || args.size, quality: args.quality || null,
                 format, background: effectiveBackground(model, requested), signal,
                 background_mode: effectiveBackground(model, requested), resolution,
             });
@@ -547,8 +566,9 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                 if (source) args.size = `${source.width}x${source.height}`;
             }
 
+            const flatPlate = transparent && imageModelProfile(model).paintsFakeTransparency;
             const payloads = await client.images.edit({
-                model, prompt: FIX_PROMPT(args.prompt, { hasSource: true }), size: imageRequestSize(args.size || null, model, resolution) || args.size,
+                model, prompt: FIX_PROMPT(args.prompt, { hasSource: true, flatPlate }), size: imageRequestSize(args.size || null, model, resolution) || args.size,
                 format, background: effectiveBackground(model, requested), signal, resolution,
                 background_mode: effectiveBackground(model, requested),
                 files,

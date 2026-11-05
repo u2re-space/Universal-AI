@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { runProgram } from '../src/agent/shell.js';
-import { detectMagick, magickApplyAlphaMask, magickContourAlphaMask, magickDetectFakeTransparency, magickIsOpaque, magickSaturationAlphaMask } from '../src/agent/image-magick.js';
-import { ALPHA_MASK_PROMPT, BACKGROUND_PAINT_PROMPT, applyGeneratedAlphaMask } from '../src/agent/image-alpha.js';
+import { detectMagick, magickAlphaShare, magickAlphaSoftShare, magickApplyAlphaMask, magickContourAlphaMask, magickDetectFakeTransparency, magickIsOpaque, magickSaturationAlphaMask } from '../src/agent/image-magick.js';
+import { ALPHA_MASK_PROMPT, BACKGROUND_PAINT_PROMPT, applyGeneratedAlphaMask, hasRealAlpha } from '../src/agent/image-alpha.js';
 import { TINY_PNG } from './helpers/mock-server.js';
 
 /**
@@ -256,6 +256,75 @@ test('applyGeneratedAlphaMask skips a transparent file, a JPEG, and a failing ma
         assert.equal(await magickIsOpaque({ exe, input: path.join(dir, 'whole.png'), cwd: dir }), true);
     } finally {
         await rmDir(dir);
+    }
+});
+
+test('a plate with a translucent fringe is not taken for a real alpha channel', async (t) => {
+    const exe = await detectMagick();
+    if (!exe) return t.skip('ImageMagick is not installed');
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-plate-fringe-'));
+    try {
+        // Opaque plate with a thin translucent line along the frame: what a gateway that cannot
+        // emit alpha returns — magickIsOpaque answers "not opaque" for it, yet the background is
+        // painted, not cut. The cleared share of the frame is what separates the two.
+        await runProgram({
+            file: exe, args: ['-size', '400x300', 'xc:white', '-fill', 'red', '-draw', 'rectangle 120,80 280,220', 'subject.png'],
+            cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096,
+        });
+        await runProgram({
+            file: exe, args: ['-size', '400x300', 'xc:white', '-stroke', 'gray(50%)', '-strokewidth', '2', '-fill', 'none', '-draw', 'rectangle 1,1 398,298', 'fringe.png'],
+            cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096,
+        });
+        await runProgram({
+            file: exe, args: ['subject.png', 'fringe.png', '-alpha', 'off', '-compose', 'CopyOpacity', '-composite', 'plate.png'],
+            cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096,
+        });
+        const plate = path.join(dir, 'plate.png');
+        assert.equal(await magickIsOpaque({ exe, input: plate, cwd: dir }), false);
+        const share = await magickAlphaShare({ exe, input: plate, cwd: dir });
+        assert.ok(share < 0.03, `a fringe plate must clear almost nothing, got ${share}`);
+        assert.equal(await hasRealAlpha({ abs: plate, cwd: dir, exe }), false);
+
+        // The pipeline therefore has to run on it instead of reporting the file as already cut.
+        let reached = false;
+        const client = { images: { async edit() { reached = true; throw new Error('no matte'); } } };
+        const result = await applyGeneratedAlphaMask({ client, config: { image: { paintBackground: false } }, file: plate });
+        assert.equal(reached, true, 'a fringe plate must go through the matte pipeline');
+        assert.notEqual(result.reason, 'already');
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('a soft-edged alpha channel is rebuilt instead of kept as is', async (t) => {
+    const exe = await detectMagick();
+    if (!exe) return t.skip('ImageMagick is not installed');
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-alpha-soft-'));
+    try {
+        // A circle with a real alpha channel, then its edge smeared by a wide glow: the frame is
+        // genuinely cleared, so the fake-plate check passes, yet the soft band is a fifth of the
+        // picture and would read as a halo. Tight cut-outs score under 1% here, soft ones near 20%.
+        await runProgram({
+            file: exe, args: ['-size', '200x200', 'xc:none', '-fill', '#222', '-draw', 'circle 100,100 100,15', 'hard.png'],
+            cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096,
+        });
+        await runProgram({
+            file: exe, args: ['hard.png', '-morphology', 'Dilate', 'Disk:6', '-blur', '0x6', 'soft.png'],
+            cwd: dir, timeoutMs: 10000, maxOutputBytes: 4096,
+        });
+        assert.equal(await magickAlphaSoftShare({ exe, input: path.join(dir, 'hard.png'), cwd: dir }) < 0.02, true);
+        assert.equal(await hasRealAlpha({ abs: path.join(dir, 'hard.png'), cwd: dir, exe }), true);
+        assert.equal(await magickAlphaSoftShare({ exe, input: path.join(dir, 'soft.png'), cwd: dir }) > 0.05, true);
+        assert.equal(await hasRealAlpha({ abs: path.join(dir, 'soft.png'), cwd: dir, exe }), false);
+
+        let reached = false;
+        const client = { images: { async edit() { reached = true; throw new Error('no matte'); } } };
+        const result = await applyGeneratedAlphaMask({ client, config: { image: { paintBackground: false } }, file: path.join(dir, 'soft.png') });
+        assert.equal(reached, true, 'a soft alpha must go through the matte pipeline');
+        assert.notEqual(result.reason, 'already');
+        assert.equal(result.softEdge, true);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
     }
 });
 
