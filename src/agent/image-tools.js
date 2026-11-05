@@ -16,7 +16,7 @@ import { mkdir, readFile, writeFile, stat, unlink, readdir } from 'node:fs/promi
 import { resolveInside } from './paths.js';
 import { detectMagick, magickConvert, magickIsOpaque, magickRemoveFlatBackground, assessVectorSuitability, magickTrimImage } from './image-magick.js';
 import { applyGeneratedAlphaMask } from './image-alpha.js';
-import { imageModelFor, imageModelProfile, imageSizeFields, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL, imageRequestSize, readImageSize } from '../openai/images.js';
+import { imageModelFor, imageModelProfile, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL, imageRequestSize, readImageSize } from '../openai/images.js';
 import { formatBytes } from '../util/text.js';
 
 /** Prompt the vector model gets when the caller did not describe the artwork. */
@@ -91,9 +91,9 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             }
         }
         await writeFile(abs, buffer);
-
-        // The frame the model actually answered with, before any local pass touches the file.
+        // The frame the model actually answered with — the ground truth for size diagnostics.
         const returned = readImageSize(buffer);
+
         let alpha = null;
         if (transparent) {
             alpha = await hasRealAlpha(abs)
@@ -116,9 +116,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                 }
             } catch { /* trim failure is non-fatal */ }
         }
-        // The final frame after all passes, so the caller can see if the model honored the request.
-        const final_ = readImageSize(await readFile(abs).catch(() => null));
-        return { rel: safe, bytes: buffer.length, alpha, returned, final: final_ };
+        return { rel: safe, bytes: buffer.length, alpha, returned };
     }
 
     /**
@@ -170,50 +168,40 @@ export function createImageHandlers({ root, client, config, signal, describeImag
     /**
      * @param {string[]} payloads
      * @param {string} requested
-     * @param {{ transparent?: boolean, alphaSource?: string|null, model?: string|null, toSvg?: boolean }} [options]
+     * @param {{ transparent?: boolean, alphaSource?: string|null, model?: string|null, toSvg?: boolean, frame?: string|boolean, route?: string }} [options]
      * @returns {Promise<{ output: string, summary: string }>}
      * @ai.hint io
      */
-    async function saveAll(payloads, requested, options = {}) {
-        const saved = [];
-        for (const [index, b64] of payloads.entries()) saved.push(await save(b64, requested, index, payloads.length, options));
-        const notes = [];
-        if (options.transparent) {
-            const count = (reason) => saved.filter((item) => item.alpha?.reason === reason).length;
-            if (count('native')) notes.push(`Прозрачность: модель отдала настоящий альфа-канал у ${count('native')} файл(ов), маска не потребовалась.`);
-            if (count('mask')) notes.push(`Прозрачность: фон залит цветом объекта, anti-aliased маска модели влита в альфа-канал у ${count('mask')} файл(ов).`);
-            if (count('contour')) notes.push(`Прозрачность: маска модели недоступна, фон обрезан по локальному контуру у ${count('contour')} файл(ов).`);
-            if (count('flat')) notes.push(`Прозрачность: маска не удалась, фон удалён заливкой от углов у ${count('flat')} файл(ов).`);
-            if (count('opaque')) notes.push('Прозрачность: фоном оказался сам объект — файл оставлен непрозрачным.');
-            if (count('no-magick')) notes.push('Прозрачность: ImageMagick не найден, альфа-канал не гарантирован.');
-            if (count('format')) notes.push('Прозрачность: JPEG не хранит альфа-канал, сохраните результат в PNG.');
-            for (const item of saved) {
-                const cut = item.alpha?.trimmed;
-                if (cut?.changed) notes.push(`${item.rel}: прозрачный padding обрезан — ${cut.before.width}×${cut.before.height} → ${cut.after.width}×${cut.after.height}.`);
-            }
-        }
-        // Frame diagnostics: requested → model returned → final file, plus the route the request took.
-        const caps = imageModelProfile(options.model);
-        const sent = options.frame && imageSizeFields(options.frame, options.model);
-        const field = sent && Object.keys(sent).length
-            ? Object.entries(sent).map(([key, value]) => `${key}=${value}`).join(' ')
-            : 'size не передан';
-        notes.push(`Канал: POST /images/${options.route ?? 'generations'} · ${options.model ?? 'модель не задана'} · ${field}`);
-        for (const item of saved) {
-            const req = options.frame ?? '';
-            const ret = item.returned ? `${item.returned.width}×${item.returned.height}` : '?';
-            const fin = item.final ? `${item.final.width}×${item.final.height}` : ret;
-            const note = [req, ret, fin].filter(Boolean).join(' → ');
-            if (note && note !== '→') notes.push(`${item.rel}: кадр ${note}`);
-            if (item.returned && item.final
-                && (item.returned.width !== item.final.width || item.returned.height !== item.final.height)) {
-                notes.push(`${item.rel}: локальный проход изменил кадр — проверьте maskModel.`);
-            }
-        }
+     async function saveAll(payloads, requested, options = {}) {
+         const saved = [];
+         for (const [index, b64] of payloads.entries()) saved.push(await save(b64, requested, index, payloads.length, options));
+         const notes = [];
+         if (options.transparent) {
+             const count = (reason) => saved.filter((item) => item.alpha?.reason === reason).length;
+             if (count('native')) notes.push(`Прозрачность: модель отдала настоящий альфа-канал у ${count('native')} файл(ов), маска не потребовалась.`);
+             if (count('mask')) notes.push(`Прозрачность: фон залит цветом объекта, anti-aliased маска модели влита в альфа-канал у ${count('mask')} файл(ов).`);
+             if (count('contour')) notes.push(`Прозрачность: маска модели недоступна, фон обрезан по локальному контуру у ${count('contour')} файл(ов).`);
+             if (count('flat')) notes.push(`Прозрачность: маска не удалась, фон удалён заливкой от углов у ${count('flat')} файл(ов).`);
+             if (count('opaque')) notes.push('Прозрачность: фоном оказался сам объект — файл оставлен непрозрачным.');
+             if (count('no-magick')) notes.push('Прозрачность: ImageMagick не найден, альфа-канал не гарантирован.');
+             if (count('format')) notes.push('Прозрачность: JPEG не хранит альфа-канал, сохраните результат в PNG.');
+             for (const item of saved) {
+                 const cut = item.alpha?.trimmed;
+                 if (cut?.changed) notes.push(`${item.rel}: прозрачный padding обрезан — ${cut.before.width}×${cut.before.height} → ${cut.after.width}×${cut.after.height}.`);
+             }
+         }
+        // Frame diagnostics in summary (UI shows summary, not output): route, model, size, result frame.
+        const model = options.model || 'не задана';
+        const route = options.route ?? 'unknown';
+        const reqFrame = typeof options.frame === 'string' ? options.frame : (options.frame ? '(не auto)' : 'auto');
+        const frames = saved.map((item) => {
+            const got = item.returned ? `${item.returned.width}×${item.returned.height}` : '?';
+            return `${item.rel} → ${got}`;
+        });
         const vectors = await toVectors(saved, options);
         return {
             output: [...saved.map((item) => `Сохранено ${item.rel} (${item.bytes} bytes).`), ...notes, ...vectors.notes].join('\n'),
-            summary: [...saved.map((item) => item.rel), ...vectors.made].join(', '),
+            summary: `${[...saved.map((item) => item.rel), ...vectors.made].join(', ')} · [${model} · /images/${route} · size=${reqFrame} · ${frames.join(', ')}]`,
         };
     }
 
@@ -499,8 +487,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                     format, background: effectiveBackground(model, requested), signal,
                     files,
                 });
-                const caps = imageModelProfile(model);
-                const route = caps.routeEditsThroughGeneration ? 'generations' : 'edits';
+                const route = imageModelProfile(model).routeEditsThroughGeneration ? 'generations' : 'edits';
                 return saveAll(payloads, args.path, { transparent, alphaSource: ref, model, toSvg, frame: args.size || null, route });
             }
 
@@ -513,8 +500,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                 format, background: effectiveBackground(model, requested), signal,
                 background_mode: effectiveBackground(model, requested),
             });
-            const caps = imageModelProfile(model);
-            return saveAll(payloads, args.path, { transparent, model, toSvg, frame: args.size && args.size !== 'auto' ? args.size : null, route: 'generations' });
+            return saveAll(payloads, args.path, { transparent, model, toSvg, frame: Boolean(args.size?.trim()) });
         },
         /**
          * POST /images/edits with one required source image and optional extra references.
@@ -540,9 +526,8 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                 background_mode: effectiveBackground(model, requested),
                 files,
             });
-            const caps = imageModelProfile(model);
-            const route = caps.routeEditsThroughGeneration ? 'generations' : 'edits';
-            return saveAll(payloads, args.path, { transparent, alphaSource: args.image, model, toSvg, frame: args.size && args.size !== 'auto' ? args.size : null, route });
+            const route = imageModelProfile(model).routeEditsThroughGeneration ? 'generations' : 'edits';
+            return saveAll(payloads, args.path, { transparent, alphaSource: args.image, model, toSvg, frame: args.size || null, route });
         },
         /**
          * Vectorize a flat raster (logo, badge, icon) into an SVG document with the vector model.
