@@ -24,17 +24,13 @@ import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, imageModelProfile, sniffImage } 
  * black → transparent, gray → anti-aliased edge. The mask must hug the contour tightly so the
  * composite edge is clean — no halo, no milky rim, no stair-stepping.
  */
-export const ALPHA_MASK_PROMPT = 'Return an A-mask for the attached image that will be composited '
-    + 'onto an RGB background to produce the final RGBA image. '
+export const ALPHA_MASK_PROMPT = 'Return an A-mask for the attached image that will be composited onto an RGB background to produce the final RGBA image. '
     + 'This is the alpha channel of a two-part composition: RGB + A-mask = RGBA. '
     + 'White (255) marks the subject that must stay visible — the artwork, logo, product, or person. '
-    + 'Black (0) marks everything that must become transparent, including any checkerboard, grid, or '
-    + 'flat plate that only imitates transparency in the RGB layer. '
+    + 'Black (0) marks everything that must become transparent, including any checkerboard, grid, or flat plate that only imitates transparency in the RGB layer. '
     + 'Keep the exact framing and proportions of the source. '
-    + 'The mask must trace the subject contour tightly: a one- or two-pixel gray transition exactly '
-    + 'on the silhouette creates a clean anti-aliased edge in the final composite. '
-    + 'Do not widen the transition into a soft glow — that makes the rim milky and eats into the '
-    + 'artwork. The interior of the subject must be pure white; the transparent area must be pure black. '
+    + 'The mask must trace the subject contour tightly: a one- or two-pixel gray transition exactly on the silhouette creates a clean anti-aliased edge in the final composite. '
+    + 'Do not widen the transition into a soft glow — that makes the rim milky and eats into the artwork. The interior of the subject must be pure white; the transparent area must be pure black. '
     + 'Output the mask only: grayscale, no colors, no text, no border, no shadow.';
 
 /**
@@ -44,15 +40,11 @@ export const ALPHA_MASK_PROMPT = 'Return an A-mask for the attached image that w
  * the halo around a cut-out subject. The A-mask (drawn separately from the clean source) will be
  * composited over this RGB to produce the final RGBA.
  */
-export const BACKGROUND_PAINT_PROMPT = 'You are creating the RGB channel for a two-part RGBA '
-    + 'composition (RGB + A-mask = RGBA). '
+export const BACKGROUND_PAINT_PROMPT = 'You are creating the RGB channel for a two-part RGBA composition (RGB + A-mask = RGBA). '
     + 'Fill the whole background of the attached image with the dominant color of the subject. '
-    + 'Do not change the subject: keep every pixel of it identical, in the same position, with the same '
-    + 'proportions and framing. '
-    + 'Paint a single flat color only where the background is now — including any checkerboard, grid, or '
-    + 'pattern that imitates transparency. '
-    + 'This flat color will serve as the RGB base that the A-mask composites over: no gradients, '
-    + 'no texture, no shadow, no new objects.';
+    + 'Do not change the subject: keep every pixel of it identical, in the same position, with the same proportions and framing. '
+    + 'Paint a single flat color only where the background is now — including any checkerboard, grid, or pattern that imitates transparency. '
+    + 'This flat color will serve as the RGB base that the A-mask composites over: no gradients, no texture, no shadow, no new objects.';
 
 /** Raster matte formats ImageMagick can read. */
 const MASK_EXT = /\.(png|webp|jpe?g)$/i;
