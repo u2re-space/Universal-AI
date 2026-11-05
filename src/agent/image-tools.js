@@ -490,6 +490,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                     prompt: args.prompt,
                     size: imageRequestSize(args.size || null, model, resolution) || args.size,
                     format, background: effectiveBackground(model, requested), signal, resolution,
+                    background_mode: effectiveBackground(model, requested),
                     files,
                 });
                 const route = imageModelProfile(model).routeEditsThroughGeneration ? 'generations' : 'edits';
