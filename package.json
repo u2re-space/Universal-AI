@@ -10,6 +10,9 @@
   "engines": {
     "node": ">=26.0.0"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "start": "node bin/ai.js",
     "test": "node --test --test-timeout=60000 \"test/*.test.js\""
