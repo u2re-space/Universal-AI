@@ -15,7 +15,7 @@ import path from 'node:path';
 import { mkdir, readFile, writeFile, stat, unlink, readdir } from 'node:fs/promises';
 import { resolveInside } from './paths.js';
 import { detectMagick, magickConvert, magickIsOpaque, magickRemoveFlatBackground, assessVectorSuitability, magickTrimImage } from './image-magick.js';
-import { applyGeneratedAlphaMask, BACKGROUND_PAINT_PROMPT, ALPHA_MASK_PROMPT } from './image-alpha.js';
+import { applyGeneratedAlphaMask } from './image-alpha.js';
 import { imageModelFor, imageModelProfile, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL, imageRequestSize, readImageSize } from '../openai/images.js';
 import { formatBytes } from '../util/text.js';
 
@@ -274,13 +274,16 @@ export function createImageHandlers({ root, client, config, signal, describeImag
         try { paths = JSON.parse(text); }
         catch { return []; }
         if (!Array.isArray(paths)) return [];
-        const files = [];
-        for (const item of paths) {
+        return Promise.all(paths?.map?.(()=>{
+            if (typeof item !== 'string' || !item.trim()) return null;
+            return loadFile(item)?.catch?.(console.warn.bind(console));
+        }))?.then?.((files)=>files?.filter?.((f)=>f!=null));
+        /*for (const item of paths) {
             if (typeof item !== 'string' || !item.trim()) continue;
             try { files.push(await loadFile(item)); }
-            catch { /* an unreadable extra must not lose the main image */ }
+            catch { }
         }
-        return files;
+        return files;*/
     }
 
     /**
@@ -460,20 +463,23 @@ export function createImageHandlers({ root, client, config, signal, describeImag
         };
     }
 
-    const FIX_PROMPT = (prompt, size = null, model = "")=>{
-        prompt ||= "";
-        prompt += "\n [PROMPT_META]:";
-        prompt += "\n Recommended Output Image Size: " + (size || "auto");
+    /**
+     * A short guard for requests that carry a source picture: cut-out and restyle models tend to
+     * decorate the answer with captions, frames or an invented scene when the prompt stays silent.
+     * Nothing else belongs in the prompt: the frame travels in the `size`/`resolution`/`aspect_ratio`
+     * fields, transparency is requested through `background`, and the two-part RGBA composition
+     * (painted RGB base + A-mask) is assembled locally by image-alpha.js from its own technical
+     * prompts sent to the clean source. Inlining those texts here asked the model to repaint the
+     * background with the subject color and to draw a matte in the same reply as the artwork —
+     * it obeyed both and stopped isolating the subject.
+     */
+    const SOURCE_GUARD = 'Do not add text, numbers, watermarks, or frames. Do not invent a new background or extra objects: keep the subject exactly as in the source unless the request changes it.';
 
-        if (model?.endsWith?.("riverflow-v2.6-pro"))
-            prompt += "\n" + " When you operate internally with RGB and A channels, follow by such rules: " + "\n" 
-            + "\n [ABOUT_RGB]:\n"
-            + BACKGROUND_PAINT_PROMPT + "\n" 
-            + "\n [ABOUT_ALPHA]:\n"
-            + ALPHA_MASK_PROMPT;
-
-        return prompt;
-    }
+    const FIX_PROMPT = (prompt, { hasSource = false } = {}) => {
+        const text = String(prompt ?? '').trim();
+        if (!text) return hasSource ? SOURCE_GUARD : '';
+        return hasSource ? `${text}\n${SOURCE_GUARD}` : text;
+    };
 
     return {
         /**
@@ -500,7 +506,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
                     if (source) args.size = `${source.width}x${source.height}`;
                 }
                 const payloads = await client.images.edit({
-                    model, prompt: FIX_PROMPT(args.prompt || "", args.size, model) || "",
+                    model, prompt: FIX_PROMPT(args.prompt, { hasSource: true }),
                     size: imageRequestSize(args.size || null, model, resolution) || args.size,
                     format, background: effectiveBackground(model, requested), signal, resolution,
                     background_mode: effectiveBackground(model, requested),
@@ -515,7 +521,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             // No reference: pure text-to-image generation.
             const model = imageModelFor(config);
             const payloads = await client.images.generate({
-                model, prompt: FIX_PROMPT(args.prompt || "", args.size, model) || "", size: imageRequestSize(args.size || null, model, resolution) || args.size, quality: args.quality || null,
+                model, prompt: args.prompt || '', size: imageRequestSize(args.size || null, model, resolution) || args.size, quality: args.quality || null,
                 format, background: effectiveBackground(model, requested), signal,
                 background_mode: effectiveBackground(model, requested), resolution,
             });
@@ -542,7 +548,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             }
 
             const payloads = await client.images.edit({
-                model, prompt: FIX_PROMPT(args.prompt || "", args.size, model) || "", size: imageRequestSize(args.size || null, model, resolution) || args.size,
+                model, prompt: FIX_PROMPT(args.prompt, { hasSource: true }), size: imageRequestSize(args.size || null, model, resolution) || args.size,
                 format, background: effectiveBackground(model, requested), signal, resolution,
                 background_mode: effectiveBackground(model, requested),
                 files,

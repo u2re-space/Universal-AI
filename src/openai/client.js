@@ -20,7 +20,7 @@ import { CHAT_PATH, chatGaps, createChatStreamReducer, droppedTools, normalizeCh
 import { envValue } from '../core/runtime-env.js';
 import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
 import { rasterPadImageBytes, rasterRemoveImagePadding } from '../agent/image-raster.js';
-import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, readImageSize, imageQualityValue, imageReasoningValue, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat, withSizeHint } from './images.js';
+import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, readImageSize, imageQualityValue, imageReasoningValue, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat } from './images.js';
 
 export { ApiError };
 
@@ -726,7 +726,7 @@ export function createClient({
             let result;
             for (let index = 0; ; index++) {
                 const attemptSize = index < attempts.length ? attempts[index] : requestedFrame;
-                const fields = { model, prompt: withSizeHint(prompt, isVectorModel(model) ? { aspect_ratio: normalizeVectorRatio(attemptSize) } : imageSizeFields(attemptSize, model, resolution)) };
+                const fields = { model, prompt };
                 if (isVectorModel(model)) {
                     const aspect = normalizeVectorRatio(attemptSize);
                     if (aspect) fields.aspect_ratio = aspect;

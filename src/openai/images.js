@@ -756,7 +756,6 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
         if (Number.isInteger(n) && n > 1) body.n = n;
         body[imageFormatField(model)] = 'svg';
         //if (acceptsResponseFormat(model)) body.response_format = 'b64_json';
-        body.prompt = withSizeHint(prompt, body);
         return body;
     }
     const fields = imageSizeFields(size, model, resolution);
@@ -769,10 +768,6 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
     }
     if (fields.resolution) body.resolution = fields.resolution;
     if (fields.aspect_ratio) body.aspect_ratio = fields.aspect_ratio;
-    // The frame the gateway is asked for in fields is repeated in the prompt: proxies that drop
-    // `size`/`resolution` still read the text, and the answer keeps the requested shape instead of
-    // collapsing to the default square.
-    body.prompt = withSizeHint(prompt, body);
     // Recraft swaps `-pro` for non-pro at small sizes; Riverflow keeps its suffix at any size.
     const caps = imageModelProfile(model);
     if (!caps.keepProSuffix) {
@@ -964,25 +959,4 @@ export function sniffImage(buffer) {
     const head = buffer.subarray(0, 64).toString('utf8', 0, 64).replace(/^\s+/, '');
     if (head.startsWith('<svg') || head.startsWith('<?xml')) return { ext: 'svg', mime: 'image/svg+xml' };
     return { ext: 'png', mime: 'image/png' };
-}
-
-/**
- * Repeat the requested output frame in the prompt text. Gateway proxies sometimes drop the
- * `size`/`resolution`/`aspect_ratio` fields and answer with their default square; the text
- * hint survives in those cases.
- * @param {string} prompt Original prompt.
- * @param {{ size?: string, resolution?: string, aspect_ratio?: string }} fields Computed size fields.
- * @returns {string}
- * @exports
- * @ai.hint pure
- */
-export function withSizeHint(prompt, fields = {}) {
-    const text = String(prompt ?? '');
-    const parts = [];
-    if (fields.size) parts.push(`size ${fields.size}`);
-    if (fields.resolution) parts.push(`resolution ${fields.resolution}`);
-    if (fields.aspect_ratio && fields.aspect_ratio !== 'auto') parts.push(`aspect ratio ${fields.aspect_ratio}`);
-    if (!parts.length) return text;
-    if (/\b(output|requested) (size|resolution|aspect ratio)/i.test(text)) return text;
-    return `${text}\n\nRequested output: ${parts.join(', ')}. Keep this exact frame and aspect ratio.`;
 }
