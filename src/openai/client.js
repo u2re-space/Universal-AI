@@ -20,7 +20,7 @@ import { CHAT_PATH, chatGaps, createChatStreamReducer, droppedTools, normalizeCh
 import { envValue } from '../core/runtime-env.js';
 import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
 import { rasterPadImageBytes, rasterRemoveImagePadding } from '../agent/image-raster.js';
-import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, readImageSize, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat } from './images.js';
+import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, readImageSize, imageQualityValue, imageReasoningValue, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat } from './images.js';
 
 export { ApiError };
 
@@ -674,7 +674,7 @@ export function createClient({
             return await payloadList(result, signal, 'images/generations');
         },
         /** POST /images/edits as multipart form data. `files` are { filename, mime, bytes }. */
-        async edit({ model, prompt, files, size, format, background, signal } = {}) {
+        async edit({ model, prompt, files, size, format, background, quality, reasoning, signal } = {}) {
             const vector = isVectorModel(model);
             let requestFiles = files;
             let padding = null;
@@ -728,6 +728,11 @@ export function createClient({
                     if (fmt) fields[imageFormatField(model)] = fmt;
                     const backgroundField = backgroundValue({ model, format: fmt, background });
                     if (backgroundField) fields.background = backgroundField;
+                    // Tier-based models (riverflow) accept quality and reasoning.
+                    const q = imageQualityValue({ model, quality });
+                    if (q) fields.quality = q;
+                    const reasoningObj = imageReasoningValue({ model, reasoning });
+                    if (reasoningObj) fields.reasoning = JSON.stringify(reasoningObj);
                     //if (acceptsResponseFormat(model)) fields.response_format = 'b64_json';
                 }
                 const form = encodeMultipart({

@@ -50,10 +50,13 @@ export const PROXY_RIVERFLOW_MODEL = 'sourceful/riverflow-v2.6-pro';
  *   `customSizes`     — an arbitrary WIDTHxHEIGHT goes into `size` instead of an IMAGE_SIZES preset;
  *   `div16Padding`    — /images/edits inputs must be padded to a 16-pixel multiple first;
  *   `keepProSuffix`   — the `-pro` suffix survives a small frame (the Recraft tier swap is not for it);
- *   `omitSizeOnReject` — when the host rejects the frame, retry once with `size` left out entirely.
+ *   `omitSizeOnReject` — when the host rejects the frame, retry once with `size` left out entirely;
+ *   `reasoning`       — reasoning effort string the model understands (e.g. 'high' for riverflow);
+ *   `defaultQuality`  — quality tier the model accepts when caller does not specify one.
  */
 const IMAGE_CAPABILITIES = Object.freeze({
     customSizes: false, div16Padding: false, keepProSuffix: false, omitSizeOnReject: false,
+    reasoning: null, defaultQuality: null,
 });
 
 /**
@@ -61,10 +64,12 @@ const IMAGE_CAPABILITIES = Object.freeze({
  * Riverflow keeps its `-pro` suffix at any frame — the suffix is the model, not a size tier — and
  * takes no 16-pixel padding. Its frame support differs between gateways, so a refused frame costs
  * one retry without the field rather than the whole request.
+ * Riverflow also supports reasoning effort (`reasoning: { effort }`) and quality; it accepts
+ * aspect ratios via `aspect_ratio` and resolution tiers via `resolution` instead of pixel presets.
  */
 const IMAGE_MODEL_PROFILES = Object.freeze([
     Object.freeze({ match: GPT_IMAGE_25, customSizes: true, div16Padding: true }),
-    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true }),
+    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true, reasoning: 'high', defaultQuality: 'high' }),
 ]);
 
 /**
@@ -137,6 +142,37 @@ export function normalizeImageSize(size) {
 const MIN_IMAGE_PIXELS = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?16_384:655_360;
 const MAX_IMAGE_PIXELS = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?16_777_216:8_294_400;
 const MAX_IMAGE_EDGE   = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?4096:3840;
+const MAX_IMAGE_RATIO  = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?16:3;
+
+/**
+ * Resolve a reasoning effort for the model: the caller's value when it names one of the known
+ * levels, otherwise the model's own default from the profile. `auto`, `off`, `none`, and empty
+ * strings return null so the field is omitted.
+ * @param {{ model: string, reasoning?: string | null }} request
+ * @returns {{ effort: string } | null}
+ * @exports
+ * @ai.hint pure
+ */
+export function imageReasoningValue({ model, reasoning = null }) {
+    const name = String(model ?? '').trim();
+    const value = String(reasoning ?? imageModelProfile(model).reasoning ?? '').trim().toLowerCase();
+    if (!value || value === 'auto' || value === 'off' || value === 'none') return null;
+    return { effort: value };
+}
+
+/**
+ * Resolve a quality tier for the model: the caller's value when it names one, otherwise the
+ * model's own default from the profile. `auto` and empty strings return null so the field is omitted.
+ * @param {{ model: string, quality?: string | null }} request
+ * @returns {string | null}
+ * @exports
+ * @ai.hint pure
+ */
+export function imageQualityValue({ model, quality = null }) {
+    const value = String(quality ?? imageModelProfile(model).defaultQuality ?? '').trim().toLowerCase();
+    if (!value || value === 'auto') return null;
+    return value;
+}
 
 /**
  * Keep custom dimensions for the models that take them (GPT Image 2.5); the rest get their
@@ -185,9 +221,16 @@ export function imageSizeFields(size, model) {
 }
 
 /**
- * Custom dimensions are constrained to 16-pixel multiples, 3:1 ratio, a 3840-pixel edge,
- * and the supported pixel-count range. Return a nearby same-ratio frame when possible.
+ * Custom dimensions are constrained to 16-pixel multiples, the model's max aspect ratio,
+ * a maximum edge, and the supported pixel-count range. Return a nearby same-ratio frame
+ * when possible.
+ *
+ * When the area and edge are already within limits, the function simply rounds each side
+ * to the nearest 16-pixel multiple — no gcd-based rescaling. The gcd-path is used only when
+ * the area is outside the supported range (too small or too large), in which case the frame
+ * is rescaled to the nearest valid same-ratio size.
  * @param {string|null|undefined} size
+ * @param {string|null|undefined} model
  * @returns {string|null}
  * @exports
  * @ai.hint pure
@@ -198,11 +241,21 @@ export function sameAspectImageSize(size, model = null) {
     const width = Number(match[1]);
     const height = Number(match[2]);
     if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || !width || !height
-        || Math.max(width, height) / Math.min(width, height) > 3) return null;
+        || Math.max(width, height) / Math.min(width, height) > MAX_IMAGE_RATIO(model)) return null;
     const area = width * height;
+    const maxEdge = Math.max(width, height);
+    // Already valid — nothing to do.
     if (width % 16 === 0 && height % 16 === 0 && area >= MIN_IMAGE_PIXELS(model) && area <= MAX_IMAGE_PIXELS(model)
-        && Math.max(width, height) <= MAX_IMAGE_EDGE(model)) return null;
+        && maxEdge <= MAX_IMAGE_EDGE(model)) return null;
 
+    // Fast path: area and edge are already in range, only 16-multiple rounding is needed.
+    // This avoids the gcd-based rescaling that would wildly inflate a small source image.
+    if (area >= MIN_IMAGE_PIXELS(model) && area <= MAX_IMAGE_PIXELS(model) && maxEdge <= MAX_IMAGE_EDGE(model)) {
+        const rounded = `${Math.round(width / 16) * 16}x${Math.round(height / 16) * 16}`;
+        return rounded === `${width}x${height}` ? null : rounded;
+    }
+
+    // Area out of range — rescale via gcd to the nearest valid same-ratio size.
     const gcd = (a, b) => {
         while (b) [a, b] = [b, a % b];
         return a;
@@ -238,9 +291,35 @@ export function isImageSizeError(error) {
 }
 
 /**
- * Ordered image-size attempts: the exact request, a valid same-ratio size, then the nearest preset.
- * For models that may reject the `size` field entirely (`omitSizeOnReject`), a null entry is
- * appended so the caller retries with the field omitted.
+ * Nearest aspect ratio from the riverflow set for a pixel size. Returns a ratio string like
+ * '4:5' that `imageSizeFields` can consume, or null when the size is already square.
+ * @param {string} sizePixels
+ * @returns {string | null}
+ * @ai.hint pure
+ */
+function nearestRiverflowRatio(sizePixels) {
+    const match = /^(\d+)\s*x\s*(\d+)$/i.exec(sizePixels);
+    if (!match) return null;
+    const w = Number(match[1]), h = Number(match[2]);
+    if (w === h) return null;
+    const wanted = Math.log(w / h);
+    let best = w < h ? '4:5' : '4:3';
+    let bestDelta = Infinity;
+    for (const candidate of RIVERFLOW_RATIOS) {
+        if (candidate === 'auto') continue;
+        const [cw, ch] = candidate.split(':').map(Number);
+        const delta = Math.abs(Math.log(cw / ch) - wanted);
+        if (delta < bestDelta) { bestDelta = delta; best = candidate; }
+    }
+    return best;
+}
+
+/**
+ * Ordered image-size attempts: the exact request, a valid same-ratio size, then the nearest
+ * fallback. For tier-based models (riverflow) the fallback is `aspect_ratio` + `resolution`;
+ * for preset-based models it is the nearest IMAGE_SIZES entry. For models that may reject the
+ * `size` field entirely (`omitSizeOnReject`), a null entry is appended so the caller retries
+ * with the field omitted.
  * @param {string|null|undefined} size
  * @param {string|null|undefined} model
  * @returns {(string | null)[]}
@@ -258,10 +337,18 @@ export function imageSizeAttempts(size, model) {
     }
     const attempts = [initial];
     const sameRatio = sameAspectImageSize(initial, model);
-    const preset = normalizeImageSize(initial);
-    for (const candidate of [sameRatio, preset]) {
-        if (candidate && !attempts.includes(candidate)) attempts.push(candidate);
+    if (sameRatio && !attempts.includes(sameRatio)) attempts.push(sameRatio);
+
+    // Tier-based models: fallback to aspect_ratio (nearest from the model's native set)
+    // instead of a hard-coded OpenAI preset that breaks the aspect ratio.
+    if (RIVERFLOW.test(String(model ?? ''))) {
+        const ratio = nearestRiverflowRatio(initial);
+        if (ratio && !attempts.includes(ratio)) attempts.push(ratio);
+    } else {
+        const preset = normalizeImageSize(initial);
+        if (preset && !attempts.includes(preset)) attempts.push(preset);
     }
+
     if (profile.omitSizeOnReject) attempts.push(null);
     return attempts;
 }
@@ -460,7 +547,7 @@ export function acceptsResponseFormat(model) {
  * @exports
  * @ai.hint pure
  */
-export function generationBody({ model, prompt, size = null, quality = null, n = null, format = null, background = null }) {
+export function generationBody({ model, prompt, size = null, quality = null, n = null, format = null, background = null, reasoning = null }) {
     const body = { model, prompt };
     if (isVectorModel(model)) {
         const aspect = normalizeVectorRatio(size);
@@ -484,7 +571,10 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
             body.model = body.model?.replace?.(/\-pro$/, '') || body.model;
         }
     }
-    if (quality && quality !== 'auto') body.quality = quality;
+    const q = imageQualityValue({ model, quality });
+    if (q) body.quality = q;
+    const reasoningObj = imageReasoningValue({ model, reasoning });
+    if (reasoningObj) body.reasoning = reasoningObj;
     if (Number.isInteger(n) && n > 1) body.n = n;
     const fmt = resolveImageFormat({ model, format });
     if (fmt) body[imageFormatField(model)] = fmt;

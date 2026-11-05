@@ -9,7 +9,7 @@ import { createClient } from '../src/openai/client.js';
 import { TINY_PNG } from './helpers/mock-server.js';
 import { rasterInfo, rasterIsOpaque, rasterPadImageBytes } from '../src/agent/image-raster.js';
 import { runProgram } from '../src/agent/shell.js';
-import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFor, imageModelProfile, imagePayloads, imageRequestSize, imageSizeAttempts, imageSizeFields, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_RIVERFLOW_MODEL, PROXY_VECTOR_MODEL, VECTOR_RATIOS, readImageSize } from '../src/openai/images.js';
+import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFor, imageModelProfile, imagePayloads, imageQualityValue, imageReasoningValue, imageRequestSize, imageSizeAttempts, imageSizeFields, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_RIVERFLOW_MODEL, PROXY_VECTOR_MODEL, VECTOR_RATIOS, readImageSize } from '../src/openai/images.js';
 import { builtinTools } from '../src/agent/loop.js';
 import { enabledToolNames } from '../src/agent/tool-specs.js';
 import { createToolset } from '../src/agent/tools.js';
@@ -195,6 +195,52 @@ test('edit_image keeps the source frame when no size is asked for', async () => 
         client.close();
         await new Promise((resolve) => server.close(resolve));
     }
+});
+
+test('imageQualityValue and imageReasoningValue use the model profile', () => {
+    // Riverflow defaults to quality=high and reasoning effort=high.
+    assert.equal(imageQualityValue({ model: 'sourceful/riverflow-v2.6-pro', quality: null }), 'high');
+    assert.equal(imageQualityValue({ model: 'sourceful/riverflow-v2.6-pro', quality: 'auto' }), null);
+    assert.equal(imageQualityValue({ model: 'sourceful/riverflow-v2.6-pro', quality: 'low' }), 'low');
+    assert.deepEqual(imageReasoningValue({ model: 'sourceful/riverflow-v2.6-pro', reasoning: null }), { effort: 'high' });
+    assert.equal(imageReasoningValue({ model: 'sourceful/riverflow-v2.6-pro', reasoning: 'off' }), null);
+    assert.deepEqual(imageReasoningValue({ model: 'sourceful/riverflow-v2.6-pro', reasoning: 'low' }), { effort: 'low' });
+    // gpt-image has no profile defaults.
+    assert.equal(imageQualityValue({ model: 'gpt-image-2.5-sunburst', quality: null }), null);
+    assert.equal(imageReasoningValue({ model: 'gpt-image-2.5-sunburst', reasoning: null }), null);
+    // generationBody uses the profile defaults when the caller passes nothing.
+    const rf = generationBody({ model: 'sourceful/riverflow-v2.6-pro', prompt: 'test', size: '512x512' });
+    assert.equal(rf.quality, 'high');
+    assert.deepEqual(rf.reasoning, { effort: 'high' });
+    const gpt = generationBody({ model: 'gpt-image-2.5-sunburst', prompt: 'test', size: '512x512' });
+    assert.equal('quality' in gpt, false);
+    assert.equal('reasoning' in gpt, false);
+});
+
+test('sameAspectImageSize rounds small frames to 16 without inflating them', () => {
+    // A small source frame (273x324) is already within riverflow's area and edge limits,
+    // so it should round to 16-multiples without gcd inflation.
+    assert.equal(sameAspectImageSize('273x324', 'sourceful/riverflow-v2.6-pro'), '272x320');
+    // 100x100 is below gpt-image minimum area, so it must rescale via gcd.
+    assert.equal(sameAspectImageSize('100x100', 'gpt-image-2.5-sunburst'), '816x816');
+    // 100x100 is below riverflow's minimum area (16384), so it rescales via gcd to 128x128.
+    assert.equal(sameAspectImageSize('100x100', 'sourceful/riverflow-v2.6-pro'), '128x128');
+    // Already valid — null.
+    assert.equal(sameAspectImageSize('272x320', 'sourceful/riverflow-v2.6-pro'), null);
+    // riverflow allows up to 16:1 ratio.
+    assert.notEqual(sameAspectImageSize('1600x100', 'sourceful/riverflow-v2.6-pro'), null);
+    // gpt-image max ratio is 3:1 — 1600x100 is out of range.
+    assert.equal(sameAspectImageSize('1600x100', 'gpt-image-2.5-sunburst'), null);
+});
+
+test('imageSizeAttempts for riverflow falls back to nearest aspect_ratio, not a broken preset', () => {
+    // 273x324: exact → 272x320 (rounded to 16) → 4:5 (nearest ratio) → null (omit).
+    const attempts = imageSizeAttempts('273x324', 'sourceful/riverflow-v2.6-pro');
+    assert.deepEqual(attempts, ['273x324', '272x320', '4:5', null]);
+    // 512x512 is square: no ratio fallback needed.
+    assert.deepEqual(imageSizeAttempts('512x512', 'sourceful/riverflow-v2.6-pro'), ['512x512', null]);
+    // 1920x1080: exact → 1920x1088 (rounded) → 16:9 → null.
+    assert.deepEqual(imageSizeAttempts('1920x1080', 'sourceful/riverflow-v2.6-pro'), ['1920x1080', '1920x1088', '16:9', null]);
 });
 
 test('vector model uses aspect_ratio and svg output', () => {
