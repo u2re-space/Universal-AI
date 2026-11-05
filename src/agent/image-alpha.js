@@ -34,16 +34,41 @@ export const ALPHA_MASK_PROMPT = 'Return an alpha matte of the attached image as
     + 'not a wide soft glow, and the interior of the subject pure white. '
     + 'Output the matte only: grayscale, no colors, no text, no border, no shadow.';
 
+/*
+export const ALPHA_MASK_PROMPT = 'Return an A-mask for the attached image that will be composited '
+    + 'onto an RGB background to produce the final RGBA image. '
+    + 'This is the alpha channel of a two-part composition: RGB + A-mask = RGBA. '
+    + 'White (255) marks the subject that must stay visible — the artwork, logo, product, or person. '
+    + 'Black (0) marks everything that must become transparent, including any checkerboard, grid, or '
+    + 'flat plate that only imitates transparency in the RGB layer. '
+    + 'Keep the exact framing and proportions of the source. '
+    + 'The mask must trace the subject contour tightly: a one- or two-pixel gray transition exactly '
+    + 'on the silhouette creates a clean anti-aliased edge in the final composite. '
+    + 'Do not widen the transition into a soft glow — that makes the rim milky and eats into the '
+    + 'artwork. The interior of the subject must be pure white; the transparent area must be pure black. '
+    + 'Output the mask only: grayscale, no colors, no text, no border, no shadow.';
+    */
+
 /**
  * Prompt for the background paint pass. The background becomes the dominant color of the subject,
  * so the semi-transparent pixels an anti-aliased matte leaves behind carry the object color instead
  * of white or a checkerboard. That is what removes the halo around a cut-out logo or badge.
  */
-export const BACKGROUND_PAINT_PROMPT = 'Fill the whole background of the attached image with the dominant color of the subject. '
+/*export const BACKGROUND_PAINT_PROMPT = 'Fill the whole background of the attached image with the dominant color of the subject. '
     + 'Do not change the subject: keep every pixel of it identical, in the same position, with the same '
     + 'proportions and framing. '
     + 'Paint a single flat color only where the background is now — including any checkerboard, grid, or '
-    + 'pattern that imitates transparency. No gradients, no texture, no shadow, no new objects.';
+    + 'pattern that imitates transparency. No gradients, no texture, no shadow, no new objects.';*/
+
+export const BACKGROUND_PAINT_PROMPT = 'You are creating the RGB channel for a two-part RGBA '
+    + 'composition (RGB + A-mask = RGBA). '
+    + 'Fill the whole background of the attached image with the dominant color of the subject. '
+    + 'Do not change the subject: keep every pixel of it identical, in the same position, with the same '
+    + 'proportions and framing. '
+    + 'Paint a single flat color only where the background is now — including any checkerboard, grid, or '
+    + 'pattern that imitates transparency. '
+    + 'This flat color will serve as the RGB base that the A-mask composites over: no gradients, '
+    + 'no texture, no shadow, no new objects.';
 
 /** Raster matte formats ImageMagick can read. */
 const MASK_EXT = /\.(png|webp|jpe?g)$/i;
@@ -55,17 +80,53 @@ const RGB_SOURCE_EXT = /\.(png|webp)$/i;
 const MODEL_MATES = new Set(['auto', 'mask']);
 
 /**
- * Pick the frame that keeps the source aspect ratio, so the matte is not squeezed into a square.
- * The matte is resampled back onto the picture afterwards, so a preset frame is enough here;
- * the exact source frame is preserved on the main edit path inside the client instead.
+ * Pick the frame for a technical pass so the matte is not squeezed into a square.
+ *
+ * A model that takes an arbitrary frame (`customSizes`) gets the source frame exactly: the painted
+ * picture this pass returns becomes the RGB base of the final file, so a preset frame here would
+ * rescale the whole result to the preset and the caller would lose the source dimensions.
+ * A preset-only model cannot take anything else, so the nearest frame that keeps the aspect wins.
  * @param {{ width: number, height: number }|null} info
+ * @param {string|null} [model]
  * @returns {string|null}
  * @ai.hint pure
  */
-function frameFor(info) {
+function frameFor(info, model = null) {
     if (!info?.width || !info?.height) return null;
+    if (imageModelProfile(model).customSizes) return `${info.width}x${info.height}`;
     if (info.width === info.height) return '1024x1024';
-    return info.height > info.width ? '1024x1536' : '1536x1024';
+
+    const { width, height } = info;
+
+    if (
+        !Number.isFinite(width) ||
+        !Number.isFinite(height) ||
+        width <= 0 ||
+        height <= 0
+    ) {
+        throw new Error('Некорректный размер input');
+    }
+
+    // Для квадратных изображений (или близкиз к тому) сохраняем квадратный формат.
+    if (width === height || Math.max(width / height, height / width) < 1.005) {
+        // Оба измерения не больше 512 — выбираем квадрат 512×512.
+        if (width <= 512 && height <= 512) {
+            return '512x512';
+        }
+        return '1024x1024';
+    }
+
+    if (height > width) {
+        // Портретная ориентация.
+        return width <= 768 && height <= 1024
+        ? '768x1024'
+        : '1024x1536';
+    }
+
+    // Альбомная ориентация.
+    return width <= 1024 && height <= 768
+        ? '1024x768'
+        : '1536x1024';
 }
 
 /**
@@ -96,7 +157,7 @@ async function askModel({ client, config = null, file, prompt, signal, model = n
         const payloads = await client.images.edit({
             model: techModel,
             prompt,
-            size: frameFor(info),
+            size: frameFor(info, techModel),
             format: 'png',
             signal,
             files: [{ filename: path.basename(abs), mime: kind.mime, bytes }],

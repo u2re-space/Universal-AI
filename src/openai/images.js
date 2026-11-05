@@ -121,28 +121,170 @@ export const RIVERFLOW_RATIOS = Object.freeze(['1:1', '4:3', '3:4', '3:2', '2:3'
 /** Resolution tiers accepted by Riverflow (Sourceful). */
 export const RIVERFLOW_RESOLUTIONS = Object.freeze(['512', '1K', '2K', '4K']);
 
+/** */
+const IMAGE_SIZES_BY_RESOLUTION = {
+    '512': [
+        '512x512',
+    ],
+    '1k': [
+        // Ваши поддерживаемые размеры 1k
+        '1024x768',
+        '768x1024',
+        '1024x1024',
+    ],
+    '2k': [
+        // Нативные размеры модели
+        '1024x1536',
+        '1536x1024',
+
+        // Остальные размеры, если модель их поддерживает
+        '2048x1536',
+        '1536x2048',
+        '2048x2048',
+    ],
+    '4k': [
+        '4096x3072',
+        '3072x4096',
+        '4096x4096',
+    ],
+};
+
+function parseImageSize(value) {
+    const match = /^(\d+)\s*x\s*(\d+)$/.exec(value);
+    if (!match) return null;
+
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+
+    if (!Number.isFinite(width) || !Number.isFinite(height) || !width || !height) {
+        return null;
+    }
+
+    return { width, height };
+}
+
+function getOrientation({ width, height }) {
+    if (width === height) return 'square';
+    return height > width ? 'portrait' : 'landscape';
+}
+
+function getAspectDifference(a, b) {
+    return Math.abs(Math.log((a.width / a.height) / (b.width / b.height)));
+}
+
+function inferResolution({ width, height }) {
+    const maxSide = Math.max(width, height);
+
+    if (maxSide <= 512) return '512';
+    if (maxSide <= 1024) return '1k';
+    if (maxSide <= 2048) return '2k';
+
+    // 4k — максимальный уровень; запросы больше него попадут в 4k.
+    return '4k';
+}
+
 /**
- * Map a requested size to the nearest supported one. `auto` and an empty value omit the field.
- * Common words portrait, landscape, and square are accepted.
+ * Map a requested size to the nearest supported size for the chosen resolution.
+ * `auto` and an empty value omit the field.
+ *
  * @param {string | null | undefined} size
+ * @param {'512' | '1k' | '2k' | '4k'} resolution
  * @returns {string | null}
  * @exports
  * @ai.hint pure
  */
-export function normalizeImageSize(size) {
+export function normalizeImageSize(size, resolution = null) {
     const value = String(size ?? '').trim().toLowerCase();
     if (!value || value === 'auto') return null;
-    if (IMAGE_SIZES.includes(value)) return value;
-    if (value === 'portrait') return '1024x1536';
-    if (value === 'landscape') return '1536x1024';
-    if (value === 'square') return '1024x1024';
-    const match = /^(\d+)\s*x\s*(\d+)$/.exec(value);
-    if (!match) return value;
-    const width = Number(match[1]);
-    const height = Number(match[2]);
-    if (!width || !height) return value;
-    if (width === height) return '1024x1024';
-    return height > width ? '1024x1536' : '1536x1024';
+
+    let requested;
+    let hasExplicitDimensions = false;
+
+    if (value === 'portrait') {
+        requested = { width: 1, height: 2 };
+    } else if (value === 'landscape') {
+        requested = { width: 2, height: 1 };
+    } else if (value === 'square') {
+        requested = { width: 1, height: 1 };
+    } else {
+        requested = parseImageSize(value);
+
+        // Неизвестное значение оставляем без изменений.
+        if (!requested) return value;
+
+        hasExplicitDimensions = true;
+    }
+
+    const hasResolution =
+        resolution != null && String(resolution).trim() !== '';
+
+    const resolutionKey = hasResolution
+        ? String(resolution).trim().toLowerCase()
+        : hasExplicitDimensions
+            ? inferResolution(requested)
+            : '1k';
+
+    const supportedSizes = IMAGE_SIZES_BY_RESOLUTION[resolutionKey];
+
+    if (!supportedSizes) {
+        throw new RangeError(`Unsupported image resolution: ${resolutionKey}`);
+    }
+
+    const candidates = supportedSizes.map((size) => ({
+        size,
+        ...parseImageSize(size),
+    }));
+
+    const orientation = getOrientation(requested);
+    const matchingOrientation = candidates.filter(
+        (candidate) => getOrientation(candidate) === orientation,
+    );
+
+    const pool = matchingOrientation.length ? matchingOrientation : candidates;
+
+    if (['portrait', 'landscape', 'square'].includes(value)) {
+        return pool
+            .slice()
+            .sort((a, b) => b.width * b.height - a.width * a.height)[0]
+            .size;
+    }
+
+    const fitting = pool.filter(
+        (candidate) =>
+            candidate.width >= requested.width &&
+            candidate.height >= requested.height,
+    );
+
+    if (fitting.length) {
+        return fitting
+            .slice()
+            .sort(
+                (a, b) =>
+                    a.width * a.height - b.width * b.height ||
+                    getAspectDifference(a, requested) -
+                        getAspectDifference(b, requested),
+            )[0]
+            .size;
+    }
+
+    return pool
+        .slice()
+        .sort((a, b) => {
+            const scaleA = Math.min(
+                a.width / requested.width,
+                a.height / requested.height,
+            );
+            const scaleB = Math.min(
+                b.width / requested.width,
+                b.height / requested.height,
+            );
+
+            return (
+                scaleB - scaleA ||
+                getAspectDifference(a, requested) -
+                    getAspectDifference(b, requested)
+            );
+        })[0].size;
 }
 
 const MIN_IMAGE_PIXELS = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?16_384:655_360;

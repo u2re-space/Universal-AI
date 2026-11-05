@@ -63,9 +63,9 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(normalizeImageSize('auto'), null);
     assert.equal(normalizeImageSize(''), null);
     assert.equal(normalizeImageSize('1024x1024'), '1024x1024');
-    assert.equal(normalizeImageSize('768x1024'), '1024x1536');
+    assert.equal(normalizeImageSize('768x1024'), '768x1024');
     assert.equal(normalizeImageSize('1280x720'), '1536x1024');
-    assert.equal(normalizeImageSize('portrait'), '1024x1536');
+    assert.equal(normalizeImageSize('portrait'), '768x1024');
     assert.equal(imageRequestSize('2048x2048', 'gpt-image-2.5-sunburst'), '2048x2048');
     assert.equal(imageRequestSize('2048x2048', 'gpt-image-1'), '1024x1024');
     assert.equal(generationBody({ model: 'gpt-image-2.5-sunburst', prompt: 'p', size: '2048x2048' }).size, '2048x2048');
