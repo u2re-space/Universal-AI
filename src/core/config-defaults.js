@@ -237,6 +237,13 @@ export const defaults = Object.freeze({
     },
     image: {
         size: 'auto', quality: 'auto', format: 'png', background: 'auto', partialImages: 2, outputDir: '.', transport: null,
+        /**
+         * Resolution tier for the families that are tuned by one (sourceful/riverflow): 512 | 1K |
+         * 2K | 4K. A tier decides the pixel budget; `size` then only decides orientation. A bare
+         * number in `size` (`2048`) names the same tier, so this field is only the default for a
+         * request that names no frame at all. Preset-only models (gpt-image, recraft) ignore it.
+         */
+        resolution: null,
         maskModel: null,             // null → the edit model draws the alpha matte (openai/gpt-image-2.5-sunburst)
         rasterEngine: 'auto',        // auto | sharp | canvas | magick; auto prefers sharp, then node-canvas, then ImageMagick
         /**

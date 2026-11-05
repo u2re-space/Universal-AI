@@ -279,7 +279,14 @@ test('vector model uses aspect_ratio and svg output', () => {
     const vectorBody = generationBody({
         model: 'recraft/recraft-v4.1-pro-vector', prompt: 'логотип', size: '1024x1024', format: 'png', quality: 'high', background: 'transparent',
     });
-    assert.deepEqual(vectorBody, { model: 'recraft/recraft-v4.1-pro-vector', prompt: 'логотип', aspect_ratio: '1:1', image_format: 'svg' });
+    // The requested frame is repeated in the prompt text, so a gateway that drops the field still
+    // answers with the asked shape.
+    assert.deepEqual(vectorBody, {
+        model: 'recraft/recraft-v4.1-pro-vector',
+        prompt: 'логотип\n\nRequested output: aspect ratio 1:1. Keep this exact frame and aspect ratio.',
+        aspect_ratio: '1:1',
+        image_format: 'svg',
+    });
     assert.equal('size' in vectorBody, false);
     assert.equal('quality' in vectorBody, false);
     assert.equal('background' in vectorBody, false);
@@ -381,7 +388,7 @@ test('GPT Image 2.5 retries invalid dimensions in order and does not retry other
         };
         if (req.url === '/v1/images/generations') {
             const body = JSON.parse(raw.toString('utf8'));
-            if (body.prompt === 'auth') { authAttempts++; return fail(401, 'Invalid API key'); }
+            if (body.prompt.startsWith('auth')) { authAttempts++; return fail(401, 'Invalid API key'); }
             generationSizes.push(body.size);
             if (generationSizes.length < 3) return fail(400, 'Invalid image size', 'size');
         } else {

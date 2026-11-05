@@ -20,7 +20,7 @@ import { CHAT_PATH, chatGaps, createChatStreamReducer, droppedTools, normalizeCh
 import { envValue } from '../core/runtime-env.js';
 import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
 import { rasterPadImageBytes, rasterRemoveImagePadding } from '../agent/image-raster.js';
-import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, readImageSize, imageQualityValue, imageReasoningValue, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat } from './images.js';
+import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, readImageSize, imageQualityValue, imageReasoningValue, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat, withSizeHint } from './images.js';
 
 export { ApiError };
 
@@ -659,13 +659,13 @@ export function createClient({
     };
     const images = {
          /** POST /images/generations. Returns base64 payloads from data[].b64_json or data[].url. */
-        async generate({ model, prompt, size, quality, n, format, background, reasoning, references, signal } = {}) {
-            const attempts = imageSizeAttempts(size, model);
+        async generate({ model, prompt, size, quality, n, format, background, reasoning, references, resolution, signal } = {}) {
+            const attempts = imageSizeAttempts(size, model, resolution);
             let result;
             for (let index = 0; ; index++) {
                 const requestedSize = index < attempts.length ? attempts[index] : size;
                 try {
-                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, quality, n, format, background, reasoning, references }), signal });
+                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, quality, n, format, background, reasoning, references, resolution }), signal });
                     break;
                 } catch (error) {
                     if (index >= attempts.length - 1 || !isImageSizeError(error)) throw error;
@@ -674,7 +674,7 @@ export function createClient({
             return await payloadList(result, signal, 'images/generations');
         },
         /** POST /images/edits as multipart form data. `files` are { filename, mime, bytes }. */
-        async edit({ model, prompt, files, size, format, background, quality, reasoning, signal } = {}) {
+        async edit({ model, prompt, files, size, format, background, quality, reasoning, resolution, signal } = {}) {
             const vector = isVectorModel(model);
             // Some families (riverflow) answer /images/edits with the gateway default square and
             // silently drop size, resolution, aspect_ratio, quality and reasoning. The same
@@ -682,12 +682,12 @@ export function createClient({
             // field, so an edit for those models travels through the generation route instead.
             if (!vector && imageModelProfile(model).routeEditsThroughGeneration && files?.length) {
                 let frame = size;
-                if (!Object.keys(imageSizeFields(frame, model)).length && files[0]?.bytes) {
+                if (!Object.keys(imageSizeFields(frame, model, resolution)).length && files[0]?.bytes) {
                     const source = readImageSize(files[0].bytes);
                     if (source) frame = `${source.width}x${source.height}`;
                 }
                 const references = files.map((file) => `data:${file.mime || 'image/png'};base64,${Buffer.from(file.bytes).toString('base64')}`);
-                return images.generate({ model, prompt, size: frame, quality, format, background, reasoning, references, signal });
+                return images.generate({ model, prompt, size: frame, quality, format, background, reasoning, references, resolution, signal });
             }
             let requestFiles = files;
             let padding = null;
@@ -718,22 +718,22 @@ export function createClient({
             // picture, so an edit keeps the input image's own size and aspect instead of the
             // gateway default square. The header is read straight from the bytes, so no raster
             // engine has to be present for this to work in a bundled build.
-            if (!vector && files?.length && !Object.keys(imageSizeFields(requestedFrame, model)).length) {
+            if (!vector && files?.length && !Object.keys(imageSizeFields(requestedFrame, model, resolution)).length) {
                 const source = readImageSize(files[0]?.bytes);
                 if (source) requestedFrame = `${source.width}x${source.height}`;
             }
-            const attempts = vector ? [] : imageSizeAttempts(requestedFrame, model);
+            const attempts = vector ? [] : imageSizeAttempts(requestedFrame, model, resolution);
             let result;
             for (let index = 0; ; index++) {
                 const attemptSize = index < attempts.length ? attempts[index] : requestedFrame;
-                const fields = { model, prompt };
+                const fields = { model, prompt: withSizeHint(prompt, isVectorModel(model) ? { aspect_ratio: normalizeVectorRatio(attemptSize) } : imageSizeFields(attemptSize, model, resolution)) };
                 if (isVectorModel(model)) {
                     const aspect = normalizeVectorRatio(attemptSize);
                     if (aspect) fields.aspect_ratio = aspect;
                     //if (acceptsResponseFormat(model)) fields.response_format = 'b64_json';
                     fields[imageFormatField(model)] = 'svg';
                 } else {
-                    const sizeFields = imageSizeFields(attemptSize, model);
+                    const sizeFields = imageSizeFields(attemptSize, model, resolution);
                     if (sizeFields.size) fields.size = sizeFields.size;
                     if (sizeFields.resolution) fields.resolution = sizeFields.resolution;
                     if (sizeFields.aspect_ratio) fields.aspect_ratio = sizeFields.aspect_ratio;

@@ -78,14 +78,14 @@ async function runImagesEndpoint(ctx, prompt, count) {
     try {
         const payloads = sources.length
             ? await client.images.edit({
-                model, prompt, size: config.image.size, format, background, signal,
+                model, prompt, size: config.image.size, format, background, signal, resolution: config.image.resolution,
                 files: await Promise.all(sources.map(async (file) => {
                     const located = await resolveInside(ctx.cwd, file, { allowRoot: false });
                     const bytes = await readFile(located.abs);
                     return { filename: path.basename(located.rel), mime: sniffImage(bytes).mime, bytes };
                 })),
             })
-            : await client.images.generate({ model, prompt, size: config.image.size, quality: config.image.quality, n: count, format, background, signal });
+            : await client.images.generate({ model, prompt, size: config.image.size, quality: config.image.quality, n: count, format, background, signal, resolution: config.image.resolution });
         const sink = createImageSink({ target: path.resolve(ctx.cwd, target), format, prefix: 'image' });
         const saved = [];
         for (const [index, b64] of payloads.entries()) {

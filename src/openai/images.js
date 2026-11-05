@@ -58,7 +58,7 @@ export const PROXY_RIVERFLOW_MODEL = 'sourceful/riverflow-v2.6-pro';
  */
 const IMAGE_CAPABILITIES = Object.freeze({
     customSizes: false, div16Padding: false, keepProSuffix: false, omitSizeOnReject: false,
-    reasoning: null, defaultQuality: null, routeEditsThroughGeneration: false,
+    reasoning: null, defaultQuality: null, routeEditsThroughGeneration: false, resolutionTiers: false,
 });
 
 /**
@@ -75,7 +75,7 @@ const IMAGE_CAPABILITIES = Object.freeze({
  */
 const IMAGE_MODEL_PROFILES = Object.freeze([
     Object.freeze({ match: GPT_IMAGE_25, customSizes: true, div16Padding: true }),
-    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true, reasoning: 'high', defaultQuality: 'high', routeEditsThroughGeneration: true }),
+    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true, reasoning: 'high', defaultQuality: 'high', routeEditsThroughGeneration: true, resolutionTiers: true }),
 ]);
 
 /**
@@ -184,11 +184,56 @@ function inferResolution({ width, height }) {
 }
 
 /**
- * Map a requested size to the nearest supported size for the chosen resolution.
- * `auto` and an empty value omit the field.
+ * Read a resolution tier out of a bare token: `512`, `1k`/`2k`/`4k`, or a plain pixel number
+ * (`512`, `1024`, `2048`, `4096`) which names the tier by its longest side. This is what lets a
+ * caller ask for `size: "2048"` and land on the 2K tier instead of leaking an unusable token to
+ * the gateway (where it is dropped and the model answers with its default square).
+ * Returns a key of `IMAGE_SIZES_BY_RESOLUTION`, or null when the token names no tier.
+ * @param {string|null|undefined} value
+ * @returns {string|null}
+ * @ai.hint pure
+ */
+function tierFromToken(value) {
+    const token = String(value ?? '').trim().toLowerCase();
+    if (!token) return null;
+    if (token === '512') return '512';
+    if (/^\d+k$/.test(token)) return IMAGE_SIZES_BY_RESOLUTION[token] ? token : null;
+    if (/^\d+$/.test(token)) return inferResolution({ width: Number(token), height: Number(token) });
+    return null;
+}
+
+/**
+ * The frame a preset-only model gets when its family serves no resolution tiers: the nearest
+ * `IMAGE_SIZES` entry that keeps the orientation. Kept separate from the tier table because a model
+ * such as gpt-image-1 has no 2048x2048 at all — mapping a size by its own pixel count would ask the
+ * gateway for a frame it cannot produce.
+ * @param {string} value lowercased, non-empty size token
+ * @returns {string|null}
+ * @ai.hint pure
+ */
+function presetImageSize(value) {
+    if (IMAGE_SIZES.includes(value)) return value;
+    if (value === 'portrait') return '1024x1536';
+    if (value === 'landscape') return '1536x1024';
+    if (value === 'square') return '1024x1024';
+    const parsed = parseImageSize(value);
+    if (!parsed) return value;
+    if (parsed.width === parsed.height) return '1024x1024';
+    return parsed.height > parsed.width ? '1024x1536' : '1536x1024';
+}
+
+/**
+ * Map a requested size to the nearest supported one.
  *
+ * The resolution tier decides the pixel budget; the requested size only decides orientation and
+ * aspect. The tier comes from the explicit `resolution` argument, from a tier token inside `size`
+ * (`512`, `2K`), or — when the size names pixels — from its longest side, so `1280x720` is a 2K
+ * request and stays a 2K frame rather than collapsing to the 1024 preset.
+ * A family that serves no tiers never reaches this function: `imageRequestSize` sends it to
+ * `presetImageSize` instead, so it keeps getting the frames it actually has.
+ * `auto` and an empty value omit the field.
  * @param {string | null | undefined} size
- * @param {'512' | '1k' | '2k' | '4k'} resolution
+ * @param {string | null} [resolution] one of `512`/`1K`/`2K`/`4K`
  * @returns {string | null}
  * @exports
  * @ai.hint pure
@@ -198,37 +243,21 @@ export function normalizeImageSize(size, resolution = null) {
     if (!value || value === 'auto') return null;
 
     let requested;
-    let hasExplicitDimensions = false;
-
-    if (value === 'portrait') {
-        requested = { width: 1, height: 2 };
-    } else if (value === 'landscape') {
-        requested = { width: 2, height: 1 };
-    } else if (value === 'square') {
-        requested = { width: 1, height: 1 };
-    } else {
-        requested = parseImageSize(value);
-
+    let isOrientationWord = true;
+    if (value === 'portrait') requested = { width: 1, height: 2 };
+    else if (value === 'landscape') requested = { width: 2, height: 1 };
+    else if (value === 'square') requested = { width: 1, height: 1 };
+    else {
+        isOrientationWord = false;
+        requested = parseImageSize(value) || (tierFromToken(value) ? { width: 1, height: 1 } : null);
         // Неизвестное значение оставляем без изменений.
         if (!requested) return value;
-
-        hasExplicitDimensions = true;
     }
 
-    const hasResolution =
-        resolution != null && String(resolution).trim() !== '';
-
-    const resolutionKey = hasResolution
-        ? String(resolution).trim().toLowerCase()
-        : hasExplicitDimensions
-            ? inferResolution(requested)
-            : '1k';
-
+    const resolutionKey = tierFromToken(resolution) || tierFromToken(value)
+        || (isOrientationWord ? '1k' : inferResolution(requested));
     const supportedSizes = IMAGE_SIZES_BY_RESOLUTION[resolutionKey];
-
-    if (!supportedSizes) {
-        throw new RangeError(`Unsupported image resolution: ${resolutionKey}`);
-    }
+    if (!supportedSizes) return presetImageSize(value);
 
     const candidates = supportedSizes.map((size) => ({
         size,
@@ -242,10 +271,11 @@ export function normalizeImageSize(size, resolution = null) {
 
     const pool = matchingOrientation.length ? matchingOrientation : candidates;
 
-    if (['portrait', 'landscape', 'square'].includes(value)) {
+    // A bare orientation word or a bare tier asks for the largest frame the tier offers in that shape.
+    if (isOrientationWord || !parseImageSize(value)) {
         return pool
             .slice()
-            .sort((a, b) => b.width * b.height - a.width * a.height)[0]
+            .sort((a, b) => b.width * b.height - a.width * b.height)[0]
             .size;
     }
 
@@ -323,19 +353,27 @@ export function imageQualityValue({ model, quality = null }) {
 }
 
 /**
- * Keep custom dimensions for the models that take them (GPT Image 2.5); the rest get their
+ * Keep custom dimensions for the models that take them (GPT Image 2.5); a family that serves
+ * resolution tiers gets the frame of the tier its request names; every other model gets its
  * supported frame presets.
  * @param {string|null|undefined} size
  * @param {string|null|undefined} model
+ * @param {string|null} [resolution]
  * @returns {string|null}
  * @exports
  * @ai.hint pure
  */
-export function imageRequestSize(size, model) {
+export function imageRequestSize(size, model, resolution = null) {
     const value = String(size ?? '').trim().toLowerCase();
     if (!value || value === 'auto') return null;
-    if (imageModelProfile(model).customSizes && /^\d+\s*x\s*\d+$/.test(value)) return value.replace(/\s+/g, '');
-    return normalizeImageSize(value);
+    const caps = imageModelProfile(model);
+    if (caps.customSizes && /^\d+\s*x\s*\d+$/.test(value)) return value.replace(/\s+/g, '');
+    // A family that serves tiers keeps the tier token: the gateway reads it as `resolution`, and
+    // unfolding `2K` into `2048x2048` would move the request out of the field the model is tuned by.
+    if (caps.resolutionTiers && tierFromToken(value)) return tierFromToken(value).toUpperCase();
+    // A family without tiers must not be sent a tier frame it does not serve.
+    if (!caps.resolutionTiers && !tierFromToken(resolution)) return presetImageSize(value);
+    return normalizeImageSize(value, resolution);
 }
 
 /**
@@ -352,19 +390,27 @@ export function imageRequestSize(size, model) {
  * @exports
  * @ai.hint pure
  */
-export function imageSizeFields(size, model) {
+export function imageSizeFields(size, model, resolution = null) {
     const value = String(size ?? '').trim().toLowerCase();
-    if (!value || value === 'auto') return {};
-    if (RIVERFLOW.test(String(model ?? '').trim())) {
+    const caps = imageModelProfile(model);
+    // An explicitly requested tier is the `resolution` field even when no frame was named.
+    const explicitTier = caps.resolutionTiers ? tierFromToken(resolution) : null;
+    if (!value || value === 'auto') return explicitTier ? { resolution: explicitTier.toUpperCase() } : {};
+    if (caps.resolutionTiers) {
         if (/^\d+\s*x\s*\d+$/.test(value)) return { size: value.replace(/\s+/g, '') };
         if (/^\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?$/.test(value)) {
             const ratio = value.replace(/\s+/g, '');
-            return { aspect_ratio: RIVERFLOW_RATIOS.includes(ratio) ? ratio : 'auto' };
+            return {
+                aspect_ratio: RIVERFLOW_RATIOS.includes(ratio) ? ratio : 'auto',
+                ...(explicitTier ? { resolution: explicitTier.toUpperCase() } : {}),
+            };
         }
-        if (/^512$/.test(value)) return { resolution: '512' };
-        if (/^\d+k$/.test(value)) return { resolution: value.toUpperCase() };
+        // A tier named on its own — `512`, `2K`, or the pixel count `2048` — is the `resolution`
+        // field, never `size`: a gateway that has no such frame drops the field and answers square.
+        const tier = tierFromToken(value);
+        if (tier) return { resolution: tier.toUpperCase() };
     }
-    const frame = imageRequestSize(value, model);
+    const frame = imageRequestSize(value, model, resolution);
     return frame ? { size: frame } : {};
 }
 
@@ -474,8 +520,8 @@ function nearestRiverflowRatio(sizePixels) {
  * @exports
  * @ai.hint pure
  */
-export function imageSizeAttempts(size, model) {
-    const initial = imageRequestSize(size, model);
+export function imageSizeAttempts(size, model, resolution = null) {
+    const initial = imageRequestSize(size, model, resolution);
     if (!initial) return [];
     const profile = imageModelProfile(model);
     if (!profile.customSizes || !/^\d+x\d+$/.test(initial)) {
@@ -493,7 +539,8 @@ export function imageSizeAttempts(size, model) {
         const ratio = nearestRiverflowRatio(initial);
         if (ratio && !attempts.includes(ratio)) attempts.push(ratio);
     } else {
-        const preset = normalizeImageSize(initial);
+        // The last resort is the most compatible frame the family documents, not a tier frame.
+        const preset = presetImageSize(initial);
         if (preset && !attempts.includes(preset)) attempts.push(preset);
     }
 
@@ -692,12 +739,13 @@ export function acceptsResponseFormat(model) {
  * svg`; image-conditioned vectorization goes through /images/edits with a multipart file.
  * `references` are `data:` URLs of source pictures for an image-conditioned generation
  * (`input_references`), used by the families whose edit route ignores the tuning fields.
- * @param {{ model: string, prompt: string, size?: string | null, quality?: string | null, n?: number | null, format?: string | null, background?: string | null, reasoning?: string | null, references?: string[] | null }} request
+ * `resolution` is an optional tier (512/1K/2K/4K) that selects a frame from the tier table.
+ * @param {{ model: string, prompt: string, size?: string | null, quality?: string | null, n?: number | null, format?: string | null, background?: string | null, reasoning?: string | null, references?: string[] | null, resolution?: string | null }} request
  * @returns {object}
  * @exports
  * @ai.hint pure
  */
-export function generationBody({ model, prompt, size = null, quality = null, n = null, format = null, background = null, reasoning = null, references = null }) {
+export function generationBody({ model, prompt, size = null, quality = null, n = null, format = null, background = null, reasoning = null, references = null, resolution = null }) {
     const body = { model, prompt };
     if (Array.isArray(references) && references.length) {
         body.input_references = references.map((url) => ({ type: 'image_url', image_url: { url } }));
@@ -708,18 +756,23 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
         if (Number.isInteger(n) && n > 1) body.n = n;
         body[imageFormatField(model)] = 'svg';
         //if (acceptsResponseFormat(model)) body.response_format = 'b64_json';
+        body.prompt = withSizeHint(prompt, body);
         return body;
     }
-    const fields = imageSizeFields(size, model);
+    const fields = imageSizeFields(size, model, resolution);
     // A tier or ratio request carries its own field; `normalizeImageSize` leaves an unknown token
     // like `2K` untouched, so it must not leak into `size` beside `resolution`.
     if (fields.size) body.size = fields.size;
     else if (!fields.resolution && !fields.aspect_ratio) {
-        const frame = imageRequestSize(size, model);
+        const frame = imageRequestSize(size, model, resolution);
         if (frame) body.size = frame;
     }
     if (fields.resolution) body.resolution = fields.resolution;
     if (fields.aspect_ratio) body.aspect_ratio = fields.aspect_ratio;
+    // The frame the gateway is asked for in fields is repeated in the prompt: proxies that drop
+    // `size`/`resolution` still read the text, and the answer keeps the requested shape instead of
+    // collapsing to the default square.
+    body.prompt = withSizeHint(prompt, body);
     // Recraft swaps `-pro` for non-pro at small sizes; Riverflow keeps its suffix at any size.
     const caps = imageModelProfile(model);
     if (!caps.keepProSuffix) {
@@ -911,4 +964,25 @@ export function sniffImage(buffer) {
     const head = buffer.subarray(0, 64).toString('utf8', 0, 64).replace(/^\s+/, '');
     if (head.startsWith('<svg') || head.startsWith('<?xml')) return { ext: 'svg', mime: 'image/svg+xml' };
     return { ext: 'png', mime: 'image/png' };
+}
+
+/**
+ * Repeat the requested output frame in the prompt text. Gateway proxies sometimes drop the
+ * `size`/`resolution`/`aspect_ratio` fields and answer with their default square; the text
+ * hint survives in those cases.
+ * @param {string} prompt Original prompt.
+ * @param {{ size?: string, resolution?: string, aspect_ratio?: string }} fields Computed size fields.
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function withSizeHint(prompt, fields = {}) {
+    const text = String(prompt ?? '');
+    const parts = [];
+    if (fields.size) parts.push(`size ${fields.size}`);
+    if (fields.resolution) parts.push(`resolution ${fields.resolution}`);
+    if (fields.aspect_ratio && fields.aspect_ratio !== 'auto') parts.push(`aspect ratio ${fields.aspect_ratio}`);
+    if (!parts.length) return text;
+    if (/\b(output|requested) (size|resolution|aspect ratio)/i.test(text)) return text;
+    return `${text}\n\nRequested output: ${parts.join(', ')}. Keep this exact frame and aspect ratio.`;
 }

@@ -605,7 +605,14 @@ function validateConfig(c) {
     if (!['png', 'webp', 'jpeg'].includes(c.image.format)) fail('image.format: png | webp | jpeg');
     if (!['auto', 'low', 'medium', 'high', 'xhigh', 'max'].includes(c.image.quality)) fail('image.quality: auto | low | medium | high | xhigh | max');
     if (!['auto', 'transparent', 'opaque'].includes(c.image.background)) fail('image.background: auto | transparent | opaque');
-    if (!(c.image.size === 'auto' || /^\d{2,4}x\d{2,4}$/.test(c.image.size))) fail('image.size: auto | WIDTHxHEIGHT');
+    // `image.size` also accepts a resolution tier (`512`, `2K`) and a ratio (`9:16`): a family that
+    // is tuned by a tier reads those instead of a pixel frame, and refusing them here would make the
+    // most useful way of asking for a size unconfigurable.
+    if (!(c.image.size === 'auto' || /^\d{2,4}x\d{2,4}$/.test(c.image.size)
+        || /^(?:512|[124]K)$/i.test(c.image.size) || /^\d+(?:\.\d+)?:\d+$/.test(c.image.size))) {
+        fail('image.size: auto | WIDTHxHEIGHT | 512 | 1K | 2K | 4K | W:H');
+    }
+    if (c.image.resolution != null && !/^(?:512|[124]K)$/i.test(String(c.image.resolution))) fail('image.resolution: null | 512 | 1K | 2K | 4K');
     if (!Number.isSafeInteger(c.image.partialImages) || c.image.partialImages < 0 || c.image.partialImages > 3) fail('image.partialImages: 0..3');
     if (c.image.transport != null && c.image.transport !== 'images' && c.image.transport !== 'responses') fail('image.transport: images | responses');
     if (!['auto', 'sharp', 'canvas', 'magick'].includes(c.image.rasterEngine)) fail('image.rasterEngine: auto | sharp | canvas | magick');

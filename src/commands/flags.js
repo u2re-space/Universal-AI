@@ -133,6 +133,14 @@ export function overridesFrom(values, { command = null } = {}) {
     }
     if (values.format) o.image.format = values.format;
     if (values['image-background']) o.image.background = values['image-background'];
+    if (values['image-resolution']) {
+        const r = values['image-resolution'].trim();
+        // Accept both the named tiers and a bare pixel number (e.g. "2048").
+        if (!['auto', 'off', '512', '1K', '2K', '4K'].includes(r) && !/^\d+$/.test(r)) {
+            throw new UsageError('--image-resolution: auto | off | 512 | 1K | 2K | 4K | <px>');
+        }
+        o.image.resolution = r;
+    }
     if (values['image-div16']) {
         if (!['auto', 'always', 'never'].includes(values['image-div16'])) throw new UsageError('--image-div16: auto | always | never');
         o.image.div16 = values['image-div16'];

@@ -16,7 +16,7 @@ import path from 'node:path';
 import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { detectMagick, ensureTransparentBackground, magickApplyAlphaMask, magickContourAlphaMask, magickDetectFakeTransparency, magickIdentify, magickIsOpaque, magickSaturationAlphaMask } from './image-magick.js';
 import { rasterApplyAlphaMask, rasterDetectFakeTransparency, rasterEngine, rasterInfo, rasterIsOpaque, rasterLocalAlphaMatte } from './image-raster.js';
-import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, sniffImage } from '../openai/images.js';
+import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, imageModelProfile, sniffImage } from '../openai/images.js';
 
 /**
  * Prompt for the mask pass. A matte rather than a transparent picture: most vendors cannot emit
@@ -104,7 +104,7 @@ function frameFor(info, model = null) {
         width <= 0 ||
         height <= 0
     ) {
-        throw new Error('Некорректный размер input');
+        return null;
     }
 
     // Для квадратных изображений (или близкиз к тому) сохраняем квадратный формат.
@@ -117,14 +117,16 @@ function frameFor(info, model = null) {
     }
 
     if (height > width) {
-        // Портретная ориентация.
-        return width <= 768 && height <= 1024
-        ? '768x1024'
-        : '1024x1536';
+        // Portrait: 768x1024 is 3:4, 1024x1536 is 2:3. The matte is resized onto the RGB base,
+        // so the frame that keeps the source aspect is the one that must win — a stretched matte
+        // puts alpha on the wrong pixels.
+        return Math.abs(width / height - 3 / 4) <= Math.abs(width / height - 2 / 3)
+            ? '768x1024'
+            : '1024x1536';
     }
 
-    // Альбомная ориентация.
-    return width <= 1024 && height <= 768
+    // Landscape: 1024x768 is 4:3, 1536x1024 is 3:2. Same aspect-first rule as the portrait branch.
+    return Math.abs(width / height - 4 / 3) <= Math.abs(width / height - 3 / 2)
         ? '1024x768'
         : '1536x1024';
 }

@@ -475,16 +475,21 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             const requested = normalizeBackground(args.background, background);
             const transparent = requested === 'transparent';
             const toSvg = args.to_svg === true || config.image?.autoVectorize === true;
+            const resolution = args.resolution || config.image?.resolution || null;
 
             const ref = String(args.reference ?? '').trim();
             if (ref) {
                 const model = imageModelFor(config, { hasImage: true });
                 const files = [await loadFile(ref), ...(await loadExtras(args.extra_images))];
+                if ((!args.size || args.size === 'auto') && files?.length > 0) {
+                    const source = readImageSize(files?.[0]?.bytes);
+                    if (source) args.size = `${source.width}x${source.height}`;
+                }
                 const payloads = await client.images.edit({
                     model,
                     prompt: args.prompt,
-                    size: args.size || null,
-                    format, background: effectiveBackground(model, requested), signal,
+                    size: imageRequestSize(args.size || null, model, resolution) || args.size,
+                    format, background: effectiveBackground(model, requested), signal, resolution,
                     files,
                 });
                 const route = imageModelProfile(model).routeEditsThroughGeneration ? 'generations' : 'edits';
@@ -496,9 +501,9 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             // No reference: pure text-to-image generation.
             const model = imageModelFor(config);
             const payloads = await client.images.generate({
-                model, prompt: args.prompt, size: args.size || null, quality: args.quality || null,
+                model, prompt: args.prompt, size: imageRequestSize(args.size || null, model, resolution) || args.size, quality: args.quality || null,
                 format, background: effectiveBackground(model, requested), signal,
-                background_mode: effectiveBackground(model, requested),
+                background_mode: effectiveBackground(model, requested), resolution,
             });
             return saveAll(payloads, args.path, { transparent, model, toSvg, frame: Boolean(args.size?.trim()) });
         },
@@ -513,16 +518,17 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             const transparent = requested === 'transparent';
             const toSvg = args.to_svg === true || config.image?.autoVectorize === true;
             const model = imageModelFor(config, { hasImage: true });
+            const resolution = args.resolution || config.image?.resolution || null;
             const files = [await loadFile(args.image), ...(await loadExtras(args.extra_images))];
             // No frame asked for: keep the source picture's own frame, so an edit does not come
             // back as the gateway default square.
-            if (!args.size || args.size === 'auto') {
-                const source = readImageSize(files[0]?.bytes);
+            if ((!args.size || args.size === 'auto') && files?.length > 0) {
+                const source = readImageSize(files?.[0]?.bytes);
                 if (source) args.size = `${source.width}x${source.height}`;
             }
             const payloads = await client.images.edit({
-                model, prompt: args.prompt, size: imageRequestSize(args.size || null, model) || args.size,
-                format, background: effectiveBackground(model, requested), signal,
+                model, prompt: args.prompt, size: imageRequestSize(args.size || null, model, resolution) || args.size,
+                format, background: effectiveBackground(model, requested), signal, resolution,
                 background_mode: effectiveBackground(model, requested),
                 files,
             });

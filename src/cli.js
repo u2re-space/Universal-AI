@@ -54,6 +54,7 @@ const OPTIONS = {
     json: { type: 'boolean', default: false }, quiet: { type: 'boolean', short: 'q', default: false }, verbose: { type: 'boolean', short: 'v', default: false },
     stream: { type: 'boolean', default: true }, config: { type: 'string' }, 'base-url': { type: 'string' }, timeout: { type: 'string' },
     size: { type: 'string' }, quality: { type: 'string' }, format: { type: 'string' }, 'image-background': { type: 'string' },
+    'image-resolution': { type: 'string' },
     'image-div16': { type: 'string' },
     partials: { type: 'string' }, 'image-model': { type: 'string' }, count: { type: 'string', short: 'n' }, schema: { type: 'string' },
     follow: { type: 'boolean', default: false }, help: { type: 'boolean', short: 'h', default: false }, version: { type: 'boolean', short: 'V', default: false },
