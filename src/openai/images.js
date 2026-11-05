@@ -745,7 +745,7 @@ export function acceptsResponseFormat(model) {
  * @exports
  * @ai.hint pure
  */
-export function generationBody({ model, prompt, size = null, quality = null, n = null, format = null, background = null, reasoning = null, references = null, resolution = null }) {
+export function generationBody({ model, prompt, size = null, quality = null, n = null, format = null, background = null, reasoning = null, references = null, resolution = null, sizeHint = 'auto' }) {
     const body = { model, prompt };
     if (Array.isArray(references) && references.length) {
         body.input_references = references.map((url) => ({ type: 'image_url', image_url: { url } }));
@@ -756,6 +756,7 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
         if (Number.isInteger(n) && n > 1) body.n = n;
         body[imageFormatField(model)] = 'svg';
         //if (acceptsResponseFormat(model)) body.response_format = 'b64_json';
+        body.prompt = withSizeHint(prompt, body, model, sizeHint);
         return body;
     }
     const fields = imageSizeFields(size, model, resolution);
@@ -768,6 +769,9 @@ export function generationBody({ model, prompt, size = null, quality = null, n =
     }
     if (fields.resolution) body.resolution = fields.resolution;
     if (fields.aspect_ratio) body.aspect_ratio = fields.aspect_ratio;
+    // The frame asked for in fields is repeated in the prompt for the families whose gateway is
+    // known to drop those fields: the text survives where the field does not.
+    body.prompt = withSizeHint(prompt, body, model, sizeHint);
     // Recraft swaps `-pro` for non-pro at small sizes; Riverflow keeps its suffix at any size.
     const caps = imageModelProfile(model);
     if (!caps.keepProSuffix) {
@@ -959,4 +963,44 @@ export function sniffImage(buffer) {
     const head = buffer.subarray(0, 64).toString('utf8', 0, 64).replace(/^\s+/, '');
     if (head.startsWith('<svg') || head.startsWith('<?xml')) return { ext: 'svg', mime: 'image/svg+xml' };
     return { ext: 'png', mime: 'image/png' };
+}
+
+/**
+ * Gate: return true when the model family is known to be sensitive to size resolution.
+ * These families have a tuning field (`resolution`/`aspect_ratio`) rather than a raw frame:
+ * the gateway may ignore an unrecognised pixel string and answer with its default square.
+ * @param {object} caps Image capabilities from imageModelProfile.
+ * @returns {boolean}
+ * @ai.hint pure
+ */
+function isSizeFinicky(caps) {
+    return caps.resolutionTiers || caps.routeEditsThroughGeneration || caps.omitSizeOnReject;
+}
+
+/**
+ * Repeat the requested output frame in the prompt text. Gateway proxies sometimes drop the
+ * `size`/`resolution`/`aspect_ratio` fields and answer with their default square; the text
+ * hint survives in those cases. Applied only for families known to be size-sensitive
+ * (resolution-tuned gateways); preset-only models like gpt-image get a clean prompt.
+ * @param {string} prompt Original prompt.
+ * @param {{ size?: string, resolution?: string, aspect_ratio?: string }} fields Computed size fields.
+ * @param {string|null} [model] Model id (null → no profile match).
+ * @param {'auto'|'always'|'never'} [mode] 'auto' = gate on profile; 'always' = always; 'never' = never.
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function withSizeHint(prompt, fields = {}, model = null, mode = 'auto') {
+    const text = String(prompt ?? '');
+    const parts = [];
+    if (fields.size) parts.push(`size ${fields.size}`);
+    if (fields.resolution) parts.push(`resolution ${fields.resolution}`);
+    if (fields.aspect_ratio && fields.aspect_ratio !== 'auto') parts.push(`aspect ratio ${fields.aspect_ratio}`);
+    if (!parts.length) return text;
+    if (mode === 'never') return text;
+    // Our own marker: the hint is added once per rebuilt body, never twice.
+    if (/Requested output:/i.test(text)) return text;
+    const caps = imageModelProfile(model);
+    if (mode === 'auto' && !isSizeFinicky(caps)) return text;
+    return `${text}\n\nRequested output: ${parts.join(', ')}. Keep this exact frame and aspect ratio.`;
 }

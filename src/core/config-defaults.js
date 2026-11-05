@@ -251,7 +251,13 @@ export const defaults = Object.freeze({
          * (gpt-image-2.5 pads; riverflow and most others do not); always and never are
          * the operator override for a gateway whose behaviour the profile does not describe.
          */
-        div16: 'auto',               // auto | always | never
+         div16: 'auto',               // auto | always | never
+         /**
+          * Repeat the output frame in the prompt text for families whose gateway is known to
+          * drop `size`/`resolution`/`aspect_ratio`. 'auto' = only for resolution-tuned gateways
+          * (riverflow, sourceful); 'always' = all models; 'never' = no text hint.
+          */
+        sizeHint: 'auto',              // auto | always | never
         alphaMode: 'auto',           // auto: native alpha, then paint→mask, then contour, then corner fill; mask | contour | flat | off
         paintBackground: true,       // fill the background with the subject color before the matte is drawn (kills the halo)
         alphaFeather: 1,             // px of anti-aliasing on the matte edge; 0 keeps the matte as drawn

@@ -20,7 +20,7 @@ import { CHAT_PATH, chatGaps, createChatStreamReducer, droppedTools, normalizeCh
 import { envValue } from '../core/runtime-env.js';
 import { detectMagick, magickPadImageBytes, magickRemoveImagePadding } from '../agent/image-magick.js';
 import { rasterPadImageBytes, rasterRemoveImagePadding } from '../agent/image-raster.js';
-import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, readImageSize, imageQualityValue, imageReasoningValue, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat } from './images.js';
+import { acceptsResponseFormat, backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelProfile, imageRequestSize, imageSizeAttempts, imageSizeFields, readImageSize, imageQualityValue, imageReasoningValue, imageSources, isImageSizeError, isVectorModel, needsDiv16Padding, normalizeVectorRatio, resolveImageFormat, withSizeHint } from './images.js';
 
 export { ApiError };
 
@@ -137,7 +137,7 @@ export function createClient({
     headers = null, body: bodySetting = null,
     http, retries = defaults.retries, idleTimeoutMs, connectTimeoutMs, maxErrorBytes = defaults.maxErrorBytes,
     maxResponseBytes = defaults.maxResponseBytes, maxEventBytes = defaults.maxEventBytes,
-    magickPath = null, rasterEngine = 'auto', imageDiv16 = null,
+    magickPath = null, rasterEngine = 'auto', imageDiv16 = null, imageSizeHint = 'auto',
     chat: chatSetting = null,
     onEvent: globalOnEvent,
 } = {}) {
@@ -665,7 +665,7 @@ export function createClient({
             for (let index = 0; ; index++) {
                 const requestedSize = index < attempts.length ? attempts[index] : size;
                 try {
-                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, quality, n, format, background, reasoning, references, resolution }), signal });
+                    result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, quality, n, format, background, reasoning, references, resolution, sizeHint: imageSizeHint }), signal });
                     break;
                 } catch (error) {
                     if (index >= attempts.length - 1 || !isImageSizeError(error)) throw error;
@@ -748,6 +748,9 @@ export function createClient({
                     if (reasoningObj) fields.reasoning = JSON.stringify(reasoningObj);
                     //if (acceptsResponseFormat(model)) fields.response_format = 'b64_json';
                 }
+                // The frame this attempt asks for is repeated in the text for the size-sensitive
+                // families, so a gateway that drops the field still gets the requirement.
+                fields.prompt = withSizeHint(prompt, fields, model, imageSizeHint);
                 const form = encodeMultipart({
                     fields,
                     files: requestFiles.map((file) => ({ ...file, field: 'image' })),

@@ -339,7 +339,7 @@ export function createFallbackClient(config, { create = createClient } = {}) {
     };
     /** Chat transport switches, shared by every host this router opens. */
     const primarySpec = primaryBackend(config, 'responses');
-    const rasterOptions = { magickPath: config.magickPath ?? null, rasterEngine: config.image?.rasterEngine ?? 'auto', imageDiv16: config.image?.div16 ?? null };
+    const rasterOptions = { magickPath: config.magickPath ?? null, rasterEngine: config.image?.rasterEngine ?? 'auto', imageDiv16: config.image?.div16 ?? null, imageSizeHint: config.image?.sizeHint ?? 'auto' };
     const primary = create({
         apiKey: primarySpec.apiKey, baseURL: primarySpec.baseURL, headers: primarySpec.headers, body: primarySpec.body,
         chat: chatOptionsFor(config, primarySpec.supports), ...timeouts, ...rasterOptions,
