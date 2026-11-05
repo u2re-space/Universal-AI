@@ -736,7 +736,7 @@ export function acceptsResponseFormat(model) {
  * @exports
  * @ai.hint pure
  */
-export function generationBody({ model, prompt, size = null, complexity = null, n = null, format = null, background = null, references = null, resolution = null, sizeHint = 'auto' }) {
+export function generationBody({ model, prompt, size = null, complexity = null, quality = null, n = null, format = null, background = null, references = null, resolution = null, sizeHint = 'auto' }) {
     const body = { model, prompt };
     if (Array.isArray(references) && references.length) {
         body.input_references = references.map((url) => ({ type: 'image_url', image_url: { url } }));
@@ -773,6 +773,7 @@ export function generationBody({ model, prompt, size = null, complexity = null, 
     }
     const cx = imageComplexityValue({ model, complexity });
     if (cx) body.complexity = cx;
+    body.quality ||= quality || body.complexity || "high";
     if (Number.isInteger(n) && n > 1) body.n = n;
     const fmt = resolveImageFormat({ model, format });
     if (fmt) body[imageFormatField(model)] = fmt;

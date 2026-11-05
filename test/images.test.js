@@ -24,16 +24,16 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }, { hasImage: true }), 'openai/gpt-image-2.6-sunburst');
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/', imageModel: 'custom/model' }, { hasImage: true }), 'custom/model');
     const body = generationBody({ model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', size: 'auto', complexity: 'auto', n: 1, format: 'png', background: 'transparent' });
-    assert.deepEqual(body, { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png' });
+    assert.deepEqual(body, { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png', quality: 'high' });
     assert.deepEqual(
-        generationBody({ model: 'gpt-image-2.6-sunburst', prompt: 'маяк', size: 'auto', complexity: 'auto', n: 1, format: 'png', background: 'transparent' }),
-        { model: 'gpt-image-2.6-sunburst', prompt: 'маяк', output_format: 'png', background: 'transparent'/*, response_format: 'b64_json'*/ },
+        generationBody({ model: 'gpt-image-2.6-sunburst', prompt: 'маяк', size: 'auto', complexity: 'auto', quality: 'high', n: 1, format: 'png', background: 'transparent' }),
+        { model: 'gpt-image-2.6-sunburst', prompt: 'маяк', output_format: 'png', background: 'transparent', quality: 'high'/*, response_format: 'b64_json'*/ },
     );
     assert.equal('partial_images' in body, false);
     // gpt-image-1 always answers in base64 and rejects response_format, so the field stays out.
     assert.deepEqual(
         generationBody({ model: 'gpt-image-1', prompt: 'маяк', format: 'png', background: 'transparent' }),
-        { model: 'gpt-image-1', prompt: 'маяк', output_format: 'png', background: 'transparent' },
+        { model: 'gpt-image-1', prompt: 'маяк', output_format: 'png', background: 'transparent', quality: 'high' },
     );
     assert.equal(supportsTransparentBackground('gpt-image-2.6-sunburst'), true);
     assert.equal(supportsTransparentBackground('gpt-image-1'), true);
@@ -54,7 +54,7 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(backgroundValue({ model: 'recraft/recraft-v4.1-utility', format: 'png', background: 'transparent' }), null);
     assert.deepEqual(
         generationBody({ model: 'gpt-image-2.6-sunburst', prompt: 'маяк', format: 'jpeg', background: 'transparent' }),
-        { model: 'gpt-image-2.6-sunburst', prompt: 'маяк', output_format: 'jpeg', complexity: 'high'/*, response_format: 'b64_json'*/ },
+        { model: 'gpt-image-2.6-sunburst', prompt: 'маяк', output_format: 'jpeg', complexity: 'high', quality: 'high'/*, response_format: 'b64_json'*/ },
     );
     assert.equal(normalizeImageFormat('auto'), null);
     assert.equal(normalizeImageFormat('jpg'), 'jpeg');
@@ -517,7 +517,7 @@ test('images client posts generations and edits and the tool saves the file', as
         assert.match(edited.output, /assets\/edited\.png/);
 
         // The direct recraft call keeps the vendor-specific format field and gets no OpenAI-only background.
-        assert.deepEqual(generations[0], { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png' });
+        assert.deepEqual(generations[0], { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png', quality: "high" });
         // The tool defaults to gpt-image-2.6 for raster work.
         assert.equal(generations[1].model, 'openai/gpt-image-2.6-sunburst');
         assert.equal(generations[1].output_format, 'png');
