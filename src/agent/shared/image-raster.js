@@ -5,7 +5,7 @@
  *          differences, alpha masks, crops, trims, splits, and SVG-to-raster conversion through ReSVG.
  * @depends node:path, node:fs/promises
  * @usedBy agent/tools, agent/image-alpha
- * @exports rasterEngine, rasterInfo, rasterCompare, rasterApplyAlphaMask, rasterLocalAlphaMatte, rasterDetectFakeTransparency, rasterCrop, rasterTrim, rasterSplit, rasterizeSvg, fitBox, frameFor
+ * @exports rasterEngine, rasterInfo, rasterCompare, rasterApplyAlphaMask, rasterColorKeyAlpha, rasterLocalAlphaMatte, rasterDetectFakeTransparency, rasterCrop, rasterTrim, rasterSplit, rasterizeSvg, fitBox, frameFor, decodeRgba
  * @ai.tags sharp, canvas, resvg, image, compare, alpha, crop, svg
  * @ai.hint io
  * @changed 2026-10-28 First version: comparison and matte work moved off the browser and off ImageMagick.
@@ -348,10 +348,13 @@ export async function rasterAlphaSoftShare({ input, cwd = process.cwd(), engine 
 /**
  * Decode one picture into raw RGBA.
  * @param {Buffer} bytes
+ * @param {string} [preferred='auto'] — raster engine preference
+ * @param {number|null} [maxSide=null] — cap the longest side while decoding
  * @returns {Promise<{ width: number, height: number, channels: 4, data: Buffer }>}
+ * @exports
  * @ai.hint io
  */
-async function decodeRgba(bytes, preferred = 'auto', maxSide = null) {
+export async function decodeRgba(bytes, preferred = 'auto', maxSide = null) {
     // SVG is rendered by ReSVG first: a dedicated renderer keeps gradients, masks, and text metrics
     // closer to the document than a raster library's SVG side feature. node-canvas stays the fallback.
     if (preferred !== 'canvas' && isSvgBytes(bytes)) {
@@ -565,6 +568,129 @@ function boxBlur(channel, width, height, radius) {
         }
     }
     return out;
+}
+
+/**
+ * Weighted distance of one pixel to a key color, normalized to 0..255.
+ * Green carries most of the perceived detail, so it weighs double; the scale is chosen so that the
+ * largest possible distance lands exactly on 255.
+ * @param {number} r
+ * @param {number} g
+ * @param {number} b
+ * @param {{ r: number, g: number, b: number }} key
+ * @returns {number}
+ * @ai.hint pure
+ */
+function keyDistance(r, g, b, key) {
+    const dr = r - key.r;
+    const dg = g - key.g;
+    const db = b - key.b;
+    return Math.round(Math.sqrt((2 * dr * dr + 4 * dg * dg + 2 * db * db) / 8));
+}
+
+/**
+ * Read a key color from `#rrggbb`, `rrggbb`, an object, or a triple. Returns null when unparsable.
+ * @param {string|{ r: number, g: number, b: number }|number[]|null|undefined} key
+ * @returns {{ r: number, g: number, b: number }|null}
+ * @ai.hint pure
+ */
+function parseKeyColor(key) {
+    if (!key) return null;
+    if (Array.isArray(key) && key.length >= 3) return { r: Number(key[0]), g: Number(key[1]), b: Number(key[2]) };
+    if (typeof key === 'object') {
+        const { r, g, b } = key;
+        return [r, g, b].every((v) => Number.isFinite(v)) ? { r, g, b } : null;
+    }
+    const match = /^#?([0-9a-f]{6})$/i.exec(String(key).trim());
+    if (!match) return null;
+    const value = parseInt(match[1], 16);
+    return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
+}
+
+/**
+ * Turn a flat background of a known color into a real alpha channel, without a model matte.
+ *
+ * The picture is keyed against the color its background was painted with: the distance map is
+ * flooded inward from the four frame edges, so only background that is reachable from the border
+ * becomes transparent, and an interior patch of the same color survives as part of the subject.
+ * Pixels inside the `low..high` distance band get a smoothstep alpha, which is what keeps the rim
+ * anti-aliased. Because the alpha is derived from the very pixels it is stored beside, the edge of
+ * A cannot drift away from the edge of RGB — the stair-stepping a separately drawn matte leaves.
+ *
+ * `key-miss` is reported when the flood clears nothing: the painted background does not match the
+ * key color, so the caller should fall back to a matte.
+ * @param {{ input: string, output?: string, key: string|{ r: number, g: number, b: number }, cwd: string, signal?: AbortSignal, low?: number, high?: number, feather?: number, engine?: string }} options
+ * @returns {Promise<{ changed: boolean, reason: string, width?: number, height?: number, cleared?: number, key?: { r: number, g: number, b: number } }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function rasterColorKeyAlpha({ input, output = input, key, cwd, signal, low = 16, high = 56, feather = 0, engine = 'auto' }) {
+    const rgb = parseKeyColor(key);
+    if (!rgb) return { changed: false, reason: 'bad-key' };
+    const bytes = await readFile(toAbs(cwd, input)).catch(() => null);
+    if (!bytes) return { changed: false, reason: 'unreadable' };
+    const frame = await decodeRgba(bytes, engine).catch(() => null);
+    if (!frame?.width || !frame.height) return { changed: false, reason: 'unreadable' };
+    signal?.throwIfAborted();
+
+    const { width, height, data } = frame;
+    const total = width * height;
+    // One byte per pixel keeps the map of a 4K frame in megabytes rather than tens of them.
+    const dist = new Uint8Array(total);
+    for (let i = 0, p = 0; i < total; i++, p += 4) dist[i] = keyDistance(data[p], data[p + 1], data[p + 2], rgb);
+
+    const background = new Uint8Array(total);
+    const stack = new Int32Array(total);
+    let top = 0;
+    const push = (idx) => {
+        if (!background[idx] && dist[idx] <= high) {
+            background[idx] = 1;
+            stack[top++] = idx;
+        }
+    };
+    for (let x = 0; x < width; x++) { push(x); push((height - 1) * width + x); }
+    for (let y = 0; y < height; y++) { push(y * width); push(y * width + width - 1); }
+    while (top > 0) {
+        const idx = stack[--top];
+        const x = idx % width;
+        const y = (idx - x) / width;
+        if (x > 0) push(idx - 1);
+        if (x + 1 < width) push(idx + 1);
+        if (y > 0) push(idx - width);
+        if (y + 1 < height) push(idx + width);
+    }
+
+    const lo = Math.max(0, Math.min(254, low));
+    const hi = Math.max(lo + 1, Math.min(255, high));
+    let cleared = 0;
+    for (let i = 0; i < total; i++) {
+        let a;
+        if (!background[i]) a = 255;
+        else if (dist[i] <= lo) a = 0;
+        else {
+            const t = (dist[i] - lo) / (hi - lo);
+            a = Math.round(255 * t * t * (3 - 2 * t));
+        }
+        data[i * 4 + 3] = a;
+        if (a < 10) cleared++;
+    }
+    const share = cleared / total;
+    // Nothing cleared means the frame does not carry the key color at its border: the paint pass
+    // answered with something else, so a model matte is the better bet.
+    if (share < 0.005) return { changed: false, reason: 'key-miss', width, height, cleared: Number(share.toFixed(4)), key: rgb };
+
+    const smooth = Number.isFinite(feather) ? Math.max(0, Math.min(8, feather)) : 0;
+    if (smooth > 0) {
+        const alpha = Buffer.alloc(total);
+        for (let i = 0; i < total; i++) alpha[i] = data[i * 4 + 3];
+        const blurred = boxBlur(alpha, width, height, Math.round(smooth));
+        for (let i = 0; i < total; i++) data[i * 4 + 3] = blurred[i];
+    }
+
+    const outAbs = toAbs(cwd, output);
+    await mkdir(path.dirname(outAbs), { recursive: true });
+    await writeFile(outAbs, await encodePng({ width, height, channels: 4, data }, engine));
+    return { changed: true, reason: 'color-key', width, height, cleared: Number(share.toFixed(4)), key: rgb, feathered: smooth };
 }
 
 /**

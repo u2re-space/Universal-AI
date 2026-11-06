@@ -11,7 +11,7 @@ import { rasterInfo, rasterIsOpaque, rasterPadImageBytes } from '../src/agent/im
 import { runProgram } from '../src/agent/shell.js';
 import { imageModelFamily as sharedImageModelFamily, IMAGE_SIZES as SHARED_IMAGE_SIZES, VECTOR_RATIOS as SHARED_VECTOR_RATIOS } from '../src/openai/shared/images.js';
 import { imageModelProfile as agentImageModelProfile, imageSizeAttempts as agentImageSizeAttempts } from '../src/agent/riverflow/images.js';
-import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFamily, imageModelFor, imageModelProfile, imagePayloads, imageComplexityValue, imageRequestSize, imageSizeAttempts, imageSizeFields, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_RIVERFLOW_MODEL, PROXY_VECTOR_MODEL, VECTOR_RATIOS, readImageSize } from '../src/openai/images.js';
+import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFamily, imageModelFor, imageModelProfile, imagePayloads, imageComplexityValue, imageRequestSize, imageSizeAttempts, imageSizeFields, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_RIVERFLOW_MODEL, PROXY_VECTOR_MODEL, VECTOR_RATIOS, readImageSize, MIN_IMAGE_PIXELS, MAX_IMAGE_PIXELS, MAX_IMAGE_EDGE, MAX_IMAGE_RATIO } from '../src/openai/images.js';
 import { builtinTools } from '../src/agent/loop.js';
 import { enabledToolNames } from '../src/agent/tool-specs.js';
 import { createToolset } from '../src/agent/tools.js';
@@ -108,6 +108,45 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(builtinTools(proxy, { images: imageTransport(proxy) !== 'images' }).some((tool) => tool.type === 'image_generation'), false);
     assert.ok(enabledToolNames({ images: true, fs: true }, { imageApi: true }).includes('generate_image'));
     assert.ok(enabledToolNames({ images: true, fs: true }, { imageApi: true }).includes('edit_image'));
+});
+
+test('frame limits come from the model profile, not from a hardcoded model id', () => {
+    // The gpt-image minimum area belongs to the gpt-image family; riverflow takes a far smaller frame.
+    const riverflowLimits = { minPixels: 16_384, maxPixels: 16_777_216, maxEdge: 4096, maxRatio: 16 };
+    const gptLimits = { minPixels: 655_360, maxPixels: 8_294_400, maxEdge: 3840, maxRatio: 3 };
+    const read = (model) => ({
+        minPixels: MIN_IMAGE_PIXELS(model),
+        maxPixels: MAX_IMAGE_PIXELS(model),
+        maxEdge: MAX_IMAGE_EDGE(model),
+        maxRatio: MAX_IMAGE_RATIO(model),
+    });
+
+    assert.deepEqual(read('sourceful/riverflow-v2.6-pro'), riverflowLimits);
+    // Any riverflow id gets the family limits: the old check matched only the exact `-v2.6-pro` suffix.
+    assert.deepEqual(read('riverflow-v2.6-pro'), riverflowLimits);
+    assert.deepEqual(read('sourceful/riverflow-v2.5-pro'), riverflowLimits);
+
+    assert.deepEqual(read('openai/gpt-image-2.6-sunburst'), gptLimits);
+    assert.deepEqual(read('gpt-image-2.6-sunburst'), gptLimits);
+    // A model no profile describes keeps the gpt-image defaults.
+    assert.deepEqual(read('recraft/recraft-v4.1-pro-vector'), gptLimits);
+    assert.deepEqual(read(null), gptLimits);
+
+    // The profile object carries the same numbers the accessors return: one table for both.
+    for (const model of ['sourceful/riverflow-v2.6-pro', 'openai/gpt-image-2.6-sunburst', null]) {
+        const profile = imageModelProfile(model);
+        assert.deepEqual(read(model), {
+            minPixels: profile.minPixels, maxPixels: profile.maxPixels,
+            maxEdge: profile.maxEdge, maxRatio: profile.maxRatio,
+        }, `the profile and the accessors must agree for ${model}`);
+    }
+
+    // The limits actually drive the frame a request gets: 128x128 is legal riverflow, too small gpt-image.
+    assert.equal(sameAspectImageSize('128x128', PROXY_RIVERFLOW_MODEL), null);
+    assert.notEqual(sameAspectImageSize('128x128', 'openai/gpt-image-2.6-sunburst'), null);
+    // riverflow takes a 16:1 frame; gpt-image refuses anything past 3:1.
+    assert.equal(sameAspectImageSize('1600x100', 'openai/gpt-image-2.6-sunburst'), null);
+    assert.notEqual(sameAspectImageSize('1600x100', PROXY_RIVERFLOW_MODEL), null);
 });
 
 test('Riverflow keeps custom sizes, maps resolution/aspect_ratio, keeps -pro suffix', () => {

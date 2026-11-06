@@ -67,6 +67,22 @@ export const BACKGROUND_PAINT_PROMPT = 'You are creating the RGB channel for a t
     + 'This flat color will serve as the RGB base that the A-mask composites over: no gradients, no texture, no shadow, no new objects.';
 
 /**
+ * Paint prompt with an explicit hex color instead of "dominant color of the subject".
+ *
+ * Used when the model does not reliably pick a color on its own (e.g. riverflow).
+ * @param {string} hex — `#RRGGBB`
+ * @returns {string}
+ * @ai.hint pure
+ */
+export function paintPromptWithColor(hex) {
+    return 'You are creating the RGB channel for a two-part RGBA composition (RGB + A-mask = RGBA). '
+        + 'Fill the whole background with the solid color ' + hex + '. '
+        + 'Do not change the subject: keep every pixel of it identical, in the same position, with the same proportions and framing. '
+        + 'Paint a single flat color only where the background is now — including any checkerboard, grid, or pattern that imitates transparency. '
+        + 'This flat color will serve as the RGB base that the A-mask composites over: no gradients, no texture, no shadow, no new objects.';
+}
+
+/**
  * Prompt for the background paint pass. The background becomes the dominant color of the subject,
  * so the semi-transparent pixels an anti-aliased matte leaves behind carry the object color instead
  * of white or a checkerboard. That is what removes the halo around a cut-out logo or badge.
@@ -160,12 +176,18 @@ export const PROXY_RIVERFLOW_MODEL = 'sourceful/riverflow-v2.6-pro';
  *   `complexity`              — complexity tier the model understands (e.g. 'high' for riverflow);
  *   `routeEditsThroughGeneration` — /images/edits drops the size and tuning fields for this
  *                     family; send the source as `input_references` on /images/generations instead.
+ *   `minPixels`/`maxPixels`   — the accepted frame area in pixels; a frame outside the range is
+ *                     rescaled to the nearest same-ratio size that fits;
+ *   `maxEdge`                 — longest side the model accepts;
+ *   `maxRatio`                — widest aspect ratio (longest side over shortest).
+ * The defaults are the OpenAI gpt-image numbers, which is what a model nobody described gets.
  */
 export const IMAGE_CAPABILITIES = Object.freeze({
     customSizes: false, div16Padding: false, keepProSuffix: false, omitSizeOnReject: false,
     complexity: null, routeEditsThroughGeneration: false, resolutionTiers: false,
     /** The gateway answers `background: transparent` with a painted plate instead of an alpha channel. */
     paintsFakeTransparency: false,
+    minPixels: 655_360, maxPixels: 8_294_400, maxEdge: 3840, maxRatio: 3,
 });
 
 /**
@@ -179,12 +201,29 @@ export const IMAGE_CAPABILITIES = Object.freeze({
  * resolution, aspect_ratio, quality and reasoning fields for this family and answers with the
  * gateway default square. The source picture travels as `input_references` on /images/generations
  * instead, where every field is honored.
+ * Riverflow takes a far smaller frame than gpt-image (128x128 is already legal) and a much wider
+ * ratio, so its limits are spelled out here rather than guessed from the model id.
  */
 export const IMAGE_MODEL_PROFILES = Object.freeze([
-    Object.freeze({ match: GPT_IMAGE_26, customSizes: true, div16Padding: true, complexity: 'high' }),
+    Object.freeze({ match: GPT_IMAGE_26, customSizes: true, div16Padding: true, complexity: 'high', minPixels: 655_360, maxPixels: 8_294_400, maxEdge: 3840, maxRatio: 3 }),
     Object.freeze({ match: GPT_IMAGE_25, customSizes: true, div16Padding: true }),
-    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true, complexity: 'high', routeEditsThroughGeneration: true, resolutionTiers: true, paintsFakeTransparency: true }),
+    Object.freeze({ match: RIVERFLOW, customSizes: true, keepProSuffix: true, omitSizeOnReject: true, complexity: 'high', routeEditsThroughGeneration: true, resolutionTiers: true, paintsFakeTransparency: true, minPixels: 16_384, maxPixels: 16_777_216, maxEdge: 4096, maxRatio: 16 }),
 ]);
+
+/**
+ * Capabilities of one image model id, merged over the defaults.
+ * @param {string | null | undefined} model
+ * @returns {{ customSizes: boolean, div16Padding: boolean, keepProSuffix: boolean, omitSizeOnReject: boolean, complexity: string|null, routeEditsThroughGeneration: boolean, resolutionTiers: boolean, paintsFakeTransparency: boolean, minPixels: number, maxPixels: number, maxEdge: number, maxRatio: number }}
+ * @exports
+ * @ai.hint pure
+ */
+export function imageModelProfile(model) {
+    const name = String(model ?? '').trim();
+    const rule = IMAGE_MODEL_PROFILES.find((p) => p.match.test(name));
+    if (!rule) return { ...IMAGE_CAPABILITIES };
+    const { match, ...caps } = rule;
+    return { ...IMAGE_CAPABILITIES, ...caps };
+}
 
 
 /**
@@ -229,10 +268,17 @@ export const IMAGE_SIZES = Object.freeze(['1024x1024', '1024x1536', '1536x1024']
 export const VECTOR_RATIOS = Object.freeze(['1:1', '4:3', '3:4', '16:9', '9:16', 'auto']);
 
 
-export const MIN_IMAGE_PIXELS = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?16_384:655_360;
-export const MAX_IMAGE_PIXELS = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?16_777_216:8_294_400;
-export const MAX_IMAGE_EDGE   = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?4096:3840;
-export const MAX_IMAGE_RATIO  = (model = null)=>model?.trim?.()?.endsWith?.("riverflow-v2.6-pro")?16:3;
+/**
+ * Frame limits of one model, read from its profile. Kept as functions because the call sites ask
+ * for a limit by model id; the numbers themselves live in `IMAGE_MODEL_PROFILES`.
+ * @param {string|null|undefined} model
+ * @returns {number}
+ * @ai.hint pure
+ */
+export const MIN_IMAGE_PIXELS = (model = null) => imageModelProfile(model).minPixels;
+export const MAX_IMAGE_PIXELS = (model = null) => imageModelProfile(model).maxPixels;
+export const MAX_IMAGE_EDGE   = (model = null) => imageModelProfile(model).maxEdge;
+export const MAX_IMAGE_RATIO  = (model = null) => imageModelProfile(model).maxRatio;
 
 /** Aspect ratios accepted by Riverflow (Sourceful). */
 export const RIVERFLOW_RATIOS = Object.freeze(['1:1', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '16:9', '9:16', '21:9', 'auto']);

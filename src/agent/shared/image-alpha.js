@@ -5,7 +5,9 @@
  *          subject color, draw an anti-aliased matte from the clean source, and merge the matte as alpha.
  * @depends node:path, node:fs/promises, agent/image-magick, openai/images
  * @usedBy commands/image, agent/image-tools
- * @exports ALPHA_MASK_PROMPT, BACKGROUND_PAINT_PROMPT, applyGeneratedAlphaMask, hasRealAlpha
+ * @exports ALPHA_MASK_PROMPT, BACKGROUND_PAINT_PROMPT, applyGeneratedAlphaMask, hasRealAlpha, frameFor,
+ *          judgeAlphaShares, clearedShare, softShare, askModel, isRaster, isFakePlate, localMatte,
+ *          flatAlphaFallback
  * @ai.tags images, alpha, imagemagick
  * @ai.hint io
  * @changed 2026-10-23 Paint + anti-aliased matte pipeline; the matte is drawn from the clean source,
@@ -27,7 +29,7 @@ import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, imageModelProfile, sniffImage } 
  * @returns {Promise<number|null>}
  * @ai.hint io
  */
-async function clearedShare({ abs, cwd = path.dirname(abs), raster = null, engine = 'auto', exe = null, signal }) {
+export async function clearedShare({ abs, cwd = path.dirname(abs), raster = null, engine = 'auto', exe = null, signal }) {
     if (raster) return await rasterAlphaShare({ input: abs, cwd, engine }).catch(() => null);
     if (exe) return await magickAlphaShare({ exe, input: abs, cwd, signal });
     return null;
@@ -39,7 +41,7 @@ async function clearedShare({ abs, cwd = path.dirname(abs), raster = null, engin
  * @returns {Promise<number|null>}
  * @ai.hint io
  */
-async function softShare({ abs, cwd = path.dirname(abs), raster = null, engine = 'auto', exe = null, signal }) {
+export async function softShare({ abs, cwd = path.dirname(abs), raster = null, engine = 'auto', exe = null, signal }) {
     if (raster) return await rasterAlphaSoftShare({ input: abs, cwd, engine }).catch(() => null);
     if (exe) return await magickAlphaSoftShare({ exe, input: abs, cwd, signal });
     return null;
@@ -58,7 +60,7 @@ async function softShare({ abs, cwd = path.dirname(abs), raster = null, engine =
  * @returns {Promise<{ usable: boolean, cleared: number|null, soft: number|null }>}
  * @ai.hint io
  */
-async function judgeAlphaShares(options) {
+export async function judgeAlphaShares(options) {
     const { totalPixels = Infinity } = options;
     const [cleared, rawSoft] = await Promise.all([clearedShare(options), softShare(options)]);
     const soft = totalPixels < MIN_SOFT_PIXELS ? null : rawSoft;
@@ -157,7 +159,7 @@ export function frameFor(info, model = null) {
  * @returns {Promise<{ bytes: Buffer, ext: string, mime: string, model: string }|{ error: Error }|null>}
  * @ai.hint io
  */
-async function askModel({ client, config = null, file, prompt, signal, model = null }) {
+export async function askModel({ client, config = null, file, prompt, signal, model = null }) {
     const abs = path.resolve(file);
     const bytes = await readFile(abs).catch(() => null);
     if (!bytes) return null;
@@ -194,7 +196,7 @@ async function askModel({ client, config = null, file, prompt, signal, model = n
  * @returns {boolean}
  * @ai.hint pure
  */
-function isRaster(reply) { return Boolean(reply?.bytes); }
+export function isRaster(reply) { return Boolean(reply?.bytes); }
 
 /**
  * Build a real alpha channel for a saved picture.
@@ -348,7 +350,7 @@ export async function applyGeneratedAlphaMask({
  * @returns {Promise<{ changed: boolean, reason: string }>}
  * @ai.hint io
  */
-async function flatAlphaFallback({ raster, engine, file, cwd, signal, feather }) {
+export async function flatAlphaFallback({ raster, engine, file, cwd, signal, feather }) {
     const mask = path.join(cwd, `.tmp-alpha-flat-${process.pid}-${Date.now()}.png`);
     try {
         const built = await rasterLocalAlphaMatte({ input: file, output: mask, cwd, signal, mode: 'contour', engine });
@@ -370,7 +372,7 @@ async function flatAlphaFallback({ raster, engine, file, cwd, signal, feather })
  * @returns {Promise<boolean>}
  * @ai.hint io
  */
-async function isFakePlate({ raster, engine = 'auto', exe, base, cwd, signal }) {
+export async function isFakePlate({ raster, engine = 'auto', exe, base, cwd, signal }) {
     if (raster) {
         const local = await rasterDetectFakeTransparency({ input: base, cwd, engine, signal }).catch(() => null);
         if (local) return local.fake;
@@ -389,7 +391,7 @@ async function isFakePlate({ raster, engine = 'auto', exe, base, cwd, signal }) 
  * @returns {Promise<{ mask: string, reason: string }|null>}
  * @ai.hint io
  */
-async function localMatte({ raster, engine = 'auto', exe, base, cwd, signal, fake = false }) {
+export async function localMatte({ raster, engine = 'auto', exe, base, cwd, signal, fake = false }) {
     const order = fake
         ? [['saturation', raster ? rasterLocalAlphaMatte : magickSaturationAlphaMask], ['contour', raster ? rasterLocalAlphaMatte : magickContourAlphaMask]]
         : [['contour', raster ? rasterLocalAlphaMatte : magickContourAlphaMask], ['saturation', raster ? rasterLocalAlphaMatte : magickSaturationAlphaMask]];

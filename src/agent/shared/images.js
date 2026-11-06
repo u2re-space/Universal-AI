@@ -6,12 +6,13 @@
  */
 import { randomBytes } from 'node:crypto';
 import {
-    IMAGE_SIZES, VECTOR_RATIOS, IMAGE_CAPABILITIES, IMAGE_MODEL_PROFILES, IMAGE_SIZES_BY_RESOLUTION,
+    IMAGE_SIZES, VECTOR_RATIOS, IMAGE_SIZES_BY_RESOLUTION, imageModelProfile,
     RIVERFLOW, RIVERFLOW_RATIOS, RIVERFLOW_RESOLUTIONS, MIN_IMAGE_PIXELS, MAX_IMAGE_PIXELS, MAX_IMAGE_EDGE, MAX_IMAGE_RATIO,
     GPT_IMAGE_25, GPT_IMAGE_26, PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, PROXY_RIVERFLOW_MODEL
 } from './constants.js';
 
-export { IMAGE_SIZES, VECTOR_RATIOS, RIVERFLOW_RATIOS, RIVERFLOW_RESOLUTIONS,
+export { IMAGE_SIZES, VECTOR_RATIOS, RIVERFLOW_RATIOS, RIVERFLOW_RESOLUTIONS, imageModelProfile,
+    MIN_IMAGE_PIXELS, MAX_IMAGE_PIXELS, MAX_IMAGE_EDGE, MAX_IMAGE_RATIO,
     PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, PROXY_RIVERFLOW_MODEL };
 
 /** True when the model id names a vector (SVG) variant. */
@@ -145,21 +146,6 @@ export function sniffImage(buffer) {
     return { ext: 'png', mime: 'image/png' };
 }
 
-
-/**
- * Capabilities of one image model id, merged over the defaults.
- * @param {string | null | undefined} model
- * @returns {{ customSizes: boolean, div16Padding: boolean, keepProSuffix: boolean, omitSizeOnReject: boolean, complexity: string|null, routeEditsThroughGeneration: boolean, resolutionTiers: boolean, paintsFakeTransparency: boolean }}
- * @exports
- * @ai.hint pure
- */
-export function imageModelProfile(model) {
-    const name = String(model ?? '').trim();
-    const rule = IMAGE_MODEL_PROFILES.find((p) => p.match.test(name));
-    if (!rule) return { ...IMAGE_CAPABILITIES };
-    const { match, ...caps } = rule;
-    return { ...IMAGE_CAPABILITIES, ...caps };
-}
 
 /**
  * Whether /images/edits inputs for this model need the 16-pixel padding. `auto` follows the model
