@@ -67,7 +67,7 @@ const MODEL_MATES = new Set(['auto', 'mask']);
  * @returns {string|null}
  * @ai.hint pure
  */
-function frameFor(info, model = null) {
+export function frameFor(info, model = null) {
     if (!info?.width || !info?.height) return null;
     if (imageModelProfile(model).customSizes) return `${info.width}x${info.height}`;
     if (info.width === info.height) return '1024x1024';

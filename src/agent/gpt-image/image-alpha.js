@@ -20,6 +20,7 @@ import { detectMagick, ensureTransparentBackground, magickApplyAlphaMask, magick
 import { rasterApplyAlphaMask, rasterDetectFakeTransparency, rasterEngine, rasterInfo, rasterIsOpaque, rasterLocalAlphaMatte } from '../shared/image-raster.js';
 import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, sniffImage } from '../../openai/images.js';
 import { hasRealAlpha as hasUsableAlpha } from '../riverflow/image-alpha.js';
+import { frameFor } from '../shared/image-alpha.js';
 
 /**
  * Pick the frame that keeps the source aspect ratio, so the matte is not squeezed into a square.
@@ -27,11 +28,11 @@ import { hasRealAlpha as hasUsableAlpha } from '../riverflow/image-alpha.js';
  * @returns {string|null}
  * @ai.hint pure
  */
-function frameFor(info) {
+/*function frameFor(info) {
     if (!info?.width || !info?.height) return null;
     if (info.width === info.height) return '1024x1024';
     return info.height > info.width ? '1024x1536' : '1536x1024';
-}
+}*/
 
 /**
  * Send one picture to the technical edit model and return the decoded reply when it is a readable
