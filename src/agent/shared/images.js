@@ -7,38 +7,18 @@
 import { randomBytes } from 'node:crypto';
 import {
     IMAGE_SIZES, VECTOR_RATIOS, IMAGE_CAPABILITIES, IMAGE_MODEL_PROFILES, IMAGE_SIZES_BY_RESOLUTION,
-    RIVERFLOW, RIVERFLOW_RATIOS, MIN_IMAGE_PIXELS, MAX_IMAGE_PIXELS, MAX_IMAGE_EDGE, MAX_IMAGE_RATIO,
-    GPT_IMAGE_25, GPT_IMAGE_26
+    RIVERFLOW, RIVERFLOW_RATIOS, RIVERFLOW_RESOLUTIONS, MIN_IMAGE_PIXELS, MAX_IMAGE_PIXELS, MAX_IMAGE_EDGE, MAX_IMAGE_RATIO,
+    GPT_IMAGE_25, GPT_IMAGE_26, PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, PROXY_RIVERFLOW_MODEL
 } from './constants.js';
+
+export { IMAGE_SIZES, VECTOR_RATIOS, RIVERFLOW_RATIOS, RIVERFLOW_RESOLUTIONS,
+    PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, PROXY_RIVERFLOW_MODEL };
 
 /** True when the model id names a vector (SVG) variant. */
 export function isVectorModel(model) {
     return /(?:^|[-/])vector\b/i.test(String(model ?? '').trim());
 }
 
-/** Map a requested vector aspect ratio to the nearest supported ratio. */
-export function normalizeVectorRatio(ratio) {
-    const value = String(ratio ?? '').trim().toLowerCase();
-    if (!value || value === 'auto') return null;
-    if (VECTOR_RATIOS.includes(value)) return value;
-    const word = value === 'square' ? '1:1' : value === 'portrait' ? '3:4' : value === 'landscape' ? '4:3' : null;
-    if (word) return word;
-    const match = /^(\d+(?:\.\d+)?)\s*[:x]\s*(\d+(?:\.\d+)?)$/.exec(value);
-    if (!match) return null;
-    const width = Number(match[1]);
-    const height = Number(match[2]);
-    if (!width || !height) return null;
-    const wanted = Math.log(width / height);
-    let best = '1:1';
-    let bestDelta = Infinity;
-    for (const candidate of VECTOR_RATIOS) {
-        if (candidate === 'auto') continue;
-        const [cw, ch] = candidate.split(':').map(Number);
-        const delta = Math.abs(Math.log(cw / ch) - wanted);
-        if (delta < bestDelta) { bestDelta = delta; best = candidate; }
-    }
-    return best;
-}
 
 /** Normalize an image format; auto and empty values omit the field. */
 export function normalizeImageFormat(format) {
@@ -581,4 +561,184 @@ export function imageSizeAttempts(size, model, resolution = null) {
     }
     if (profile.omitSizeOnReject) attempts.push(null);
     return attempts;
+}
+
+/** Resolve the image model family used by agent-level dispatchers. */
+export function imageModelFamily(model) {
+    const name = String(model ?? '').trim();
+    if (/^(?:openai\/)?gpt-image-/i.test(name)) return 'gpt-image';
+    if (/(?:^|\/)riverflow-/i.test(name)) return 'riverflow';
+    return 'other';
+}
+
+/** Map a requested vector aspect ratio to the nearest supported ratio. */
+export function normalizeVectorRatio(ratio) {
+    const value = String(ratio ?? '').trim().toLowerCase();
+    if (!value || value === 'auto') return null;
+    if (VECTOR_RATIOS.includes(value)) return value;
+    const word = value === 'square' ? '1:1' : value === 'portrait' ? '3:4' : value === 'landscape' ? '4:3' : null;
+    if (word) return word;
+    const match = /^(\d+(?:\.\d+)?)\s*[:x]\s*(\d+(?:\.\d+)?)$/.exec(value);
+    if (!match) return null;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!width || !height) return null;
+    const wanted = Math.log(width / height);
+    let best = '1:1';
+    let bestDelta = Infinity;
+    for (const candidate of VECTOR_RATIOS) {
+        if (candidate === 'auto') continue;
+        const [cw, ch] = candidate.split(':').map(Number);
+        const delta = Math.abs(Math.log(cw / ch) - wanted);
+        if (delta < bestDelta) { bestDelta = delta; best = candidate; }
+    }
+    return best;
+}
+
+/**
+ * Whether a model accepts the `response_format` field. `gpt-image-1` rejects it and always answers
+ * in base64, and vendor models that take `image_format` do not document it at all, so a strict
+ * gateway answers 400 for the whole request. Only the newer OpenAI image models are asked for it.
+ * @param {string | null | undefined} model
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+
+/**
+ * OpenAI gpt-image models accept `background: transparent`; gpt-image-2 is the exception and
+ * rejects the field, so it is treated as an opaque-only model. Recraft and most other vendors
+ * render an opaque background. The caller uses this to decide whether native alpha is possible
+ * or a local background removal is needed.
+ * @param {string | null | undefined} model
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+
+/**
+ * Value for the `background` field, or null to omit it. Transparent output needs a model that
+ * accepts the field and a format that can store alpha: the API rejects transparent JPEG, so that
+ * combination falls back to a local background removal (reported by the caller).
+ * @param {{ model: string, format?: string | null, background?: string | null }} request
+ * @returns {'transparent' | 'opaque' | null}
+ * @exports
+ * @ai.hint pure
+ */
+
+
+/** Select whether image requests use the Images API or Responses image_generation tool. */
+export function imageTransport(config) {
+    const chosen = config?.image?.transport;
+    if (chosen === 'images' || chosen === 'responses') return chosen;
+    if (Array.isArray(config?.imagesBackends) && config.imagesBackends.length) return 'images';
+    const declared = Array.isArray(config?.backends) ? config.backends : [];
+    const primary = String(config?.baseURL ?? '').replace(/\/+$/, '');
+    const entry = declared.find((item) => String(item?.baseURL ?? '').replace(/\/+$/, '') === primary);
+    const wants = (supports) => supports?.images === true || supports?.imageAPI === true;
+    if (wants(entry?.supports)) return 'images';
+    try {
+        const host = new URL(config?.baseURL ?? '').hostname;
+        if (host === 'proxyapi.ru' || host.endsWith('.proxyapi.ru')) return 'images';
+    } catch { /* an unusable base URL stays on the Responses tool */ }
+    if (primary.startsWith('https://api.openai.com')) return 'responses';
+    return 'images';
+}
+
+/** Resolve an explicit or default model id for an Images API request. */
+export function imageModelFor(config, { hasImage = false } = {}) {
+    if (config?.imageModel) return config.imageModel;
+    if (imageTransport(config) !== 'images') return null;
+    return hasImage ? PROXY_IMAGE_EDIT_MODEL : PROXY_IMAGE_MODEL;
+}
+
+/** Field name used by a model for its requested image format. */
+export function imageFormatField(model) {
+    const name = String(model ?? '').trim();
+    if (/^(?:openai\/)?gpt-image-/i.test(name) || RIVERFLOW.test(name)) return 'output_format';
+    return 'image_format';
+}
+
+/** Resolve the requested format, defaulting OpenAI image models to PNG. */
+export function resolveImageFormat({ model, format = null }) {
+    const normalized = normalizeImageFormat(format);
+    if (normalized) return normalized;
+    return imageFormatField(model) === 'output_format' ? 'png' : null;
+}
+
+/** True when a model can return native transparent output. */
+export function supportsTransparentBackground(model) {
+    const version = /^(?:openai\/)?gpt-image-(\d+(?:\.\d+)?)/i.exec(String(model ?? '').trim())?.[1];
+    return (Boolean(version) && version !== '2') || /riverflow-v2\.6-pro$/i.test(String(model ?? '').trim());
+}
+
+/** Return the supported background setting, or null when it cannot be sent. */
+export function backgroundValue({ model, format = null, background = null }) {
+    if (background !== 'transparent' && background !== 'opaque') return null;
+    if (!supportsTransparentBackground(model)) return null;
+    if (background === 'transparent' && normalizeImageFormat(format) === 'jpeg') return null;
+    return background;
+}
+
+/** Whether a model accepts the optional response_format parameter. */
+export function acceptsResponseFormat(model) {
+    const name = String(model ?? '').trim();
+    if (!/^(?:openai\/)?gpt-image-/i.test(name)) return false;
+    const version = /^(?:openai\/)?gpt-image-(\d+(?:\.\d+)?)/i.exec(name)?.[1];
+    return Boolean(version) && version !== '1';
+}
+
+function isSizeFinicky(caps) {
+    return caps.resolutionTiers || caps.routeEditsThroughGeneration || caps.omitSizeOnReject;
+}
+
+/** Add a size instruction only for image families whose gateway is known to discard size fields. */
+export function withSizeHint(prompt, fields = {}, model = null, mode = 'auto') {
+    const text = String(prompt ?? '');
+    const parts = [];
+    if (fields.size) parts.push(`size ${fields.size}`);
+    if (fields.resolution) parts.push(`resolution ${fields.resolution}`);
+    if (fields.aspect_ratio && fields.aspect_ratio !== 'auto') parts.push(`aspect ratio ${fields.aspect_ratio}`);
+    if (!parts.length || mode === 'never' || /Requested output:/i.test(text)) return text;
+    if (mode === 'auto' && !isSizeFinicky(imageModelProfile(model))) return text;
+    return `${text}\n\nRequested output: ${parts.join(', ')}. Keep this exact frame and aspect ratio.`;
+}
+
+/** Build the JSON body accepted by /images/generations for the selected model family. */
+export function generationBody({ model, prompt, size = null, complexity = null, n = null, format = null,
+    background = null, references = null, resolution = null, sizeHint = 'auto' }) {
+    const body = { model, prompt };
+    if (Array.isArray(references) && references.length) {
+        body.input_references = references.map((url) => ({ type: 'image_url', image_url: { url } }));
+    }
+    if (isVectorModel(model)) {
+        const aspect = normalizeVectorRatio(size);
+        if (aspect) body.aspect_ratio = aspect;
+        if (Number.isInteger(n) && n > 1) body.n = n;
+        body[imageFormatField(model)] = 'svg';
+        body.prompt = withSizeHint(prompt, body, model, sizeHint);
+        return body;
+    }
+    const fields = imageSizeFields(size, model, resolution);
+    if (fields.size) body.size = fields.size;
+    else if (!fields.resolution && !fields.aspect_ratio) {
+        const frame = imageRequestSize(size, model, resolution);
+        if (frame) body.size = frame;
+    }
+    if (fields.resolution) body.resolution = fields.resolution;
+    if (fields.aspect_ratio) body.aspect_ratio = fields.aspect_ratio;
+    body.prompt = withSizeHint(prompt, body, model, sizeHint);
+    const profile = imageModelProfile(model);
+    if (!profile.keepProSuffix) {
+        const sizePair = body.size?.split('x').map((part) => parseInt(part || '0', 10));
+        if (sizePair?.[0] <= 1024 && sizePair?.[1] <= 1024) body.model = body.model?.replace(/\-pro$/, '') || body.model;
+    }
+    const cx = imageComplexityValue({ model, complexity });
+    if (cx) body.complexity = cx;
+    if (Number.isInteger(n) && n > 1) body.n = n;
+    const fmt = resolveImageFormat({ model, format });
+    if (fmt) body[imageFormatField(model)] = fmt;
+    const backgroundField = backgroundValue({ model, format: fmt, background });
+    if (backgroundField) body.background = backgroundField;
+    return body;
 }
