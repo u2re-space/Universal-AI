@@ -9,6 +9,8 @@ import { createClient } from '../src/openai/client.js';
 import { TINY_PNG } from './helpers/mock-server.js';
 import { rasterInfo, rasterIsOpaque, rasterPadImageBytes } from '../src/agent/image-raster.js';
 import { runProgram } from '../src/agent/shell.js';
+import { imageModelFamily as sharedImageModelFamily, IMAGE_SIZES as SHARED_IMAGE_SIZES, VECTOR_RATIOS as SHARED_VECTOR_RATIOS } from '../src/openai/shared/images.js';
+import { imageModelProfile as agentImageModelProfile, imageSizeAttempts as agentImageSizeAttempts } from '../src/agent/riverflow/images.js';
 import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFamily, imageModelFor, imageModelProfile, imagePayloads, imageComplexityValue, imageRequestSize, imageSizeAttempts, imageSizeFields, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_RIVERFLOW_MODEL, PROXY_VECTOR_MODEL, VECTOR_RATIOS, readImageSize } from '../src/openai/images.js';
 import { builtinTools } from '../src/agent/loop.js';
 import { enabledToolNames } from '../src/agent/tool-specs.js';
@@ -19,6 +21,11 @@ test('image model family keeps GPT Image and Riverflow independent', () => {
     assert.equal(imageModelFamily('openai/gpt-image-2.6-sunburst'), 'gpt-image');
     assert.equal(imageModelFamily('sourceful/riverflow-v2.6-pro'), 'riverflow');
     assert.equal(imageModelFamily('recraft/recraft-v4.1-pro-vector'), 'other');
+    assert.equal(sharedImageModelFamily('sourceful/riverflow-v2.6-pro'), 'riverflow');
+    assert.deepEqual(SHARED_IMAGE_SIZES, ['1024x1024', '1024x1536', '1536x1024']);
+    assert.ok(SHARED_VECTOR_RATIOS.includes('auto'));
+    assert.deepEqual(agentImageModelProfile('sourceful/riverflow-v2.6-pro'), imageModelProfile('sourceful/riverflow-v2.6-pro'));
+    assert.deepEqual(agentImageSizeAttempts('273x324', 'sourceful/riverflow-v2.6-pro'), imageSizeAttempts('273x324', 'sourceful/riverflow-v2.6-pro'));
 });
 
 test('proxyapi uses the images API and omits Responses-only image fields', () => {

@@ -12,24 +12,13 @@
  */
 
 import path from 'node:path';
+import { CUT_OUT, DEFAULT_VECTOR_PROMPT, FLAT_PLATE_NOTE, SOURCE_GUARD, VECTOR_HINT, VECTOR_SOURCE_EXT } from '../shared/constants.js';
 import { mkdir, readFile, writeFile, stat, unlink, readdir } from 'node:fs/promises';
 import { resolveInside } from '../paths.js';
-import { detectMagick, magickConvert, magickIsOpaque, magickRemoveFlatBackground, assessVectorSuitability, magickTrimImage } from './image-magick.js';
+import { detectMagick, magickConvert, magickIsOpaque, magickRemoveFlatBackground, assessVectorSuitability, magickTrimImage } from '../shared/image-magick.js';
 import { applyGeneratedAlphaMask } from './image-alpha.js';
 import { imageModelFor, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL } from '../../openai/images.js';
 import { formatBytes } from '../../util/text.js';
-
-/** Prompt the vector model gets when the caller did not describe the artwork. */
-const DEFAULT_VECTOR_PROMPT = 'Vectorize the attached image exactly as it is: keep the original shapes, palette, and proportions; flat shapes with smooth paths and a transparent background; do not redesign it or add new colors.';
-
-/** Raster extensions worth offering for vectorization. */
-const VECTOR_SOURCE_EXT = /\.(png|webp)$/i;
-
-/** A name that says "this must be a vector": marks, badges, logos, icons. */
-const VECTOR_HINT = /logo|badge|icon|emblem|seal|wordmark|logotype|stamp|марк|логотип|эмблем|знач|наклейк|герб|печать|щит/i;
-
-/** Reasons that mean the raster is already cut out and can go straight to the vector model. */
-const CUT_OUT = new Set(['native', 'mask', 'contour', 'flat', 'already']);
 
 /**
  * Handlers for generate_image, edit_image, and vectorize_image. `client.images` talks to
