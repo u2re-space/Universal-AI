@@ -39,27 +39,14 @@ export const ALPHA_MASK_PROMPT = ''//'Return an alpha matte of the attached imag
     + 'The interior of the subject must be pure white; the transparent area must be pure black. '
     + 'Output the matte/mask only: grayscale, no colors, no text, no border, no shadow.';
 
-/*
-export const ALPHA_MASK_PROMPT = 'Return an A-mask for the attached image that will be composited onto an RGB background to produce the final RGBA image. '
-    + 'This is the alpha channel of a two-part composition: RGB + A-mask = RGBA. '
-    + 'White (255) marks the subject that must stay visible — the artwork, logo, product, or person. '
-    + 'Black (0) marks everything that must become transparent, including any checkerboard, grid, or flat plate that only imitates transparency in the RGB layer. '
-    + 'Keep the exact framing and proportions of the source. '
-    + 'The mask must trace the subject contour tightly: a one- or two-pixel gray transition exactly on the silhouette creates a clean anti-aliased edge in the final composite. '
-    + 'Do not widen the transition into a soft glow — that makes the rim milky and eats into the artwork. The interior of the subject must be pure white; the transparent area must be pure black. '
-    + 'Output the mask only: grayscale, no colors, no text, no border, no shadow.';
-    */
-
 /**
  * Prompt for the background paint pass. The background becomes the dominant color of the subject,
  * so the semi-transparent pixels an anti-aliased matte leaves behind carry the object color instead
  * of white or a checkerboard. That is what removes the halo around a cut-out logo or badge.
  */
 /*export const BACKGROUND_PAINT_PROMPT = 'Fill the whole background of the attached image with the dominant color of the subject. '
-    + 'Do not change the subject: keep every pixel of it identical, in the same position, with the same '
-    + 'proportions and framing. '
-    + 'Paint a single flat color only where the background is now — including any checkerboard, grid, or '
-    + 'pattern that imitates transparency. No gradients, no texture, no shadow, no new objects.';*/
+    + 'Do not change the subject: keep every pixel of it identical, in the same position, with the same proportions and framing. '
+    + 'Paint a single flat color only where the background is now — including any checkerboard, grid, or pattern that imitates transparency. No gradients, no texture, no shadow, no new objects.';*/
 
 export const BACKGROUND_PAINT_PROMPT = 'You are creating the RGB channel for a two-part RGBA composition (RGB + A-mask = RGBA). '
     + 'Fill the whole background of the attached image with the dominant color of the subject. '

@@ -9,12 +9,17 @@ import { createClient } from '../src/openai/client.js';
 import { TINY_PNG } from './helpers/mock-server.js';
 import { rasterInfo, rasterIsOpaque, rasterPadImageBytes } from '../src/agent/image-raster.js';
 import { runProgram } from '../src/agent/shell.js';
-import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFor, imageModelProfile, imagePayloads, imageComplexityValue, imageRequestSize, imageSizeAttempts, imageSizeFields, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_RIVERFLOW_MODEL, PROXY_VECTOR_MODEL, VECTOR_RATIOS, readImageSize } from '../src/openai/images.js';
+import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFamily, imageModelFor, imageModelProfile, imagePayloads, imageComplexityValue, imageRequestSize, imageSizeAttempts, imageSizeFields, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_RIVERFLOW_MODEL, PROXY_VECTOR_MODEL, VECTOR_RATIOS, readImageSize } from '../src/openai/images.js';
 import { builtinTools } from '../src/agent/loop.js';
 import { enabledToolNames } from '../src/agent/tool-specs.js';
 import { createToolset } from '../src/agent/tools.js';
 
 const RGB_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQAAAAA3bvkkAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAACYktHRAAB3YoTpAAAAAd0SU1FB+oKFgUxCIqEz80AAAAldEVYdGRhdGU6Y3JlYXRlADIwMjYtMTAtMjJUMDU6NDk6MDgrMDA6MDAqmhesAAAAJXRFWHRkYXRlOm1vZGlmeQAyMDI2LTEwLTIyVDA1OjQ5OjA4KzAwOjAwW8evEAAAACh0RVh0ZGF0ZTp0aW1lc3RhbXAAMjAyNi0xMC0yMlQwNTo0OTowOCswMDowMAzSjs8AAAAKSURBVAjXY2gAAACCAIHdQ2r0AAAAAElFTkSuQmCC';
+test('image model family keeps GPT Image and Riverflow independent', () => {
+    assert.equal(imageModelFamily('openai/gpt-image-2.6-sunburst'), 'gpt-image');
+    assert.equal(imageModelFamily('sourceful/riverflow-v2.6-pro'), 'riverflow');
+    assert.equal(imageModelFamily('recraft/recraft-v4.1-pro-vector'), 'other');
+});
 
 test('proxyapi uses the images API and omits Responses-only image fields', () => {
     assert.equal(imageTransport({ baseURL: 'https://api.proxyapi.ru/v1/' }), 'images');
@@ -560,6 +565,37 @@ test('images client posts generations and edits and the tool saves the file', as
     } finally {
         client.close();
         await rm(root, { recursive: true, force: true });
+        await new Promise((resolve) => server.close(resolve));
+    }
+});
+
+test('images edits reports response shape when a gateway returns no image payload', async () => {
+    const png = Buffer.from(TINY_PNG, 'base64');
+    let route = null;
+    const server = http.createServer(async (req, res) => {
+        route = req.url;
+        for await (const _ of req) {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: [{ revised_prompt: 'accepted but no image data' }] }));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    const client = createClient({ apiKey: 'sk-test', baseURL: `http://127.0.0.1:${port}/v1/`, retries: 0, imageDiv16: 'never' });
+    try {
+        await assert.rejects(client.images.edit({
+            model: 'openai/gpt-image-2.6-sunburst', prompt: 'edit',
+            files: [{ filename: 'source.png', mime: 'image/png', bytes: png }],
+        }), (error) => {
+            assert.equal(error.code, 'INVALID_RESPONSE');
+            assert.deepEqual(error.details.responseKeys, ['data']);
+            assert.equal(error.details.dataType, 'array');
+            assert.deepEqual(error.details.firstResultKeys, ['revised_prompt']);
+            assert.match(error.message, /поля первого результата: revised_prompt/);
+            return true;
+        });
+        assert.equal(route, '/v1/images/edits');
+    } finally {
+        client.close();
         await new Promise((resolve) => server.close(resolve));
     }
 });

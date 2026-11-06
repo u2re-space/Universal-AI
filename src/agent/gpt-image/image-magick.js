@@ -12,7 +12,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import { stat, mkdir, rename, unlink, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
-import { runProgram } from './shell.js';
+import { runProgram } from '../shell.js';
 
 /** Cached detection result. null = not checked, false = not available, string = executable path. */
 let _magickPath = null;

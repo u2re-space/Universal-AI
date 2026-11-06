@@ -13,11 +13,11 @@
 
 import path from 'node:path';
 import { mkdir, readFile, writeFile, stat, unlink, readdir } from 'node:fs/promises';
-import { resolveInside } from './paths.js';
+import { resolveInside } from '../paths.js';
 import { detectMagick, magickConvert, magickIsOpaque, magickRemoveFlatBackground, assessVectorSuitability, magickTrimImage } from './image-magick.js';
 import { applyGeneratedAlphaMask } from './image-alpha.js';
-import { imageModelFor, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL } from '../openai/images.js';
-import { formatBytes } from '../util/text.js';
+import { imageModelFor, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL } from '../../openai/images.js';
+import { formatBytes } from '../../util/text.js';
 
 /** Prompt the vector model gets when the caller did not describe the artwork. */
 const DEFAULT_VECTOR_PROMPT = 'Vectorize the attached image exactly as it is: keep the original shapes, palette, and proportions; flat shapes with smooth paths and a transparent background; do not redesign it or add new colors.';

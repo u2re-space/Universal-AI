@@ -502,7 +502,12 @@ export function createClient({
     async function payloadList(result, signal, route) {
         const sources = imageSources(result);
         if (!sources.length) {
-            throw new ApiError(`Ответ ${route} не содержит ни b64_json, ни url.`, { code: 'INVALID_RESPONSE' });
+            const keys = result && typeof result === 'object' && !Array.isArray(result) ? Object.keys(result) : [];
+            const rows = Array.isArray(result?.data) ? result.data : null;
+            const rowKeys = rows?.[0] && typeof rows[0] === 'object' ? Object.keys(rows[0]) : [];
+            throw new ApiError(`Ответ ${route} не содержит ни b64_json, ни url (поля ответа: ${keys.join(', ') || 'нет'}; data: ${rows ? `массив из ${rows.length}` : typeof result?.data}; поля первого результата: ${rowKeys.join(', ') || 'нет'}).`, {
+                code: 'INVALID_RESPONSE', details: { responseKeys: keys, dataType: Array.isArray(result?.data) ? 'array' : typeof result?.data, dataCount: rows?.length ?? null, firstResultKeys: rowKeys },
+            });
         }
         const out = [];
         for (const source of sources) {
@@ -676,10 +681,10 @@ export function createClient({
         /** POST /images/edits as multipart form data. `files` are { filename, mime, bytes }. */
         async edit({ model, prompt, files, size, format, background, complexity, resolution, signal } = {}) {
             const vector = isVectorModel(model);
-             // Some families (riverflow) answer /images/edits with the gateway default square and
-             // silently drop size, resolution, aspect_ratio and complexity. The same
-            // request on /images/generations with the sources as `input_references` honors every
-            // field, so an edit for those models travels through the generation route instead.
+            let requestFiles = files;
+            let padding = null;
+            let requestedFrame = size;
+            // Riverflow routes edits through generations because its edits endpoint drops tuning fields.
             if (!vector && imageModelProfile(model).routeEditsThroughGeneration && files?.length) {
                 let frame = size;
                 if (!Object.keys(imageSizeFields(frame, model, resolution)).length && files[0]?.bytes) {
@@ -689,10 +694,7 @@ export function createClient({
                 const references = files.map((file) => `data:${file.mime || 'image/png'};base64,${Buffer.from(file.bytes).toString('base64')}`);
                 return images.generate({ model, prompt, size: frame, complexity, format, background, references, resolution, signal });
             }
-            let requestFiles = files;
-            let padding = null;
-            let requestedFrame = size;
-            if (!vector && needsDiv16Padding(model, imageDiv16) && files?.length) {
+             if (!vector && needsDiv16Padding(model, imageDiv16) && files?.length) {
                 const prepared = [];
                 for (const file of files) {
                     let frame = null;
