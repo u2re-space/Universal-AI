@@ -71,7 +71,7 @@ export function createSubagentRunner({ config, roles, root, allNames = [], appro
         if (!text) throw new Error('run_subagent: task пуст — опиши задачу целиком, суб-агент не видит переписку.');
 
         const names = executorToolNames(spec, allNames, { nested: true });
-        const toolset = createToolset({ ...toolBase, ...toolOptions, root, config, names, approvalLevel });
+        const toolset = createToolset({ ...toolBase, ...toolOptions, root, config, names, approvalLevel, role: kind });
         const model = roles.resolve(kind).model;
         // The role prompt itself comes from the role runner; here only the project rules are added.
         const notes = typeof agentsText === 'function' ? agentsText() : agentsText;

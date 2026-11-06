@@ -193,7 +193,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
         });
         const toolset = createToolset({
             root: ctx.cwd, names, approvalLevel: level, subagent, extras: mcp.extras, ...toolBase,
-            describeImage, summarizeFile: roles.summarizeFile,
+            describeImage, summarizeFile: roles.summarizeFile, role: 'default',
         });
         const mcpNote = mcp.describe() ? `\n\nMCP sources:\n${mcp.describe()}` : '';
         const baseInstructions = composeInstructions(agentBase({ root: ctx.cwd, approvalLevel: level, toolNames: toolset.names(), interactive, shell: config.shell ?? null }), config, extra) + mcpNote;

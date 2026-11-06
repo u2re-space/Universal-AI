@@ -260,7 +260,7 @@ export async function runTeam({
                 ? ['crop_image', 'split_image', 'compare_images', ...names.filter((name) => name === 'generate_image' || name === 'edit_image')]
                 : [];
         const toolset = createToolset({
-            ...toolBase, names, approvalLevel, allowWrite,
+            ...toolBase, names, approvalLevel, allowWrite, role,
             describeScreen: roles.describeScreen,
         });
         const builtin = role === 'decomposer'
@@ -300,26 +300,26 @@ export async function runTeam({
     const toolEnums = { delegate_role: { role: executors }, run_subagent: { kind: executors } };
     const workerTools = createToolset({
         ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker'), editPaths: () => taskMarks.edit,
-        describeScreen: roles.describeScreen, delegate, subagent, extras: mcp.extras, toolEnums,
+        describeScreen: roles.describeScreen, delegate, subagent, extras: mcp.extras, toolEnums, role: 'worker',
     });
     const stylerTools = createToolset({
-        ...toolBase, names: toolNamesForRole(enabled, 'styler', config.roles?.styler), approvalLevel,
+        ...toolBase, names: toolNamesForRole(enabled, 'styler', config.roles?.styler), approvalLevel, role: 'styler',
         editPaths: () => taskMarks.edit,
     });
     const workerToolsFor = (author) => author === 'styler' ? stylerTools : workerTools;
     const workerChanges = () => [...workerTools.stats().changes, ...stylerTools.stats().changes];
-    const orchestratorTools = createToolset({ ...toolBase, names: orchestratorNames, approvalLevel, describeImage: vision('orchestrator'), extras: mcp.extras, toolEnums });
-    const architectTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('architect'), extras: mcpRead });
+    const orchestratorTools = createToolset({ ...toolBase, names: orchestratorNames, approvalLevel, describeImage: vision('orchestrator'), extras: mcp.extras, toolEnums, role: 'orchestrator' });
+    const architectTools = createToolset({ ...toolBase, names: readNames, approvalLevel: 'read', describeImage: vision('architect'), extras: mcpRead, role: 'architect' });
     const reviewerTools = createToolset({
         ...toolBase, names: reviewerNames, approvalLevel, describeImage: vision('reviewer'),
-        describeScreen: roles.describeScreen, delegate, subagent, extras: mcpRead, toolEnums,
+        describeScreen: roles.describeScreen, delegate, subagent, extras: mcpRead, toolEnums, role: 'reviewer',
     });
     const imageProcessorNames = toolNamesForRole(enabled, 'image-processor', config.roles?.['image-processor']);
-    const imageProcessorTools = createToolset({ ...toolBase, names: imageProcessorNames, approvalLevel });
+    const imageProcessorTools = createToolset({ ...toolBase, names: imageProcessorNames, approvalLevel, role: 'image-processor' });
     const decoratorNames = toolNamesForRole(enabled, 'decorator', config.roles?.decorator);
-    const decoratorTools = createToolset({ ...toolBase, names: decoratorNames, approvalLevel });
+    const decoratorTools = createToolset({ ...toolBase, names: decoratorNames, approvalLevel, role: 'decorator' });
     const iconifierNames = toolNamesForRole(enabled, 'iconifier', config.roles?.iconifier);
-    const iconifierTools = createToolset({ ...toolBase, names: iconifierNames, approvalLevel });
+    const iconifierTools = createToolset({ ...toolBase, names: iconifierNames, approvalLevel, role: 'iconifier' });
     const builtin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi });
     const imageProcessorBuiltin = builtinTools(config, { web: config.tools.web, images: config.tools.images && !imageApi })
         .filter((tool) => tool.type === 'image_generation' || tool.type === 'web_search');
@@ -1094,7 +1094,7 @@ export async function runTeam({
                         text: `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Design sources\n${taskLines.join('\n') || '(attached image references)'}\n\n# Output directory\n${imageDir}/\n\n${subRefBrief}\n\n# Task\nIdentify screens and relationships before measurements, then return one clean sub-reference per screen.`,
                         parts: referenceParts, instructions: withAgents(ROLE_INSTRUCTIONS.decomposer),
                         toolset: createToolset({
-                            ...toolBase, names, approvalLevel: 'read', allowWrite: autoWrite,
+                            ...toolBase, names, approvalLevel: 'read', allowWrite: autoWrite, role: 'decomposer',
                             extras: mcpRead, describeScreen: roles.describeScreen,
                         }),
                         builtin: builtinTools(config, { web: config.tools.web }).filter((tool) => tool.type === 'mcp' || (config.tools.web && tool.type === 'web_search')),

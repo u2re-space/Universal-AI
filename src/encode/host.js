@@ -30,7 +30,7 @@ export async function startEncodeHost({
     const { encodeArtifacts } = await import('./encode.ts');
     const { createEncodeHandler } = await import('./server.ts');
     const toolset = createToolset({
-        root, config, names: TOOLS, approvalLevel,
+        root, config, role: 'encoder', names: TOOLS, approvalLevel,
         approve: (request) => decide(request),
         processTool: (name, args, callSignal) => registry.requestTool(name, args, callSignal ?? signal),
         signal, emit,

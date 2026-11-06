@@ -8,6 +8,8 @@
  * @ai.tags tools, approval
  * @ai.hint hot
  * @changed 2026-10-25 Measurement crops may run at read access, confined to .tmp/.
+ * @changed 2026-11-06 `role` parameter: apply the role's picture models (imageModel / vectorModel) to
+ *           the config so the role's image tools use its own generator instead of the run default.
  */
 
 import path from 'node:path';
@@ -16,6 +18,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { CancelledError } from '../openai/errors.js';
 import { createClient } from '../openai/client.js';
 import { primaryBackend } from '../openai/fallback.js';
+import { roleToolConfig } from '../core/config.js';
 import { detectImageMime } from '../core/attachments.js';
 import { errorMessage, formatBytes, truncate, clipMiddle } from '../util/text.js';
 import { resolveInside, NOISY_DIRS } from './paths.js';
@@ -177,13 +180,26 @@ const GENERATED_OUTPUT_TOOLS = new Set(['generate_image', 'edit_image']);
  * browserOverrides — engine injection for the browser tools ({ engine, runEgo, runChromium }); used by tests.
  * processTool(name, args, signal) → null | { output, summary, changes? } — remote handler for a processable tool. null runs the local handler.
  */
+/**
+ * Build the local toolset.
+ *
+ * `role` names the role whose tools these are: the role's picture models (roles.<name>.imageModel,
+ * roles.<name>.vectorModel) override the run defaults for this toolset only, so a decomposer can cut
+ * screens with one generator while the rest of the run draws with another. `null` keeps the config as it is.
+ *
+ * @param {{ root?: string, config: object, role?: string|null, names: string[], approvalLevel?: string, allowWrite?: string[], approve?: Function, askUser?: Function|null, backupDir?: string|null, signal?: AbortSignal, emit?: Function, memory?: object|null, projectKey?: string|null, projectName?: string|null, describeImage?: Function|null, summarizeFile?: Function|null, editPaths?: Function, describeScreen?: Function|null, performDesktop?: Function|null, delegate?: Function|null, subagent?: Function|null, extras?: object[], client?: object|null, ledger?: object|null, scaffoldTask?: string, processTool?: Function|null, toolEnums?: object, browserOverrides?: object }} [options]
+ * @returns {{ execute: Function, stats: object, names: Set<string> }}
+ * @exports
+ * @ai.hint hot
+ */
 export function createToolset({
-    root = process.cwd(), config, names, approvalLevel = 'read', allowWrite = [], approve = async () => 'no', askUser = null,
+    root = process.cwd(), config: runConfig, role = null, names, approvalLevel = 'read', allowWrite = [], approve = async () => 'no', askUser = null,
     backupDir = null, signal, emit = () => { }, memory = null, projectKey = null, projectName = null,
     describeImage = null, summarizeFile = null, editPaths = () => null,
     describeScreen = null, performDesktop = null, delegate = null, subagent = null, extras = [], client = null, ledger = null,
     scaffoldTask = '', processTool = null, toolEnums = {}, browserOverrides = {},
 }) {
+    const config = roleToolConfig(runConfig, role);
     const limits = config.limits;
     const allowed = new Set(names);
     const autoWrite = new Set(allowWrite.filter((name) => AUTO_WRITE_TOOLS.has(name)));

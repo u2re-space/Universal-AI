@@ -52,6 +52,15 @@ const ROLE_FIELDS = Object.freeze({
      * A tier applies when the caller names a complexity and the role does not pin that field.
      */
     tiers: null,
+    /**
+     * The picture model this role draws with, next to its `model` (its brain). `null` keeps the
+     * top-level `imageModel`. A role that works with pictures — `decomposer`, `image-processor`,
+     * `decorator`, `iconifier` — can thus spend a different generator than the rest of the run:
+     * a cheap plate-painting model for restored screens, a native-alpha model for artwork.
+     */
+    imageModel: null,
+    /** The vector (SVG) model of this role; `null` keeps `image.vectorModel`. */
+    vectorModel: null,
 });
 
 /** One role entry: the standard fields with the given overrides on top. */

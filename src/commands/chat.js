@@ -106,7 +106,7 @@ export async function chat(ctx) {
         if (!names.length) { toolset = null; return 'локальные инструменты выключены'; }
         ctx.backupDir ??= backupDirFor(config);
         toolset = createToolset({
-            root: ctx.cwd, config, client, ledger, names, approvalLevel: approvalLevel(config, true),
+            root: ctx.cwd, config, role: 'default', client, ledger, names, approvalLevel: approvalLevel(config, true),
             approve: (request) => renderer.approve(request, { signal: ctx.turnSignal() }), askUser: null,
             backupDir: ctx.backupDir, signal, emit, memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
             processTool: ctx.processTool,

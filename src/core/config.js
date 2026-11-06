@@ -108,13 +108,41 @@ export function resolveRole(config, name = 'default', complexity = null) {
         instructions: role.instructions ?? null,
         /** Tools the role may use; null means the tools of the run. */
         tools: role.tools ?? null,
-        /** A config object with this role's settings applied (for runTurn / buildRequestBody). */
-        config: {
+        /**
+         * A config object with this role's settings applied (for runTurn / buildRequestBody).
+         * `roleToolConfig` adds the picture models of the role (`imageModel`, `vectorModel`), so the
+         * brain and the generator of a role travel together in the one object handed to the turn.
+         */
+        config: roleToolConfig({
             ...config, model,
             reasoning: { effort, summary, mode },
             verbosity, maxOutputTokens: outputLimit, temperature,
-        },
+        }, name),
     };
+}
+
+/**
+ * Config for the tools of one role: the run config with the picture models that role names.
+ *
+ * `roles.<name>.imageModel` and `roles.<name>.vectorModel` sit next to `roles.<name>.model` (the
+ * brain of the role) and let a role that works with pictures — `decomposer`, `image-processor`,
+ * `decorator`, `iconifier` — draw or vectorize with a different generator than the rest of the run.
+ * The chain is the one of `resolveRole`: role → roles.default → the top-level setting. A role that
+ * names nothing returns the very config object, so shared budgets and caches stay untouched.
+ * @param {object} config
+ * @param {string|null} [name]
+ * @returns {object}
+ * @exports
+ * @ai.hint pure
+ */
+export function roleToolConfig(config, name = null) {
+    if (!name || !config?.roles) return config;
+    const role = config.roles[name] ?? {};
+    const base = config.roles.default ?? {};
+    const imageModel = role.imageModel ?? base.imageModel ?? config.imageModel ?? null;
+    const vectorModel = role.vectorModel ?? base.vectorModel ?? config.image?.vectorModel ?? null;
+    if (imageModel === (config.imageModel ?? null) && vectorModel === (config.image?.vectorModel ?? null)) return config;
+    return { ...config, imageModel, image: { ...config.image, vectorModel } };
 }
 
 /**
@@ -704,6 +732,11 @@ function validateConfig(c, env = liveEnv() ?? process.env) {
         if (role.context != null && typeof role.context !== 'string' && !(Number.isSafeInteger(role.context) && role.context > 0)) fail(`roles.${name}.context: уровень или целое > 0`);
         if (role.tools != null && !Array.isArray(role.tools)) fail(`roles.${name}.tools: массив имён`);
         if (role.turns != null && !(Number.isSafeInteger(role.turns) && role.turns > 0)) fail(`roles.${name}.turns: целое > 0`);
+        // The picture models of the role: a model id next to `model`, so a picture role can draw with
+        // its own generator. An empty string is not a model, and neither is anything but a string.
+        for (const key of ['imageModel', 'vectorModel']) {
+            if (role[key] != null && (typeof role[key] !== 'string' || !role[key].trim())) fail(`roles.${name}.${key}: строка или null`);
+        }
         if (role.tiers != null) {
             if (Array.isArray(role.tiers)) {
                 if (!role.tiers.length) fail(`roles.${name}.tiers: непустой массив моделей`);
