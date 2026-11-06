@@ -1,6 +1,6 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadConfig } from '../src/core/config.js';
+import { loadConfig, redactConfig } from '../src/core/config.js';
 import { createClient } from '../src/openai/client.js';
 import { createFallbackClient, providerList, supportsRoute } from '../src/openai/fallback.js';
 import { startMockServer } from './helpers/mock-server.js';
@@ -112,6 +112,42 @@ test('backends validate their fields and route switches', async () => {
     await assert.rejects(load([{ baseUrl: 'https://x/v1', apiKey: 'sk', headers: { x: 'a\nb' } }]), /перевода строки/);
 });
 
+test('modelsBackends normalize URLs, inherit keys by exact baseURL, validate, and redact secrets', async () => {
+    const config = await loadConfig({
+        env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6.1-terra', OPENAI_API_KEY: 'sk-primary' },
+        overrides: {
+            backends: [{ baseURL: 'https://model.example/v1', apiKey: 'sk-inherited', headers: { 'x-api-key': 'secret' } }],
+            modelsBackends: {
+                'gpt-6-luna': ['https://model.example/v1'],
+                'gpt-6.1-sol': [{ baseURL: 'https://other.example/v1', apiKey: 'sk-local', vendor: 'acme', prefix: 'gpt-', suffix: '-pro', type: 'text' }],
+            },
+        },
+        ensureHome: false,
+    });
+    assert.deepEqual(config.modelsBackends['gpt-6-luna'], [{ baseURL: 'https://model.example/v1' }]);
+    assert.equal(config.modelsBackends['gpt-6.1-sol'][0].apiKey, 'sk-local');
+    const shown = redactConfig(config);
+    assert.equal(shown.modelsBackends['gpt-6.1-sol'][0].apiKey, '…');
+    assert.equal(shown.backends[0].headers['x-api-key'], '…');
+    for (const invalid of [
+        { m: [{ apiKey: 'sk' }] },
+        { m: [{ baseURL: 'https://x/v1', apiKey: 'sk', type: 'audio' }] },
+        { m: [{ baseURL: 'https://x/v1' }] },
+    ]) {
+        await assert.rejects(loadConfig({
+            env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6.1-terra' },
+            overrides: { modelsBackends: invalid }, ensureHome: false,
+        }), /modelsBackends/);
+    }
+    await assert.rejects(loadConfig({
+        env: { AI_AGENT_HOME: home, AI_MODEL: 'gpt-6.1-terra' },
+        overrides: {
+            backends: [{ baseURL: 'https://x/v1/', apiKey: 'sk' }],
+            modelsBackends: { m: [{ baseURL: 'https://x/v1', type: 'auto' }] },
+        }, ensureHome: false,
+    }), /apiKey не задан/);
+});
+
 // ── fallback list ──────────────────────────────────────────────────────────
 
 test('providerList reads backends, skips the primary and entries without a key', () => {
@@ -138,6 +174,51 @@ test('supportsRoute defaults to on and maps the images variants', () => {
     assert.equal(supportsRoute({ decisionAPI: false }, 'decisions'), false);
     assert.equal(supportsRoute({ images: false }, 'images-edit'), false);
     assert.equal(supportsRoute({ images: false }, 'images-vector'), false);
+});
+
+test('modelsBackends inherit matching backend settings, rewrite the model, and filter by route type', async () => {
+    const general = await host({ script: () => ({ text: 'general' }), images: () => ({ data: [{ b64_json: Buffer.from('general').toString('base64') }] }) });
+    const modelText = await host({ script: () => ({ text: 'model text' }) });
+    const modelImages = await host({ images: () => ({ data: [{ b64_json: Buffer.from('model image').toString('base64') }] }) });
+    const modelDecisions = await host({ decisions: () => ({ answers: [{ label: 'model decision' }] }) });
+    const config = configFor([
+        { baseURL: general.baseURL, apiKey: 'sk-general', body: { inheritedFlag: true } },
+    ], general.baseURL, 'sk-general');
+    config.modelsBackends = {
+        'gpt-6-luna': [
+            { baseURL: modelText.baseURL, apiKey: 'sk-text', vendor: 'acme', prefix: 'openai/', suffix: '-pro', type: 'text' },
+            { baseURL: modelImages.baseURL, apiKey: 'sk-image', prefix: 'image/', type: 'images' },
+        ],
+        'gpt-6.1-terra': [{ baseURL: general.baseURL, prefix: 'vendor/' }],
+        'gpt-6-luna-decisions': [{ baseURL: modelDecisions.baseURL, apiKey: 'sk-decision', vendor: 'acme', suffix: '-safe', type: 'decisions' }],
+    };
+    const client = createFallbackClient(config);
+    try {
+        await client.responses.create({ model: 'gpt-6-luna', input: 'hello', stream: false });
+        const textRequest = modelText.requests.find((request) => request.path === '/v1/responses');
+        assert.equal(textRequest.body.model, 'acme/openai/gpt-6-luna-pro');
+        assert.equal(textRequest.headers.authorization, 'Bearer sk-text');
+        assert.equal(general.requests.filter((request) => request.path === '/v1/responses').length, 0);
+
+        await client.images.generate({ model: 'gpt-6-luna', prompt: 'draw' });
+        const imageRequest = modelImages.requests.find((request) => request.path === '/v1/images/generations');
+        assert.equal(imageRequest.body.model, 'image/gpt-6-luna');
+        assert.equal(general.requests.filter((request) => request.path === '/v1/images/generations').length, 0);
+
+        await client.responses.create({ model: 'gpt-6.1-terra', input: 'inherit', stream: false });
+        const inheritedRequest = general.requests.find((request) => request.path === '/v1/responses');
+        assert.equal(inheritedRequest.body.model, 'vendor/gpt-6.1-terra');
+        assert.equal(inheritedRequest.headers.authorization, 'Bearer sk-general');
+        assert.equal(inheritedRequest.body.inheritedFlag, true);
+
+        const decisions = await client.decisions.create({ model: 'gpt-6-luna-decisions', input: 'check' });
+        assert.deepEqual(decisions.answers, [{ label: 'model decision' }]);
+        const decisionRequest = modelDecisions.requests.find((request) => request.path === '/v1/decisions');
+        assert.equal(decisionRequest.body.model, 'acme/gpt-6-luna-decisions-safe');
+        assert.equal(general.requests.filter((request) => request.path === '/v1/decisions').length, 0);
+    } finally {
+        client.close();
+    }
 });
 
 // ── requests ───────────────────────────────────────────────────────────────

@@ -263,6 +263,9 @@ MCP:
      moderationsBackends — /moderations
    Пустой пул означает, что маршрут идёт через backends (общий пул).
    fallback.providers устарел: при загрузке его записи мёржатся в backends и список очищается.
+  modelsBackends: { "gpt-6-luna": ["https://gw.example/v1", { baseURL, apiKey, vendor, prefix, suffix, type }] } задаёт список провайдеров для точной модели.
+  Строка — сокращённая запись baseURL; параметры наследуются из backends только при точном совпадении baseURL, поля объекта имеют приоритет.
+  vendor/prefix/suffix собирают model как vendor/ + prefix + исходная модель + suffix; type: auto | text | images | decisions фильтрует маршрут.
   supports: responses | chat | images | decisions | moderations; decisionAPI — старое имя decisions; false выключает маршрут.
   Заголовки бэкенда не заменяют Authorization, Content-Type, Accept и заголовки организации/проекта.
   body — поля, которые шлюз ждёт в теле запроса (у gptunnel это useWalletBalance). Значение сохраняет тип

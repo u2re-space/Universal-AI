@@ -131,6 +131,7 @@ export async function configCommand(ctx) {
         const template = {
             model: defaults.model, imageModel: null, reasoning: { effort: 'medium', summary: 'auto', mode: 'off' }, store: false,
             backends: [],
+            modelsBackends: {},
             approve: 'ask', tools: { ...defaults.tools }, limits: { maxTurns: 60, budgetUsd: null, budgetTokens: null },
             roles: {
                 planner: { model: null, effort: 'high' },
@@ -160,7 +161,7 @@ export async function configCommand(ctx) {
             `Роли: укажите модели в roles.* (null = общая model). Например: "planner": { "model": "${defaults.model}", "effort": "high" }, "worker": { "model": "gpt-6-luna" }.\n` +
             `Модели по сложности — roles.<имя>.tiers: лестница [{ "model", "effort": [...] }, ...] или запись на каждый размер (trivial, normal, complex).\n` +
             `Провайдеры — backends: [{ "baseUrl", "apiKey": "{{env:NAME}}", "headers": {...}, "supports": { "decisions": false } }, ...].\n` +
-            `  Первый бэкенд с ключом — основной, остальные — резервные. Подстановки: {{env:NAME}}, {{fs:путь}}, {{task:PROMPT}}, {{delegated:PROMPT}}.\n` +
+            `  Первый бэкенд с ключом — основной, остальные — резервные. modelsBackends.<model> задаёт упорядоченные URL модели с опциональными vendor/prefix/suffix/type. Подстановки: {{env:NAME}}, {{fs:путь}}, {{task:PROMPT}}, {{delegated:PROMPT}}.\n` +
             `Потолки и лестницы effort моделей — в models.<id> (ceiling, efforts, modes); порядок этапов команды — agent.pipeline.\n` +
             `reasoning.mode: "pro" — расширенный режим шлюза (по умолчанию "off", поля нет); models.<id>.modes: [] запрещает его модели.\n` +
             `Чтобы видеть стоимость, добавьте актуальные цены (USD за 1M токенов), например:\n` +

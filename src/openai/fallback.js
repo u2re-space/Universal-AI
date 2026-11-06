@@ -182,6 +182,37 @@ function poolFor(config, kind) {
     return poolOf(config, kind).list;
 }
 
+function modelTypeMatches(type, kind) {
+    if (!type || type === 'auto') return true;
+    if (type === 'images') return kind === 'images' || kind === 'images-edit' || kind === 'images-vector';
+    if (type === 'decisions') return kind === 'decisions';
+    return type === 'text' && (kind === 'responses' || kind === 'completions' || kind === 'moderations');
+}
+
+function rewriteModel(model, entry) {
+    const source = String(model ?? '');
+    if (!entry) return source;
+    return (entry.vendor ? entry.vendor + '/' : '') + (entry.prefix ?? '') + source + (entry.suffix ?? '');
+}
+
+export function modelBackendEntries(config, model, kind, env = liveEnv()) {
+    const list = config?.modelsBackends?.[model];
+    if (!Array.isArray(list)) return null;
+    const common = [...(Array.isArray(config?.backends) ? config.backends : []), ...(Array.isArray(config?.fallback?.providers) ? config.fallback.providers : [])];
+    const entries = [];
+    for (const item of list) {
+        if (!modelTypeMatches(item.type, kind)) continue;
+        const inherited = common.find((backend) => backend?.baseURL === item.baseURL);
+        const merged = { ...(inherited ?? {}), ...item, apiKey: item.apiKey ?? inherited?.apiKey, env: item.env ?? inherited?.env };
+        entries.push(merged);
+    }
+    const usable = entries.map((item) => {
+        const spec = usableBackend(item, env);
+        return spec ? { ...spec, modelRewrite: item } : null;
+    }).filter(Boolean);
+    return usable.length ? usable : null;
+}
+
 /**
  * One backend entry with a key, or null when it cannot be used.
  * The key of an `env` entry is read from the live environment, so a value that exists only in
@@ -352,7 +383,7 @@ export function createFallbackClient(config, { create = createClient } = {}) {
      * @ai.hint io
      */
     const clientForSpec = (spec) => {
-        const key = `${spec.baseURL.replace(/\/+$/, '')}\u0000${spec.apiKey}`;
+        const key = `${spec.baseURL.replace(/\/+$/, '')}\u0000${spec.apiKey}\u0000${JSON.stringify(spec.headers ?? null)}\u0000${JSON.stringify(spec.body ?? null)}`;
         let c = fallbackClients.get(key);
         if (!c) {
             c = create({
@@ -379,7 +410,12 @@ export function createFallbackClient(config, { create = createClient } = {}) {
      * @returns {{ label: string, client: object, supports: object|null }[]}
      * @ai.hint pure
      */
-    const endpoints = (kind) => {
+    const endpoints = (kind, model = null) => {
+        const modelEntries = model ? modelBackendEntries(config, model, kind) : null;
+        if (modelEntries) {
+            return modelEntries.map((item) => ({ ...endpointOf(item, clientForSpec(item)), modelRewrite: item.modelRewrite }))
+                .filter((endpoint) => servesRoute(endpoint.supports, kind));
+        }
         const primaryForPool = primaryBackend(config, kind);
         const primaryClient = (primaryForPool.baseURL === primarySpec.baseURL && primaryForPool.apiKey === primarySpec.apiKey)
             ? primary
@@ -413,7 +449,7 @@ export function createFallbackClient(config, { create = createClient } = {}) {
      * @param {'responses'|'images'|'images-edit'|'images-vector'} kind
      */
     const sendBody = (body, options, kind) => {
-        const chain = endpoints(kind);
+        const chain = endpoints(kind, body?.model ?? config.model);
         if (!chain.length) throw new ApiError(`Нет доступного провайдера для маршрута ${kind}.`, { code: 'NO_PROVIDER' });
         return attemptChain({
             endpoints: chain,
@@ -423,6 +459,7 @@ export function createFallbackClient(config, { create = createClient } = {}) {
             send: (endpoint, model, switchedHost) => {
                 active = endpoint.client;
                 const next = adaptBody(body ?? {}, model, switchedHost);
+                next.model = rewriteModel(model, endpoint.modelRewrite);
                 if (kind === 'images') return endpoint.client.images.generate({ ...next, signal: options?.signal });
                 if (kind === 'images-edit') return endpoint.client.images.edit({ ...next, signal: options?.signal });
                 if (kind === 'images-vector') return endpoint.client.images.vectorize({ ...next, signal: options?.signal });
@@ -456,7 +493,7 @@ export function createFallbackClient(config, { create = createClient } = {}) {
         },
         decisions: {
             create: async (body, options = {}) => {
-                const chain = endpoints('decisions');
+                const chain = endpoints('decisions', body?.model ?? config.model);
                 if (!chain.length) {
                     throw new ApiError('Сервис решений недоступен. Шаг пропущен.', { code: 'DECISIONS_UNAVAILABLE', status: 404 });
                 }
@@ -465,7 +502,7 @@ export function createFallbackClient(config, { create = createClient } = {}) {
                 for (const endpoint of chain) {
                     for (const candidate of models) {
                         try {
-                            const raw = await endpoint.client.decisions.create({ ...body, model: candidate }, options);
+                            const raw = await endpoint.client.decisions.create({ ...body, model: rewriteModel(candidate, endpoint.modelRewrite) }, options);
                             if (candidate !== body?.model) {
                                 try { options?.onEvent?.({ type: 'warning', message: `Модель решений заменена на ${candidate}.` }); } catch { /* observer */ }
                             }
@@ -487,11 +524,11 @@ export function createFallbackClient(config, { create = createClient } = {}) {
         },
         moderations: {
             create: async (body, options = {}) => {
-                const chain = endpoints('moderations');
+                const chain = endpoints('moderations', body?.model ?? config.model);
                 let last = null;
                 for (const endpoint of chain) {
                     try {
-                        return await endpoint.client.moderations.create(body, options);
+                        return await endpoint.client.moderations.create({ ...body, model: rewriteModel(body?.model, endpoint.modelRewrite) }, options);
                     } catch (error) {
                         last = error;
                         if (routeMissing(error) || providerDown(error)) continue;

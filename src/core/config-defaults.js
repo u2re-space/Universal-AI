@@ -83,6 +83,8 @@ export const defaults = Object.freeze({
      * A route whose own `<name>Backends` pool is set and non-empty ignores this list entirely.
      */
     backends: [],
+    /** Per-model ordered providers; each entry selects a URL, inherits matching general-pool settings, and can rewrite the model id. */
+    modelsBackends: {},
     /**
      * Pool for POST /images/generations, /images/edits and the vector route. Same entry shape as
      * `backends`. Empty means images ride the `backends` pool, which is the pre-branch behaviour.

@@ -235,6 +235,27 @@ test('channel list keeps the primary and every provider key', () => {
     ]);
 });
 
+test('modelsBackends routes completion models and rewrites the probed and sent model', async () => {
+    scripts.primary = channelScript({ text: 'primary()' });
+    scripts.fast = channelScript({ text: 'model()' });
+    const config = configFor([{ baseURL: fast.baseURL, apiKey: 'sk-fast' }]);
+    config.completion.model = 'gpt-6-luna';
+    config.modelsBackends = {
+        'gpt-6-luna': [
+            { baseURL: fast.baseURL, apiKey: 'sk-fast', vendor: 'acme', suffix: '-pro', type: 'text' },
+            { baseURL: primary.baseURL, apiKey: 'sk-primary', vendor: 'acme', suffix: '-pro', type: 'text' },
+        ],
+    };
+    const channels = router(config);
+    try {
+        await channels.create({ model: 'gpt-6-luna', input: 'hello', stream: false });
+        const requests = callsOf(fast);
+        assert.equal(requests.probes[0].body.model, 'acme/gpt-6-luna-pro');
+        assert.ok(requests.completions.length > 0);
+        assert.ok(requests.completions.every((request) => request.body.model === 'acme/gpt-6-luna-pro'));
+    } finally { channels.close(); }
+});
+
 test('probe body is short and follows the model catalog', () => {
     assert.deepEqual(buildProbeBody('gpt-6-luna'), {
         model: 'gpt-6-luna',

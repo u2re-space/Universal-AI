@@ -13,7 +13,7 @@
 import { performance } from 'node:perf_hooks';
 import { createClient } from '../openai/client.js';
 import { ApiError, isAbortError } from '../openai/errors.js';
-import { chatOptionsFor, modelMissing, primaryBackend, providerDown, providerList, servesRoute } from '../openai/fallback.js';
+import { chatOptionsFor, modelBackendEntries, modelMissing, primaryBackend, providerDown, providerList, servesRoute } from '../openai/fallback.js';
 import { isReasoningModel, supportsVerbosity } from '../core/config.js';
 import { liveEnv } from '../core/runtime-env.js';
 import { resolveCompletionModel } from './models.js';
@@ -34,7 +34,7 @@ const PROBE_MAX_OUTPUT_TOKENS = 32;
  * @exports
  * @ai.hint pure
  */
-export function completionChannelList(config, env = null) {
+export function completionChannelList(config, env = null, modelOverride = null) {
     const out = [];
     const seen = new Set();
     /**
@@ -44,10 +44,11 @@ export function completionChannelList(config, env = null) {
      * @param {object|null} [headers]
      * @param {object|null} [body]
      * @param {object|null} [supports]
+     * @param {object|null} [modelRewrite]
      * @returns {void}
      * @ai.hint pure
      */
-    const add = (baseURL, apiKey, primary, headers = null, body = null, supports = null) => {
+    const add = (baseURL, apiKey, primary, headers = null, body = null, supports = null, modelRewrite = null) => {
         const url = String(baseURL ?? '').trim();
         const key = String(apiKey ?? '').trim();
         if (!url || !key || /[\r\n]/.test(key) || !servesRoute(supports, 'responses')) return;
@@ -56,15 +57,22 @@ export function completionChannelList(config, env = null) {
         if (seen.has(id)) return;
         seen.add(id);
         const entry = { baseURL: url, apiKey: key, label: normalized, primary };
+        if (modelRewrite) entry.modelRewrite = modelRewrite;
         if (headers && typeof headers === 'object') entry.headers = headers;
         if (body && typeof body === 'object') entry.body = body;
         if (supports && typeof supports === 'object') entry.supports = supports;
         out.push(entry);
     };
     env ??= liveEnv() ?? process.env;
-    const first = primaryBackend({ ...config, apiKey: config?.apiKey || env.OPENAI_API_KEY }, 'completions');
-    add(first.baseURL || 'https://api.openai.com/v1/', first.apiKey || env.OPENAI_API_KEY, true, first.headers, first.body, first.supports);
-    for (const item of providerList(config, env, 'completions')) add(item.baseURL, item.apiKey, false, item.headers, item.body, item.supports);
+    const model = modelOverride ?? config.completion?.model ?? config.model;
+    const modelEntries = modelBackendEntries(config, model, 'completions', env);
+    if (modelEntries?.length) {
+        for (const item of modelEntries) add(item.baseURL, item.apiKey, out.length === 0, item.headers, item.body, item.supports, item.modelRewrite);
+    } else {
+        const first = primaryBackend({ ...config, apiKey: config?.apiKey || env.OPENAI_API_KEY }, 'completions');
+        add(first.baseURL || 'https://api.openai.com/v1/', first.apiKey || env.OPENAI_API_KEY, true, first.headers, first.body, first.supports);
+        for (const item of providerList(config, env, 'completions')) add(item.baseURL, item.apiKey, false, item.headers, item.body, item.supports);
+    }
     return out;
 }
 
@@ -117,7 +125,11 @@ function channelFailed(error) {
  * @ai.hint io
  */
 export function createCompletionChannels(config, { create = createClient, env = liveEnv(), ttlMs, timeoutMs } = {}) {
-    const endpoints = completionChannelList(config, env);
+    const endpointCache = new Map();
+    const endpointsFor = (model) => {
+        if (!endpointCache.has(model)) endpointCache.set(model, completionChannelList(config, env, model));
+        return endpointCache.get(model);
+    };
     const probeEnabled = config?.completion?.channelProbe !== false;
     const ttl = Number.isFinite(ttlMs) ? ttlMs : (config?.completion?.probeTtlMs ?? DEFAULT_TTL_MS);
     const timeout = Number.isFinite(timeoutMs) ? timeoutMs : (config?.completion?.probeTimeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -162,7 +174,8 @@ export function createCompletionChannels(config, { create = createClient, env = 
      * @returns {object}
      * @ai.hint pure
      */
-    function fallbackEntry(error = null) {
+    function fallbackEntry(error = null, model) {
+        const endpoints = endpointsFor(model);
         const first = endpoints[0] ?? null;
         return {
             winner: first,
@@ -184,6 +197,7 @@ export function createCompletionChannels(config, { create = createClient, env = 
      * @ai.hint io
      */
     function startProbe(model) {
+        const endpoints = endpointsFor(model);
         if (!probeEnabled || endpoints.length < 2) {
             const entry = {
                 winner: endpoints[0] ?? null,
@@ -213,7 +227,7 @@ export function createCompletionChannels(config, { create = createClient, env = 
         const probes = endpoints.map((endpoint) => (async () => {
             try {
                 const client = clientFor(endpoint);
-                const response = await client.responses.create(buildProbeBody(model), {
+                const response = await client.responses.create(buildProbeBody(rewriteCompletionModel(model, endpoint.modelRewrite)), {
                     signal: AbortSignal.any([controller.signal, AbortSignal.timeout(Math.max(1, timeout))]),
                 });
                 if (response?.status === 'failed' || response?.status === 'cancelled' || response?.error) {
@@ -263,7 +277,7 @@ export function createCompletionChannels(config, { create = createClient, env = 
             if (!closed) cache.set(model, entry);
             return entry;
         })().catch((error) => {
-            const entry = fallbackEntry(error);
+            const entry = fallbackEntry(error, model);
             entry.at = Date.now();
             if (!closed) cache.set(model, entry);
             return entry;
@@ -295,6 +309,12 @@ export function createCompletionChannels(config, { create = createClient, env = 
         entry.refresh ??= refresh(model).catch(() => null);
         return entry;
     }
+
+    const rewriteCompletionModel = (model, rewrite) => {
+        if (!rewrite) return model;
+        return (rewrite.vendor ? `${rewrite.vendor}/` : '') + (rewrite.prefix ?? '') + model + (rewrite.suffix ?? '');
+    };
+    const completionBody = (body, endpoint) => ({ ...body, model: rewriteCompletionModel(body?.model, endpoint.modelRewrite) });
 
     /**
      * Try one endpoint and keep setup failures separate from API errors.
@@ -344,7 +364,7 @@ export function createCompletionChannels(config, { create = createClient, env = 
         const winner = entry.winner && (!entry.down.has(entry.winner) || entry.failed) ? entry.winner : null;
         if (winner) {
             tried.add(winner);
-            const result = await tryEndpoint(winner, body, options);
+            const result = await tryEndpoint(winner, completionBody(body, winner), options);
             if (result.response) return result;
             lastError = result.error;
             if (options.signal?.aborted || isAbortError(result.error)) throw result.error;
@@ -356,7 +376,7 @@ export function createCompletionChannels(config, { create = createClient, env = 
             const endpoint = nextEndpoint(entry, tried);
             if (!endpoint) return { error: lastError };
             tried.add(endpoint);
-            const result = await tryEndpoint(endpoint, body, options);
+            const result = await tryEndpoint(endpoint, completionBody(body, endpoint), options);
             if (result.response) return result;
             lastError = result.error;
             if (options.signal?.aborted || isAbortError(result.error)) throw result.error;
@@ -411,6 +431,7 @@ export function createCompletionChannels(config, { create = createClient, env = 
         clients.clear();
         cache.clear();
         inflight.clear();
+        endpointCache.clear();
     }
 
     return { create: send, close };

@@ -329,7 +329,15 @@ function normalizeBackendEntries(list) {
  * @returns {boolean} true when `fallback.providers` was merged and config.json should be rewritten.
  * @ai.hint pure
  */
+function normalizeModelBackends(value) {
+    if (!isRecord(value)) return value;
+    return Object.fromEntries(Object.entries(value).map(([model, list]) => [
+        model, Array.isArray(list) ? list.map((item) => typeof item === 'string' ? { baseURL: item } : item) : list,
+    ]));
+}
+
 function normalizeBackends(c, env = null) {
+    c.modelsBackends = normalizeModelBackends(c.modelsBackends);
     c.backends = normalizeBackendEntries(c.backends);
     c.imagesBackends = normalizeBackendEntries(c.imagesBackends);
     c.decisionsBackends = normalizeBackendEntries(c.decisionsBackends);
@@ -425,7 +433,7 @@ export async function loadConfig({ configPath = null, overrides = {}, env = null
     config.memory.dbFile ||= path.join(home, 'memory.db');
     config.configFiles = [path.join(home, 'config.json'), ...(configPath ? [path.resolve(configPath)] : [])];
     normalizeContext(config);
-    validateConfig(config);
+    validateConfig(config, env);
     const pins = pinsFrom([homeConfig, fileConfig, overrides]);
     config.rolePins = pins.rolePins;
     config.stepCapPinned = pins.stepCapPinned;
@@ -497,6 +505,32 @@ function validateBodyFields(body, where, fail) {
  * @returns {void}
  * @ai.hint pure
  */
+function validateModelBackends(map, c, env, fail) {
+    if (!isRecord(map)) fail('modelsBackends должен быть объектом');
+    for (const [model, list] of Object.entries(map)) {
+        if (!model.trim()) fail('modelsBackends: ключ модели не должен быть пустым');
+        if (!Array.isArray(list) || !list.length) fail(`modelsBackends.${model} должен быть непустым массивом`);
+        for (const [index, item] of list.entries()) {
+            const where = `modelsBackends.${model}[${index}]`;
+            if (!isRecord(item)) fail(`${where} должен быть объектом`);
+            for (const key of Object.keys(item)) {
+                if (!['baseURL', 'apiKey', 'prefix', 'vendor', 'suffix', 'type'].includes(key)) fail(`${where}.${key}: неизвестное поле`);
+            }
+            if (typeof item.baseURL !== 'string' || !item.baseURL.trim()) fail(`${where}.baseURL должен быть URL`);
+            try { new URL(item.baseURL); } catch { fail(`${where}.baseURL должен быть URL`); }
+            if (item.apiKey != null && (typeof item.apiKey !== 'string' || /[\r\n]/.test(item.apiKey))) fail(`${where}.apiKey: строка или null`);
+            for (const key of ['prefix', 'vendor', 'suffix']) {
+                if (item[key] != null && typeof item[key] !== 'string') fail(`${where}.${key}: строка или null`);
+            }
+            if (item.type != null && !['auto', 'text', 'images', 'decisions'].includes(item.type)) fail(`${where}.type: auto | text | images | decisions`);
+            const inherited = [...(Array.isArray(c.backends) ? c.backends : []), ...(Array.isArray(c.fallback?.providers) ? c.fallback.providers : [])]
+                .find((backend) => backend?.baseURL === item.baseURL);
+            const inheritedKey = inherited?.apiKey || (inherited?.env ? env?.[inherited.env] : '');
+            if (!(item.apiKey?.trim()) && !(typeof inheritedKey === 'string' && inheritedKey.trim())) fail(`${where}: apiKey не задан и не найден в backends с тем же baseURL`);
+        }
+    }
+}
+
 function validateBackends(list, where, fail) {
     if (!Array.isArray(list)) fail(`${where} должен быть массивом`);
     for (const [index, item] of list.entries()) {
@@ -519,7 +553,7 @@ function validateBackends(list, where, fail) {
  * @returns {void}
  * @ai.hint pure
  */
-function validateConfig(c) {
+function validateConfig(c, env = liveEnv() ?? process.env) {
     const fail = (message) => { throw new Error(`Конфигурация: ${message}`); };
     if (typeof c.model !== 'string' || !c.model.trim()) fail('укажите model (или AI_MODEL / --model).');
     if (c.imageModel !== null && (typeof c.imageModel !== 'string' || !c.imageModel.trim())) fail('imageModel должен быть строкой.');
@@ -565,6 +599,7 @@ function validateConfig(c) {
     }
     if (!Array.isArray(c.backends)) fail('backends должен быть массивом');
     validateBackends(c.backends, 'backends', fail);
+    validateModelBackends(c.modelsBackends, c, env, fail);
     validateBackends(c.imagesBackends, 'imagesBackends', fail);
     validateBackends(c.decisionsBackends, 'decisionsBackends', fail);
     validateBackends(c.completionsBackends, 'completionsBackends', fail);
@@ -898,6 +933,9 @@ export function redactConfig(config) {
     if (Array.isArray(copy.backends)) for (const item of copy.backends) redactBackend(item);
     for (const branch of ['imagesBackends', 'decisionsBackends', 'completionsBackends', 'moderationsBackends']) {
         if (Array.isArray(copy[branch])) for (const item of copy[branch]) redactBackend(item);
+    }
+    for (const list of Object.values(copy.modelsBackends ?? {})) {
+        if (Array.isArray(list)) for (const item of list) redactBackend(item);
     }
     if (Array.isArray(copy.fallback?.providers)) {
         for (const item of copy.fallback.providers) redactBackend(item);
