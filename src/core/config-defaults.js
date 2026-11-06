@@ -246,7 +246,16 @@ export const defaults = Object.freeze({
          * request that names no frame at all. Preset-only models (gpt-image, recraft) ignore it.
          */
         resolution: null,
-        maskModel: null,             // null → the edit model draws the alpha matte (openai/gpt-image-2.6-sunburst)
+        /**
+         * The model the technical alpha passes (background paint, matte) are charged to.
+         *   null              → the family default: gpt-image keeps its own raster model, riverflow
+         *                       and other plate-painting families take the cheap edit default
+         *   'self'            → the model that drew the picture. For riverflow this is the quality
+         *                       option: the matte comes back in the exact source frame, so nothing is
+         *                       stretched onto the RGB base — and it is billed as full generations
+         *   "vendor/model"    → that model, whatever generated the picture
+         */
+        maskModel: null,
         rasterEngine: 'auto',        // auto | sharp | canvas | magick; auto prefers sharp, then node-canvas, then ImageMagick
         /**
          * 16-pixel padding for /images/edits inputs. auto follows the model profile
@@ -260,7 +269,12 @@ export const defaults = Object.freeze({
           * (riverflow, sourceful); 'always' = all models; 'never' = no text hint.
           */
         sizeHint: 'auto',              // auto | always | never
-        alphaMode: 'auto',           // auto: native alpha, then paint→mask, then contour, then corner fill; mask | contour | flat | off
+        /**
+         * 'key' cuts the background locally by its own color (read off the frame border), so a cut-out
+         * costs no extra generation at all — the cheap path for a flat plate. It cannot recover an edge
+         * the model blended into the plate, which is what the paint pass is for, so 'auto' stays default.
+         */
+        alphaMode: 'auto',           // auto: native alpha, then paint→mask, then contour, then corner fill; mask | contour | flat | key | off
         paintBackground: true,       // fill the background with the subject color before the matte is drawn (kills the halo)
         alphaFeather: 1,             // px of anti-aliasing on the matte edge; 0 keeps the matte as drawn
         vectorModel: null,           // null → recraft/recraft-v4.1-pro-vector through the images API

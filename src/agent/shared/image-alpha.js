@@ -20,8 +20,29 @@ import path from 'node:path';
 import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { ALPHA_MASK_PROMPT, BACKGROUND_PAINT_PROMPT, MASK_EXT, MAX_SOFT_SHARE, MIN_CLEARED_SHARE, MIN_SOFT_PIXELS, MODEL_MATES, RGB_SOURCE_EXT } from './constants.js';
 import { detectMagick, ensureTransparentBackground, magickAlphaShare, magickAlphaSoftShare, magickApplyAlphaMask, magickContourAlphaMask, magickDetectFakeTransparency, magickIdentify, magickIsOpaque, magickSaturationAlphaMask } from './image-magick.js';
-import { rasterAlphaShare, rasterAlphaSoftShare, rasterApplyAlphaMask, rasterDetectFakeTransparency, rasterEngine, rasterInfo, rasterIsOpaque, rasterLocalAlphaMatte } from './image-raster.js';
+import { rasterAlphaShare, rasterAlphaSoftShare, rasterApplyAlphaMask, rasterColorKeyAlpha, rasterDetectFakeTransparency, rasterEngine, rasterInfo, rasterIsOpaque, rasterLocalAlphaMatte } from './image-raster.js';
 import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, imageModelProfile, sniffImage } from '../../openai/images.js';
+import { backgroundColor, frameFromFile } from '../../quantizer/kmeans.js';
+
+/**
+ * Cut a flat background locally, by the color the frame is resting on, with no model call at all.
+ *
+ * The plate color is read off the frame border, so nothing has to be told to the model and nothing
+ * has to be asked of it: this is the cheap answer for a family that cannot emit alpha and paints a
+ * plate instead. It cannot recover an edge the model blended into that plate — that is what the paint
+ * pass exists for — which is why `auto` keeps the two-pass pipeline and this is the `key` mode.
+ * @param {{ engine?: string, base: string, abs: string, cwd: string, signal?: AbortSignal, feather?: number }} options
+ * @returns {Promise<{ changed: boolean, reason: string, key?: { r: number, g: number, b: number } }>}
+ * @exports
+ * @ai.hint io
+ */
+export async function localKeyAlpha({ engine = 'auto', base, abs, cwd, signal, feather = 1 }) {
+    const frame = await frameFromFile(base, { engine }).catch(() => null);
+    if (!frame) return { changed: false, reason: 'unreadable' };
+    const key = backgroundColor(frame, { alphaThreshold: 128, borderSamples: 512 });
+    if (!key) return { changed: false, reason: 'no-plate-color' };
+    return rasterColorKeyAlpha({ input: base, output: abs, key, cwd, signal, low: 16, high: 56, feather, engine });
+}
 
 /**
  * Cleared share of the frame (`1 - mean(alpha)`), measured by whichever engine is available.
@@ -149,10 +170,38 @@ export function frameFor(info, model = null) {
 }
 
 /**
+ * `image.maskModel` values that ask for the technical passes to run on the model that drew the
+ * picture itself. A generator draws a cleaner matte than a cheap edit model — and for a family that
+ * takes an arbitrary frame it also returns the matte in the exact source frame, so nothing is
+ * stretched onto the RGB base. The price is a full generation per pass, so this is opt-in.
+ */
+const SELF_MASK_MODELS = new Set(['self', 'same', 'generator']);
+
+/**
+ * The model the paint pass and the matte pass are charged to.
+ *
+ * - a name in `image.maskModel` → that model, whatever generated the picture;
+ * - `self` → the model that drew the picture (best edge, billed as extra generations);
+ * - `null` → the family default: `preferGenerator` keeps the caller's raster model (gpt-image answers
+ *   natively, so a matte is only built when it did not), while a family that always paints a plate
+ *   falls back to `null` and lets its caller pick the cheap edit model instead.
+ * @param {{ maskModel?: unknown, model?: string|null, imageModel?: string|null, preferGenerator?: boolean }} options
+ * @returns {string|null} the model to use, or `null` when the caller decides its own default
+ * @ai.hint pure
+ */
+export function maskPassModel({ maskModel = null, model = null, imageModel = null, preferGenerator = false }) {
+    const requested = typeof maskModel === 'string' ? maskModel.trim() : '';
+    const configured = imageModel && !isVectorModel(imageModel) ? imageModel : null;
+    if (SELF_MASK_MODELS.has(requested.toLowerCase())) return model || configured || PROXY_IMAGE_EDIT_MODEL;
+    if (requested) return requested;
+    return preferGenerator ? (model || configured || PROXY_IMAGE_EDIT_MODEL) : null;
+}
+
+/**
  * Send one picture to the technical edit model and return the decoded reply when it is a readable
  * raster. Both the paint pass and the matte pass use this: they are technical requests, so they go
- * to `image.maskModel`, then to the raster model the caller already uses, and only then to the edit
- * default — a vector model can never draw a matte.
+ * to `image.maskModel` (`self` = the model that drew the picture), then to the raster model the
+ * caller already uses, and only then to the edit default — a vector model can never draw a matte.
  * `error` is set when the pass did not produce a readable raster, so the caller can report why the
  * model matte is missing instead of failing silently.
  * @param {{ client: object, config?: object|null, file: string, prompt: string, signal?: AbortSignal, model?: string|null }} options
@@ -170,8 +219,7 @@ export async function askModel({ client, config = null, file, prompt, signal, mo
     const info = raster
         ? await rasterInfo(abs, { cwd: path.dirname(abs), engine }).catch(() => null)
         : exe ? await magickIdentify({ exe, input: abs, cwd: path.dirname(abs), signal }).catch(() => null) : null;
-    const configured = config?.imageModel && !isVectorModel(config.imageModel) ? config.imageModel : null;
-    const techModel = model || config?.image?.maskModel || configured || PROXY_IMAGE_EDIT_MODEL;
+    const techModel = maskPassModel({ maskModel: config?.image?.maskModel, model, imageModel: config?.imageModel, preferGenerator: true });
     try {
         const payloads = await client.images.edit({
             model: techModel,
@@ -273,6 +321,13 @@ export async function applyGeneratedAlphaMask({
     };
     /** Why the model passes did not deliver a matte; reported with the local fallback result. */
     let lastError = null;
+
+    // 0. Key mode: the plate is removed by its own color, so the cut costs no generation at all.
+    if (alphaMode === 'key' && raster) {
+        const keyed = await localKeyAlpha({ engine, base, abs, cwd, signal, feather });
+        if (keyed.changed) return { ...merged, ...keyed, reason: 'key', model: merged.model };
+        lastError = keyed.error ?? lastError;
+    }
 
     // 1. Paint pass: the background takes the subject color, the subject itself stays untouched.
     let paintedPath = null;

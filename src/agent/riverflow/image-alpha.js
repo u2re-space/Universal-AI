@@ -14,8 +14,9 @@ export { ALPHA_MASK_PROMPT, BACKGROUND_PAINT_PROMPT, paintPromptWithColor } from
 import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { detectMagick, ensureTransparentBackground, magickApplyAlphaMask, magickIdentify, magickIsOpaque } from '../shared/image-magick.js';
 import { rasterApplyAlphaMask, rasterEngine, rasterInfo, rasterIsOpaque } from '../shared/image-raster.js';
+import { PROXY_IMAGE_EDIT_MODEL } from '../../openai/images.js';
 import { dominantSubjectColorFromFile } from '../../quantizer/kmeans.js';
-import { frameFor, judgeAlphaShares, askModel, isRaster, isFakePlate, localMatte, flatAlphaFallback } from '../shared/image-alpha.js';
+import { frameFor, judgeAlphaShares, askModel, isRaster, isFakePlate, localMatte, localKeyAlpha, flatAlphaFallback, maskPassModel } from '../shared/image-alpha.js';
 
 /**
  * Apply alpha with a riverflow-specific pipeline:
@@ -81,16 +82,30 @@ export async function applyGeneratedAlphaMask({
     };
     let lastError = null;
 
+    // 0. Key mode: cut the flat plate locally, zero extra generations (same helper as the shared tract).
+    if (alphaMode === 'key' && raster) {
+        const keyed = await localKeyAlpha({ engine, base, abs, cwd, signal, feather });
+        if (keyed.changed) return { ...merged, ...keyed, reason: 'key', model: merged.model };
+        lastError = keyed.error ?? lastError;
+    }
+
     // 1. Local color pick — the dominant color of the subject, with the plate left out of the vote.
+    // Used only in the paint pass to give the model an explicit hex target.
     const hex = await dominantSubjectColorFromFile(base, { k: 3, alphaThreshold: 128, maxSamples: 4096 })
         .catch(() => null);
     if (hex) merged.backgroundColor = hex;
     const paintPrompt = hex ? paintPromptWithColor(hex) : BACKGROUND_PAINT_PROMPT;
 
+    // Technical model: a named `image.maskModel`, or `self` to run the passes on riverflow itself
+    // (better edges, billed as full generations), otherwise the cheap edit default. By default the
+    // generator is never charged for a technical pass.
+    const techModel = maskPassModel({ maskModel: config?.image?.maskModel, model, imageModel: config?.imageModel })
+        || PROXY_IMAGE_EDIT_MODEL;
+
     // 2. Paint pass with explicit hex.
     let paintedPath = null;
     if (MODEL_MATES.has(alphaMode) && paintBackground && client?.images) {
-        const painted = await askModel({ client, config, file: base, prompt: paintPrompt, signal, model });
+        const painted = await askModel({ client, config, file: base, prompt: paintPrompt, signal, model: techModel });
         if (isRaster(painted)) {
             paintedPath = path.join(cwd, `.tmp-alpha-painted-${process.pid}-${Date.now()}.png`);
             await writeFile(paintedPath, painted.bytes);
@@ -105,7 +120,7 @@ export async function applyGeneratedAlphaMask({
     try {
         // 3. Model matte.
         if (MODEL_MATES.has(alphaMode) && client?.images && paintedPath) {
-            const matte = await askModel({ client, config, file: base, prompt: ALPHA_MASK_PROMPT, signal, model });
+            const matte = await askModel({ client, config, file: base, prompt: ALPHA_MASK_PROMPT, signal, model: techModel });
             if (isRaster(matte)) {
                 const maskPath = path.join(cwd, `.tmp-alpha-mask-${process.pid}-${Date.now()}.${matte.ext}`);
                 await writeFile(maskPath, matte.bytes);

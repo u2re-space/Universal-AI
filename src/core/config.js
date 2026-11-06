@@ -653,10 +653,10 @@ function validateConfig(c, env = liveEnv() ?? process.env) {
     if (!['auto', 'sharp', 'canvas', 'magick'].includes(c.image.rasterEngine)) fail('image.rasterEngine: auto | sharp | canvas | magick');
      if (!['auto', 'always', 'never'].includes(c.image.div16)) fail('image.div16: auto | always | never');
      if (!['auto', 'always', 'never'].includes(c.image.sizeHint)) fail('image.sizeHint: auto | always | never');
-    if (c.image.maskModel != null && (typeof c.image.maskModel !== 'string' || !c.image.maskModel.trim())) fail('image.maskModel: непустая строка или null');
+    if (c.image.maskModel != null && (typeof c.image.maskModel !== 'string' || !c.image.maskModel.trim())) fail('image.maskModel: null | self | "vendor/model"');
     if (c.image.vectorModel != null && (typeof c.image.vectorModel !== 'string' || !c.image.vectorModel.trim())) fail('image.vectorModel: непустая строка или null');
     if (!Number.isSafeInteger(c.image.vectorMaxColors) || c.image.vectorMaxColors < 2 || c.image.vectorMaxColors > 65536) fail('image.vectorMaxColors: 2..65536');
-    if (!['auto', 'mask', 'contour', 'flat', 'off'].includes(c.image.alphaMode)) fail('image.alphaMode: auto | mask | contour | flat | off');
+    if (!['auto', 'mask', 'contour', 'flat', 'key', 'off'].includes(c.image.alphaMode)) fail('image.alphaMode: auto | mask | contour | flat | key | off');
     if (typeof c.image.paintBackground !== 'boolean') fail('image.paintBackground: true | false');
     if (typeof c.image.autoVectorize !== 'boolean') fail('image.autoVectorize: true | false');
     if (typeof c.image.alphaFeather !== 'number' || c.image.alphaFeather < 0 || c.image.alphaFeather > 8) fail('image.alphaFeather: 0..8');

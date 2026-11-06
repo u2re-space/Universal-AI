@@ -16,7 +16,7 @@ export const VECTOR_SOURCE_EXT = /\.(png|webp)$/i;
 export const VECTOR_HINT = /logo|badge|icon|emblem|seal|wordmark|logotype|stamp|марк|логотип|эмблем|знач|наклейк|герб|печать|щит/i;
 
 /** Reasons that mean the raster is already cut out and can go straight to the vector model. */
-export const CUT_OUT = new Set(['native', 'mask', 'contour', 'flat', 'already']);
+export const CUT_OUT = new Set(['native', 'mask', 'contour', 'flat', 'key', 'already']);
 
 /** Prompt for a grayscale alpha matte that preserves the subject and cleanly removes its background. */
 export const ALPHA_MASK_PROMPT = 'Return an A-mask (matte) for the attached image that will be composited onto an RGB background to produce the final RGBA image. '

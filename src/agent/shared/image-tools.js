@@ -2,20 +2,25 @@
  * @file src/agent/image-tools.js
  * @module agent/image-tools
  * @purpose Local generate_image and edit_image tools for the images API, plus vectorize_image.
- * @depends node:path, node:fs/promises, agent/paths, agent/image-magick, openai/images
+ * @depends node:path, node:fs/promises, agent/paths, agent/image-magick, openai/images, agent/image-alpha
  * @usedBy agent/tools
  * @exports createImageHandlers
  * @ai.tags images, tools
  * @ai.hint io
  * @changed 2026-10-23 Native alpha first with the mask pipeline as fallback, PNG by default and WebP
  *           only for heavy files, alpha built from the clean source, auto-vectorization of marks.
+ * @changed 2026-11-06 Transparency is asked of the model that can deliver it: a family that paints a
+ *           fake plate is sent `background: opaque` and cut locally, and the alpha pipeline is chosen
+ *           by model family instead of always running the shared one.
  */
 
 import path from 'node:path';
 import { mkdir, readFile, writeFile, stat, unlink, readdir } from 'node:fs/promises';
 import { resolveInside } from '../paths.js';
 import { detectMagick, magickConvert, magickIsOpaque, magickRemoveFlatBackground, assessVectorSuitability, magickTrimImage } from './image-magick.js';
-import { applyGeneratedAlphaMask, hasRealAlpha as sharedHasRealAlpha } from './image-alpha.js';
+// The family dispatcher, not the shared pipeline: riverflow and gpt-image cut alpha differently,
+// and the tool has to pick the one that matches the model that drew the picture.
+import { applyGeneratedAlphaMask, hasRealAlpha as sharedHasRealAlpha } from '../image-alpha.js';
 import { imageModelFor, imageModelProfile, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_VECTOR_MODEL, imageRequestSize, readImageSize } from '../../openai/images.js';
 import { rasterEngine } from './image-raster.js';
 import { formatBytes } from '../../util/text.js';
@@ -38,17 +43,21 @@ export function createImageHandlers({ root, client, config, signal, describeImag
     const pngMaxBytes = config.image?.pngMaxBytes ?? 4 * 1024 * 1024;
 
     /**
-     * Background for one request. `background: transparent` is a real API field for the gpt-image
-     * family, so when the caller wants transparency and the model can deliver alpha natively, the
-     * model draws the alpha channel itself and no matte is needed. The mask pipeline stays as the
-     * fallback for the vendors that cannot, and for the ones that paint a checkerboard instead.
+     * The `background` field a request actually carries.
+     *
+     * A family whose gateway answers `background: transparent` with a painted plate is asked for an
+     * opaque frame instead: the plate is what the local matte removes, and asking for transparency
+     * only invites a checkerboard the matte then has to fight. Transparency of the delivered file is
+     * still produced locally — the caller keeps its own `transparent` intent, only the wire field
+     * changes.
      * @param {string} model
      * @param {string} requested
      * @returns {string}
      * @ai.hint pure
      */
-    const effectiveBackground = (model, requested) =>
-        requested === 'transparent' && supportsTransparentBackground(model) ? 'transparent' : requested;
+    const effectiveBackground = (model, requested) => requested === 'transparent' && imageModelProfile(model).paintsFakeTransparency
+        ? 'opaque'
+        : requested === 'transparent' && supportsTransparentBackground(model) ? 'transparent' : requested;
 
     /**
      * Write one base64 image inside the working directory.
@@ -170,6 +179,7 @@ export function createImageHandlers({ root, client, config, signal, describeImag
             const count = (reason) => saved.filter((item) => item.alpha?.reason === reason).length;
             if (count('native')) notes.push(`Прозрачность: модель отдала настоящий альфа-канал у ${count('native')} файл(ов), маска не потребовалась.`);
             if (count('mask')) notes.push(`Прозрачность: фон залит цветом объекта, anti-aliased маска модели влита в альфа-канал у ${count('mask')} файл(ов).`);
+            if (count('key')) notes.push(`Прозрачность: фон обрезан локально по его цвету (color-key) у ${count('key')} файл(ов) — без дополнительных генераций.`);
             if (count('contour')) notes.push(`Прозрачность: маска модели недоступна, фон обрезан по локальному контуру у ${count('contour')} файл(ов).`);
             if (count('flat')) notes.push(`Прозрачность: маска не удалась, фон удалён заливкой от углов у ${count('flat')} файл(ов).`);
             if (count('opaque')) notes.push('Прозрачность: фоном оказался сам объект — файл оставлен непрозрачным.');

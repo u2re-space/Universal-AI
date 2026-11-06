@@ -10,6 +10,8 @@
  * @ai.hint io
  * @changed 2026-10-23 Paint + anti-aliased matte pipeline; the matte is drawn from the clean source,
  *           never from the painted picture.
+ * @changed 2026-11-06 `alphaMode: 'key'` cuts the flat plate locally through the shared key helper,
+ *           so the mode means the same thing in both model families and costs no generation.
  */
 
 import path from 'node:path';
@@ -20,7 +22,7 @@ import { detectMagick, ensureTransparentBackground, magickApplyAlphaMask, magick
 import { rasterApplyAlphaMask, rasterDetectFakeTransparency, rasterEngine, rasterInfo, rasterIsOpaque, rasterLocalAlphaMatte } from '../shared/image-raster.js';
 import { isVectorModel, PROXY_IMAGE_EDIT_MODEL, sniffImage } from '../../openai/images.js';
 import { hasRealAlpha as hasUsableAlpha } from '../riverflow/image-alpha.js';
-import { frameFor } from '../shared/image-alpha.js';
+import { frameFor, localKeyAlpha, maskPassModel } from '../shared/image-alpha.js';
 
 /**
  * Pick the frame that keeps the source aspect ratio, so the matte is not squeezed into a square.
@@ -56,8 +58,7 @@ async function askModel({ client, config = null, file, prompt, signal, model = n
     const info = raster
         ? await rasterInfo(abs, { cwd: path.dirname(abs), engine }).catch(() => null)
         : exe ? await magickIdentify({ exe, input: abs, cwd: path.dirname(abs), signal }).catch(() => null) : null;
-    const configured = config?.imageModel && !isVectorModel(config.imageModel) ? config.imageModel : null;
-    const techModel = model || config?.image?.maskModel || configured || PROXY_IMAGE_EDIT_MODEL;
+    const techModel = maskPassModel({ maskModel: config?.image?.maskModel, model, imageModel: config?.imageModel, preferGenerator: true });
     try {
         const payloads = await client.images.edit({
             model: techModel,
@@ -148,6 +149,13 @@ export async function applyGeneratedAlphaMask({
     };
     /** Why the model passes did not deliver a matte; reported with the local fallback result. */
     let lastError = null;
+
+    // 0. Key mode: cut the flat plate locally, zero extra generations (same helper as riverflow).
+    if (alphaMode === 'key' && raster) {
+        const keyed = await localKeyAlpha({ engine, base, abs, cwd, signal, feather });
+        if (keyed.changed) return { ...merged, ...keyed, reason: 'key', model: merged.model };
+        lastError = keyed.error ?? lastError;
+    }
 
     // 1. Paint pass: the background takes the subject color, the subject itself stays untouched.
     let paintedPath = null;
