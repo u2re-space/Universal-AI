@@ -24,16 +24,16 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/' }, { hasImage: true }), 'openai/gpt-image-2.6-sunburst');
     assert.equal(imageModelFor({ baseURL: 'https://api.proxyapi.ru/v1/', imageModel: 'custom/model' }, { hasImage: true }), 'custom/model');
     const body = generationBody({ model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', size: 'auto', complexity: 'auto', n: 1, format: 'png', background: 'transparent' });
-    assert.deepEqual(body, { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png', quality: 'high' });
+    assert.deepEqual(body, { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png' });
     assert.deepEqual(
         generationBody({ model: 'gpt-image-2.6-sunburst', prompt: 'маяк', size: 'auto', complexity: 'auto', quality: 'high', n: 1, format: 'png', background: 'transparent' }),
-        { model: 'gpt-image-2.6-sunburst', prompt: 'маяк', output_format: 'png', background: 'transparent', quality: 'high'/*, response_format: 'b64_json'*/ },
+        { model: 'gpt-image-2.6-sunburst', prompt: 'маяк', output_format: 'png', background: 'transparent' },
     );
     assert.equal('partial_images' in body, false);
     // gpt-image-1 always answers in base64 and rejects response_format, so the field stays out.
     assert.deepEqual(
         generationBody({ model: 'gpt-image-1', prompt: 'маяк', format: 'png', background: 'transparent' }),
-        { model: 'gpt-image-1', prompt: 'маяк', output_format: 'png', background: 'transparent', quality: 'high' },
+        { model: 'gpt-image-1', prompt: 'маяк', output_format: 'png', background: 'transparent' },
     );
     assert.equal(supportsTransparentBackground('gpt-image-2.6-sunburst'), true);
     assert.equal(supportsTransparentBackground('gpt-image-1'), true);
@@ -54,7 +54,7 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(backgroundValue({ model: 'recraft/recraft-v4.1-utility', format: 'png', background: 'transparent' }), null);
     assert.deepEqual(
         generationBody({ model: 'gpt-image-2.6-sunburst', prompt: 'маяк', format: 'jpeg', background: 'transparent' }),
-        { model: 'gpt-image-2.6-sunburst', prompt: 'маяк', output_format: 'jpeg', complexity: 'high', quality: 'high'/*, response_format: 'b64_json'*/ },
+        { model: 'gpt-image-2.6-sunburst', prompt: 'маяк', output_format: 'jpeg', complexity: 'high' },
     );
     assert.equal(normalizeImageFormat('auto'), null);
     assert.equal(normalizeImageFormat('jpg'), 'jpeg');
@@ -70,7 +70,7 @@ test('proxyapi uses the images API and omits Responses-only image fields', () =>
     assert.equal(imageRequestSize('2048x2048', 'gpt-image-1'), '1024x1024');
     assert.equal(generationBody({ model: 'gpt-image-2.6-sunburst', prompt: 'p', size: '2048x2048' }).size, '2048x2048');
     assert.deepEqual(imageSizeAttempts('2048x2048', 'gpt-image-2.6-sunburst'), ['2048x2048', '1024x1024']);
-    assert.deepEqual(imageSizeAttempts('100x100', 'gpt-image-2.6-sunburst'), ['100x100', '816x816', '1024x1024']);
+    assert.deepEqual(imageSizeAttempts('100x100', 'gpt-image-2.6-sunburst'), ['112x112', '816x816', '1024x1024']);
     assert.deepEqual(imageSizeAttempts('4096x2048', 'gpt-image-2.6-sunburst'), ['4096x2048', '3840x1920', '1536x1024']);
     assert.deepEqual(imageSizeAttempts('1024x1024', 'gpt-image-2.6-sunburst'), ['1024x1024']);
     assert.equal(sameAspectImageSize('bad'), null);
@@ -363,6 +363,38 @@ test('openai edits send output_format and background instead of image_format', a
     }
 });
 
+test('GPT Image 2.6 edits send multipart fields and parse base64 response', async () => {
+    const png = Buffer.from(TINY_PNG, 'base64');
+    let seen = null;
+    const server = http.createServer(async (req, res) => {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        seen = { route: req.url, form: Buffer.concat(chunks).toString('latin1') };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: [{ b64_json: TINY_PNG }] }));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    const client = createClient({ apiKey: 'sk-test', baseURL: `http://127.0.0.1:${port}/v1/`, retries: 0, imageDiv16: 'never' });
+    try {
+        const payloads = await client.images.edit({
+            model: 'gpt-image-2.6-sunburst', prompt: 'edit', size: '1024x1024', format: 'png', complexity: 'high',
+            files: [{ filename: 'shot.png', mime: 'image/png', bytes: png }],
+        });
+        assert.equal(payloads[0], TINY_PNG);
+        assert.equal(seen.route, '/v1/images/edits');
+        assert.match(seen.form, /name="model"\r\n\r\ngpt-image-2\.6-sunburst\r\n/);
+        assert.match(seen.form, /name="size"\r\n\r\n1024x1024\r\n/);
+        assert.match(seen.form, /name="output_format"\r\n\r\npng\r\n/);
+        assert.match(seen.form, /name="complexity"\r\n\r\nhigh\r\n/);
+        assert.match(seen.form, /name="image"; filename="shot\.png"/);
+        assert.doesNotMatch(seen.form, /name="quality"/);
+    } finally {
+        client.close();
+        await new Promise((resolve) => server.close(resolve));
+    }
+});
+
 test('GPT Image 2.6 retries invalid dimensions in order and does not retry other errors', async () => {
     const png = Buffer.from(TINY_PNG, 'base64');
     const generationSizes = [];
@@ -394,7 +426,7 @@ test('GPT Image 2.6 retries invalid dimensions in order and does not retry other
     const client = createClient({ apiKey: 'sk-test', baseURL: `http://127.0.0.1:${port}/v1/`, retries: 0 });
     try {
         await client.images.generate({ model: 'gpt-image-2.6-sunburst', prompt: 'draw', size: '100x100' });
-        assert.deepEqual(generationSizes, ['100x100', '816x816', '1024x1024']);
+        assert.deepEqual(generationSizes, ['112x112', '816x816', '1024x1024']);
         await client.images.edit({
             model: 'gpt-image-2.6-sunburst', prompt: 'edit', size: '100x100',
             files: [{ filename: 'shot.png', mime: 'image/png', bytes: png }],
@@ -517,7 +549,7 @@ test('images client posts generations and edits and the tool saves the file', as
         assert.match(edited.output, /assets\/edited\.png/);
 
         // The direct recraft call keeps the vendor-specific format field and gets no OpenAI-only background.
-        assert.deepEqual(generations[0], { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png', quality: "high" });
+        assert.deepEqual(generations[0], { model: 'recraft/recraft-v4.1-utility', prompt: 'маяк', image_format: 'png' });
         // The tool defaults to gpt-image-2.6 for raster work.
         assert.equal(generations[1].model, 'openai/gpt-image-2.6-sunburst');
         assert.equal(generations[1].output_format, 'png');

@@ -773,6 +773,62 @@ test('delegated measurer gets web search only when tools.web is enabled', async 
     }
 });
 
+test('resume with --no-measure cannot invoke or delegate to the measurer', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-resume-no-measure-'));
+    await writeFile(path.join(dir, 'mockup.png'), Buffer.from(TINY_PNG, 'base64'));
+    const seen = [];
+    const events = [];
+    script = (body) => {
+        const role = roleOf(body);
+        seen.push({ role, body });
+        if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+        if (role === 'planner') return { text: JSON.stringify({
+            summary: 'экран по референсу', complexity: 'normal',
+            steps: [{ goal: 'Выполнить задачу', details: '', verify: 'Проверить результат' }],
+            filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+            needsReview: false, imageNotes: null, risks: [], imageTasks: [],
+        }) };
+        if (role === 'worker') {
+            const outputs = body.input.filter((item) => item.type === 'function_call_output');
+            if (!outputs.length) return { calls: [{ name: 'delegate_role', arguments: { role: 'measurer', task: 'measure the reference' } }] };
+            assert.match(outputs[0].output, /measurer отключена параметром --no-measure/);
+            return { text: 'Задача выполнена без замеров' };
+        }
+        if (role === 'measurer') assert.fail('measurer must not be invoked during ai resume --no-measure');
+        return { text: 'ok' };
+    };
+    const config = baseConfig();
+    config.memory = { ...defaults.memory, enabled: false };
+    try {
+        const first = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'выполни задачу по референсу', root: dir,
+            approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+            referencePaths: ['mockup.png'], stopAfter: 'decompose', emit() {},
+        });
+        assert.equal(first.status, 'prepared', first.error?.message);
+
+        config.agent.measure = 'off';
+        const resumed = await runTeam({
+            client: client(), config, ledger: createLedger(), task: 'выполни задачу по референсу', root: dir,
+            approvalLevel: 'read', resumeId: first.workId, emit: (event) => events.push(event),
+        });
+        assert.equal(resumed.status, 'completed', resumed.error?.message);
+        assert.equal(events.some((event) => event.stage === 'measure' && event.type === 'stage.start'), false);
+        const workerRequests = seen.filter((item) => item.role === 'worker');
+        assert.ok(workerRequests.length >= 2, 'the worker receives and handles the delegated tool result');
+        for (const { body } of workerRequests) {
+            const delegate = body.tools.find((tool) => tool.name === 'delegate_role');
+            assert.ok(delegate);
+            assert.equal(delegate.parameters.properties.role.enum.includes('measurer'), false);
+            const runSubagent = body.tools.find((tool) => tool.name === 'run_subagent');
+            if (runSubagent) assert.equal(runSubagent.parameters.properties.kind.enum.includes('measurer'), false);
+        }
+        assert.equal(seen.some((item) => item.role === 'measurer'), false);
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
 test('team run puts the confirmed read file in the collector brief', async () => {
     await mkdir(path.join(root, 'src'), { recursive: true });
     await writeFile(path.join(root, 'src', 'sum.js'), 'export function sum(a, b) { return a + b; }\n');

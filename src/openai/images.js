@@ -343,6 +343,15 @@ export function imageComplexityValue({ model, complexity = null }) {
     return value;
 }
 
+//
+const makePad16Size = (value)=>{
+    const size = parseImageSize(value = value.trim().replace(/\s+/g, ''));
+    if (!size || size == 'auto') return size;
+    size.width = Math.ceil(size.width / 16) * 16;
+    size.height = Math.ceil(size.height / 16) * 16;
+    return `${size.width}x${size.height}`;
+}
+
 /**
  * Keep custom dimensions for the models that take them (GPT Image 2.6); a family that serves
  * resolution tiers gets the frame of the tier its request names; every other model gets its
@@ -358,7 +367,12 @@ export function imageRequestSize(size, model, resolution = null) {
     const value = String(size ?? '').trim().toLowerCase();
     if (!value || value === 'auto') return null;
     const caps = imageModelProfile(model);
-    if (caps.customSizes && /^\d+\s*x\s*\d+$/.test(value)) return value.replace(/\s+/g, '');
+    if (caps.customSizes && /^\d+\s*x\s*\d+$/.test(value)) {
+        if (needsDiv16Padding(model)) {
+            return makePad16Size(value);
+        }
+        return value.replace(/\s+/g, '');
+    }
     // A family that serves tiers keeps the tier token: the gateway reads it as `resolution`, and
     // unfolding `2K` into `2048x2048` would move the request out of the field the model is tuned by.
     if (caps.resolutionTiers && tierFromToken(value)) return tierFromToken(value).toUpperCase();
@@ -736,7 +750,7 @@ export function acceptsResponseFormat(model) {
  * @exports
  * @ai.hint pure
  */
-export function generationBody({ model, prompt, size = null, complexity = null, quality = null, n = null, format = null, background = null, references = null, resolution = null, sizeHint = 'auto' }) {
+export function generationBody({ model, prompt, size = null, complexity = null, n = null, format = null, background = null, references = null, resolution = null, sizeHint = 'auto' }) {
     const body = { model, prompt };
     if (Array.isArray(references) && references.length) {
         body.input_references = references.map((url) => ({ type: 'image_url', image_url: { url } }));
@@ -773,7 +787,6 @@ export function generationBody({ model, prompt, size = null, complexity = null, 
     }
     const cx = imageComplexityValue({ model, complexity });
     if (cx) body.complexity = cx;
-    body.quality ||= quality || body.complexity || "high";
     if (Number.isInteger(n) && n > 1) body.n = n;
     const fmt = resolveImageFormat({ model, format });
     if (fmt) body[imageFormatField(model)] = fmt;

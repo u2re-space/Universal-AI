@@ -62,6 +62,9 @@ export function createSubagentRunner({ config, roles, root, allNames = [], appro
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
 
     return async function runSubagent(kind, task) {
+        if (kind === 'measurer' && config.agent?.measure === 'off') {
+            throw new Error('run_subagent: роль measurer отключена параметром --no-measure.');
+        }
         const spec = executorSpec(kind, config);
         if (!spec) throw new Error(`run_subagent: неизвестный суб-агент «${kind}» (${executorNames(config).join(', ')}).`);
         const text = String(task ?? '').trim();

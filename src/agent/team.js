@@ -236,6 +236,9 @@ export async function runTeam({
      * run already knows; without it the role sees the task alone, like run_subagent.
      */
     async function delegate(role, task, { context = false } = {}) {
+        if (role === 'measurer' && config.agent.measure === 'off') {
+            throw new Error('delegate_role: роль measurer отключена параметром --no-measure.');
+        }
         const spec = executorSpec(role, config);
         if (!spec) throw new Error(`delegate_role: неизвестная роль «${role}» (${executorNames(config).join(', ')}).`);
         // Measurement crops are local artifacts, not image generation: keep them available to the measurer.
@@ -293,7 +296,7 @@ export async function runTeam({
         agentsText: () => effectiveAgentsText,
     });
     // Both delegation tools offer the same role list: the built-in executors plus the user-defined roles.
-    const executors = executorNames(config);
+    const executors = executorNames(config).filter((name) => !(config.agent.measure === 'off' && name === 'measurer'));
     const toolEnums = { delegate_role: { role: executors }, run_subagent: { kind: executors } };
     const workerTools = createToolset({
         ...toolBase, names: allNames, approvalLevel, describeImage: vision('worker'), editPaths: () => taskMarks.edit,
