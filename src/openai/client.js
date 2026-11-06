@@ -499,7 +499,25 @@ export function createClient({
      * @returns {Promise<string[]>}
      * @ai.hint io
      */
+    function imageErrorFromResult(result) {
+        if (!result || typeof result !== 'object' || result.error == null) return null;
+        const apiError = result.error;
+        const errorDetails = apiError && typeof apiError === 'object' ? apiError : {};
+        const message = typeof apiError === 'string' ? apiError
+            : (typeof errorDetails.message === 'string' ? errorDetails.message : 'Gateway вернул error-ответ без описания.');
+        const sizeError = /\b(?:invalid\s+size|minimum\s+(?:pixel|image)\s+budget|below the current minimum pixel budget)\b/i.test(message);
+        return new ApiError(`Images API: ${message}`, {
+            code: sizeError ? 'IMAGE_SIZE_ERROR' : 'HTTP_ERROR',
+            status: Number.isInteger(errorDetails.status) ? errorDetails.status : null,
+            apiCode: errorDetails.code ?? null,
+            apiType: errorDetails.type ?? null,
+            param: errorDetails.param ?? null,
+        });
+    }
+
     async function payloadList(result, signal, route) {
+        const imageError = imageErrorFromResult(result);
+        if (imageError) throw imageError;
         const sources = imageSources(result);
         if (!sources.length) {
             const keys = result && typeof result === 'object' && !Array.isArray(result) ? Object.keys(result) : [];
@@ -671,6 +689,8 @@ export function createClient({
                 const requestedSize = index < attempts.length ? attempts[index] : size;
                 try {
                     result = await call('images/generations', { body: generationBody({ model, prompt, size: requestedSize, complexity, n, format, background, references, resolution, sizeHint: imageSizeHint }), signal });
+                    const imageError = imageErrorFromResult(result);
+                    if (imageError) throw imageError;
                     break;
                 } catch (error) {
                     if (index >= attempts.length - 1 || !isImageSizeError(error)) throw error;
@@ -757,6 +777,8 @@ export function createClient({
                 });
                 try {
                     result = await call('images/edits', { rawBody: form.body, contentType: form.contentType, signal });
+                    const imageError = imageErrorFromResult(result);
+                    if (imageError) throw imageError;
                     break;
                 } catch (error) {
                     if (index >= attempts.length - 1 || !isImageSizeError(error)) throw error;

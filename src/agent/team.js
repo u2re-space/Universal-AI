@@ -1139,16 +1139,22 @@ export async function runTeam({
                     const canMeasure = (referenceParts.length || referencePaths.length || hasFigmaReference || screenReferences.files.length > 0);
                     const wantsMeasure = measureMode === 'always' || (measureMode === 'auto' && plan.complexity !== 'trivial');
                     const needsMeasure = !resumedWork || !hasMeasurements || measureMode === 'always';
-                    if (measureMode !== 'off' && canMeasure && wantsMeasure && needsMeasure) {
+                    const forcedMeasure = measureMode === 'off' && stopAfter === 'measure';
+                    if ((measureMode !== 'off' || forcedMeasure) && canMeasure && (wantsMeasure || forcedMeasure) && needsMeasure) {
                         const tier = plan.complexity === 'trivial' || plan.complexity === 'complex' ? plan.complexity : 'normal';
                         const measurerRole = roles.resolve('measurer', tier);
-                        const model = encodeRoute || !paced?.ready
-                            ? measurerRole.model
-                            : clampModel(measurerRole.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.measurer?.model));
+                        const disabledMeasureForced = measureMode === 'off' && stopAfter === 'measure';
+                        const model = disabledMeasureForced
+                            ? (pins.measurer?.model ? measurerRole.model : 'gpt-6-luna')
+                            : encodeRoute || !paced?.ready
+                                ? measurerRole.model
+                                : clampModel(measurerRole.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.measurer?.model));
                         const baseline = defaultFineQuality(paceSettings.speed, paceSettings.quality);
-                        const measureEffort = encodeRoute || !paced?.ready
-                            ? measurerRole.effort
-                            : stageEffort(measurerRole.effort, baseline, paced.qualities.measurer);
+                        const measureEffort = disabledMeasureForced
+                            ? (pins.measurer?.effort ? measurerRole.effort : 'low')
+                            : encodeRoute || !paced?.ready
+                                ? measurerRole.effort
+                                : stageEffort(measurerRole.effort, baseline, paced.qualities.measurer);
                         const measurePasses = Math.max(1, Math.min(2, config.agent.measurerPasses ?? 1));
                         const measureTurns = Math.max(1, config.agent.measurerMaxTurns ?? 8);
                         // One pass spends the whole turn budget on the overview. A second pass splits it

@@ -578,6 +578,72 @@ test('images client posts generations and edits and the tool saves the file', as
     }
 });
 
+test('GPT Image edits surfaces gateway error objects returned with HTTP 200', async () => {
+    const png = Buffer.from(TINY_PNG, 'base64');
+    const server = http.createServer(async (req, res) => {
+        for await (const _ of req) {}
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: {
+            message: 'unsupported parameter: output_format',
+            type: 'invalid_request_error',
+            code: 'unsupported_parameter',
+            param: 'output_format',
+        } }));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    const client = createClient({ apiKey: 'sk-test', baseURL: `http://127.0.0.1:${port}/v1/`, retries: 0, imageDiv16: 'never' });
+    try {
+        await assert.rejects(client.images.edit({
+            model: 'openai/gpt-image-2.6-sunburst', prompt: 'edit',
+            files: [{ filename: 'source.png', mime: 'image/png', bytes: png }],
+        }), (error) => {
+            assert.equal(error.code, 'HTTP_ERROR');
+            assert.equal(error.apiCode, 'unsupported_parameter');
+            assert.equal(error.apiType, 'invalid_request_error');
+            assert.equal(error.param, 'output_format');
+            assert.match(error.message, /unsupported parameter: output_format/);
+            assert.doesNotMatch(error.message, /не содержит ни b64_json, ни url/);
+            return true;
+        });
+    } finally {
+        client.close();
+        await new Promise((resolve) => server.close(resolve));
+    }
+});
+
+test('GPT Image 2.6 retries HTTP 200 minimum-pixel errors with a same-ratio size', async () => {
+    const png = Buffer.from(TINY_PNG, 'base64');
+    const sizes = [];
+    const server = http.createServer(async (req, res) => {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const form = Buffer.concat(chunks).toString('latin1');
+        sizes.push(/name=.{1}size.{1}\r\n\r\n([^\r]+)/.exec(form)?.[1]);
+        if (sizes.length === 1) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: { message: "Invalid size '288x336'. Requested resolution is below the current minimum pixel budget." } }));
+            return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ data: [{ b64_json: TINY_PNG }] }));
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    const client = createClient({ apiKey: 'sk-test', baseURL: `http://127.0.0.1:${port}/v1/`, retries: 0, imageDiv16: 'never' });
+    try {
+        const payloads = await client.images.edit({
+            model: 'gpt-image-2.6-sunburst', prompt: 'edit', size: '288x336',
+            files: [{ filename: 'source.png', mime: 'image/png', bytes: png }],
+        });
+        assert.deepEqual(sizes, ['288x336', '768x896']);
+        assert.equal(payloads[0], TINY_PNG);
+    } finally {
+        client.close();
+        await new Promise((resolve) => server.close(resolve));
+    }
+});
+
 test('images edits reports response shape when a gateway returns no image payload', async () => {
     const png = Buffer.from(TINY_PNG, 'base64');
     let route = null;

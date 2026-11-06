@@ -773,6 +773,60 @@ test('delegated measurer gets web search only when tools.web is enabled', async 
     }
 });
 
+test('a forced measure stage uses a cheap model when measurement is off, unless role settings are pinned', async () => {
+    const cases = [
+        { name: 'default', model: 'gpt-6-luna', effort: 'low', pinned: false },
+        { name: 'pinned', model: 'gpt-6.1-sol', effort: 'high', pinned: true },
+    ];
+    for (const item of cases) {
+        const dir = await mkdtemp(path.join(os.tmpdir(), `ai-measure-off-${item.name}-`));
+        await writeFile(path.join(dir, 'mockup.png'), Buffer.from(TINY_PNG, 'base64'));
+        const measureBodies = [];
+        script = (body) => {
+            const role = roleOf(body);
+            if (role === 'answer') return { text: 'Нужен план.\nroute: plan' };
+            if (role === 'planner') return { text: JSON.stringify({
+                summary: 'измерение по референсу', complexity: 'normal',
+                steps: [{ goal: 'Создать страницу', details: '', verify: '' }],
+                filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [],
+                needsReview: false, imageNotes: null, risks: [], imageTasks: [],
+            }) };
+            if (role === 'measurer') {
+                measureBodies.push(body);
+                return { text: JSON.stringify({
+                    summary: 'Измерено', source: 'mockup.png', unit: 'px',
+                    units: { source: 'px', rootFontSize: 16, scale: null, preferred: ['rem'], notes: '' },
+                    confidence: 'high', assumptions: [], canvas: { x: 0, y: 0, width: 8, height: 8 },
+                    elements: [], regions: [], rules: [], notes: '',
+                }) };
+            }
+            return { text: 'готово' };
+        };
+        const config = baseConfig();
+        config.memory = { ...defaults.memory, enabled: false };
+        config.agent = { ...config.agent, measure: 'off', chain: false, resume: false };
+        if (item.pinned) {
+            config.roles = { ...config.roles, measurer: { ...config.roles.measurer, model: item.model, effort: item.effort } };
+            config.rolePins = { measurer: { model: true, effort: true } };
+        }
+        try {
+            const events = [];
+            const result = await runTeam({
+                client: client(), config, ledger: createLedger(), task: 'измерь страницу по референсу', root: dir,
+                approvalLevel: 'read', parts: [{ type: 'input_image', image: { path: 'mockup.png' } }],
+                referencePaths: ['mockup.png'], stopAfter: 'measure', emit: (event) => events.push(event),
+            });
+            assert.equal(result.status, 'prepared', result.error?.message);
+            assert.equal(measureBodies.length, 1);
+            assert.equal(measureBodies[0].model, item.model);
+            assert.equal(measureBodies[0].reasoning?.effort, item.effort);
+            assert.ok(events.some((event) => event.type === 'stage.start' && event.stage === 'measure'));
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    }
+});
+
 test('resume with --no-measure cannot invoke or delegate to the measurer', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'ai-resume-no-measure-'));
     await writeFile(path.join(dir, 'mockup.png'), Buffer.from(TINY_PNG, 'base64'));

@@ -503,6 +503,7 @@ export function sameAspectImageSize(size, model = null) {
  * @ai.hint pure
  */
 export function isImageSizeError(error) {
+    if (error?.code === 'IMAGE_SIZE_ERROR') return true;
     if (![400, 413, 422].includes(error?.status)) return false;
     if (/^(?:size|image_size|dimensions?)$/i.test(String(error?.param ?? ''))) return true;
     return /\b(size|dimensions?|resolution|aspect ratio|pixel count)\b/i.test(String(error?.message ?? ''));
