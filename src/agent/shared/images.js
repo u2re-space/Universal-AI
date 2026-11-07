@@ -213,8 +213,8 @@ export function inferResolution({ width, height }, model = null) {
  */
 export function tierFromToken(value, model = null) {
     const token = String(value ?? '').trim().toLowerCase();
-    if (!token) return null;
-    if (token === '512') return '512';
+    if (!token) return null; if (token === '512') return '512';
+    // TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
     if (/^\d+k$/.test(token)) return IMAGE_SIZES_BY_RESOLUTION[token] ? token : null;
     if (/^\d+$/.test(token)) return inferResolution({ width: Number(token), height: Number(token) }, model);
     return null;
@@ -237,6 +237,8 @@ export function presetImageSize(value, resolution = null, model = null) {
     const parsed = parseImageSize(value);
     if (!parsed) return value;
     resolution ||= inferResolution(parsed, model) || "1k";
+
+    // TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
     if (Math.max(parsed.width / parsed.height, parsed.height / parsed.width) < 1.005) return SQUARE_SIZES[resolution || "1k"];
     return parsed.height > parsed.width ? PORTRAIT_SIZES[resolution || "1k"] : LANDSCAPE_SIZES[resolution || "1k"];
 }

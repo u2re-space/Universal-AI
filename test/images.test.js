@@ -311,7 +311,7 @@ test('vector model uses aspect_ratio and svg output', () => {
     assert.equal(isVectorModel('recraft/recraft-v4-styles-pro-vector'), true);
     assert.equal(isVectorModel('recraft/recraft-v4.1-utility'), false);
     assert.equal(isVectorModel(''), false);
-    assert.deepEqual([...VECTOR_RATIOS], ['1:1', '4:3', '3:4', '16:9', '9:16', 'auto']);
+    assert.deepEqual([...VECTOR_RATIOS], ['1:1', '3:2', '2:3', '4:3', '3:4', '16:9', '9:16', 'auto']);
     assert.equal(normalizeVectorRatio(''), null);
     assert.equal(normalizeVectorRatio('auto'), null);
     assert.equal(normalizeVectorRatio('1:1'), '1:1');
@@ -319,8 +319,8 @@ test('vector model uses aspect_ratio and svg output', () => {
     assert.equal(normalizeVectorRatio('portrait'), '3:4');
     assert.equal(normalizeVectorRatio('landscape'), '4:3');
     assert.equal(normalizeVectorRatio('1024x1024'), '1:1');
-    assert.equal(normalizeVectorRatio('1536x1024'), '4:3');
-    assert.equal(normalizeVectorRatio('1024x1536'), '3:4');
+    assert.equal(normalizeVectorRatio('1536x1024'), '3:2');
+    assert.equal(normalizeVectorRatio('1024x1536'), '2:3');
     assert.equal(normalizeVectorRatio('1920x1080'), '16:9');
     assert.equal(normalizeVectorRatio('1080x1920'), '9:16');
     assert.equal(normalizeVectorRatio('garbage'), null);

@@ -241,33 +241,35 @@ export function imageModelProfile(model) {
 export const MASK_EXT = /\.(png|webp|jpe?g)$/i;
 
 
-    /**
-     * A short guard for requests that carry a source picture: cut-out and restyle models tend to
-     * decorate the answer with captions, frames or an invented scene when the prompt stays silent.
-     * Nothing else belongs in the prompt: the frame travels in the `size`/`resolution`/`aspect_ratio`
-     * fields, transparency is requested through `background`, and the two-part RGBA composition
-     * (painted RGB base + A-mask) is assembled locally by image-alpha.js from its own technical
-     * prompts sent to the clean source. Inlining those texts here asked the model to repaint the
-     * background with the subject color and to draw a matte in the same reply as the artwork —
-     * it obeyed both and stopped isolating the subject.
-     */
+/**
+ * A short guard for requests that carry a source picture: cut-out and restyle models tend to
+ * decorate the answer with captions, frames or an invented scene when the prompt stays silent.
+ * Nothing else belongs in the prompt: the frame travels in the `size`/`resolution`/`aspect_ratio`
+ * fields, transparency is requested through `background`, and the two-part RGBA composition
+ * (painted RGB base + A-mask) is assembled locally by image-alpha.js from its own technical
+ * prompts sent to the clean source. Inlining those texts here asked the model to repaint the
+ * background with the subject color and to draw a matte in the same reply as the artwork —
+ * it obeyed both and stopped isolating the subject.
+ */
 export const SOURCE_GUARD = 'Do not add text, numbers, watermarks, or frames. Do not invent a new background or extra objects: keep the subject exactly as in the source unless the request changes it.';
 
-    /**
-     * One extra line for the families whose gateway answers `background: transparent` with a drawn
-     * plate: a single flat color is what the local matte can remove cleanly, while a checkerboard
-     * or a gradient survives as a halo. This is not the two-pass RGBA recipe — the model returns one
-     * picture, so only the RGB base is asked for here, and the matte stays a local step.
-     */
+/**
+ * One extra line for the families whose gateway answers `background: transparent` with a drawn
+ * plate: a single flat color is what the local matte can remove cleanly, while a checkerboard
+ * or a gradient survives as a halo. This is not the two-pass RGBA recipe — the model returns one
+ * picture, so only the RGB base is asked for here, and the matte stays a local step.
+ */
 export const FLAT_PLATE_NOTE = 'Background: one flat solid color, uniform across the whole area, with no checkerboard, grid, gradient, texture, or shadow.';
 
+// TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
 /** Sizes accepted by POST /images/generations and /images/edits. */
 export const IMAGE_SIZES = Object.freeze(['1024x1024', '1024x1536', '1536x1024']);
 
+// TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
 /** Aspect ratios accepted by recraft vector models. */
-export const VECTOR_RATIOS = Object.freeze(['1:1', '4:3', '3:4', '16:9', '9:16', 'auto']);
+export const VECTOR_RATIOS = Object.freeze(['1:1', '3:2', '2:3', '4:3', '3:4', '16:9', '9:16', 'auto']);
 
-
+// TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
 export const PORTRAIT_SIZES = {
     "512": "384x512",
     "1k":  "768x1024",
@@ -275,6 +277,7 @@ export const PORTRAIT_SIZES = {
     "4k": "3072x4096"
 }
 
+// TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
 export const LANDSCAPE_SIZES = {
     "512": "512x384",
     "1k": "1024x768",
@@ -282,6 +285,7 @@ export const LANDSCAPE_SIZES = {
     "4k": "4096x3072"
 }
 
+// TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
 export const SQUARE_SIZES = {
     "512": "512x512",
     "1k": "1024x1024",
@@ -307,6 +311,7 @@ export const RIVERFLOW_RATIOS = Object.freeze(['1:1', '4:3', '3:4', '3:2', '2:3'
 /** Resolution tiers accepted by Riverflow (Sourceful). */
 export const RIVERFLOW_RESOLUTIONS = Object.freeze(['512', '1K', '2K', '4K']);
 
+// TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
 /** */
 export const IMAGE_SIZES_BY_RESOLUTION = {
     '512': [
