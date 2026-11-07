@@ -20,6 +20,26 @@ const RULES = ['.rules/stack.md', '.rules/files.md', '.skills/scaffold/SKILL.md'
 const WEB_TAIL = ['src/main.js', 'src/styles.scss', 'scripts/generate.js', ...RULES];
 
 /**
+ * Front-end framework definitions. Maps a canonical framework name to its
+ * library entries (used for dependency resolution) and Vite-plugin entries.
+ * The keys are the canonical values stored in config.generate.frontendFramework.
+ */
+const FRAMEWORKS = Object.freeze({
+    vanilla:  { libs: [], plugins: [], defaultScript: 'javascript' },
+    react:    { libs: ['react'], plugins: ['@vitejs/plugin-react'], defaultScript: 'javascript' },
+    'react-ssr': { libs: ['react', 'react-dom'], plugins: ['@vitejs/plugin-react'], defaultScript: 'javascript' },
+    vue:      { libs: ['vue'], plugins: ['@vitejs/plugin-vue'], defaultScript: 'javascript' },
+    'vue-runtime': { libs: ['vue'], plugins: ['@vitejs/plugin-vue'], defaultScript: 'javascript' },
+    angular:  { libs: ['@angular/core', '@angular/common'], plugins: ['@angular-devkit/build-angular'], defaultScript: 'typescript' },
+    svelte:   { libs: ['svelte'], plugins: ['@sveltejs/vite-plugin-svelte'], defaultScript: 'javascript' },
+    solid:    { libs: ['solid-js'], plugins: ['@vitejs/plugin-solid'], defaultScript: 'typescript' },
+    'solidjs': { libs: ['solid-js'], plugins: ['@vitejs/plugin-solid'], defaultScript: 'typescript' },
+    lit:      { libs: ['lit'], plugins: [], defaultScript: 'typescript' },
+    fest:     { libs: ['@fest-lib/lure', '@fest-lib/core', '@fest-lib/dom', '@fest-lib/object', '@fest-lib/uniform', '@fest-lib/style-lib'], plugins: [], defaultScript: 'typescript' },
+    'fest-lib': { libs: ['@fest-lib/lure', '@fest-lib/core', '@fest-lib/dom', '@fest-lib/object', '@fest-lib/uniform', '@fest-lib/style-lib'], plugins: [], defaultScript: 'typescript' },
+});
+
+/**
  * Files the brief asks for when they are missing. `null` asks for none.
  * @param {string | null} kind
  * @returns {string[]}
@@ -35,25 +55,84 @@ export function filesForKind(kind) {
 }
 
 /**
- * File list for a kind after named libraries choose the source language.
- * Preact with TypeScript uses TSX modules and a matching SCSS module.
- * @param {{ kind: string | null, libraries?: { name: string, include: boolean }[] }} request
+ * File list for a kind after framework and language choices determine extensions.
+ * @param {{ kind: string | null, libraries?: { name: string, include: boolean }[], framework?: string | null, scriptLanguage?: string | null, styleLanguage?: string | null, markup?: string | null }} request
  * @returns {string[]}
  * @exports
  * @ai.hint pure
  */
-export function filesForStack({ kind, libraries = [] }) {
+export function filesForStack({ kind, libraries = [], framework = null, scriptLanguage = null, styleLanguage = null, markup = null }) {
     const files = [...filesForKind(kind)];
     const included = new Set(libraries.filter((item) => item.include).map((item) => item.name));
-    const ui = included.has('preact') || included.has('react');
-    const typed = included.has('typescript');
-    if (!ui && !typed) return files;
-    const ext = typed ? (ui ? 'tsx' : 'ts') : 'jsx';
-    const index = files.indexOf('src/main.js');
-    if (index === -1) return files;
-    const entry = `src/main.${ext}`;
-    files[index] = entry;
-    if (ui) files.splice(index + 1, 0, `src/app.${ext}`, 'src/app.scss');
+
+    // Backward compatibility: when no explicit framework/scriptLanguage is given,
+    // fall back to the old library-based detection (preact + typescript).
+    const explicit = framework !== null || scriptLanguage !== null || styleLanguage !== null || markup !== null;
+    if (!explicit) {
+        const ui = included.has('preact') || included.has('react');
+        const typed = included.has('typescript');
+        if (!ui && !typed) return files;
+        const ext = typed ? (ui ? 'tsx' : 'ts') : 'jsx';
+        const index = files.indexOf('src/main.js');
+        if (index === -1) return files;
+        files[index] = `src/main.${ext}`;
+        if (ui) files.splice(index + 1, 0, `src/app.${ext}`, 'src/app.scss');
+        return files;
+    }
+
+    // Resolve framework (explicit or inferred from libraries).
+    const fw = framework ?? (included.has('react') ? 'react' : included.has('vue') ? 'vue' : included.has('svelte') ? 'svelte' : included.has('solid') || included.has('solid-js') ? 'solid' : included.has('lit') ? 'lit' : included.has('@fest-lib/lure') ? 'fest' : 'vanilla');
+    const sty = styleLanguage ?? 'scss';
+    // Resolve script language: explicit value, or framework default.
+    const fDef = FRAMEWORKS[fw];
+    const lang = scriptLanguage ?? (fDef?.defaultScript ?? 'javascript');
+    if (lang === 'vanilla' || lang === 'none') return files;
+
+    // Determine extension for source files.
+    let ext;
+    if (fw === 'vue') ext = lang === 'typescript' ? 'ts' : 'js';
+    else if (fw === 'svelte') ext = lang === 'typescript' ? 'ts' : 'js';
+    else if (fw === 'lit') ext = 'ts';
+    else if (fw === 'fest') ext = 'tsx';
+    else if (lang === 'typescript') ext = (fw === 'react' || fw === 'react-ssr' || fw === 'solid') ? 'tsx' : 'ts';
+    else ext = (fw === 'react' || fw === 'react-ssr' || fw === 'solid') ? 'jsx' : 'js';
+
+    // Determine component entry file.
+    const mainIdx = files.indexOf('src/main.js');
+    if (mainIdx !== -1) {
+        files[mainIdx] = `src/main.${ext}`;
+    }
+    // Vue: also add App.vue
+    if (fw === 'vue') {
+        const appIdx = mainIdx !== -1 ? mainIdx : files.length;
+        files.splice(appIdx, 0, 'src/App.vue');
+    }
+    // React/Solid: add App entry
+    if ((fw === 'react' || fw === 'react-ssr' || fw === 'solid') && !included.has('preact')) {
+        const targetIdx = mainIdx !== -1 ? mainIdx + 1 : 1;
+        files.splice(targetIdx, 0, `src/App.${ext}`, `src/App.${sty === 'scss' ? 'module.' + sty : sty}`);
+    }
+    // Solid: also add index.html entry wrapper
+    if (fw === 'solid') {
+        const solidIdx = mainIdx !== -1 ? mainIdx + 2 : 2;
+        files.splice(solidIdx, 0, 'src/index.css');
+    }
+    // LIT: add LitElement base file
+    if (fw === 'lit') {
+        const litIdx = mainIdx !== -1 ? mainIdx + 1 : 1;
+        files.splice(litIdx, 0, 'src/app-element.ts');
+    }
+    // Fest-Lib: add LUR.E entry (TSX)
+    if (fw === 'fest') {
+        const festIdx = mainIdx !== -1 ? mainIdx + 1 : 1;
+        files.splice(festIdx, 0, 'src/App.tsx');
+    }
+    // Markup language: pug replaces the HTML entry. htmx keeps index.html.
+    const mk = markup ?? 'html';
+    if (mk === 'pug') {
+        const htmlIdx = files.indexOf('index.html');
+        if (htmlIdx !== -1) files[htmlIdx] = 'index.pug';
+    }
     return files;
 }
 
@@ -80,22 +159,50 @@ const BACKEND_SCRIPTS = Object.freeze({
 /**
  * Manifest for a new project. Included libraries are added. Versions are `*`.
  * `css`, `tool`, and `types` go to devDependencies. `runtime` and `icons` go to dependencies.
- * @param {{ kind: string | null, name: string, libraries?: { name: string, kind: string, include: boolean }[] }} request
+ * @param {{ kind: string | null, name: string, libraries?: { name: string, kind: string, include: boolean }[], framework?: string | null, styleLanguage?: string | null, markup?: string | null }} request
  * @returns {object}
  * @exports
  * @ai.hint pure
  */
-export function buildPackageManifest({ kind, name, libraries = [] }) {
+export function buildPackageManifest({ kind, name, libraries = [], framework = null, styleLanguage = null, markup = null }) {
     const web = kind === 'landing' || kind === 'site' || kind === 'app';
     const scripts = { ...(web ? WEB_SCRIPTS : BACKEND_SCRIPTS) };
     const dev = {};
     const deps = {};
-    if (web) { dev.vite = '*'; dev.sass = '*'; }
+    if (web) { dev.vite = '*'; }
+    // Style language dependency
+    const sty = styleLanguage ?? 'scss';
+    if (web && sty === 'scss') dev.sass = '*';
+    else if (web && sty === 'sass') dev.sass = '*'; // sass gem is also 'sass' package on npm
+    else if (web && sty === 'less') dev.less = '*';
+    else if (web && sty === 'stylus') dev.stylus = '*';
+    else if (web && sty === 'postcss-preset-env') dev['postcss-preset-env'] = '*';
+    // Framework dependencies
+    const fw = framework ?? 'vanilla';
+    const fDef = FRAMEWORKS[fw];
+    if (fDef) {
+        for (const libName of fDef.libs) {
+            const known = KNOWN[libName];
+            if (known) {
+                const bucket = (known.kind === 'css' || known.kind === 'tool' || known.kind === 'types') ? dev : deps;
+                if (!(libName in bucket) && !(libName in dev) && !(libName in deps)) bucket[libName] = '*';
+            }
+        }
+        for (const plugin of fDef.plugins) {
+            const known = KNOWN[plugin];
+            if (known && known.kind === 'tool') {
+                if (!(plugin in dev) && !(plugin in deps)) dev[plugin] = '*';
+            }
+        }
+    }
+    // Markup language dependency
+    const mk = markup ?? 'html';
+    if (web && mk === 'htmx') deps['htmx.org'] = '*';
+    else if (web && mk === 'pug') dev.pug = '*';
     for (const lib of libraries) {
         if (!lib?.include || typeof lib.name !== 'string') continue;
         const bucket = lib.kind === 'css' || lib.kind === 'tool' || lib.kind === 'types' ? dev : deps;
         if (!(lib.name in bucket) && !(lib.name in dev) && !(lib.name in deps) &&
-            // temporary forbid unknown libraries...
             Array.from(Object.keys(KNOWN) || [])?.includes?.(lib.name?.trim?.())) bucket[lib.name?.trim?.()] = '*';
     }
     const manifest = { name: npmPackageName(name), private: true, type: 'module', engines: { node: '>=26' }, scripts };
@@ -110,20 +217,35 @@ export function buildPackageManifest({ kind, name, libraries = [] }) {
  * @param {string | null} kind
  * @param {{ id: string, ecma: { edition: number } }} platform
  * @param {{ name: string, include: boolean }[]} [libraries]
+ * @param {{ framework?: string | null, scriptLanguage?: string | null, styleLanguage?: string | null, markupLanguage?: string | null }} [options]
  * @returns {string}
  * @exports
  * @ai.hint pure
  */
-export function stackText(kind, platform, libraries = []) {
+export function stackText(kind, platform, libraries = [], options = {}) {
     const included = new Set(libraries.filter((item) => item.include).map((item) => item.name));
+    const { framework = null, scriptLanguage = null, styleLanguage = null, markupLanguage = null } = options;
     let text;
+    const fw = framework ?? (included.has('react') ? 'react' : included.has('vue') ? 'vue' : included.has('svelte') ? 'svelte' : included.has('@fest-lib/lure') ? 'fest' : null);
+    const sty = styleLanguage ?? 'scss';
+    const mk = markupLanguage ?? 'html';
     if (kind === 'backend') text = 'Node.js 26, ESM, server.js on node:http, bind 127.0.0.1, port PORT or 3000. No dependencies unless a recommendation includes them.';
-    else if (kind === 'landing' || kind === 'site') text = `Node.js 26, ESM, Vite, SCSS, ECMAScript ${platform.ecma.edition} (${platform.id}, experimental flags off). No Node server.`;
-    else if (kind === 'app') text = `Node.js 26, ESM, Vite, SCSS, ECMAScript ${platform.ecma.edition} (${platform.id}, experimental flags off). server.js serves dist/ after vite build.`;
+    else if (kind === 'landing' || kind === 'site') text = `Node.js 26, ESM, Vite, ${sty === 'scss' ? 'SCSS' : sty === 'sass' ? 'Sass' : sty === 'less' ? 'Less' : sty === 'stylus' ? 'Stylus' : sty === 'postcss-preset-env' ? 'PostCSS' : 'CSS'}, ECMAScript ${platform.ecma.edition} (${platform.id}, experimental flags off). No Node server.`;
+    else if (kind === 'app') text = `Node.js 26, ESM, Vite, ${sty === 'scss' ? 'SCSS' : sty === 'sass' ? 'Sass' : sty === 'less' ? 'Less' : sty === 'stylus' ? 'Stylus' : sty === 'postcss-preset-env' ? 'PostCSS' : 'CSS'}, ECMAScript ${platform.ecma.edition} (${platform.id}, experimental flags off). server.js serves dist/ after vite build.`;
     else text = 'If this is web, PWA, or frontend, use Node.js 26, ESM, Vite, and SCSS. If it is a backend, use node:http on 127.0.0.1 and port PORT or 3000. Otherwise choose the files the request needs.';
+    if (fw === 'react') text += ' Write the interface as React JSX/TSX components with Vite plugin.';
+    else if (fw === 'react-ssr') text += ' Write the interface as React SSR with @vitejs/plugin-react.';
+    else if (fw === 'vue') text += ' Write the interface as Vue Single-File Components (.vue) with @vitejs/plugin-vue.';
+    else if (fw === 'vue-runtime') text += ' Write the interface as Vue runtime-only SFCs with @vitejs/plugin-vue.';
+    else if (fw === 'svelte') text += ' Write the interface as Svelte components (.svelte) with @sveltejs/vite-plugin-svelte.';
+    else if (fw === 'solid') text += ' Write the interface as Solid.js TSX with @vitejs/plugin-solid.';
+    else if (fw === 'lit') text += ' Write the interface as LitElement web components.';
+    else if (fw === 'fest') text += ' Write the interface as Fest-Lib LUR.E components (@fest-lib/lure + @fest-lib/core + @fest-lib/dom + @fest-lib/object).';
+    if (mk === 'htmx') text += ' Markup uses htmx 4 (htmx.org): write HTML attributes hx-get, hx-post, hx-swap, hx-target for server-driven fragments.';
+    else if (mk === 'pug') text += ' Markup is Pug (.pug). The prepared vite.config.js compiles index.pug to index.html on dev and build.';
     if (included.has('preact') && included.has('typescript')) text += ' Write the interface as Preact TSX modules. Each component has a matching SCSS module. Do not implement the UI as h() calls in src/main.js.';
     else if (included.has('preact')) text += ' Write the interface as Preact JSX modules. Each component has a matching SCSS module. Do not implement the UI as h() calls in src/main.js.';
-    else if (included.has('typescript')) text += ' Source modules are TypeScript.';
+    else if (scriptLanguage === 'typescript' || included.has('typescript')) text += ' Source modules are TypeScript.';
     if (included.has('fastify')) text += ' The server uses fastify.';
     return text;
 }
@@ -164,7 +286,44 @@ const KNOWN = Object.freeze({
     'phosphor-core': { kind: 'icons', docs: 'https://github.com/phosphor-icons/core', types: null },
     'phosphor-web': { kind: 'icons', docs: 'https://github.com/phosphor-icons/web', types: null },
     'phosphor-webcomponents': { kind: 'icons', docs: 'https://github.com/phosphor-icons/webcomponents', types: null },
-    'phosphor-icons': { kind: 'icons', docs: 'https://phosphoricons.com/', types: null }
+    'phosphor-icons': { kind: 'icons', docs: 'https://phosphoricons.com/', types: null },
+    // Fest-Lib (frontend framework + utilities)
+    '@fest-lib/lure': { kind: 'runtime', docs: 'https://github.com/fest-live/lur.e', types: null },
+    '@fest-lib/core': { kind: 'runtime', docs: 'https://github.com/fest-live/core.ts', types: null },
+    '@fest-lib/dom': { kind: 'runtime', docs: 'https://github.com/fest-live/dom.ts', types: null },
+    '@fest-lib/object': { kind: 'runtime', docs: 'https://github.com/fest-live/object.ts', types: null },
+    '@fest-lib/uniform': { kind: 'runtime', docs: 'https://github.com/fest-live/uniform.ts', types: null },
+    '@fest-lib/image': { kind: 'runtime', docs: 'https://github.com/fest-live/image.ts', types: null },
+    '@fest-lib/icon': { kind: 'icons', docs: 'https://github.com/fest-live/icon.ts', types: null },
+    '@fest-lib/style-lib': { kind: 'css', docs: 'https://github.com/fest-live/style.ts', types: null },
+    // React ecosystem
+    'react': { kind: 'runtime', docs: 'https://react.dev/', types: '@types/react' },
+    'react-dom': { kind: 'runtime', docs: 'https://react.dev/', types: '@types/react-dom' },
+    '@vitejs/plugin-react': { kind: 'tool', docs: 'https://github.com/vitejs/vite/tree/main/packages/plugin-react', types: null },
+    '@vitejs/plugin-react-swc': { kind: 'tool', docs: 'https://github.com/vitejs/vite-plugin-react-swc', types: null },
+    // Vue ecosystem
+    'vue': { kind: 'runtime', docs: 'https://vuejs.org/', types: '@vue/runtime-core' },
+    '@vitejs/plugin-vue': { kind: 'tool', docs: 'https://github.com/vitejs/vite-plugin-vue', types: null },
+    // Angular ecosystem
+    '@angular/core': { kind: 'runtime', docs: 'https://angular.io/', types: null },
+    '@angular/common': { kind: 'runtime', docs: 'https://angular.io/', types: null },
+    '@angular-devkit/build-angular': { kind: 'tool', docs: 'https://angular.io/', types: null },
+    // Svelte ecosystem
+    'svelte': { kind: 'runtime', docs: 'https://svelte.dev/', types: null },
+    '@sveltejs/vite-plugin-svelte': { kind: 'tool', docs: 'https://github.com/sveltejs/vite-plugin-svelte', types: null },
+    // Solid ecosystem
+    'solid-js': { kind: 'runtime', docs: 'https://www.solidjs.com/', types: null },
+    '@vitejs/plugin-solid': { kind: 'tool', docs: 'https://github.com/solidjs/solid-refresh', types: null },
+    // LIT
+    'lit': { kind: 'runtime', docs: 'https://lit.dev/', types: null },
+    // Style languages
+    'less': { kind: 'css', docs: 'https://lesscss.org/', types: null },
+    'stylus': { kind: 'css', docs: 'https://stylus-lang.com/', types: null },
+    'postcss-preset-env': { kind: 'css', docs: 'https://postcss.org/', types: null },
+    'sugarss': { kind: 'css', docs: 'https://sugarss.postcss.org/', types: null },
+    // Markup languages
+    'htmx.org': { kind: 'runtime', docs: 'https://htmx.org/', types: null },
+    'pug': { kind: 'tool', docs: 'https://pugjs.org/api/reference.html', types: null },
 });
 
 const CSS_PACKS = [
@@ -197,6 +356,18 @@ const URL_PACKAGES = [
     { test: /beercss\.com/i, names: ['beercss'] },
     { test: /github\.com\/google\/material-design-icons(?:\/|$)/i, names: ['material-symbols'] },
     { test: /github\.com\/material-foundation\/material-color-utilities(?:\/|$)/i, names: ['@material/material-color-utilities'] },
+    // Fest-Lib repos
+    { test: /github\.com\/fest-live\/lur\.e(?:\/|$)/i, names: ['@fest-lib/lure'] },
+    { test: /github\.com\/fest-live\/core\.ts(?:\/|$)/i, names: ['@fest-lib/core'] },
+    { test: /github\.com\/fest-live\/dom\.ts(?:\/|$)/i, names: ['@fest-lib/dom'] },
+    { test: /github\.com\/fest-live\/object\.ts(?:\/|$)/i, names: ['@fest-lib/object'] },
+    { test: /github\.com\/fest-live\/uniform\.ts(?:\/|$)/i, names: ['@fest-lib/uniform'] },
+    { test: /github\.com\/fest-live\/style\.ts(?:\/|$)/i, names: ['@fest-lib/style-lib'] },
+    { test: /github\.com\/fest-live\/image\.ts(?:\/|$)/i, names: ['@fest-lib/image'] },
+    { test: /github\.com\/fest-live\/icon\.ts(?:\/|$)/i, names: ['@fest-lib/icon'] },
+    // htmx and pug
+    { test: /github\.com\/bigskysoftware\/htmx(?:\/|$)/i, names: ['htmx.org'] },
+    { test: /github\.com\/pugjs\/pug(?:\/|$)/i, names: ['pug'] },
 ];
 
 /**
@@ -356,26 +527,93 @@ export function scaffoldScript() {
 
 /**
  * Vite config for a generated web project. The platform profile owns the target strings.
+ * Framework and markup choices add imports, plugins, and JSX options.
  * @param {{ vite?: { target?: string, cssTarget?: string } }} [platform]
+ * @param {{ framework?: string | null, markup?: string | null }} [options]
  * @returns {string}
  * @exports
  * @ai.hint pure
  */
-export function viteConfig(platform = {}) {
+export function viteConfig(platform = {}, { framework = null, markup = null } = {}) {
     const target = platform?.vite?.target ?? 'esnext';
     const cssTarget = platform?.vite?.cssTarget ?? 'chrome156';
-    return [
-        "import { defineConfig } from 'vite';",
-        '',
-        '// Chromium 156 based browser is the only target. esnext keeps the ES2026 syntax intact.',
-        'export default defineConfig({',
-        '    build: {',
-        `        target: '${target}',`,
-        `        cssTarget: '${cssTarget}',`,
-        '    },',
-        '});',
-        '',
-    ].join('\n');
+    const fw = framework ?? 'vanilla';
+    const mk = markup ?? 'html';
+    const lines = ["import { defineConfig } from 'vite';"];
+    const plugins = [];
+    // Framework Vite plugin.
+    if (fw === 'react' || fw === 'react-ssr') {
+        lines.push("import react from '@vitejs/plugin-react';");
+        plugins.push('react()');
+    } else if (fw === 'vue' || fw === 'vue-runtime') {
+        lines.push("import vue from '@vitejs/plugin-vue';");
+        plugins.push('vue()');
+    } else if (fw === 'svelte') {
+        lines.push("import { svelte } from '@sveltejs/vite-plugin-svelte';");
+        plugins.push('svelte()');
+    } else if (fw === 'solid' || fw === 'solidjs') {
+        lines.push("import solid from '@vitejs/plugin-solid';");
+        plugins.push('solid()');
+    } else if (fw === 'fest') {
+        // Fest-Lib LUR.E ships its JSX factory in a TypeScript subpath. esbuild compiles it.
+        lines.push("import { lureJsx } from '@fest-lib/lure';");
+        lines.push('');
+        lines.push('// LUR.E jsx factory. Automatic runtime points at the package jsx-runtime export.');
+        lines.push('const festJsxPlugin = () => ({');
+        lines.push('    name: "fest-lure-jsx",');
+        lines.push('    config() {');
+        lines.push('        return {');
+        lines.push('            esbuild: {');
+        lines.push('                jsx: "transform",');
+        lines.push('                jsxFactory: "lureJsx",');
+        lines.push('                jsxFragment: "Fragment",');
+        lines.push('                loader: "jsx",');
+        lines.push('            },');
+        lines.push('        };');
+        lines.push('    },');
+        lines.push('});');
+        plugins.push('festJsxPlugin()');
+    }
+    // Markup language plugin.
+    if (mk === 'pug') {
+        lines.push("import pug from 'pug';");
+        lines.push("import { readFileSync, writeFileSync, existsSync } from 'node:fs';");
+        lines.push('');
+        lines.push('const pugFile = new URL("./index.pug", import.meta.url);');
+        lines.push('const htmlFile = new URL("./index.html", import.meta.url);');
+        lines.push('const compilePug = () => {');
+        lines.push('    if (!existsSync(pugFile)) return;');
+        lines.push('    const render = pug.compileFile(pugFile, { filename: pugFile });');
+        lines.push('    writeFileSync(htmlFile, render(), "utf8");');
+        lines.push('};');
+        lines.push('const pugPlugin = () => ({');
+        lines.push('    name: "vite-pug",');
+        lines.push('    buildStart: compilePug,');
+        lines.push('    configureServer(server) {');
+        lines.push('        server.middlewares.use((req, res, next) => {');
+        lines.push('            if (req.url === "/" || req.url?.startsWith("/index")) {');
+        lines.push('                try { compilePug(); } catch { /* keep the previous html */ }');
+        lines.push('            }');
+        lines.push('            next();');
+        lines.push('        });');
+        lines.push('    },');
+        lines.push('    handleHotUpdate({ file, server }) {');
+        lines.push('        if (file.endsWith(".pug")) { compilePug(); server.ws.send({ type: "full-reload" }); return []; }');
+        lines.push('    },');
+        lines.push('});');
+        plugins.push('pugPlugin()');
+    }
+    lines.push('');
+    lines.push('// Chromium 156 based browser is the only target. esnext keeps the ES2026 syntax intact.');
+    lines.push('export default defineConfig({');
+    if (plugins.length) lines.push(`    plugins: [${plugins.join(', ')}],`);
+    lines.push('    build: {');
+    lines.push(`        target: '${target}',`);
+    lines.push(`        cssTarget: '${cssTarget}',`);
+    lines.push('    },');
+    lines.push('});');
+    lines.push('');
+    return lines.join('\n');
 }
 
 /**
@@ -386,9 +624,9 @@ export function viteConfig(platform = {}) {
  * @exports
  * @ai.hint pure
  */
-export function stackDocuments(kind, platform, libraries = []) {
+export function stackDocuments(kind, platform, libraries = [], options = {}) {
     return {
-        '.rules/stack.md': `# Stack\n\n${stackText(kind, platform, libraries)}\n`,
+        '.rules/stack.md': `# Stack\n\n${stackText(kind, platform, libraries, options)}\n`,
         '.rules/files.md': '# Files\n\nRead existing files. Do not overwrite them. A scaffold command copies only missing paths and adds absent package.json keys.\n',
         '.skills/scaffold/SKILL.md': '# Scaffold\n\nWrite the skeleton with file tools. Run npm run generate only when package.json generate.command names a generator. The script copies missing files and skips node_modules.\n',
     };
@@ -402,15 +640,26 @@ export function stackDocuments(kind, platform, libraries = []) {
  * @exports
  * @ai.hint pure
  */
-export function kindRules(kind, recommendations) {
+export function kindRules(kind, recommendations, framework = null, markup = null) {
     const fastify = recommendations.libraries.some((item) => item.name === 'fastify' && item.include);
+    const included = new Set(recommendations.libraries.filter((item) => item.include).map((item) => item.name));
+    const fw = framework ?? (included.has('react') ? 'react' : included.has('vue') ? 'vue' : included.has('svelte') ? 'svelte' : included.has('@fest-lib/lure') ? 'fest' : included.has('lit') ? 'lit' : included.has('solid') || included.has('solid-js') ? 'solid' : null);
+    const mk = markup ?? 'html';
     const web = kind === 'landing' || kind === 'site' || kind === 'app';
     const lines = [];
     if (kind === 'backend') {
         lines.push('Node.js 26 ESM. Bind 127.0.0.1. Port from PORT or 3000.');
         lines.push(fastify ? 'Use fastify and the companion packages marked include.' : 'Use node:http. Do not add Fastify unless the recommendation includes it.');
     } else if (web) {
-        lines.push('Vite, SCSS, and ESM. Node.js 26.');
+        if (fw === 'react') lines.push('Vite + @vitejs/plugin-react, React JSX/TSX, and ESM. Node.js 26.');
+        else if (fw === 'react-ssr') lines.push('Vite + @vitejs/plugin-react, React SSR, and ESM. Node.js 26.');
+        else if (fw === 'vue') lines.push('Vite + @vitejs/plugin-vue, Vue SFC (.vue), and ESM. Node.js 26.');
+        else if (fw === 'vue-runtime') lines.push('Vite + @vitejs/plugin-vue, Vue runtime-only SFC (.vue), and ESM. Node.js 26.');
+        else if (fw === 'svelte') lines.push('Vite + @sveltejs/vite-plugin-svelte, Svelte components (.svelte), and ESM. Node.js 26.');
+        else if (fw === 'solid') lines.push('Vite + @vitejs/plugin-solid, Solid.js TSX, and ESM. Node.js 26.');
+        else if (fw === 'lit') lines.push('Vite, LitElement web components, and ESM. Node.js 26.');
+        else if (fw === 'fest') lines.push('Vite, Fest-Lib LUR.E (@fest-lib/lure + core + dom + object + uniform), and ESM. Node.js 26.');
+        else lines.push('Vite, SCSS, and ESM. Node.js 26.');
         lines.push(kind === 'app' ? 'server.js serves dist/ after vite build.' : 'No Node server.');
         lines.push('vite.config.js is already written with the Chromium 156 based browser build targets. Do not plan a step to create or verify it.');
         lines.push('Do not run npm run dev or npm run preview inside a step: they do not exit. Verify with npm run build and read the built files.');
@@ -431,6 +680,21 @@ export function kindRules(kind, recommendations) {
     } else if (recommendations.libraries.some((item) => item.name === 'preact' && item.include)) {
         lines.push('Write the interface as Preact JSX modules. Each component has a matching SCSS module. Do not implement the UI as h() calls in src/main.js.');
     }
+    // Fest-Lib deep rules: LUR.E primitives, forms, overlays, drag, and icon.
+    if (fw === 'fest') {
+        lines.push('Fest-Lib LUR.E: build the UI with the package factories — E(tag|node, props, children) for create/wrap/bind, H`html` or H("<div>") for HTML parse, M(list, mapFn) for reactive lists, Q(selector, root) for live queries, T(string|ref) for text, C(ref, factory) for conditional swap, and S`css` for controllable stylesheets.');
+        lines.push('Reactive state comes from @fest-lib/object: observe(value) and iterated([...]). Bind refs through E props (attributes, classList, style, on) or the H prefixes attr:*, prop:*, on:*/@*, ref/ref:*.');
+        lines.push('Forms: use formLink / bindForms / FormBinding / bindFormControl / formRef. Mount lifecycle is opt-in through bindWhileConnected.');
+        lines.push('Triggers and overlays: use withTriggerModifiers (once/debounce/prevent/stop/capture/passive), bindOutsideDismiss, resolvePlacement / placeOverlay, and registerTransientOverlay. Do not write ad-hoc listeners when these exist.');
+        lines.push('Drag: bindDraggable(target, onEnd).');
+        lines.push('Icons: @fest-lib/icon ships the Phosphor ui-icon web component with OPFS and CSS-registry caches. Use it in place of hand-written SVG or other icon sets when fest-lib is the framework.');
+        lines.push('JSX: the prepared vite.config.js already sets the LUR.E jsx factory (E) and the jsx fragment. Each .tsx file imports E, H, M, Q, T, C, S from "@fest-lib/lure" and uses JSX for the component tree.');
+    }
+    if (mk === 'htmx') {
+        lines.push('Markup: htmx 4 (htmx.org). The script tag loads htmx from the CDN or from the installed package. Use hx-get/hx-post/hx-put/hx-delete, hx-swap, hx-target, hx-boost, and hx-trigger for server-driven fragments. Do not duplicate the interactivity in JS.');
+    } else if (mk === 'pug') {
+        lines.push('Markup: Pug. index.pug is the source template; the prepared vite.config.js compiles it to index.html on dev and build. Write .pug partials under src/ for shared blocks and include or extend them. Do not hand-edit index.html — it is generated.');
+    }
     return lines.join('\n');
 }
 
@@ -441,15 +705,15 @@ export function kindRules(kind, recommendations) {
  * @exports
  * @ai.hint pure
  */
-export function preparedScaffoldFiles({ kind, platform, recommendations, name = 'app' }) {
-    const docs = stackDocuments(kind, platform, recommendations.libraries);
-    const manifest = buildPackageManifest({ kind, name, libraries: recommendations.libraries });
+export function preparedScaffoldFiles({ kind, platform, recommendations, name = 'app', framework = null, scriptLanguage = null, styleLanguage = null, markup = null }) {
+    const docsOpts = { framework, scriptLanguage, styleLanguage, markupLanguage: markup };
+    const docs = stackDocuments(kind, platform, recommendations.libraries, docsOpts);
+    const manifest = buildPackageManifest({ kind, name, libraries: recommendations.libraries, framework, styleLanguage, markup });
     const web = kind === 'landing' || kind === 'site' || kind === 'app';
     return {
         'package.json': `${JSON.stringify(manifest, null, 2)}\n`,
         ...(web ? {
-            'vite.config.js': viteConfig(platform),
-            //'src/main.js': 'import "./styles.scss";'
+            'vite.config.js': viteConfig(platform, { framework, markup }),
         } : {}),
         'scripts/generate.js': scaffoldScript(),
         ...docs,
@@ -526,10 +790,11 @@ export async function ensureDependencies({ root, level = 'read', approve = async
  * @exports
  * @ai.hint pure
  */
-export function renderGenerationTask({ kind, prompt = '', platform, recommendations, name = 'app' }) {
+export function renderGenerationTask({ kind, prompt = '', platform, recommendations, name = 'app', framework = null, scriptLanguage = null, styleLanguage = null, markup = null }) {
     void prompt;
-    const prepared = new Set(Object.keys(preparedScaffoldFiles({ kind, platform, recommendations, name })));
-    const application = filesForStack({ kind, libraries: recommendations.libraries }).filter((file) => !prepared.has(file));
+    const opts = { framework, scriptLanguage, styleLanguage, markup };
+    const prepared = new Set(Object.keys(preparedScaffoldFiles({ kind, platform, recommendations, name, ...opts })));
+    const application = filesForStack({ kind, libraries: recommendations.libraries, ...opts }).filter((file) => !prepared.has(file));
     const libs = recommendations.libraries.map((item) => {
         const docsUrl = item.docs ? ` Docs: ${item.docs}.` : '';
         const types = item.types ? ` Types: ${item.types}.` : '';
@@ -547,10 +812,10 @@ export function renderGenerationTask({ kind, prompt = '', platform, recommendati
         'After the plan, initialize the project and implement the application or its prototype.',
         '',
         'Stack:',
-        stackText(kind, platform, recommendations.libraries),
+        stackText(kind, platform, recommendations.libraries, opts),
         '',
         'Already written. Do not plan a step to create, copy, or rewrite them:',
-        ...Object.keys(preparedScaffoldFiles({ kind, platform, recommendations, name })).map((file) => `- ${file}`),
+        ...Object.keys(preparedScaffoldFiles({ kind, platform, recommendations, name, ...opts })).map((file) => `- ${file}`),
         '',
         application.length ? 'Create these application files when they are missing:' : 'Create the application files the request needs.',
         ...application.map((file) => `- ${file}`),

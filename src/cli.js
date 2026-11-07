@@ -83,6 +83,9 @@ const OPTIONS = {
     'mcp-command': { type: 'string' }, 'mcp-arg': { type: 'string', multiple: true },
     'mcp-url': { type: 'string' }, 'mcp-description': { type: 'string' }, 'mcp-approval': { type: 'string' },
     'mcp-header': { type: 'string', multiple: true },
+    // Generation stacks
+    'frontend-framework': { type: 'string' }, 'frontend-script-language': { type: 'string' },
+    'frontend-style-language': { type: 'string' }, 'frontend-markup-language': { type: 'string' }, 'icon-set': { type: 'string' },
 };
 
 const COMMANDS = { ask, chat, run, image, jobs, memory: memoryCommand, resume, cancel, models, config: configCommand, agents: agentsCommand, map: mapCommand, complete, gen, mcp: mcpCommand, decide, moderate, channels, telegram, serve };

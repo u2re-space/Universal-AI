@@ -523,6 +523,11 @@ export const defaults = Object.freeze({
         fidelity: 80,
         creativity: 20,
         platform: 'chrome-156-stable',
+        frontendFramework: 'vanilla',
+        scriptLanguage: 'javascript',
+        styleLanguage: 'scss',
+        markupLanguage: 'html',
+        iconSet: 'auto',
     },
     /**
      * Team pace. models run from cheap to expensive.

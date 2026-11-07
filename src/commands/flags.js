@@ -62,6 +62,101 @@ const IMAGE_COMPLEXITY = ['low', 'medium', 'high', 'auto'];
 /** The retired collector/coordinator roles are accepted as aliases for the unified orchestrator role. */
 const ROLE_ALIASES = { collector: 'orchestrator', coordinator: 'orchestrator' };
 
+/** Allowed values for --frontend-framework. */
+const FRONTEND_FRAMEWORKS = Object.freeze([
+    'vanilla', 'default', 'none',
+    'react', 'react-ssr',
+    'vue', 'vue-runtime',
+    'angular',
+    'svelte',
+    'solid', 'solidjs',
+    'lit',
+    'fest', 'fest-lib',
+]);
+
+/** Allowed values for --frontend-script-language. */
+const SCRIPT_LANGUAGES = Object.freeze([
+    'javascript', 'js', 'jsx',
+    'typescript', 'ts', 'tsx',
+]);
+
+/** Allowed values for --frontend-style-language. */
+const STYLE_LANGUAGES = Object.freeze([
+    'scss', 'css', 'vanilla', 'sass', 'stylus', 'less', 'postcss-preset-env',
+]);
+
+/** Allowed values for --frontend-markup-language. */
+const MARKUP_LANGUAGES = Object.freeze([
+    'html', 'default', 'htmx', 'pug',
+]);
+
+/** Allowed values for --icon-set. */
+const ICON_SETS = Object.freeze([
+    'auto', 'lucide', 'phosphor',
+]);
+
+/**
+ * Normalize --frontend-framework to a canonical value.
+ * @param {string} raw
+ * @returns {string}
+ * @ai.hint pure
+ */
+function canonicalFrontendFramework(raw) {
+    const v = String(raw).trim().toLowerCase();
+    if (v === 'vanilla' || v === 'default' || v === 'none') return 'vanilla';
+    return v;
+}
+
+/**
+ * Normalize --frontend-script-language to a canonical value.
+ * @param {string} raw
+ * @returns {string}
+ * @ai.hint pure
+ */
+function canonicalScriptLanguage(raw) {
+    const v = String(raw).trim().toLowerCase();
+    if (v === 'js') return 'javascript';
+    if (v === 'ts') return 'typescript';
+    return v;
+}
+
+/**
+ * Normalize --frontend-style-language to a canonical value.
+ * @param {string} raw
+ * @returns {string}
+ * @ai.hint pure
+ */
+function canonicalStyleLanguage(raw) {
+    const v = String(raw).trim().toLowerCase();
+    if (v === 'vanilla') return 'css';
+    return v;
+}
+
+/**
+ * Normalize --frontend-markup-language to a canonical value.
+ * @param {string} raw
+ * @returns {string}
+ * @ai.hint pure
+ */
+function canonicalMarkupLanguage(raw) {
+    const v = String(raw).trim().toLowerCase();
+    if (v === 'default') return 'html';
+    return v;
+}
+
+/**
+ * Normalize --icon-set to a canonical value.
+ * @param {string} raw
+ * @returns {string}
+ * @ai.hint pure
+ */
+function canonicalIconSet(raw) {
+    const v = String(raw).trim().toLowerCase();
+    if (v === 'lucide') return 'lucide';
+    if (v === 'phosphor') return 'phosphor';
+    return v;
+}
+
 /** Names --tools and --no-tools accept: every switch of the default tools object. */
 const TOOL_SWITCH_NAMES = Object.keys(defaults.tools);
 
@@ -328,6 +423,37 @@ export function overridesFrom(values, { command = null } = {}) {
     if (values.platform) {
         if (!Object.hasOwn(PLATFORMS, values.platform)) throw new UsageError(`--platform: ${Object.keys(PLATFORMS).join(' | ')}`);
         o.generate.platform = values.platform;
+    }
+    // --frontend-framework, --frontend-script-language, --frontend-style-language,
+    // --frontend-markup-language, --icon-set.
+    // Each of these turns on the generation profile even when --kind is absent.
+    if (values['frontend-framework'] || values['frontend-script-language'] || values['frontend-style-language'] || values['frontend-markup-language'] || values['icon-set']) {
+        o.generate ??= {};
+    }
+    if (values['frontend-framework']) {
+        const raw = String(values['frontend-framework']).trim().toLowerCase();
+        if (!FRONTEND_FRAMEWORKS.includes(raw)) throw new UsageError(`--frontend-framework: ${FRONTEND_FRAMEWORKS.join(' | ')}`);
+        o.generate.frontendFramework = canonicalFrontendFramework(raw);
+    }
+    if (values['frontend-script-language']) {
+        const raw = String(values['frontend-script-language']).trim().toLowerCase();
+        if (!SCRIPT_LANGUAGES.includes(raw)) throw new UsageError(`--frontend-script-language: ${SCRIPT_LANGUAGES.join(' | ')}`);
+        o.generate.scriptLanguage = canonicalScriptLanguage(raw);
+    }
+    if (values['frontend-style-language']) {
+        const raw = String(values['frontend-style-language']).trim().toLowerCase();
+        if (!STYLE_LANGUAGES.includes(raw)) throw new UsageError(`--frontend-style-language: ${STYLE_LANGUAGES.join(' | ')}`);
+        o.generate.styleLanguage = canonicalStyleLanguage(raw);
+    }
+    if (values['frontend-markup-language']) {
+        const raw = String(values['frontend-markup-language']).trim().toLowerCase();
+        if (!MARKUP_LANGUAGES.includes(raw)) throw new UsageError(`--frontend-markup-language: ${MARKUP_LANGUAGES.join(' | ')}`);
+        o.generate.markupLanguage = canonicalMarkupLanguage(raw);
+    }
+    if (values['icon-set']) {
+        const raw = String(values['icon-set']).trim().toLowerCase();
+        if (!ICON_SETS.includes(raw)) throw new UsageError(`--icon-set: ${ICON_SETS.join(' | ')}`);
+        o.generate.iconSet = canonicalIconSet(raw);
     }
     return o;
 }

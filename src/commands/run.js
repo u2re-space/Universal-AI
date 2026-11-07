@@ -122,15 +122,23 @@ export async function run(ctx) {
             quality: config.pace.quality,
             platform: resolvePlatform(config.generate.platform),
             references: { images: mockups, files: values.file ?? [], examples: values.example ?? [], urls: values.url ?? [] },
-            stagedRefs,
-            name: path.basename(ctx.cwd),
+            stagedRefs, name: path.basename(ctx.cwd),
+            framework: config.generate.frontendFramework ?? 'vanilla',
+            scriptLanguage: config.generate.scriptLanguage ?? 'javascript',
+            styleLanguage: config.generate.styleLanguage ?? 'scss',
+            iconSet: config.generate.iconSet ?? 'auto',
+            markupLanguage: config.generate.markupLanguage ?? 'html',
         });
         await writeGenerationManifest(ctx.cwd, brief.manifest);
         if (level === 'write' || level === 'all') {
-            const boilerplate = preparedScaffoldFiles({
-                kind: prepared.kind, platform: resolvePlatform(config.generate.platform),
-                recommendations: brief.manifest.recommendations, name: path.basename(ctx.cwd),
-            });
+        const boilerplate = preparedScaffoldFiles({
+            kind: prepared.kind, platform: resolvePlatform(config.generate.platform),
+            recommendations: brief.manifest.recommendations, name: path.basename(ctx.cwd),
+            framework: config.generate.frontendFramework ?? 'vanilla',
+            scriptLanguage: config.generate.scriptLanguage ?? 'javascript',
+            styleLanguage: config.generate.styleLanguage ?? 'scss',
+            markup: config.generate.markupLanguage ?? 'html',
+        });
             const saved = await writePreparedScaffold(ctx.cwd, boilerplate);
             if (saved.written.length) renderer.line('info', `Каркас уже записан: ${saved.written.join(', ')}`, { dim: true });
         }

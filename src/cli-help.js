@@ -12,6 +12,7 @@
   *   and the `model:role` header format.
  * @changed 2026-11-04 --reasoning-mode and the reasoning.mode limits.
  * @changed 2026-11-07 --id names the run's .tmp directory.
+ * @changed 2026-11-07 --frontend-markup-language html|htmx|pug.
  */
 export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
 
@@ -188,6 +189,11 @@ context=false запускает роль на чистом контексте. 
   --max-steps <n>        потолок шагов плана. Закрепляет число и заменяет расчёт pace
   --creativity <0..100>  сколько можно добавить сверх референсов (по умолчанию 20)
   --platform <id>        профиль платформы (по умолчанию chrome-156-stable)
+  --frontend-framework <name>  фронтенд-фреймворк: vanilla (по умолчанию), react, react-ssr, vue, vue-runtime, angular, svelte, solid, solidjs, lit, fest, fest-lib
+  --frontend-script-language <name>  язык скриптов: javascript (по умолчанию), js, typescript, ts
+  --frontend-style-language <name>   язык стилей: scss (по умолчанию), css, sass, stylus, less, postcss-preset-env
+  --frontend-markup-language <name>  язык разметки: html (по умолчанию), htmx, pug
+  --icon-set <name>      набор иконок: auto (по умолчанию), lucide, phosphor
   --example <путь|url>   пример или шаблон оформления, можно несколько; для decompose — ./examples/for-decompose/*.png
   --kind landing|site|backend|app  вид генерации. У memory --kind по-прежнему вид записи
   --no-memory            не использовать долговременную память (SQLite в ~/.ai-agent/memory.db)

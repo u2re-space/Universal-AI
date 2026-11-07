@@ -55,7 +55,7 @@ function formatStagedRef(ref) {
  * @exports
  * @ai.hint pure
  */
-export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', fidelity, creativity, platform, quality = 40, references = {}, stagedRefs = [] }) {
+export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', fidelity, creativity, platform, quality = 40, references = {}, stagedRefs = [], framework = null, scriptLanguage = null, styleLanguage = null, iconSet = null, markupLanguage = null }) {
     if (kind != null && !GENERATION_KINDS.includes(kind)) throw new Error(`Вид генерации: ${GENERATION_KINDS.join('|')}`);
     const contract = fidelityContract({ fidelity, creativity });
     const effective = effectiveFidelity(contract.fidelity, quality);
@@ -80,15 +80,16 @@ export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', f
         : [];
 
     const recommendations = recommendStack({ kind, prompt, references: refs });
-    const outputs = kind ? [...filesForStack({ kind, libraries: recommendations.libraries })] : [];
+    const opts = { framework, scriptLanguage, styleLanguage, markupLanguage };
+    const outputs = kind ? [...filesForStack({ kind, libraries: recommendations.libraries, ...opts, markup: markupLanguage })] : [];
     const manifest = {
         kind, prompt, fidelity: contract.fidelity, effectiveFidelity: effective, creativity: contract.creativity, measured: null,
         method: 'unmeasured', reason: contract.reason, platform: platform.id, experimentalFlags: false,
-        references: refs, outputs, stack: { kind, text: stackText(kind, platform, recommendations.libraries) }, recommendations,
+        references: refs, outputs, stack: { kind, text: stackText(kind, platform, recommendations.libraries, opts) }, recommendations,
         stagedRefs: stagedRefs.map((r) => ({ rel: r.rel, bytes: r.bytes, mime: r.mime, width: r.width, height: r.height })),
     };
     const task = [
-        renderGenerationTask({ kind, prompt, platform, recommendations, name }),
+        renderGenerationTask({ kind, prompt, platform, recommendations, name, ...opts, markup: markupLanguage }),
         '',
         `Fidelity target: ${effective}%. Measured match: unmeasured. Do not invent a percentage.`,
         `Requested fidelity ${contract.fidelity}% at quality ${quality} works as ${effective}%.`,
@@ -120,7 +121,7 @@ export function buildGenerationBrief({ kind = null, prompt = '', name = 'app', f
     const instructions = [
         platformInstructions(platform),
         '',
-        kindRules(kind, recommendations),
+        kindRules(kind, recommendations, framework, markupLanguage),
         '',
         fidelityInstructions({ ...contract, fidelity: effective }),
         ...(refs.images.length ? ['', 'The worker must create each artwork region with generate_image or edit_image before the page is finished. The saved image paths belong in the HTML and CSS. Use generate_image(reference=...) to send cropped regions directly to the generator.'] : []),

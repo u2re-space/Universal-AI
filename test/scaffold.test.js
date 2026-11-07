@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
-import { filesForKind, filesForStack, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, renderGenerationTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, guardScaffold, preparedScaffoldFiles, writePreparedScaffold, ensureDependencies } from '../src/generate/scaffold.js';
+import { filesForKind, filesForStack, npmPackageName, buildPackageManifest, stackText, recommendStack, scaffoldScript, renderGenerationTask, isScaffoldCommand, scaffoldCommandError, planScaffoldMerge, guardScaffold, preparedScaffoldFiles, writePreparedScaffold, ensureDependencies, viteConfig, kindRules } from '../src/generate/scaffold.js';
 
 const platform = { id: 'chrome-156-stable', ecma: { edition: 2026 } };
 
@@ -302,4 +302,196 @@ test('guard copies only missing files and skips a failed scaffold', async () => 
     } finally {
         await rm(root, { recursive: true, force: true });
     }
+});
+
+test('filesForStack with React framework and TypeScript', () => {
+    const files = filesForStack({ kind: 'landing', framework: 'react', scriptLanguage: 'typescript' });
+    assert.ok(files.includes('src/main.tsx'), 'React + TS should use tsx');
+    assert.ok(files.includes('src/App.tsx'), 'React should add App.tsx');
+    assert.ok(files.includes('src/App.module.scss'), 'React should add SCSS module');
+    assert.equal(files.includes('src/main.js'), false, 'React + TS should not have plain .js');
+});
+
+test('filesForStack with Vue framework', () => {
+    const files = filesForStack({ kind: 'landing', framework: 'vue' });
+    assert.ok(files.includes('src/main.vue') || files.includes('src/main.js'), 'Vue entry file');
+    assert.ok(files.includes('src/App.vue'), 'Vue should add App.vue');
+});
+
+test('filesForStack with Fest-Lib framework', () => {
+    const files = filesForStack({ kind: 'landing', framework: 'fest' });
+    assert.ok(files.includes('src/main.tsx'), 'Fest defaults to TypeScript tsx');
+    assert.ok(files.includes('src/App.tsx'), 'Fest should add App.tsx');
+});
+
+test('filesForStack with Svelte framework', () => {
+    const files = filesForStack({ kind: 'landing', framework: 'svelte' });
+    assert.ok(files.includes('src/main.svelte') || files.includes('src/main.js'), 'Svelte entry file');
+});
+
+test('buildPackageManifest with React framework adds dependencies', () => {
+    const manifest = buildPackageManifest({ kind: 'landing', name: 'react-app', framework: 'react' });
+    assert.equal(manifest.dependencies.react, '*');
+    assert.equal(manifest.devDependencies['@vitejs/plugin-react'], '*');
+    assert.equal(manifest.devDependencies.vite, '*');
+    assert.equal(manifest.devDependencies.sass, '*');
+});
+
+test('buildPackageManifest with Fest-Lib adds Fest dependencies', () => {
+    const manifest = buildPackageManifest({ kind: 'landing', name: 'fest-app', framework: 'fest' });
+    assert.equal(manifest.dependencies['@fest-lib/lure'], '*');
+    assert.equal(manifest.dependencies['@fest-lib/core'], '*');
+    assert.equal(manifest.dependencies['@fest-lib/dom'], '*');
+    assert.equal(manifest.dependencies['@fest-lib/object'], '*');
+    assert.equal(manifest.dependencies['@fest-lib/uniform'], '*');
+    assert.equal(manifest.devDependencies['@fest-lib/style-lib'], '*');
+});
+
+test('buildPackageManifest with style language Less', () => {
+    const manifest = buildPackageManifest({ kind: 'landing', name: 'less-app', styleLanguage: 'less' });
+    assert.equal(manifest.devDependencies.less, '*');
+    assert.equal(manifest.devDependencies.sass, undefined, 'Less should not add sass');
+});
+
+test('buildPackageManifest with style language PostCSS', () => {
+    const manifest = buildPackageManifest({ kind: 'landing', name: 'postcss-app', styleLanguage: 'postcss-preset-env' });
+    assert.equal(manifest.devDependencies['postcss-preset-env'], '*');
+    assert.equal(manifest.devDependencies.sass, undefined);
+});
+
+test('stackText mentions React for react framework', () => {
+    const text = stackText('landing', platform, [], { framework: 'react' });
+    assert.match(text, /React/);
+});
+
+test('stackText mentions Fest-Lib for fest framework', () => {
+    const text = stackText('landing', platform, [], { framework: 'fest' });
+    assert.match(text, /Fest-Lib LUR\.E/);
+});
+
+test('stackText mentions Vue SFC for vue framework', () => {
+    const text = stackText('landing', platform, [], { framework: 'vue' });
+    assert.match(text, /Vue Single-File Components/);
+});
+
+test('stackText with Less style language', () => {
+    const text = stackText('landing', platform, [], { styleLanguage: 'less' });
+    assert.match(text, /Less/);
+    assert.doesNotMatch(text, /SCSS/);
+});
+
+test('renderGenerationTask with React framework includes React files', () => {
+    const recommendations = recommendStack({ kind: 'landing', prompt: 'page', references: {} });
+    const task = renderGenerationTask({ kind: 'landing', platform, recommendations, framework: 'react' });
+    assert.match(task, /React JSX\/TSX components with Vite plugin/);
+    assert.match(task, /src\/main\.jsx/);
+    assert.match(task, /src\/App\.jsx/);
+});
+
+test('preparedScaffoldFiles with React framework includes React in package.json', () => {
+    const recommendations = recommendStack({ kind: 'landing', prompt: 'page', references: {} });
+    const files = preparedScaffoldFiles({ kind: 'landing', platform, recommendations, framework: 'react' });
+    const pkg = JSON.parse(files['package.json']);
+    assert.equal(pkg.dependencies.react, '*');
+    assert.equal(pkg.devDependencies['@vitejs/plugin-react'], '*');
+});
+
+test('filesForStack with Pug markup replaces index.html with index.pug', () => {
+    const files = filesForStack({ kind: 'landing', markup: 'pug' });
+    assert.ok(files.includes('index.pug'), 'Pug markup should produce index.pug');
+    assert.equal(files.includes('index.html'), false, 'Pug markup should not have index.html');
+});
+
+test('filesForStack with htmx markup keeps index.html', () => {
+    const files = filesForStack({ kind: 'landing', markup: 'htmx' });
+    assert.ok(files.includes('index.html'), 'htmx markup keeps index.html');
+});
+
+test('buildPackageManifest with htmx markup adds htm.org dependency', () => {
+    const manifest = buildPackageManifest({ kind: 'landing', name: 'htmx-app', markup: 'htmx' });
+    assert.equal(manifest.dependencies['htmx.org'], '*');
+});
+
+test('buildPackageManifest with Pug markup adds pug as devDependency', () => {
+    const manifest = buildPackageManifest({ kind: 'landing', name: 'pug-app', markup: 'pug' });
+    assert.equal(manifest.devDependencies.pug, '*');
+});
+
+test('viteConfig with htmx markup produces no extra plugins', () => {
+    const config = viteConfig(platform, { framework: null, markup: 'htmx' });
+    assert.ok(config.includes('defineConfig'), 'viteConfig should always produce a valid config');
+    assert.equal(config.includes('pugPlugin'), false, 'htmx should not add pug plugin');
+});
+
+test('viteConfig with Pug markup includes pug plugin', () => {
+    const config = viteConfig(platform, { framework: null, markup: 'pug' });
+    assert.ok(config.includes('pug') || config.includes('pug-plugin'), 'viteConfig should mention pug plugin');
+});
+
+test('viteConfig with Fest-Lib framework includes fest plugin', () => {
+    const config = viteConfig(platform, { framework: 'fest', markup: null });
+    assert.ok(config.includes('fest') || config.includes('lure'), 'viteConfig should mention fest/lure');
+});
+
+test('stackText with htmx markup mentions htmx', () => {
+    const text = stackText('landing', platform, [], { markupLanguage: 'htmx' });
+    assert.match(text, /htmx/i);
+});
+
+test('stackText with Pug markup mentions Pug', () => {
+    const text = stackText('landing', platform, [], { markupLanguage: 'pug' });
+    assert.match(text, /Pug/i);
+});
+
+test('kindRules with Fest-Lib framework includes deep rules', () => {
+    const rules = kindRules('landing', { libraries: [{ name: '@fest-lib/lure', include: true, reason: 'test' }] }, 'fest');
+    assert.match(rules, /Fest-Lib LUR\.E/);
+    assert.match(rules, /E\(/);
+    assert.match(rules, /observe/);
+    assert.match(rules, /formLink|bindForms|FormBinding/);
+    assert.match(rules, /withTriggerModifiers|bindOutsideDismiss/);
+    assert.match(rules, /bindDraggable/);
+    assert.match(rules, /@fest-lib\/icon|Phosphor/);
+    assert.match(rules, /JSX/);
+});
+
+test('kindRules with htmx markup includes htmx rules', () => {
+    const rules = kindRules('landing', { libraries: [] }, null, 'htmx');
+    assert.match(rules, /htmx 4|htmx\.org/);
+    assert.match(rules, /hx-get|hx-post|hx-put|hx-delete/);
+    assert.match(rules, /hx-swap|hx-target/);
+});
+
+test('kindRules with Pug markup includes Pug rules', () => {
+    const rules = kindRules('landing', { libraries: [] }, null, 'pug');
+    assert.match(rules, /Pug/);
+    assert.match(rules, /index\.pug/);
+});
+
+test('renderGenerationTask with Pug markup mentions index.pug', () => {
+    const recommendations = recommendStack({ kind: 'landing', prompt: 'page', references: {} });
+    const task = renderGenerationTask({ kind: 'landing', platform, recommendations, markup: 'pug' });
+    assert.match(task, /index\.pug/);
+});
+
+test('renderGenerationTask with Fest-Lib framework mentions tsx files', () => {
+    const recommendations = recommendStack({ kind: 'landing', prompt: 'page', references: {} });
+    const task = renderGenerationTask({ kind: 'landing', platform, recommendations, framework: 'fest' });
+    assert.match(task, /\.tsx/);
+});
+
+test('preparedScaffoldFiles with Pug markup includes index.pug in stack docs', () => {
+    const recommendations = recommendStack({ kind: 'landing', prompt: 'page', references: {} });
+    const files = preparedScaffoldFiles({ kind: 'landing', platform, recommendations, markup: 'pug' });
+    const stackMd = files['.rules/stack.md'];
+    assert.ok(stackMd.includes('Pug') || stackMd.includes('pug'), 'stack.md should mention Pug');
+});
+
+test('preparedScaffoldFiles with Fest-Lib framework includes fest deps in package.json', () => {
+    const recommendations = recommendStack({ kind: 'landing', prompt: 'Fest-Lib app', references: {} });
+    const files = preparedScaffoldFiles({ kind: 'landing', platform, recommendations, framework: 'fest' });
+    const pkg = JSON.parse(files['package.json']);
+    assert.equal(pkg.dependencies['@fest-lib/lure'], '*');
+    assert.equal(pkg.dependencies['@fest-lib/core'], '*');
+    assert.equal(pkg.devDependencies['@fest-lib/style-lib'], '*');
 });
