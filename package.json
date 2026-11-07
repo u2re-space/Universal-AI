@@ -4,6 +4,10 @@
   "description": "CLI-агент на OpenAI Responses API: промптинг, генерация кода/документов/картинок, автономные задачи, фоновые job'ы. Node.js 26, ESM, без SDK.",
   "type": "module",
   "main": "./index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/u2re-space/U2AI"
+  },
   "bin": {
     "ai": "./bin/ai.js"
   },
