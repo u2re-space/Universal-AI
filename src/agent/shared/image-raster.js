@@ -9,6 +9,7 @@
  * @ai.tags sharp, canvas, resvg, image, compare, alpha, crop, svg
  * @ai.hint io
  * @changed 2026-10-28 First version: comparison and matte work moved off the browser and off ImageMagick.
+ * @changed 2026-11-07 frameFor takes any shape token (`16:9`, `2.39:1`, `cinemascope`), not only three words.
  *
  * Why this module exists: a comparison built as an SVG document and rasterized by a browser engine
  * loses the input rasters — the snapshot comes back empty, and the agent repeats the request. sharp
@@ -20,6 +21,7 @@
 import path from 'node:path';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { DEFAULT_MAX_SIDE, NAMED_FRAMES, READABLE_EXT } from './constants.js';
+import { aspectOf } from './aspect-ratio.js';
 
 /** Cached module handles. null = not tried yet, false = unavailable, object = the module. */
 let _sharp = null;
@@ -187,7 +189,9 @@ export function fitBox(sourceWidth, sourceHeight, cellWidth, cellHeight) {
 }
 
 /**
- * The common frame every candidate is fitted into.
+ * The common frame every candidate is fitted into. The name may be one of the three words of
+ * `NAMED_FRAMES`, a literal `WIDTHxHEIGHT`, or any shape a caller can name — `16:9`, `2.39:1`,
+ * `cinemascope`, `a4` — whose ratio the sheet is cut to.
  * @param {{ frame?: string, sources: Array<{ width: number, height: number }>, maxSide?: number }} options
  * @returns {{ width: number, height: number }}
  * @exports
@@ -195,16 +199,18 @@ export function fitBox(sourceWidth, sourceHeight, cellWidth, cellHeight) {
  */
 export function frameFor({ frame = '', sources = [], maxSide = DEFAULT_MAX_SIDE }) {
     const cap = Math.max(64, Math.min(2048, Math.round(maxSide) || DEFAULT_MAX_SIDE));
+    // A shape of a known ratio fills the cap along its long side.
+    const fitRatio = (ratio) => (ratio >= 1
+        ? { width: cap, height: Math.max(1, Math.round(cap / ratio)) }
+        : { width: Math.max(1, Math.round(cap * ratio)), height: cap });
     const ratio = NAMED_FRAMES[String(frame ?? '').trim().toLowerCase()];
     const literal = /^(\d+)\s*[x×]\s*(\d+)$/i.exec(String(frame ?? '').trim());
-    if (Number.isFinite(ratio)) {
-        return ratio >= 1
-            ? { width: cap, height: Math.max(1, Math.round(cap / ratio)) }
-            : { width: Math.max(1, Math.round(cap * ratio)), height: cap };
-    }
+    if (Number.isFinite(ratio)) return fitRatio(ratio);
     if (literal) {
         return { width: Math.max(1, Math.min(cap * 4, Number(literal[1]))), height: Math.max(1, Math.min(cap * 4, Number(literal[2]))) };
     }
+    const shape = aspectOf(frame);
+    if (Number.isFinite(shape)) return fitRatio(shape);
     const largest = sources.reduce((best, item) => (item.width * item.height > best.width * best.height ? item : best), { width: 1, height: 1 });
     const long = Math.max(largest.width, largest.height);
     if (long <= cap) return { width: largest.width, height: largest.height };

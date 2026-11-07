@@ -11,7 +11,7 @@ import { rasterInfo, rasterIsOpaque, rasterPadImageBytes } from '../src/agent/im
 import { runProgram } from '../src/agent/shell.js';
 import { imageModelFamily as sharedImageModelFamily, IMAGE_SIZES as SHARED_IMAGE_SIZES, VECTOR_RATIOS as SHARED_VECTOR_RATIOS } from '../src/openai/shared/images.js';
 import { imageModelProfile as agentImageModelProfile, imageSizeAttempts as agentImageSizeAttempts } from '../src/agent/riverflow/images.js';
-import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFamily, imageModelFor, imageModelProfile, imagePayloads, imageComplexityValue, imageRequestSize, imageSizeAttempts, imageSizeFields, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_RIVERFLOW_MODEL, PROXY_VECTOR_MODEL, VECTOR_RATIOS, readImageSize, MIN_IMAGE_PIXELS, MAX_IMAGE_PIXELS, MAX_IMAGE_EDGE, MAX_IMAGE_RATIO } from '../src/openai/images.js';
+import { backgroundValue, encodeMultipart, generationBody, imageFormatField, imageModelFamily, imageModelFor, imageModelProfile, imagePayloads, imageComplexityValue, imageRequestSize, imageSizeAttempts, imageSizeFields, imageTransport, normalizeImageFormat, normalizeImageSize, normalizeVectorRatio, sameAspectImageSize, isImageSizeError, isVectorModel, pngHasAlphaChannel, sniffImage, supportsTransparentBackground, PROXY_RIVERFLOW_MODEL, PROXY_VECTOR_MODEL, VECTOR_RATIOS, RIVERFLOW_RATIOS, readImageSize, MIN_IMAGE_PIXELS, MAX_IMAGE_PIXELS, MAX_IMAGE_EDGE, MAX_IMAGE_RATIO, aspectRatioToken, aspectFrame, ceilAspect, nearestAspect, parseAspectToken, rationalAspect, supportedAspectRatios } from '../src/openai/images.js';
 import { builtinTools } from '../src/agent/loop.js';
 import { enabledToolNames } from '../src/agent/tool-specs.js';
 import { createToolset } from '../src/agent/tools.js';
@@ -303,6 +303,73 @@ test('imageSizeAttempts for riverflow falls back to nearest aspect_ratio, not a 
     assert.deepEqual(imageSizeAttempts('512x512', 'sourceful/riverflow-v2.6-pro'), ['512x512', null]);
     // 1920x1080: exact → 1920x1088 (rounded) → 16:9 → null.
     assert.deepEqual(imageSizeAttempts('1920x1080', 'sourceful/riverflow-v2.6-pro'), ['1920x1080', '1920x1088', '16:9', null]);
+});
+
+test('a shape is a fraction with small terms, scaled up and rounded to what the model has', () => {
+    // The fraction: the smallest whole terms within 32, not the raw gcd of the pixel count.
+    assert.deepEqual(rationalAspect('1920x1080'), { width: 16, height: 9, ratio: 16 / 9, exact: true });
+    assert.deepEqual(rationalAspect('1000x600'), { width: 5, height: 3, ratio: 5 / 3, exact: true });
+    assert.deepEqual(rationalAspect('21:9'), { width: 7, height: 3, ratio: 7 / 3, exact: true });
+    // 2.39:1 is not a fraction of small terms, so the closest one within 32 stands in (0.2% off).
+    assert.deepEqual(rationalAspect('2.39:1'), { width: 31, height: 13, ratio: 31 / 13, exact: false });
+    assert.equal(rationalAspect('1919x1079').width / rationalAspect('1919x1079').height, 16 / 9);
+    // A bare tier number names a tier, not a 512:1 shape.
+    assert.equal(rationalAspect('512'), null);
+    assert.equal(rationalAspect('2048'), null);
+    assert.equal(parseAspectToken('cinemascope').ratio, 2.39);
+    assert.equal(parseAspectToken('1.85').ratio, 1.85);
+    assert.equal(parseAspectToken('garbage'), null);
+
+    // Rounding: up, so the frame never lands under the asked budget, but a multiplier that only
+    // touches a whole 16-pixel step stays there instead of costing a full extra step.
+    assert.equal(ceilAspect(15.998), 16);
+    assert.equal(ceilAspect(16.004), 16);
+    assert.equal(ceilAspect(16.006), 17);
+    assert.equal(ceilAspect(15.4), 16);
+    // 16:9 on a 1K budget is the first legal frame at or above it: 1536x864, not 1280x720.44.
+    assert.deepEqual(aspectFrame('16:9', { step: 16, pixels: 1024 * 1024 }), { width: 1536, height: 864, ratio: 16 / 9 });
+    // A shape wider than the model refuses is clamped to the widest frame it takes (3:1).
+    assert.deepEqual(aspectFrame('40:1', { step: 16, pixels: 1024 * 1024, maxRatio: 3 }), { width: 1776, height: 592, ratio: 3 });
+
+    // Rounded to a shape the model is asked about: 2.39:1 is not on riverflow's menu, 21:9 is.
+    assert.equal(nearestAspect('2.39:1', RIVERFLOW_RATIOS), '21:9');
+    assert.equal(aspectRatioToken('cinemascope', PROXY_RIVERFLOW_MODEL), '21:9');
+    assert.equal(aspectRatioToken('2.39:1', PROXY_VECTOR_MODEL, 'vector'), '16:9');
+    assert.deepEqual([...supportedAspectRatios(PROXY_RIVERFLOW_MODEL)], [...RIVERFLOW_RATIOS]);
+});
+
+test('any shape token reaches each family as a frame or a ratio it accepts', () => {
+    const riverflow = 'sourceful/riverflow-v2.6-pro';
+    // A ratio-field family keeps the shape as the nearest ratio of its own list, tier and all.
+    assert.deepEqual(imageSizeFields('2.39:1', riverflow), { aspect_ratio: '21:9' });
+    assert.deepEqual(imageSizeFields('2.39:1', riverflow, '2K'), { aspect_ratio: '21:9', resolution: '2K' });
+    assert.deepEqual(imageSizeFields('wide', riverflow), { aspect_ratio: '16:9' });
+    assert.deepEqual(imageSizeFields('story', riverflow), { aspect_ratio: '9:16' });
+    // The shape also survives the tool layer, which pre-reads the size before the client sees it.
+    assert.equal(imageRequestSize('2.39:1', riverflow), '21:9');
+    assert.deepEqual(imageSizeAttempts('2.39:1', riverflow), ['21:9', null]);
+    assert.equal(generationBody({ model: riverflow, prompt: 'p', size: 'cinemascope' }).aspect_ratio, '21:9');
+
+    // A free-frame family has no ratio field, so the shape becomes a real frame of the tier budget.
+    assert.equal(imageRequestSize('2.39:1', 'gpt-image-2.6-sunburst'), '1984x832');
+    assert.equal(imageRequestSize('16:9', 'gpt-image-2.6-sunburst', '2K'), '2816x1584');
+    assert.equal(imageRequestSize('2.39:1', 'gpt-image-2.6-sunburst', '4K'), '3472x1456');
+    // The frame is 16-multiple and inside the model limits, so a rejection retries on the preset.
+    assert.deepEqual(imageSizeAttempts('2.39:1', 'gpt-image-2.6-sunburst'), ['1984x832', '2048x1536']);
+
+    // A tier-based model without free frames takes the frame of its tier whose shape is closest.
+    assert.equal(normalizeImageSize('21:9'), '1008x432');
+    assert.equal(normalizeImageSize('21:9', '2K'), '2016x864');
+    // A preset-only model has three shapes only: it gets the right one, never the raw token.
+    assert.equal(imageRequestSize('21:9', 'm'), '1024x768');
+    assert.equal(imageRequestSize('a4', 'm'), '768x1024');
+    assert.equal(generationBody({ model: 'm', prompt: 'p', size: '2.39:1' }).size, '1024x768');
+
+    // The vector ratio field reads the same shapes and rounds them to its own short list.
+    assert.equal(normalizeVectorRatio('2.39:1'), '16:9');
+    assert.equal(normalizeVectorRatio('cinemascope'), '16:9');
+    assert.equal(normalizeVectorRatio('story'), '9:16');
+    assert.equal(normalizeVectorRatio('1.0'), '1:1');
 });
 
 test('vector model uses aspect_ratio and svg output', () => {

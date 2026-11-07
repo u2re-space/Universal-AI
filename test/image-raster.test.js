@@ -43,6 +43,9 @@ test('local image engine is available and geometry keeps aspect ratio', async ()
     assert.ok(['sharp', 'canvas'].includes(await rasterEngine()));
     assert.deepEqual(fitBox(400, 200, 100, 100), { x: 0, y: 25, width: 100, height: 50, scale: 0.25 });
     assert.deepEqual(frameFor({ frame: 'portrait', sources: [], maxSide: 640 }), { width: 400, height: 640 });
+    // Any shape names a sheet frame, not only the three words of NAMED_FRAMES.
+    assert.deepEqual(frameFor({ frame: '2.39:1', sources: [], maxSide: 640 }), { width: 640, height: 268 });
+    assert.deepEqual(frameFor({ frame: 'story', sources: [], maxSide: 640 }), { width: 360, height: 640 });
 });
 
 test('comparison writes a direct local raster sheet and pixel difference map', async () => {

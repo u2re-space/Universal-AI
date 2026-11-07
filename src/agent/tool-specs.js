@@ -297,7 +297,7 @@ export const TOOL_SPECS = {
         parameters: schema({
             prompt: str('What to draw or how the reference should look after regeneration. Describe style and composition; do not repeat pixel-level details the image already carries.'),
             path: str('Relative output path such as assets/portrait.png. Empty string lets the tool choose a name.'),
-            size: str('WIDTHxHEIGHT, a resolution tier (512, 1K, 2K, 4K), a ratio (16:9, 9:16), or the words portrait/landscape/square. A family that takes any frame uses WIDTHxHEIGHT as asked; a family tuned by tiers reads the tier as `resolution` and the ratio as `aspect_ratio`, so a bare number like 2048 never collapses to the server default square. Empty string uses the server default.'),
+            size: str('The frame or the shape to draw: WIDTHxHEIGHT, a ratio (16:9, 21:9, 2.39:1), a bare ratio value (2.39), a resolution tier (512, 1K, 2K, 4K), or a shape word (square, portrait, landscape, wide, ultrawide, cinemascope, golden, story, a4). A family that takes any frame gets the shape as a real frame (the ratio reduced to small whole terms and scaled to the tier budget); a family tuned by tiers reads the tier as `resolution` and the shape as the nearest `aspect_ratio` it accepts, so a bare number like 2048 never collapses to the server default square. Empty string uses the server default.'),
             resolution: str('Resolution tier for the models tuned by one: 512, 1K, 2K, 4K, or an empty string for image.resolution. It sets the pixel budget; size then only sets the shape.'),
             complexity: str('low, medium, high, or an empty string for the server default. Replaces the former `quality` field.'),
             reference: str('Relative path to a reference image (e.g. .ai/refs/abc.png or a ready crop from .tmp/<id>/crops/*.png). The generator conditions on this image, and the same file is the RGB base for the alpha channel. Empty string = pure text-to-image.'),
@@ -313,7 +313,7 @@ export const TOOL_SPECS = {
             prompt: str('How to change the source image.'),
             image: str('Source image path relative to the working directory.'),
             path: str('Relative output path. Empty string lets the tool choose a name.'),
-            size: str('WIDTHxHEIGHT, a resolution tier (512, 1K, 2K, 4K), a ratio (16:9, 9:16), or the words portrait/landscape/square. Empty string keeps the source image own frame, so an edit does not come back as the server default square.'),
+            size: str('WIDTHxHEIGHT, a ratio (16:9, 21:9, 2.39:1), a bare ratio value (2.39), a resolution tier (512, 1K, 2K, 4K), or a shape word (square, portrait, landscape, wide, ultrawide, cinemascope, story, a4). Empty string keeps the source image own frame, so an edit does not come back as the server default square.'),
             resolution: str('Resolution tier for the models tuned by one: 512, 1K, 2K, 4K, or an empty string for image.resolution.'),
             extra_images: str('JSON array of additional reference image paths, e.g. ["assets/ref1.png",".ai/refs/abc.png"]. Empty string = none.'),
             background: str('transparent, opaque, or an empty string for image.background.'),

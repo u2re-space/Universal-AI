@@ -192,7 +192,10 @@ context=false запускает роль на чистом контексте. 
   --port <n>             порт ai serve, ai complete --listen и ai channels --listen. 0 — свободный порт
 
 Изображения (image / --images):
-  --size WxH|auto  --image-complexity low|medium|high|auto  --format png|webp|jpeg
+  --size WxH|W:H|2.39|wide|a4|512|1K|2K|4K|auto  --image-complexity low|medium|high|auto  --format png|webp|jpeg
+  --size принимает и форму кадра: дробь (21:9, 2.39:1), просто отношение (2.39), уровень (2K) или слово
+  (square, portrait, landscape, wide, ultrawide, cinemascope, golden, story, a4). Модель со свободным кадром
+  получает из формы настоящий кадр, модель с полем aspect_ratio — ближайшее отношение из своего списка.
   --image-complexity задаёт уровень планирования модели (заменяет бывшее 'quality'); целое --quality относится к pace работы.
   --image-background transparent|opaque|auto  --image-div16 auto|always|never  --partials 0..3  --image-model <id>  --count, -n <n>
   Для api.proxyapi.ru картинки идут через /images/generations и /images/edits (openai/gpt-image-2.6-sunburst для генерации по тексту,

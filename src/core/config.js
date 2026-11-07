@@ -2,18 +2,20 @@
  * @file src/core/config.js
  * @module core/config
  * @purpose Load, validate, and redact configuration, and resolve per-role settings.
- * @depends node:os, node:path, node:fs/promises, util/text, core/config-defaults, core/placeholders, generate/platform, mcp/servers, channels/questions
+ * @depends node:os, node:path, node:fs/promises, util/text, openai/shared/aspect-ratio, core/config-defaults, core/placeholders, generate/platform, mcp/servers, channels/questions
  * @usedBy cli, commands/shared, commands/flags, commands/ask, commands/run, commands/chat, commands/misc, agent/loop, agent/roles
  * @exports APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, REASONING_MODES, ROLE_NAMES, BUILTIN_ROLE_NAMES, roleNames, defaults, resolveRole, defaultHome, loadConfig, isReasoningModel, supportsVerbosity, redactConfig
  * @ai.tags config
  * @ai.hint io
  * @changed 2026-10-26 Model ceilings, word context levels, user-defined roles, and the stage pipeline.
  * @changed 2026-11-04 reasoning.mode validated and resolved per role; unknown `reasoning` keys rejected.
+ * @changed 2026-11-07 image.size also takes a bare ratio (2.39) and a shape word (wide, a4, cinemascope).
  */
 import os from 'node:os';
 import path from 'node:path';
 import { readFile, mkdir } from 'node:fs/promises';
 import { deepMerge, isRecord } from '../util/text.js';
+import { parseAspectToken } from '../openai/shared/aspect-ratio.js';
 import { PLATFORMS } from '../generate/platform.js';
 import { normalizeMcpServer } from '../mcp/servers.js';
 import { PRESET_NAMES } from '../channels/questions.js';
@@ -668,12 +670,14 @@ function validateConfig(c, env = liveEnv() ?? process.env) {
     if (!['png', 'webp', 'jpeg'].includes(c.image.format)) fail('image.format: png | webp | jpeg');
     if (!['auto', 'low', 'medium', 'high'].includes(c.image.complexity)) fail('image.complexity: auto | low | medium | high');
     if (!['auto', 'transparent', 'opaque'].includes(c.image.background)) fail('image.background: auto | transparent | opaque');
-    // `image.size` also accepts a resolution tier (`512`, `2K`) and a ratio (`9:16`): a family that
-    // is tuned by a tier reads those instead of a pixel frame, and refusing them here would make the
-    // most useful way of asking for a size unconfigurable.
-    if (!(c.image.size === 'auto' || /^\d{2,4}x\d{2,4}$/.test(c.image.size)
-        || /^(?:512|[124]K)$/i.test(c.image.size) || /^\d+(?:\.\d+)?:\d+$/.test(c.image.size))) {
-        fail('image.size: auto | WIDTHxHEIGHT | 512 | 1K | 2K | 4K | W:H');
+    // `image.size` also accepts a resolution tier (`512`, `2K`) and a shape (`9:16`, `2.39:1`,
+    // `2.39`, `cinemascope`): a family that is tuned by a tier or draws any frame reads those
+    // instead of a pixel frame, and refusing them here would make the most useful way of asking for
+    // a size unconfigurable.
+    const sizeToken = String(c.image.size ?? '').trim().toLowerCase();
+    if (!(sizeToken === 'auto' || /^\d{2,4}x\d{2,4}$/.test(sizeToken)
+        || /^(?:512|[124]K)$/i.test(sizeToken) || Boolean(parseAspectToken(sizeToken)))) {
+        fail('image.size: auto | WIDTHxHEIGHT | 512 | 1K | 2K | 4K | W:H | 2.39 | wide | a4');
     }
     if (c.image.resolution != null && !/^(?:512|[124]K)$/i.test(String(c.image.resolution))) fail('image.resolution: null | 512 | 1K | 2K | 4K');
     if (!Number.isSafeInteger(c.image.partialImages) || c.image.partialImages < 0 || c.image.partialImages > 3) fail('image.partialImages: 0..3');

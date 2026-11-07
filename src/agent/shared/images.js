@@ -2,19 +2,27 @@
  * Shared model-independent image API constants and payload utilities.
  * @module openai/shared/images
  * @exports IMAGE_SIZES, VECTOR_RATIOS, isVectorModel, normalizeVectorRatio, normalizeImageFormat,
- *   encodeMultipart, imagePayloads, imageSources, pngHasAlphaChannel, readImageSize, sniffImage
+ *   encodeMultipart, imagePayloads, imageSources, pngHasAlphaChannel, readImageSize, sniffImage,
+ *   aspectImageSize, aspectRatioToken, supportedAspectRatios
  */
 import { randomBytes } from 'node:crypto';
 import {
     PORTRAIT_SIZES, SQUARE_SIZES, LANDSCAPE_SIZES,
-    IMAGE_SIZES, VECTOR_RATIOS, IMAGE_SIZES_BY_RESOLUTION, imageModelProfile,
+    IMAGE_SIZES, VECTOR_RATIOS, IMAGE_SIZES_BY_RESOLUTION, IMAGE_TIER_LIMITS, imageModelProfile,
     RIVERFLOW, RIVERFLOW_RATIOS, RIVERFLOW_RESOLUTIONS, MIN_IMAGE_PIXELS, MAX_IMAGE_PIXELS, MAX_IMAGE_EDGE, MAX_IMAGE_RATIO,
     GPT_IMAGE_25, GPT_IMAGE_26, PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, PROXY_RIVERFLOW_MODEL
 } from './constants.js';
+import {
+    RATIO_MAX_TERM, RATIO_CEIL_EPSILON, RATIO_WORDS, STANDARD_RATIOS,
+    aspectOf, aspectFrame, ceilAspect, nearestAspect, parseAspectToken, rationalAspect,
+} from './aspect-ratio.js';
 
 export { IMAGE_SIZES, VECTOR_RATIOS, RIVERFLOW_RATIOS, RIVERFLOW_RESOLUTIONS, imageModelProfile,
     MIN_IMAGE_PIXELS, MAX_IMAGE_PIXELS, MAX_IMAGE_EDGE, MAX_IMAGE_RATIO,
     PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, PROXY_RIVERFLOW_MODEL };
+
+export { RATIO_MAX_TERM, RATIO_CEIL_EPSILON, RATIO_WORDS, STANDARD_RATIOS,
+    aspectOf, aspectFrame, ceilAspect, nearestAspect, parseAspectToken, rationalAspect };
 
 /** True when the model id names a vector (SVG) variant. */
 export function isVectorModel(model) {
@@ -187,6 +195,62 @@ export function getAspectDifference(a, b) {
     return Math.abs(Math.log((a.width / a.height) / (b.width / b.height)));
 }
 
+/**
+ * The shapes one model is asked for by name: the ratio field of a tier-based gateway, the vector
+ * ratio list, or the standard catalogue for a model that takes a literal frame.
+ * @param {string|null|undefined} model
+ * @param {'vector'|'image'|'auto'} [field] which field the ratio is headed for
+ * @returns {readonly string[]}
+ * @exports
+ * @ai.hint pure
+ */
+export function supportedAspectRatios(model, field = 'auto') {
+    if (field === 'vector') return VECTOR_RATIOS;
+    if (field === 'image' || imageModelProfile(model).resolutionTiers) return RIVERFLOW_RATIOS;
+    return STANDARD_RATIOS;
+}
+
+/**
+ * The shape a request names, rounded to a shape the model is asked about: `2.39:1` becomes `21:9`
+ * for a riverflow ratio field and stays 31:13 for a model that draws the frame itself.
+ * @param {string|number|{width: number, height: number}} value
+ * @param {string|null|undefined} model
+ * @param {'vector'|'image'|'auto'} [field]
+ * @returns {string|null}
+ * @exports
+ * @ai.hint pure
+ */
+export function aspectRatioToken(value, model = null, field = 'auto') {
+    return nearestAspect(value, supportedAspectRatios(model, field));
+}
+
+/**
+ * The pixel frame one shape names for one model at one tier: the shape as a fraction with terms
+ * within `RATIO_MAX_TERM`, scaled by a whole number of 16-pixel increments up to the tier's pixel
+ * budget and rounded up (with the `RATIO_CEIL_EPSILON` stickiness), then clamped to what the model
+ * accepts. This is how `2.39:1`, `cinemascope`, or a `1919x1079` source reaches a free-frame model
+ * as a real frame instead of a token the gateway would drop.
+ * @param {string|number|null|undefined} value
+ * @param {string|null|undefined} model
+ * @param {string|null} [resolution] tier whose pixel budget the frame is built on
+ * @returns {string|null} `WIDTHxHEIGHT`, or null when the token names no shape
+ * @exports
+ * @ai.hint pure
+ */
+export function aspectImageSize(value, model = null, resolution = null) {
+    const shape = parseAspectToken(value);
+    if (!shape) return null;
+    const caps = imageModelProfile(model);
+    const tier = IMAGE_TIER_LIMITS[tierFromToken(resolution, model) || '1k'] || IMAGE_TIER_LIMITS['1k'];
+    const frame = aspectFrame(shape.ratio, {
+        step: 16,
+        minPixels: caps.minPixels, maxPixels: caps.maxPixels,
+        maxEdge: caps.maxEdge, maxRatio: caps.maxRatio,
+        pixels: tier.pixels,
+    });
+    return frame ? `${frame.width}x${frame.height}` : null;
+}
+
 // TODO: add accounting MAX pixels for don't allow overflow (in 2k or 4k)
 export function inferResolution({ width, height }, model = null) {
     const maxSide = Math.max(width, height);
@@ -214,33 +278,33 @@ export function inferResolution({ width, height }, model = null) {
 export function tierFromToken(value, model = null) {
     const token = String(value ?? '').trim().toLowerCase();
     if (!token) return null; if (token === '512') return '512';
-    // TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
     if (/^\d+k$/.test(token)) return IMAGE_SIZES_BY_RESOLUTION[token] ? token : null;
     if (/^\d+$/.test(token)) return inferResolution({ width: Number(token), height: Number(token) }, model);
     return null;
 }
 
 /**
- * The frame a preset-only model gets when its family serves no resolution tiers: the nearest
- * `IMAGE_SIZES` entry that keeps the orientation. Kept separate from the tier table because a model
- * such as gpt-image-1 has no 2048x2048 at all — mapping a size by its own pixel count would ask the
- * gateway for a frame it cannot produce.
+ * The frame a preset-only model gets when its family serves no resolution tiers: the frame of the
+ * requested orientation, at the tier the request names. A preset model has three shapes — square,
+ * portrait, landscape — so any shape asked for (`2.39:1`, `a4`, `wide`) resolves to the one of them
+ * it can actually draw, and never to the token itself: leaking `2.39:1` into `size` makes a strict
+ * gateway answer 400 and a lenient one fall back to its default square.
  * @param {string} value lowercased, non-empty size token
  * @returns {string|null}
  * @ai.hint pure
  */
 export function presetImageSize(value, resolution = null, model = null) {
     if (IMAGE_SIZES.includes(value)) return value;
-    if (value === 'portrait') return PORTRAIT_SIZES[resolution || "1k"];
-    if (value === 'landscape') return LANDSCAPE_SIZES[resolution || "1k"];
-    if (value === 'square') return SQUARE_SIZES[resolution || "1k"];
+    const shape = parseAspectToken(value);
+    if (!shape) return value;
     const parsed = parseImageSize(value);
-    if (!parsed) return value;
-    resolution ||= inferResolution(parsed, model) || "1k";
-
-    // TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
-    if (Math.max(parsed.width / parsed.height, parsed.height / parsed.width) < 1.005) return SQUARE_SIZES[resolution || "1k"];
-    return parsed.height > parsed.width ? PORTRAIT_SIZES[resolution || "1k"] : LANDSCAPE_SIZES[resolution || "1k"];
+    const resolutionKey = tierFromToken(resolution, model)
+        || (parsed ? inferResolution(parsed, model) : null) || '1k';
+    const tier = IMAGE_SIZES_BY_RESOLUTION[resolutionKey] ? resolutionKey : '1k';
+    // A shape within half a percent of 1:1 is the square preset, not a leaning landscape one.
+    if (Math.abs(Math.log(shape.ratio)) < RATIO_CEIL_EPSILON) return SQUARE_SIZES[tier] || SQUARE_SIZES['1k'];
+    return shape.ratio < 1 ? (PORTRAIT_SIZES[tier] || PORTRAIT_SIZES['1k'])
+        : (LANDSCAPE_SIZES[tier] || LANDSCAPE_SIZES['1k']);
 }
 
 /**
@@ -250,6 +314,10 @@ export function presetImageSize(value, resolution = null, model = null) {
  * aspect. The tier comes from the explicit `resolution` argument, from a tier token inside `size`
  * (`512`, `2K`), or — when the size names pixels — from its longest side, so `1280x720` is a 2K
  * request and stays a 2K frame rather than collapsing to the 1024 preset.
+ * A shape named without pixels (`21:9`, `2.39:1`, `cinemascope`) takes the frame of its tier whose
+ * own shape is closest, so a tier-based model answers a wide request with a wide frame instead of
+ * the square the vendor happened to list. A bare orientation word or a bare tier asks for the
+ * largest frame the tier offers in that shape.
  * A family that serves no tiers never reaches this function: `imageRequestSize` sends it to
  * `presetImageSize` instead, so it keeps getting the frames it actually has.
  * `auto` and an empty value omit the field.
@@ -265,18 +333,23 @@ export function normalizeImageSize(size, resolution = null, model = null) {
 
     let requested;
     let isOrientationWord = true;
+    let isShapeOnly = false;
     if (value === 'portrait') requested = { width: 1, height: 2 };
     else if (value === 'landscape') requested = { width: 2, height: 1 };
     else if (value === 'square') requested = { width: 1, height: 1 };
     else {
         isOrientationWord = false;
-        requested = parseImageSize(value) || (tierFromToken(value, model) ? { width: 1, height: 1 } : null);
+        const parsed = parseImageSize(value);
+        requested = parsed
+            || (tierFromToken(value, model) ? { width: 1, height: 1 } : null)
+            || parseAspectToken(value);
         // Неизвестное значение оставляем без изменений.
         if (!requested) return value;
+        isShapeOnly = !parsed && !tierFromToken(value, model);
     }
 
     const resolutionKey = tierFromToken(resolution, model) || tierFromToken(value, model)
-        || (isOrientationWord ? '1k' : inferResolution(requested, model));
+        || (isOrientationWord || isShapeOnly ? '1k' : inferResolution(requested, model));
     const supportedSizes = IMAGE_SIZES_BY_RESOLUTION[resolutionKey];
     if (!supportedSizes) return presetImageSize(value, resolution, model);
 
@@ -292,7 +365,15 @@ export function normalizeImageSize(size, resolution = null, model = null) {
 
     const pool = matchingOrientation.length ? matchingOrientation : candidates;
 
-    // A bare orientation word or a bare tier asks for the largest frame the tier offers in that shape.
+    // A shape named without pixels asks for the frame of the tier whose own shape is closest;
+    // a bare orientation word or a bare tier asks for the largest frame in that shape.
+    if (isShapeOnly) {
+        return pool
+            .slice()
+            .sort((a, b) => getAspectDifference(a, requested) - getAspectDifference(b, requested)
+                || b.width * b.height - a.width * a.height)[0]
+            .size;
+    }
     if (isOrientationWord || !parseImageSize(value)) {
         return pool
             .slice()
@@ -364,9 +445,10 @@ export function makePad16Size(value) {
 }
 
 /**
- * Keep custom dimensions for the models that take them (GPT Image 2.6); a family that serves
- * resolution tiers gets the frame of the tier its request names; every other model gets its
- * supported frame presets.
+ * Keep custom dimensions for the models that take them (GPT Image 2.6); turn a shape that names no
+ * pixels (`21:9`, `2.39:1`, `cinemascope`) into the frame that shape gives the model at the asked
+ * tier; a family that serves resolution tiers gets the frame of the tier its request names; every
+ * other model gets its supported frame presets.
  * @param {string|null|undefined} size
  * @param {string|null|undefined} model
  * @param {string|null} [resolution]
@@ -384,6 +466,15 @@ export function imageRequestSize(size, model, resolution = null) {
             return makePad16Size(value);
         }
         return value.replace(/\s+/g, '');
+    }
+    // A shape without pixels. A family tuned by a ratio field keeps it as a ratio of its own list:
+    // the tier stays in `resolution`, and inventing a pixel frame would move the shape out of the
+    // field the gateway is actually tuned by. A free-frame model has no ratio field, so the shape
+    // is turned into the real frame it stands for at the asked tier.
+    if ((caps.customSizes || caps.resolutionTiers) && !tierFromToken(value, model) && parseAspectToken(value)) {
+        if (caps.resolutionTiers) return aspectRatioToken(value, model, 'image');
+        const frame = aspectImageSize(value, model, resolution);
+        if (frame) return frame;
     }
     // A family that serves tiers keeps the tier token: the gateway reads it as `resolution`, and
     // unfolding `2K` into `2048x2048` would move the request out of the field the model is tuned by.
@@ -415,17 +506,20 @@ export function imageSizeFields(size, model, resolution = null) {
     if (!value || value === 'auto') return explicitTier ? { resolution: explicitTier.toUpperCase() } : {};
     if (caps.resolutionTiers) {
         if (/^\d+\s*x\s*\d+$/.test(value)) return { size: value.replace(/\s+/g, '') };
-        if (/^\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?$/.test(value)) {
-            const ratio = value.replace(/\s+/g, '');
-            return {
-                aspect_ratio: RIVERFLOW_RATIOS.includes(ratio) ? ratio : 'auto',
-                ...(explicitTier ? { resolution: explicitTier.toUpperCase() } : {}),
-            };
-        }
         // A tier named on its own — `512`, `2K`, or the pixel count `2048` — is the `resolution`
         // field, never `size`: a gateway that has no such frame drops the field and answers square.
         const tier = tierFromToken(value, model);
         if (tier) return { resolution: tier.toUpperCase() };
+        // Any shape the caller names — `16:9`, `2.39`, `cinemascope`, `1920x1080` written as a
+        // ratio — is rounded to the closest shape of the model's own list rather than dropped to
+        // `auto`: a wide request must not come back square because 2.39:1 is not on the menu.
+        const shape = parseAspectToken(value);
+        if (shape) {
+            return {
+                aspect_ratio: nearestAspect(shape.ratio, RIVERFLOW_RATIOS) || 'auto',
+                ...(explicitTier ? { resolution: explicitTier.toUpperCase() } : {}),
+            };
+        }
     }
     const frame = imageRequestSize(value, model, resolution);
     return frame ? { size: frame } : {};
@@ -503,27 +597,19 @@ export function isImageSizeError(error) {
 }
 
 /**
- * Nearest aspect ratio from the riverflow set for a pixel size. Returns a ratio string like
- * '4:5' that `imageSizeFields` can consume, or null when the size is already square.
+ * Nearest aspect ratio from the riverflow set for a pixel size or any shape token. Returns a ratio
+ * string like '4:5' that `imageSizeFields` can consume, or null when the shape is already square
+ * (the gateway answers a square request with its default square frame, so there is nothing to fix).
  * @param {string} sizePixels
  * @returns {string | null}
  * @ai.hint pure
  */
 export function nearestRiverflowRatio(sizePixels) {
-    const match = /^(\d+)\s*x\s*(\d+)$/i.exec(sizePixels);
-    if (!match) return null;
-    const w = Number(match[1]), h = Number(match[2]);
-    if (w === h) return null;
-    const wanted = Math.log(w / h);
-    let best = w < h ? '4:5' : '4:3';
-    let bestDelta = Infinity;
-    for (const candidate of RIVERFLOW_RATIOS) {
-        if (candidate === 'auto') continue;
-        const [cw, ch] = candidate.split(':').map(Number);
-        const delta = Math.abs(Math.log(cw / ch) - wanted);
-        if (delta < bestDelta) { bestDelta = delta; best = candidate; }
-    }
-    return best;
+    const shape = parseAspectToken(sizePixels);
+    if (!shape) return null;
+    const terms = rationalAspect(shape.ratio);
+    if (terms && terms.width === terms.height) return null;
+    return nearestAspect(shape.ratio, RIVERFLOW_RATIOS);
 }
 /**
  * Ordered image-size attempts: the exact request, a valid same-ratio size, then a nearest fallback.
@@ -565,28 +651,16 @@ export function imageModelFamily(model) {
     return 'other';
 }
 
-/** Map a requested vector aspect ratio to the nearest supported ratio. */
+/**
+ * Map a requested vector aspect ratio to the nearest supported ratio. The request may name the
+ * shape any way a caller does it: `4:3`, `1024x768`, `1.33`, `landscape`, `a4`. The vector gateway
+ * only answers to its own list, so the shape is rounded to the closest ratio there.
+ */
 export function normalizeVectorRatio(ratio) {
     const value = String(ratio ?? '').trim().toLowerCase();
     if (!value || value === 'auto') return null;
     if (VECTOR_RATIOS.includes(value)) return value;
-    const word = value === 'square' ? '1:1' : value === 'portrait' ? '3:4' : value === 'landscape' ? '4:3' : null;
-    if (word) return word;
-    const match = /^(\d+(?:\.\d+)?)\s*[:x]\s*(\d+(?:\.\d+)?)$/.exec(value);
-    if (!match) return null;
-    const width = Number(match[1]);
-    const height = Number(match[2]);
-    if (!width || !height) return null;
-    const wanted = Math.log(width / height);
-    let best = '1:1';
-    let bestDelta = Infinity;
-    for (const candidate of VECTOR_RATIOS) {
-        if (candidate === 'auto') continue;
-        const [cw, ch] = candidate.split(':').map(Number);
-        const delta = Math.abs(Math.log(cw / ch) - wanted);
-        if (delta < bestDelta) { bestDelta = delta; best = candidate; }
-    }
-    return best;
+    return nearestAspect(value, VECTOR_RATIOS);
 }
 
 /**

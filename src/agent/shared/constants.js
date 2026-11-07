@@ -1,5 +1,7 @@
 
 
+import { STANDARD_RATIOS, aspectFrame } from './aspect-ratio.js';
+
 /** Names that choose a common frame instead of a literal WIDTHxHEIGHT. */
 export const NAMED_FRAMES = { square: 1, landscape: 16 / 10, portrait: 10 / 16 };
 
@@ -261,15 +263,17 @@ export const SOURCE_GUARD = 'Do not add text, numbers, watermarks, or frames. Do
  */
 export const FLAT_PLATE_NOTE = 'Background: one flat solid color, uniform across the whole area, with no checkerboard, grid, gradient, texture, or shadow.';
 
-// TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
-/** Sizes accepted by POST /images/generations and /images/edits. */
+/** Frame presets POST /images/generations and /images/edits accept for the preset-only models. */
 export const IMAGE_SIZES = Object.freeze(['1024x1024', '1024x1536', '1536x1024']);
 
-// TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
-/** Aspect ratios accepted by recraft vector models. */
+/**
+ * Shapes recraft vector models accept. A request may name any other shape (`2.39:1`, `a4`,
+ * `cinemascope`); `nearestAspect` rounds it to the closest entry of this list, which is the only
+ * one the gateway answers to.
+ */
 export const VECTOR_RATIOS = Object.freeze(['1:1', '3:2', '2:3', '4:3', '3:4', '16:9', '9:16', 'auto']);
 
-// TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
+/** Frames of one shape per resolution tier, for the families that serve no ratio field. */
 export const PORTRAIT_SIZES = {
     "512": "384x512",
     "1k":  "768x1024",
@@ -277,7 +281,7 @@ export const PORTRAIT_SIZES = {
     "4k": "3072x4096"
 }
 
-// TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
+/** @see PORTRAIT_SIZES */
 export const LANDSCAPE_SIZES = {
     "512": "512x384",
     "1k": "1024x768",
@@ -285,7 +289,7 @@ export const LANDSCAPE_SIZES = {
     "4k": "4096x3072"
 }
 
-// TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
+/** @see PORTRAIT_SIZES */
 export const SQUARE_SIZES = {
     "512": "512x512",
     "1k": "1024x1024",
@@ -311,31 +315,56 @@ export const RIVERFLOW_RATIOS = Object.freeze(['1:1', '4:3', '3:4', '3:2', '2:3'
 /** Resolution tiers accepted by Riverflow (Sourceful). */
 export const RIVERFLOW_RESOLUTIONS = Object.freeze(['512', '1K', '2K', '4K']);
 
-// TODO: make smart aspect ratio support (more than regular 1:1, 3:2, 2:3, 4:3 or 3:4)
-/** */
-export const IMAGE_SIZES_BY_RESOLUTION = {
-    '512': [
-        '512x512',
-    ],
-    '1k': [
-        // Ваши поддерживаемые размеры 1k
-        '1024x768',
-        '768x1024',
-        '1024x1024',
-    ],
-    '2k': [
-        // Нативные размеры модели
-        '1024x1536',
-        '1536x1024',
+/**
+ * What one resolution tier stands for: the longest side it names and the pixel budget it implies.
+ * A request that gives a shape but no pixel count (`2.39:1`, `wide`) gets its frame built from
+ * these numbers, and no catalogue entry runs past the tier's own longest side.
+ */
+export const IMAGE_TIER_LIMITS = Object.freeze({
+    '512': Object.freeze({ edge: 512, pixels: 512 * 512 }),
+    '1k': Object.freeze({ edge: 1024, pixels: 1024 * 1024 }),
+    '2k': Object.freeze({ edge: 2048, pixels: 2048 * 2048 }),
+    '4k': Object.freeze({ edge: 4096, pixels: 4096 * 4096 }),
+});
 
-        // Остальные размеры, если модель их поддерживает
-        '2048x1536',
-        '1536x2048',
-        '2048x2048',
-    ],
-    '4k': [
-        '4096x3072',
-        '3072x4096',
-        '4096x4096',
-    ],
-};
+/**
+ * Frames a family publishes for one tier. They stay first in the catalogue: a gateway that lists
+ * `1024x1536` as its native 2K portrait answers it more faithfully than any computed frame.
+ */
+const NATIVE_TIER_SIZES = Object.freeze({
+    '512': Object.freeze(['512x512']),
+    '1k': Object.freeze(['1024x768', '768x1024', '1024x1024']),
+    '2k': Object.freeze(['1024x1536', '1536x1024', '2048x1536', '1536x2048', '2048x2048']),
+    '4k': Object.freeze(['4096x3072', '3072x4096', '4096x4096']),
+});
+
+/**
+ * One frame per standard shape inside one tier, built the same way a request is answered: the
+ * shape as a fraction with terms within `RATIO_MAX_TERM`, scaled by a whole number of 16-pixel
+ * increments up to the tier's pixel budget. This is what lets a tier-based model take `21:9` or
+ * `5:4` at 2K instead of collapsing the request to the three frames the vendor happened to list.
+ * @param {string} key a key of `IMAGE_TIER_LIMITS`
+ * @returns {string[]}
+ * @ai.hint pure
+ */
+function tierCatalogue(key) {
+    const limits = IMAGE_TIER_LIMITS[key];
+    const frames = [...(NATIVE_TIER_SIZES[key] ?? [])];
+    for (const ratio of STANDARD_RATIOS) {
+        const frame = aspectFrame(ratio, { step: 16, pixels: limits.pixels, maxEdge: limits.edge });
+        if (frame) {
+            const token = `${frame.width}x${frame.height}`;
+            if (!frames.includes(token)) frames.push(token);
+        }
+    }
+    return Object.freeze(frames);
+}
+
+/**
+ * Frames one tier offers, native presets first and then one per shape of `STANDARD_RATIOS`.
+ * A tier-based model picks from this list; a model with free frames builds its own with
+ * `aspectFrame` and only consults the catalogue when a gateway refuses the frame.
+ */
+export const IMAGE_SIZES_BY_RESOLUTION = Object.freeze(Object.fromEntries(
+    Object.keys(IMAGE_TIER_LIMITS).map((key) => [key, tierCatalogue(key)]),
+));
