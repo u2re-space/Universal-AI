@@ -94,7 +94,9 @@ export function buildPackageManifest({ kind, name, libraries = [] }) {
     for (const lib of libraries) {
         if (!lib?.include || typeof lib.name !== 'string') continue;
         const bucket = lib.kind === 'css' || lib.kind === 'tool' || lib.kind === 'types' ? dev : deps;
-        if (!(lib.name in bucket) && !(lib.name in dev) && !(lib.name in deps)) bucket[lib.name] = '*';
+        if (!(lib.name in bucket) && !(lib.name in dev) && !(lib.name in deps) &&
+            // temporary forbid unknown libraries...
+            Array.from(Object.keys(KNOWN) || [])?.includes?.(lib.name?.trim?.())) bucket[lib.name?.trim?.()] = '*';
     }
     const manifest = { name: npmPackageName(name), private: true, type: 'module', engines: { node: '>=26' }, scripts };
     if (Object.keys(deps).length) manifest.dependencies = deps;
