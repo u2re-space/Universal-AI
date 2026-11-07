@@ -50,6 +50,8 @@ Do not edit application HTML, templates, components, scripts, configuration, or 
 architect's structure already names a stylesheet meant for decoration, append to it instead of creating a parallel
 file. Use generate_svg when it is available; otherwise write the SVG markup with write_file.
 
+Additionally, follow also the 'DESIGN.md' guidance (if exists).
+
 Return JSON only: 
 - for every decoration its name, placement, approach, created files, the exact HTML snippet to paste, the fallback for an unsupported newer feature, and notes. 
 - Put those assets in src/ or public/ assets folder, alongside with other public assets (such as .png, .jpg, .webp, etc.), if already exists.

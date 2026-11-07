@@ -2,12 +2,13 @@
  * @file src/roles/index.js
  * @module roles/index
  * @purpose Collect the prompt of every named role.
- * @depends roles/default, roles/planner, roles/architect, roles/orchestrator, roles/worker, roles/coder, roles/styler, roles/iconifier, roles/reviewer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/classifier, roles/decomposer, roles/measurer, roles/decorator, roles/image-processor
+ * @depends roles/default, roles/planner, roles/architect, roles/orchestrator, roles/worker, roles/coder, roles/styler, roles/iconifier, roles/reviewer, roles/solver, roles/clicker, roles/typer, roles/encoder, roles/classifier, roles/decomposer, roles/measurer, roles/decorator, roles/image-processor, roles/designer
  * @usedBy commands/instructions, agent/team
  * @exports ROLE_INSTRUCTIONS
  * @ai.tags roles, prompts
  * @ai.hint pure
  * @changed 2026-10-31 tester, vision, extractor, summarizer, and writer merged into reviewer, encoder, and orchestrator.
+ * @changed 2026-11-07 Added designer role.
  */
 
 import * as roleDefault from './default.js';
@@ -28,6 +29,7 @@ import * as decomposer from './decomposer.js';
 import * as measurer from './measurer.js';
 import * as decorator from './decorator.js';
 import * as imageProcessor from './image-processor.js';
+import * as designer from './designer.js';
 
 /**
  * Prompt strings keyed by role, plus the reviewer, encoder, and measurer variants.
@@ -55,6 +57,7 @@ export const ROLE_INSTRUCTIONS = {
     measurer: measurer.instructions,
     decorator: decorator.instructions,
     'image-processor': imageProcessor.instructions,
+    designer: designer.instructions,
     reviewerCheck: reviewer.checkInstructions,
     reviewerVision: reviewer.visionInstructions,
     reviewerVisionScreen: reviewer.visionScreenInstructions,

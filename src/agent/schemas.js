@@ -3,7 +3,7 @@
  * @module agent/schemas
  * @purpose Strict JSON schemas for structured role outputs (Responses API text.format = json_schema).
  * @usedBy agent/team, agent/roles
- * @exports PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, DECORATOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA, DECOMPOSER_SCHEMA, SUB_REFERENCE_KINDS
+ * @exports PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, DECORATOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, SCREEN_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, MEASURER_SCHEMA, DECOMPOSER_SCHEMA, SUB_REFERENCE_KINDS, DESIGNER_SCHEMA
  * @ai.tags schema, roles
  * @ai.hint pure
  * @changed 2026-10-27 The planner may request decoration tasks; the decorator answers with its artifacts.
@@ -32,6 +32,120 @@ export const CLASSIFIER_SCHEMA = object({
 });
 
 export const SUB_REFERENCE_KINDS = ['crop', 'split', 'restored', 'regenerated', 'figma-export'];
+
+/**
+ * Design direction produced by the designer role.
+ * Captures layout structure, typography, colour, spacing, generated assets,
+ * an optional HTML template skeleton, and DESIGN.md tokens.
+ */
+export const DESIGNER_SCHEMA = object({
+    summary: { ...string, description: 'What the design direction covers and how it was chosen.' },
+    layout: {
+        ...object({
+            summary: { ...string, description: 'Page structure and component layout in prose.' },
+            structure: {
+                type: 'array',
+                description: 'Sections and components in visual order, top to bottom.',
+                items: object({
+                    name: { ...string, description: 'Short section or component name.' },
+                    type: { type: 'string', enum: ['header', 'hero', 'grid', 'card', 'nav', 'footer', 'aside', 'main', 'section', 'other'], description: 'What kind of block this is.' },
+                    purpose: { ...string, description: 'What this section does and what it contains.' },
+                    children: { ...strings, description: 'Names of child sections or components; empty when it is a leaf.' },
+                }),
+            },
+        }),
+        description: 'Layout structure: sections, components, and their order.',
+    },
+    typography: {
+        ...object({
+            family: { ...string, description: 'Primary body font family recommendation.' },
+            headingFamily: { ...nullableString, description: 'Heading font family; null when the same as body.' },
+            scale: { ...string, description: 'Type scale description (e.g. "1.25 major-third").' },
+            weights: { ...strings, description: 'Recommended weights, such as 400 and 700.' },
+            cssFamily: { ...string, description: 'CSS font-family value with a suitable fallback.' },
+        }),
+        description: 'Typography direction: families, scale, and weights.',
+    },
+    color: {
+        ...object({
+            palette: {
+                ...object({
+                    name: { ...string, description: 'Name of the palette (e.g. "moooi-light").' },
+                    colors: {
+                        type: 'array',
+                        description: 'Palette colours in semantic order.',
+                        items: object({
+                            name: { ...string, description: 'Token name (e.g. "primary", "surface", "accent").' },
+                            value: { ...string, description: 'CSS colour value (hex or rgb).' },
+                            role: { ...string, description: 'What this colour is used for.' },
+                        }),
+                    },
+                }),
+                description: 'The colour palette.',
+            },
+            gradients: {
+                type: 'array',
+                description: 'Gradient definitions for backgrounds and accents; empty when none.',
+                items: object({
+                    name: { ...string, description: 'Gradient name (e.g. "hero-bg").' },
+                    stops: { ...strings, description: 'Colour stops in order, e.g. ["#f0f0f0", "#d0d0d0"].' },
+                    direction: { ...string, description: 'CSS gradient direction (e.g. "to bottom right").' },
+                }),
+            },
+        }),
+        description: 'Colour direction: palette and gradients.',
+    },
+    spacing: {
+        ...object({
+            scale: {
+                type: 'array',
+                description: 'Base spacing values in px (e.g. [4, 8, 16, 24, 32, 48]).',
+                items: { type: 'number' },
+            },
+            rules: { ...strings, description: 'Spacing conventions and rules.' },
+        }),
+        description: 'Spacing scale and layout rules.',
+    },
+    assets: {
+        ...object({
+            generated: {
+                type: 'array',
+                description: 'Images generated by the designer; empty when none.',
+                items: object({
+                    path: { ...string, description: 'Project-relative output path of the generated image.' },
+                    size: { ...string, description: 'Resolution as WIDTHxHEIGHT (e.g. "1920x1080").' },
+                    purpose: { ...string, description: 'What this asset is for.' },
+                }),
+            },
+            external: {
+                type: 'array',
+                description: 'Verified external resources used for the design; empty when none.',
+                items: object({
+                    url: { ...string, description: 'URL of the external resource.' },
+                    purpose: { ...string, description: 'What was taken from this resource.' },
+                    cached: { type: 'boolean', description: 'Whether the result was served from the local cache.' },
+                }),
+            },
+        }),
+        description: 'Assets produced or referenced by the design.',
+    },
+    template: {
+        ...object({
+            path: { ...string, description: 'Project-relative path to the generated HTML skeleton; empty when no template was written.' },
+            description: { ...string, description: 'What the template covers and how the worker should extend it.' },
+        }),
+        description: 'HTML template skeleton; empty when no template was produced.',
+    },
+    designMd: {
+        ...object({
+            read: { type: 'boolean', description: 'Whether DESIGN.md was found and read.' },
+            tokens: { ...strings, description: 'Key design tokens and conventions extracted from DESIGN.md.' },
+            conflicts: { ...strings, description: 'Conflicts between DESIGN.md and the generated direction; empty when none.' },
+        }),
+        description: 'DESIGN.md discovery and token extraction.',
+    },
+    notes: { ...strings, description: 'Ambiguities, assumptions, or limitations.' },
+});
 
 export const DECOMPOSER_SCHEMA = object({
     summary: { ...string, description: 'How the provided design divides into screens or meaningful fragments.' },

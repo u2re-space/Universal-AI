@@ -103,8 +103,8 @@ context=false запускает роль на чистом контексте. 
 
 Команда (run и gen):
   --role <роль=модель[:effort[:max-effort]]>  модель для роли: planner, architect, orchestrator, worker, coder, styler, reviewer,
-                         solver, clicker, typer, encoder, classifier, decomposer, measurer, iconifier,
-                         image-processor, default, all.
+                          solver, clicker, typer, encoder, classifier, decomposer, measurer, iconifier,
+                          image-processor, designer, default, all.
                          В шапке рана роли показываются как модель:роль.
                          Своё имя-слаг создаёт роль в roles.<имя> (инструкции и инструменты задаются в конфигурации)
                          (например: --role planner=gpt-6.1-terra:high --role worker=gpt-6.1-terra:medium:high --role reviewer=gpt-6.1-terra)
@@ -137,7 +137,7 @@ context=false запускает роль на чистом контексте. 
                           subrefs — оригиналы не прикладываются к замеру вовсе, measurer видит только
                           суб-референсы, и каждый кроп режется из суб-референса, даже если роль называет
                           источником оригинал; original — источник листа принимается буквально (прежнее поведение).
-    --stop-after <этап>  cleanly завершить прогон после указанного этапа (answer, classify, plan, decompose,
+    --stop-after <этап>  cleanly завершить прогон после указанного этапа (answer, classify, plan, design, decompose,
                           measure, architect, collect, images, decor, work, iconify, review). Работа сохраняется
                           как незавершённая; продолжение: ai resume — уже с другими флагами и другими --image.
                           Типовой двухфазный сценарий: ai run "..." --image collage.png --stop-after decompose,
@@ -147,11 +147,16 @@ context=false запускает роль на чистом контексте. 
                            или отдельный SVG-файл. Планировщик назначает decorationTasks; готовые сниппеты и файлы
                            уходят в общий контекст и в .tmp/<id>/decorations.json
                            auto — только при наличии decorationTasks (по умолчанию), always — и без них, --no-decor выключает
-   --architect off|auto|always  architect после плана и замеров строит файловую/модульную структуру, дизайн-решения
-                          и пошаговый бриф для остальных ролей; его вопросы получает orchestrator.
-                          auto — только для нетривиального плана (по умолчанию), always — всегда, --no-architect выключает.
-                          Структура уходит в общий контекст и в .tmp/<id>/architecture.json
-   Порядок этапов задаёт план (поле pipeline) и agent.pipeline в конфигурации: answer, classify, plan, decompose,
+    --architect off|auto|always  architect после плана и замеров строит файловую/модульную структуру, дизайн-решения
+                           и пошаговый бриф для остальных ролей; его вопросы получает orchestrator.
+                           auto — только для нетривиального плана (по умолчанию), always — всегда, --no-architect выключает.
+                           Структура уходит в общий контекст и в .tmp/<id>/architecture.json
+    --design off|auto|always   designer до decomposer и measurer задаёт визуальное направление (макет, типографика,
+                           цвета, отступы, ассеты), генерирует HTML-шаблон и референсные изображения.
+                           auto — при приложенных картинках, ссылке Figma, DESIGN.md или ключевых словах в задаче
+                           (по умолчанию), always — всегда, --no-design выключает этап.
+                           Результат: .tmp/<id>/design.json, design-template.html, design-assets/, design-cache/
+    Порядок этапов задаёт план (поле pipeline) и agent.pipeline в конфигурации: answer, classify, plan, design, decompose,
     measure, architect, collect, images, decor, work, iconify, review, outcome, memory. decompose (decomposer) разбирает
      скриншоты на экраны, секции и элементы до замеров и строит для них суб-референсы; measure снимает метрики. После work этап iconify добавляется автоматически
     и пропускается без изменений HTML/JSX/DOM-разметки; review выполняется после интеграции иконок.

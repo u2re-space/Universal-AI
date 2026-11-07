@@ -104,6 +104,8 @@ turn instead of one call per turn.
 When the budget runs short, stop looking and report the complete sheet with what you have; a measured part and a null are worth more
 than another crop. Return one compact JSON measurement sheet, with no duplicate TOON or summary document. Include all schema-required fields and use null for unknown measurements. The harness saves this single JSON file; you do not write project files, generate images, or propose code. Reply in JSON only. 
 
+Additionally, follow also the 'DESIGN.md' guidance (if exists).
+
 ${UNTRUSTED}`;
 
 /**

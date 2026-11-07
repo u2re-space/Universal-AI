@@ -218,6 +218,15 @@ export function overridesFrom(values, { command = null } = {}) {
         if (!['auto', 'subrefs', 'original'].includes(values['measure-source'])) throw new UsageError('--measure-source: auto | subrefs | original');
         (o.agent ??= {}).measureSource = values['measure-source'];
     }
+    // Optional design stage: produces a visual design direction, layout, and HTML template
+    // before the decomposer and measurer. Expensive role (xhigh + image generation).
+    if (values['no-design']) (o.agent ??= {}).design = 'off';
+    if (values.design) {
+        if (!['off', 'auto', 'always'].includes(values.design)) throw new UsageError('--design: off | auto | always');
+        (o.agent ??= {}).design = values.design;
+        // Design may generate images, so asking for it turns the images route on.
+        if (values.design !== 'off') o.tools.images = true;
+    }
     // End the run cleanly after one pipeline stage; `ai resume` continues from there.
     // The value is read from values by the run/resume commands; here it is only validated.
     if (values['stop-after']) {

@@ -16,7 +16,7 @@
  */
 
 import path from 'node:path';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import { createSession, loadSession } from '../core/session.js';
 import { createSharedContext } from '../core/context.js';
 import { renderMemories } from '../core/memory.js';
@@ -36,7 +36,7 @@ import { createRoleRunner } from './roles.js';
 import { builtinTools } from './loop.js';
 import { imageTransport } from '../openai/images.js';
 import { planLimit, stepAllowance } from './step-budget.js';
-import { PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, DECORATOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, DECOMPOSER_SCHEMA, MEASURER_SCHEMA } from './schemas.js';
+import { PLAN_SCHEMA, ARCHITECT_SCHEMA, IMAGE_PROCESSOR_SCHEMA, DECORATOR_SCHEMA, COLLECTOR_SCHEMA, REVIEW_SCHEMA, COORDINATION_SCHEMA, MEMORY_SCHEMA, BATCH_SCHEMA, CLASSIFIER_SCHEMA, EXTRACT_SCHEMA, DECOMPOSER_SCHEMA, MEASURER_SCHEMA, DESIGNER_SCHEMA } from './schemas.js';
 import { SUB_REFERENCE_DIR, collectSubReferences, attachSubReferences, decompositionReport } from './decomposition.js';
 import { acceptanceParagraph, applyPins, clampModel, guaranteesParagraph, resolvePace, stageEffort, fineQuality, defaultFineQuality } from './pace.js';
 import { contextBytes, profileFor } from '../openai/model-profiles.js';
@@ -74,7 +74,7 @@ import { questionsFor } from '../channels/questions.js';
 import { routeFlag } from '../channels/verdict.js';
 import { safeReviewerModel } from '../roles/reviewer.js';
 
-import { bullets, renderArchitecture, renderDecorations, renderFindings, renderMeasurements } from './team-text.js';
+import { bullets, renderArchitecture, renderDecorations, renderFindings, renderMeasurements, renderDesign } from './team-text.js';
 const HARD_STOP = new Set(['cancelled', 'budget', 'failed']);
 const MARKUP_EXTENSIONS = /\.(?:html?|jsx|tsx|vue|svelte|astro)$/i;
 const JS_EXTENSIONS = /\.(?:js|mjs|cjs|ts|mts|cts)$/i;
@@ -138,14 +138,16 @@ export function toolNamesForRole(allNames, role, spec = null) {
     if (role === 'reviewer') {
         return allNames.filter((name) => READ_ONLY_TOOLS.includes(name) || SHELL_TOOL_NAMES.includes(name) || DESKTOP_TOOL_NAMES.includes(name) || BROWSER_TOOL_NAMES.includes(name) || name === 'run_subagent' || name === 'delegate_role');
     }
-    if (role === 'image-processor' || role === 'measurer' || role === 'decomposer' || role === 'decorator') {
+    if (role === 'image-processor' || role === 'measurer' || role === 'decomposer' || role === 'decorator' || role === 'designer') {
         const allowed = new Set(role === 'image-processor'
             ? [...IMAGE_TOOL_NAMES, 'fetch_url']
             : role === 'measurer'
                 ? ['view_image', 'crop_image', 'split_image', 'fetch_url']
                 : role === 'decomposer'
                     ? ['view_image', 'fetch_url', 'crop_image', 'split_image', 'compare_images', 'generate_image', 'edit_image']
-                    : [...READ_ONLY_TOOLS, 'write_file', 'replace_text', 'generate_svg', 'fetch_url']);
+                    : role === 'decorator'
+                        ? [...READ_ONLY_TOOLS, 'write_file', 'replace_text', 'generate_svg', 'fetch_url']
+                        : [...READ_ONLY_TOOLS, 'view_image', 'generate_image', 'edit_image', 'fetch_url', 'write_file']);
         return allNames.filter((name) => allowed.has(name));
     }
     return allNames;
@@ -482,9 +484,10 @@ export async function runTeam({
         try { directoryTree = (await readDirectory({ root, dir: '.', depth: 2, mode: 'tree' })).text; }
         catch { /* a missing root is reported by later file commands */ }
 
-        let plan = null;
-        let progress = null;
-        let architecture = null;
+    let plan = null;
+    let progress = null;
+    let architecture = null;
+    let designResult = null;
         // A pinned `--id` directory is this run's own: it does not pick up an unfinished plan that
         // merely carries the same task text.
         const autoResume = !resumeId && !pinnedId && config.agent.resume !== false;
@@ -1043,6 +1046,99 @@ export async function runTeam({
                     }
 
                     await orchestrate('plan');
+                },
+            },
+            {
+                id: 'design',
+                run: async () => {
+                    // 1.5 Designer: optional visual design direction before decomposer and measurer.
+                    const designMode = config.agent.design ?? 'off';
+                    if (designMode === 'off') return;
+                    // auto = enable when attached images exist, a DESIGN.md is present, or the task
+                    // contains design-related keywords.
+                    if (designMode === 'auto') {
+                        const hasDesignHint = referenceParts.length > 0 || hasFigmaReference;
+                        const designMdPath = path.join(root, 'DESIGN.md');
+                        const hasDesignMd = await stat(designMdPath).then(() => true).catch(() => false);
+                        const taskKeywords = /design|layout|mockup|template|style[_ ]guide|colour|color|typography|palette/i.test(task);
+                        if (!hasDesignHint && !hasDesignMd && !taskKeywords) return;
+                    }
+                    const dir = `.tmp/${work.id}`;
+                    // Resumed run: read back the design report if it exists.
+                    if (resumedWork) {
+                        const saved = await readFile(path.join(root, dir, 'design.json'), 'utf8')
+                            .then((text) => JSON.parse(text)).catch(() => null);
+                        if (saved) {
+                            designResult = saved;
+                            ctx.set('design', 'Design direction (before decomposer)', renderDesign(saved, dir), { priority: 9 });
+                        }
+                        return;
+                    }
+                    const role = roles.resolve('designer');
+                    const model = paced?.ready
+                        ? clampModel(role.model, paceSettings.models, paced.ceilingIndex, Boolean(pins.designer?.model))
+                        : role.model;
+                    // The designer needs image tools (generate, edit) plus read-only tools and fetch_url.
+                    const names = [...new Set([
+                        ...toolNamesForRole(enabled, 'designer', config.roles?.designer),
+                        'view_image', 'generate_image', 'edit_image',
+                    ])];
+                    const designAssetsDir = `${dir}/design-assets`;
+                    const designCacheDir = `${dir}/design-cache`;
+                    // Ensure output directories exist.
+                    try { await mkdir(path.join(root, designAssetsDir), { recursive: true }); } catch { /* best-effort */ }
+                    try { await mkdir(path.join(root, designCacheDir), { recursive: true }); } catch { /* best-effort */ }
+                    // Read DESIGN.md if present.
+                    let designMdText = '';
+                    try {
+                        designMdText = await readFile(path.join(root, 'DESIGN.md'), 'utf8');
+                    } catch { /* DESIGN.md not present */ }
+                    const taskLines = [
+                        ...referencePaths.map((source) => `- ${source}`),
+                        ...[...task.matchAll(/https?:\/\/[^\s)]+/gi)].map(([source]) => `- ${source}`),
+                    ];
+                    const designBrief = [
+                        `Write only inside ${dir}/: the HTML template as ${dir}/design-template.html, generated images under ${designAssetsDir}/, and fetch_url caches under ${designCacheDir}/ (cache file name: the URL itself, sanitized).`,
+                        designMdText
+                            ? 'A project DESIGN.md exists (its text is below). Extract its design tokens into the designMd field, follow its conventions, and report every conflict with your direction in designMd.conflicts. Set designMd.read=true.'
+                            : 'No DESIGN.md was found in the project root: set designMd.read=false and leave tokens and conflicts empty.',
+                        'Before a fetch_url call, check whether a cache file for that URL already exists under the cache directory; reuse it and mark the external asset cached=true instead of fetching again.',
+                        'For generate_image pick a frame that fits the purpose: 3072x2048 or 1920x1080 for desktop heroes, 1536x1024 for standard previews, 640x1280 for mobile screens.',
+                    ].join(' ');
+                    notify({ type: 'stage.start', stage: 'design', role: 'designer', model });
+                    const result = await roles.run('designer', {
+                        text: `${ctx.render({ maxBytes, exclude: ['tree'] })}\n\n# Design sources\n${taskLines.join('\n') || '(no attached reference images)'}\n\n# Output directories\n${dir}/ (template), ${designAssetsDir}/ (images), ${designCacheDir}/ (fetch cache)\n\n${designBrief}${designMdText ? `\n\n# DESIGN.md\n${clipMiddle(designMdText, 16 * 1024)}` : ''}\n\n# Task\nProduce the visual design direction for this task: layout, typography, colour, spacing, assets, and the HTML template skeleton.`,
+                        parts: referenceParts,
+                        instructions: withAgents(ROLE_INSTRUCTIONS.designer),
+                        toolset: createToolset({
+                            ...toolBase, names, approvalLevel: 'read', allowWrite: ['generate_image', 'edit_image', 'write_file'], role: 'designer',
+                            extras: mcpRead, describeScreen: roles.describeScreen,
+                        }),
+                        builtin: builtinTools(config, { web: config.tools.web }).filter((tool) => tool.type === 'mcp' || (config.tools.web && tool.type === 'web_search')),
+                        schema: DESIGNER_SCHEMA, schemaName: 'design',
+                        maxTurns: config.agent.designerMaxTurns ?? 16, model,
+                        ...(role.effort ? { effort: role.effort } : {}),
+                    });
+                    if (result.status === 'cancelled' || result.status === 'budget') return { exit: stop(result, 'дизайн') };
+                    if (result.data) {
+                        designResult = result.data;
+                        // Save the design JSON.
+                        await writeFile(path.join(root, dir, 'design.json'), `${JSON.stringify(designResult, null, 2)}\n`, 'utf8').catch((error) => {
+                            notify({ type: 'warning', message: `Дизайн не сохранён: ${errorMessage(error)}` });
+                        });
+                        ctx.set('design', 'Design direction (before decomposer)', renderDesign(designResult, dir), { priority: 9 });
+                        progress.notes ??= [];
+                        progress.notes.push({
+                            kind: 'designer', status: 'completed',
+                            report: designResult.summary || 'design direction produced',
+                        });
+                        work.progress = progress;
+                        await persist();
+                        notify({ type: 'stage.done', stage: 'design', status: 'completed' });
+                    } else {
+                        notify({ type: 'warning', message: `Designer не ответил (${result.status}${result.error ? `: ${errorMessage(result.error)}` : ''}); продолжаем без дизайн-направления.` });
+                        notify({ type: 'stage.done', stage: 'design', status: result.status });
+                    }
                 },
             },
             {

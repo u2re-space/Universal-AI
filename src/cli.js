@@ -69,6 +69,7 @@ const OPTIONS = {
     decor: { type: 'string' }, 'no-decor': { type: 'boolean', default: false },
     architect: { type: 'string' }, 'no-architect': { type: 'boolean', default: false },
     decompose: { type: 'string' }, 'no-decompose': { type: 'boolean', default: false },
+    design: { type: 'string' }, 'no-design': { type: 'boolean', default: false },
     subrefs: { type: 'string' }, 'no-subrefs': { type: 'boolean', default: false },
     'measure-source': { type: 'string' }, 'stop-after': { type: 'string' },
     memory: { type: 'boolean', default: true }, global: { type: 'boolean', default: false }, kind: { type: 'string' }, tags: { type: 'string' },

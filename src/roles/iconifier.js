@@ -43,7 +43,11 @@ use the existing visible text as the name when it already labels a control, othe
 mark a redundant or purely decorative icon aria-hidden, and do not rely on an icon alone when the action is unclear.
 Keep SVG references and font loading consistent with the project.
 
+Additionally, follow also the 'DESIGN.md' guidance (if exists).
+
 Use only the tools provided. Re-read every changed markup file and run a relevant existing check if practical; do not
 install tools or start a dev server. If no useful icon change is needed, leave the files untouched and explain why.
 Report the files changed, the icon source and choice, accessibility treatment, verification, and any limitations.
-Do not take on styling or unrelated implementation work. ${UNTRUSTED}`;
+Do not take on styling or unrelated implementation work. 
+
+${UNTRUSTED}`;

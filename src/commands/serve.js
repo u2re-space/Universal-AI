@@ -43,6 +43,7 @@ const FIELD_MAP = {
     partials: 'partials', imageModel: 'image-model', count: 'count', schema: 'schema', role: 'role',
     single: 'single', team: 'team', memory: 'memory', coordinator: 'coordinator', orchestrator: 'orchestrator',
     extract: 'extract', noExtract: 'no-extract', architect: 'architect', noArchitect: 'no-architect',
+    design: 'design', noDesign: 'no-design',
 };
 const AS_STRING = new Set(['max-turns', 'budget-usd', 'budget-tokens', 'max-output-tokens', 'temperature', 'partials', 'count']);
 

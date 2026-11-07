@@ -96,6 +96,10 @@ export const EXECUTORS = Object.freeze({
         tools: 'images', turns: 16, schema: null,
         description: 'Prepares images and visual assets: crops, splits, trims padding, generates or edits artwork, saves them under assets/.',
     },
+    designer: {
+        tools: ['list_files', 'read_file', 'view_image', 'fetch_url', 'generate_image', 'edit_image'], turns: 16, schema: 'design',
+        description: 'Produces a visual design direction (layout, colour, typography, spacing), generates reference images, and writes an HTML template skeleton.',
+    },
     clicker: {
         tools: ['click', 'screenshot'], turns: 4, schema: null,
         description: 'Clicks one UI target on the screen.',

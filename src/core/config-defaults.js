@@ -315,11 +315,13 @@ export const defaults = Object.freeze({
      *   typer      — text or key chord input
      *   encoder    — a desktop batch, file commands, and clean file bodies from a verbose answer
      *   classifier — labels a task as trivial, normal, or complex
-     *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
-     *   decorator  — decorative elements (ornaments, flourishes, dividers, patterns, frames) as native HTML+CSS or SVG
-     *                before the first page markup is written
-     *   image-processor — generates, edits, and prepares requested images and visual assets before implementation
-     * worker, coder, styler, reviewer, solver, and image-processor double as the
+      *   measurer   — measures reference images (boxes, angles, borders, crops, spacing) before styles and artwork
+      *   decorator  — decorative elements (ornaments, flourishes, dividers, patterns, frames) as native HTML+CSS or SVG
+      *                before the first page markup is written
+      *   image-processor — generates, edits, and prepares requested images and visual assets before implementation
+      *   designer   — optional: produces a visual design direction (layout, colour, typography, spacing),
+      *                generates reference images, and writes an HTML template skeleton (before decomposer and measurer)
+      * worker, coder, styler, reviewer, solver, image-processor, and designer double as the
      * sub-agents of run_subagent (tools.subagents): same prompt, same model settings, own context.
      */
 
@@ -392,6 +394,7 @@ export const defaults = Object.freeze({
             ],
         }),
         'image-processor': r({ model: "gpt-6.1-terra", effort: 'xhigh' }),
+        designer: r({ model: 'gpt-6.1-terra', effort: 'xhigh' }),
     },
     /** Multi-role orchestration used by `ai run`. */
     agent: {
@@ -420,6 +423,15 @@ export const defaults = Object.freeze({
          */
         architect: 'auto',              // off | auto | always
         architectMaxTurns: 8,           // read-only tool turns the architect may spend inspecting the project
+        /**
+         * The designer works after the plan and before the decomposer and measurer.
+         * It produces a visual design direction (layout, colour, typography, spacing),
+         * generates reference images, and writes an HTML template skeleton.
+         * off = never (default); auto = when the task mentions design/layout/mockup or
+         * when DESIGN.md exists in the project root; always = always run.
+         */
+        design: 'off',                  // off | auto | always
+        designerMaxTurns: 16,           // tool turns the designer may spend producing the design direction
         /**
          * The decomposer works after the plan and before the measurements: it splits the references
          * (screenshots, collages, Figma files) into ordered screens and produces one clean

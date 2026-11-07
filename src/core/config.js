@@ -707,7 +707,7 @@ function validateConfig(c, env = liveEnv() ?? process.env) {
     }
     if (!isRecord(c.documentation.roles)) fail('documentation.roles должен быть объектом');
     for (const [name, sources] of Object.entries(c.documentation.roles)) {
-        if (!['planner', 'architect', 'orchestrator', 'worker', 'coder', 'styler', 'iconifier', 'decomposer', 'measurer', 'image-processor'].includes(name)) fail(`documentation.roles.${name}: неизвестная встроенная роль`);
+        if (!['planner', 'architect', 'orchestrator', 'worker', 'coder', 'styler', 'iconifier', 'decomposer', 'measurer', 'image-processor', 'designer'].includes(name)) fail(`documentation.roles.${name}: неизвестная встроенная роль`);
         if (!Array.isArray(sources) || sources.some((source) => typeof source !== 'string' || !Object.hasOwn(c.documentation.sources, source))) {
             fail(`documentation.roles.${name}: список имён из documentation.sources`);
         }
@@ -773,7 +773,7 @@ function validateConfig(c, env = liveEnv() ?? process.env) {
         }
     }
     if (!['team', 'single'].includes(c.agent.mode)) fail('agent.mode: team | single');
-    for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'architectMaxTurns', 'decomposerMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'measurerPasses', 'decoratorMaxTurns', 'maxContextBytes']) {
+    for (const key of ['maxSteps', 'maxReviewRounds', 'orchestratorMaxTurns', 'architectMaxTurns', 'decomposerMaxTurns', 'designerMaxTurns', 'workerMaxTurnsPerStep', 'reviewerMaxTurns', 'measurerMaxTurns', 'measurerPasses', 'decoratorMaxTurns', 'maxContextBytes']) {
         if (!Number.isSafeInteger(c.agent[key]) || c.agent[key] < (key === 'maxReviewRounds' ? 0 : 1)) fail(`agent.${key} должен быть целым числом`);
     }
     if (c.agent.measurerPasses > 2) fail('agent.measurerPasses: 1..2');
@@ -791,6 +791,7 @@ function validateConfig(c, env = liveEnv() ?? process.env) {
     if (!['auto', 'subrefs', 'original'].includes(c.agent.measureSource)) fail('agent.measureSource: auto | subrefs | original');
     if (!['off', 'auto', 'always'].includes(c.agent.decorations)) fail('agent.decorations: off | auto | always');
     if (!['off', 'auto', 'always'].includes(c.agent.architect)) fail('agent.architect: off | auto | always');
+    if (!['off', 'auto', 'always'].includes(c.agent.design)) fail('agent.design: off | auto | always');
     if (c.agent.pipeline != null) {
         if (!Array.isArray(c.agent.pipeline)) fail('agent.pipeline: массив этапов');
         const unknown = c.agent.pipeline.filter((id) => !PIPELINE_STAGE_IDS.includes(id));

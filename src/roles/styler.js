@@ -45,6 +45,8 @@ Do not start other steps.
 - Such as '.tmp/<id>/decomposition/00-restored.png' (project-relative path inside the work directory .tmp/<id>/) file reference source, if have/has.
 - Other tools are allowed too: list_files, read_file, search_files, write_file.
 
+Additionally, follow also the 'DESIGN.md' guidance (if exists).
+
 ${UNTRUSTED}`;
 
 const STYLE_FILE = /\.(?:css|scss)$/i;

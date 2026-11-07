@@ -32,7 +32,7 @@ const CALLER_TOOLS = [
 test('every executor is an existing role, and the registry and the tool enum stay in step', () => {
     // 0.2.0: one registry serves both delegation tools, so it holds the union of the old lists.
     // 2026-10-31: writer, tester, and vision merged away (reviewer covers review, checks, and images).
-    assert.deepEqual(SUBAGENT_NAMES, ['coder', 'styler', 'iconifier', 'worker', 'reviewer', 'solver', 'decomposer', 'measurer', 'decorator', 'image-processor', 'clicker', 'typer', 'encoder']);
+    assert.deepEqual(SUBAGENT_NAMES, ['coder', 'styler', 'iconifier', 'worker', 'reviewer', 'solver', 'decomposer', 'measurer', 'decorator', 'image-processor', 'designer', 'clicker', 'typer', 'encoder']);
     for (const name of SUBAGENT_NAMES) {
         assert.ok(ROLE_INSTRUCTIONS[name], `${name} needs a registered role prompt`);
         assert.ok(defaults.roles[name], `${name} needs role settings so its model is configurable`);

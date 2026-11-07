@@ -1,9 +1,9 @@
 /**
  * @file src/agent/team-text.js
  * @module agent/team-text
- * @purpose Render planner, architect, orchestrator, and measurer JSON as text the worker and reviewer can read.
+ * @purpose Render planner, architect, orchestrator, measurer, and designer JSON as text the worker and reviewer can read.
  * @usedBy agent/team
- * @exports renderPlan, renderFindings, renderMeasurements, renderArchitecture, renderDecorations, bullets
+ * @exports renderPlan, renderFindings, renderMeasurements, renderArchitecture, renderDecorations, renderDesign, bullets
  * @ai.tags team
  * @ai.hint pure
  * @changed 2026-10-27 Added the decorator report with ready snippets and files.
@@ -203,5 +203,59 @@ export function renderDecorations(report, dir) {
         report.conventions?.length ? `Conventions:\n${bullets(report.conventions)}` : '',
         report.notes?.length ? `Notes:\n${bullets(report.notes)}` : '',
         `Decoration file: ${dir}/decorations.json`,
+    ].filter(Boolean).join('\n\n');
+}
+
+/**
+ * Render the designer's design direction as the text stored on the shared context.
+ * `runTeam` calls this when the designer completes and when a saved run resumes.
+ * @param {object} design
+ * @param {string} dir Project-relative work directory such as `.tmp/<id>`.
+ * @returns {string}
+ * @exports
+ * @ai.hint pure
+ */
+export function renderDesign(design, dir) {
+    const layout = design.layout ?? {};
+    const structure = (layout.structure ?? []).map((item) => {
+        const bits = [`- ${item.name} (${item.type || 'other'})`];
+        if (item.purpose) bits.push(`: ${item.purpose}`);
+        if (item.children?.length) bits.push(` · children: ${item.children.join(', ')}`);
+        return bits.join('');
+    }).join('\n');
+    const typography = [
+        ['family', design.typography?.family],
+        ['heading', design.typography?.headingFamily],
+        ['scale', design.typography?.scale],
+        ['weights', design.typography?.weights?.join(', ')],
+        ['cssFamily', design.typography?.cssFamily],
+    ].filter(([, v]) => v).map(([k, v]) => `- ${k}: ${v}`).join('\n');
+    const palette = design.color?.palette;
+    const colors = palette?.colors?.map((c) => `- ${c.name}: ${c.value} (${c.role || 'general'})`).join('\n') || '';
+    const gradients = (design.color?.gradients ?? []).map((g) => `- ${g.name}: ${g.stops?.join(' → ')} (${g.direction || 'to bottom'})`).join('\n');
+    const spacing = [
+        design.spacing?.scale?.length ? `Scale: ${design.spacing.scale.join(', ')} px` : '',
+        design.spacing?.rules?.length ? `Rules:\n${design.spacing.rules.map((r) => `  - ${r}`).join('\n')}` : '',
+    ].filter(Boolean).join('\n');
+    const generated = (design.assets?.generated ?? []).map((a) => `- ${a.path || '(unnamed)'} (${a.size || 'auto'}): ${a.purpose || '(no purpose)'}`).join('\n');
+    const external = (design.assets?.external ?? []).map((a) => `- ${a.url || '(no URL)'}: ${a.purpose || '(no purpose)'}${a.cached ? ' [cached]' : ''}`).join('\n');
+    const template = design.template ?? {};
+    const designMd = design.designMd ?? {};
+    return [
+        design.summary ?? '',
+        structure && `Layout:\n${structure}`,
+        typography && `Typography:\n${typography}`,
+        (colors || gradients) && `Colour:\n${colors}${gradients ? `\nGradients:\n${gradients}` : ''}`,
+        spacing && `Spacing:\n${spacing}`,
+        generated && `Generated assets:\n${generated}`,
+        external && `External resources:\n${external}`,
+        template?.path ? `Template: ${template.path}${template.description ? ` — ${template.description}` : ''}` : '',
+        designMd.read && designMd.tokens?.length ? `DESIGN.md tokens: ${designMd.tokens.join(', ')}` : '',
+        designMd.conflicts?.length ? `DESIGN.md conflicts:\n${designMd.conflicts.map((c) => `  - ${c}`).join('\n')}` : '',
+        design.notes?.length ? `Notes:\n${design.notes.map((n) => `- ${n}`).join('\n')}` : '',
+        `Design JSON: ${dir}/design.json`,
+        `Template: ${dir}/${template.path || '(none)'}`,
+        `Generated assets: ${dir}/design-assets/`,
+        `Design cache: ${dir}/design-cache/`,
     ].filter(Boolean).join('\n\n');
 }
