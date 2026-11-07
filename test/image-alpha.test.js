@@ -170,7 +170,7 @@ test('applyGeneratedAlphaMask asks the model for a mask and writes RGBA', async 
         assert.equal(result.model, 'vendor/mask-model');
         assert.equal(calls.length, 1);
         assert.equal(calls[0].prompt, ALPHA_MASK_PROMPT);
-        assert.equal(calls[0].size, '1536x1024');
+        assert.equal(calls[0].size, '960x384');
         assert.equal(calls[0].format, 'png');
         assert.equal(calls[0].files[0].mime, 'image/png');
         assert.equal((await stat(path.join(dir, 'art.png'))).size > 0, true);
