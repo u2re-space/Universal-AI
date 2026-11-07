@@ -4,10 +4,11 @@
  * @purpose Split a plan into file steps, and store the plan and its progress under `.tmp`.
  * @depends node:path, node:crypto, node:fs/promises, util/text
  * @usedBy agent/team, index.js
- * @exports pathsIn, expandPlan, parsePlanUpdate, applyPlanUpdate, createProgress, recordStep, syncProgress, briefPlan, briefProgress, continuationText, revisionClause, applyFromStep, resolveResumeStep, newWorkId, saveWork, loadWork, findResumable, findLatestResumable
+ * @exports pathsIn, expandPlan, parsePlanUpdate, applyPlanUpdate, createProgress, recordStep, syncProgress, briefPlan, briefProgress, continuationText, revisionClause, applyFromStep, resolveResumeStep, newWorkId, normalizeWorkId, isWorkId, WORK_ID_HINT, saveWork, loadWork, findResumable, findLatestResumable
  * @ai.tags team, plan, tmp
  * @ai.hint io
  * @changed 2026-10-17 Resume continues an interrupted step, phase, and saved turn.
+ * @changed 2026-11-07 A work directory keeps a caller-chosen name (`--id <name>`), not only eight hex characters.
  */
 
 import path from 'node:path';
@@ -18,7 +19,12 @@ import { clipMiddle } from '../util/text.js';
 const PATH_RE = /(?:^|[\s`'"(])((?:[\w.+-]+\/)*[\w.+-]+\.[\w.+-]+)/g;
 const EXT_RE = /^(js|mjs|cjs|ts|tsx|jsx|json|md|css|html|glsl|py|txt|vue|svelte|scss|yml|yaml|toml|rs|go|java|kt|php|rb|sh|ps1|xml|svg)$/;
 const RESUMABLE = new Set(['running', 'incomplete', 'failed', 'budget', 'cancelled', 'max_turns']);
-const ID_RE = /^[0-9a-f]{8}$/;
+/** One `.tmp` work directory name: a random eight hex id or a caller-chosen `--id <name>`. */
+const WORK_ID_RE = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$/;
+/** Names Windows refuses as a file or directory name, whatever the extension. */
+const RESERVED_ID_RE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+/** Wording of every error that rejects a `--id` value. */
+export const WORK_ID_HINT = 'имя каталога .tmp/<имя>: буквы, цифры, «.», «_», «-» до 64 символов, без ведущей и завершающей точки';
 const COMPLEXITY_RANK = Object.freeze({ trivial: 0, normal: 1, complex: 2 });
 
 /**
@@ -66,6 +72,31 @@ export function normalizeTask(task) {
  */
 export function newWorkId() {
     return randomBytes(4).toString('hex');
+}
+
+/**
+ * Trim a caller-chosen work name (`--id <name>`) and check it can be one `.tmp` directory.
+ * Returns null when the name is unusable.
+ * @param {unknown} value
+ * @returns {string | null}
+ * @exports
+ * @ai.hint pure
+ */
+export function normalizeWorkId(value) {
+    const text = String(value ?? '').trim();
+    return isWorkId(text) ? text : null;
+}
+
+/**
+ * True when `value` is exactly one usable `.tmp` work directory name.
+ * No separators, no leading dot, no trailing dot or dash, at most 64 characters.
+ * @param {unknown} value
+ * @returns {boolean}
+ * @exports
+ * @ai.hint pure
+ */
+export function isWorkId(value) {
+    return typeof value === 'string' && WORK_ID_RE.test(value) && !RESERVED_ID_RE.test(value);
 }
 
 /**
@@ -511,6 +542,7 @@ export async function saveWork(root, work) {
  * @ai.hint io
  */
 export async function loadWork(root, id) {
+    if (!isWorkId(id)) throw new Error(`Некорректное имя работы: ${id}`);
     const dir = path.join(root, '.tmp', id);
     const plan = JSON.parse(await readFile(path.join(dir, 'plan.json'), 'utf8'));
     const progress = JSON.parse(await readFile(path.join(dir, 'progress.json'), 'utf8'));
@@ -556,7 +588,8 @@ async function readWorks(root) {
     catch { return []; }
     const works = [];
     for (const id of entries) {
-        if (!ID_RE.test(id)) continue;
+        // A `.tmp` entry is a work only when its name is usable and both files are readable below.
+        if (!isWorkId(id)) continue;
         let progress;
         let plan;
         try {

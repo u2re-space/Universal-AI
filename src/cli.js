@@ -46,6 +46,7 @@ const OPTIONS = {
     reasoning: { type: 'boolean', default: true }, instructions: { type: 'string', short: 'i' },
     image: { type: 'string', multiple: true }, file: { type: 'string', short: 'f', multiple: true }, url: { type: 'string', multiple: true }, detail: { type: 'string' },
     out: { type: 'string', short: 'o' }, session: { type: 'string', short: 's' }, store: { type: 'boolean', default: false },
+    id: { type: 'string' },
     web: { type: 'boolean', default: false }, 'no-web': { type: 'boolean', default: false }, images: { type: 'boolean', default: false }, desktop: { type: 'boolean', default: false }, browser: { type: 'boolean', default: false }, 'browser-engine': { type: 'string' }, 'browser-path': { type: 'string' }, 'unsafe-screenshot': { type: 'boolean', default: false }, tools: { type: 'string' },
     'no-tools': { type: 'boolean', default: false }, agents: { type: 'boolean' }, 'agents-file': { type: 'string' }, approve: { type: 'string' }, yes: { type: 'boolean', short: 'y', default: false },
     cwd: { type: 'string', short: 'C' }, 'max-turns': { type: 'string' }, 'budget-usd': { type: 'string' }, 'budget-tokens': { type: 'string' },

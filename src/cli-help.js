@@ -11,6 +11,7 @@
  * @changed 2026-10-31 Merged roles (writer, tester, vision → reviewer; extractor → encoder; summarizer → orchestrator)
   *   and the `model:role` header format.
  * @changed 2026-11-04 --reasoning-mode and the reasoning.mode limits.
+ * @changed 2026-11-07 --id names the run's .tmp directory.
  */
 export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26)
 
@@ -21,6 +22,7 @@ export const HELP = `ai — CLI-агент на OpenAI Responses API (Node.js 26
   ai gen [landing|site|backend|app] "задача"   то же, что run; первое слово-вид выбирает генерацию
   ai image "описание"               генерация изображения (image_generation)
   ai resume                         последний незавершённый шаг в этом каталоге
+  ai resume --id <имя> ["текст"]    продолжить конкретную работу .tmp/<имя>
   ai resume "что доработать"        продолжить и добавить, исправить или доработать
   ai resume <шаг> ["текст"]         начиная с шага (2 или s02); без номера — с незавершённого
   ai resume <resp_id>               подключиться к фоновому ответу API
@@ -153,6 +155,8 @@ context=false запускает роль на чистом контексте. 
     measure, architect, collect, images, decor, work, iconify, review, outcome, memory. decompose (decomposer) разбирает
      скриншоты на экраны, секции и элементы до замеров и строит для них суб-референсы; measure снимает метрики. После work этап iconify добавляется автоматически
     и пропускается без изменений HTML/JSX/DOM-разметки; review выполняется после интеграции иконок.
+  --id <имя>             имя каталога работы .tmp/<имя> вместо случайных восьми hex (run, gen, resume).
+                         Имя с готовым plan.json занято — запуск остановится; продолжить: ai resume --id <имя>. Такую работу находит и обычный ai resume
   --no-resume            не продолжать незавершённый шаг, фазу и ход из .tmp (по умолчанию тот же текст задачи продолжается с места остановки)
   --route encoder|planner|decisions  куда отдать первый ответ. decisions спрашивает модель решений. Без флага решает метка ответа
   В каталоге Node.js или фронтенда сканер (до ответа, encoder и planner) кладёт в контекст package.json, tsconfig.json или jsconfig.json, import map и найденные по ним файлы. Корневой index.html целиком — если он до 8 КиБ или задача про страницу.

@@ -291,6 +291,51 @@ test('run (team mode): roles use their own models; memory command sees what was 
     assert.equal(jsonLines(stats.stdout).find((l) => l.type === 'memory.stats').memories, 1);
 });
 
+test('run --id names the .tmp work directory; resume --id continues that work', async () => {
+    script = (body) => {
+        const role = body.text?.format?.name ?? 'worker';
+        if (role === 'task_label') return { text: JSON.stringify({ label: 'trivial' }) };
+        if (role === 'plan') return { text: JSON.stringify({ summary: 'Создать cache.txt', complexity: 'trivial', steps: [{ goal: 'Создать cache.txt', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        const outputs = body.input.filter((i) => i.type === 'function_call_output');
+        if (!outputs.length) return { calls: [{ name: 'write_file', arguments: { path: 'cache.txt', content: 'кэш\n', overwrite: true } }] };
+        return { text: 'Файл cache.txt создан.' };
+    };
+    const first = await runCli(['run', 'создай cache.txt', '--approve', 'write', '--no-memory', '--id', 'named-run', '--json']);
+    assert.equal(first.code, 0, first.stderr);
+    assert.equal(jsonLines(first.stdout).find((l) => l.type === 'result').workId, 'named-run');
+    const stored = JSON.parse(await readFile(path.join(work, '.tmp', 'named-run', 'plan.json'), 'utf8'));
+    assert.equal(stored.id, 'named-run');
+
+    // A name whose plan is already on disk is taken, so a second run stops instead of mixing two plans.
+    const again = await runCli(['run', 'создай cache.txt', '--approve', 'write', '--no-memory', '--id', 'named-run']);
+    assert.equal(again.code, 2);
+    assert.match(again.stderr, /\.tmp\/named-run уже лежит план/);
+
+    const outside = await runCli(['run', 'создай cache.txt', '--id', '../outside']);
+    assert.equal(outside.code, 2);
+    assert.match(outside.stderr, /--id:/);
+
+    const single = await runCli(['run', 'создай cache.txt', '--single', '--id', 'named-run']);
+    assert.equal(single.code, 2);
+    assert.match(single.stderr, /в --single работа в \.tmp не ведётся/);
+
+    const missing = await runCli(['resume', '--id', 'never-ran', 'доработай', '--approve', 'write', '--no-memory']);
+    assert.equal(missing.code, 2);
+    assert.match(missing.stderr, /\.tmp\/never-ran нет сохранённой работы/);
+
+    script = (body) => {
+        if (body.text?.format?.name === 'plan') return { text: JSON.stringify({ summary: 'Доработка', complexity: 'trivial', steps: [{ goal: 'Создать cache.txt', details: '', verify: '' }], filesOfInterest: [], searchQueries: [], questionsForCollector: [], acceptanceCriteria: [], needsReview: false, imageNotes: null, risks: [] }) };
+        const outputs = body.input.filter((i) => i.type === 'function_call_output');
+        if (!outputs.length) return { calls: [{ name: 'write_file', arguments: { path: 'cache.txt', content: 'кэш и тест\n', overwrite: true } }] };
+        return { text: 'Файл cache.txt обновлён.' };
+    };
+    const resumed = await runCli(['resume', '--id', 'named-run', 'и добавь тест', '--approve', 'write', '--no-memory']);
+    assert.equal(resumed.code, 0, resumed.stderr);
+    assert.match(resumed.stderr, /Доработка \.tmp\/named-run/);
+    assert.equal(await readFile(path.join(work, 'cache.txt'), 'utf8'), 'кэш и тест\n');
+    assert.equal(JSON.parse(await readFile(path.join(work, '.tmp', 'named-run', 'progress.json'), 'utf8')).id, 'named-run');
+});
+
 test('models and config commands work', async () => {
     const models = await runCli(['models', 'gpt']);
     assert.equal(models.code, 0);

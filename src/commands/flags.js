@@ -2,13 +2,14 @@
  * @file src/commands/flags.js
  * @module commands/flags
  * @purpose Turn CLI flags into configuration overrides. Bad flags throw UsageError (exit code 2).
- * @depends core/config, generate/platform
+ * @depends core/config, generate/platform, agent/pace, agent/pipeline, agent/work-plan
  * @usedBy commands/shared, cli
  * @exports UsageError, overridesFrom
  * @ai.tags cli, config
  * @ai.hint pure
  * @changed 2026-10-26 --role accepts a user-defined role name, --max-effort, and --context.
  * @changed 2026-10-31 The run header shows roles as `model:role`; --role syntax stays `name=model:effort`.
+ * @changed 2026-11-07 --id is checked as a `.tmp` directory name.
  */
 import { APPROVAL_LEVELS, IMAGE_DETAILS, REASONING_EFFORTS, REASONING_SUMMARIES, REASONING_MODES, ROLE_NAMES, CUSTOM_ROLE_NAME } from '../core/config.js';
 import { defaults } from '../core/config-defaults.js';
@@ -16,6 +17,7 @@ import { CONTEXT_LEVELS } from '../openai/model-profiles.js';
 import { PLATFORMS } from '../generate/platform.js';
 import { assertPaceBudget, PACE_QUALITY_MESSAGE, PACE_SPEED_MESSAGE, FINE_QUALITY_FLAGS } from '../agent/pace.js';
 import { PIPELINE_STAGE_IDS } from '../agent/pipeline.js';
+import { WORK_ID_HINT, normalizeWorkId } from '../agent/work-plan.js';
 
 /**
  * Error for invalid arguments or configuration. Command handlers map it to exit code 2.
@@ -221,6 +223,10 @@ export function overridesFrom(values, { command = null } = {}) {
     if (values['stop-after']) {
         const stage = String(values['stop-after']).trim();
         if (!PIPELINE_STAGE_IDS.includes(stage)) throw new UsageError(`--stop-after: неизвестный этап «${stage}». Этапы: ${PIPELINE_STAGE_IDS.join(', ')}`);
+    }
+    // The `.tmp` directory name of this run. run and resume read it; here it is only validated.
+    if (values.id !== undefined && normalizeWorkId(values.id) === null) {
+        throw new UsageError(`--id: ${WORK_ID_HINT}`);
     }
     if (values.orchestrator !== undefined) (o.agent ??= {}).orchestrator = { enabled: values.orchestrator };
     // --coordinator is the retired name of --orchestrator; both enable the unified role.

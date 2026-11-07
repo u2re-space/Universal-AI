@@ -9,8 +9,10 @@
  * @ai.hint io
  * @changed 2026-10-16 Prepared scaffold files are written before the model plans.
  * @changed 2026-10-30 The dependency install announces itself and streams npm output.
+ * @changed 2026-11-07 --id names the run's `.tmp/<id>` directory; `ai resume --id <имя>` continues it.
  */
 import path from 'node:path';
+import { stat } from 'node:fs/promises';
 import { ensureProjectMap } from '../agent/map.js';
 import { createToolset, enabledToolNames } from '../agent/tools.js';
 import { createSubagentRunner } from '../agent/subagents.js';
@@ -26,7 +28,7 @@ import { UsageError, readStdin, resolveTextArg, loadAttachments, composeInstruct
     turnExtender } from './shared.js';
 import { openMcpSources } from '../mcp/session.js';
 import { prepareTeamInvocation } from './team-args.js';
-import { findLatestResumable, resolveResumeStep } from '../agent/work-plan.js';
+import { WORK_ID_HINT, findLatestResumable, loadWork, normalizeWorkId, resolveResumeStep } from '../agent/work-plan.js';
 import { imageTransport } from '../openai/images.js';
 import { formatWorkspace, scanWorkspace } from '../agent/workspace-scan.js';
 import { buildGenerationBrief, writeGenerationManifest } from '../generate/brief.js';
@@ -38,6 +40,19 @@ import { startEncodeHost } from '../encode/host.js';
 import { discoverAgents } from '../core/agents-md.js';
 
 const TEAM_STATUS = { ...STATUS_LABELS, revise: 'ревью не приняло результат', incomplete: 'шаги выполнены не полностью' };
+
+/**
+ * The `--id` value: the name of this run's `.tmp` directory.
+ * @param {object} values Parsed CLI flags.
+ * @returns {string|null}
+ * @ai.hint pure
+ */
+function workIdFlag(values) {
+    if (values.id === undefined) return null;
+    const id = normalizeWorkId(values.id);
+    if (!id) throw new UsageError(`--id: ${WORK_ID_HINT}`);
+    return id;
+}
 
 /**
  * `ai run <task>` — autonomous agent in the working directory.
@@ -54,6 +69,15 @@ export async function run(ctx) {
     const stdinText = await readStdin({ maxBytes: config.limits.maxStdinBytes, stdin: ctx.stdin ?? process.stdin });
     const prepared = await prepareTeamInvocation({ positionals, values, cwd: ctx.cwd, stdinText: stdinText ?? '' });
     let task = prepared.task;
+    // `--id <имя>` names this run's `.tmp/<имя>` directory, so the caller knows where the plan is.
+    const workId = workIdFlag(values);
+    if (workId && config.agent.mode === 'single') {
+        throw new UsageError('--id задаёт каталог .tmp/<имя> командного режима; в --single работа в .tmp не ведётся.');
+    }
+    // A directory that already holds a plan belongs to another run; an empty one is still free.
+    if (workId && await stat(path.join(ctx.cwd, '.tmp', workId, 'plan.json')).catch(() => null)) {
+        throw new UsageError(`В .tmp/${workId} уже лежит план другой работы. Продолжите её: ai resume --id ${workId} "…" — или возьмите другое имя.`);
+    }
     const hasFigmaSource = [...(values.url ?? []), task].some((value) => /https?:\/\/(?:www\.)?figma\.com\//i.test(value));
     if (hasFigmaSource) {
         config.mcp ??= { servers: [] };
@@ -157,7 +181,7 @@ export async function run(ctx) {
     try {
         const ensured = await ensureProjectMap(ctx.cwd);
         if (ensured?.error) renderer.line('warn', `Карта проекта не построена: ${ensured.error.message}`);
-        if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra, seedFiles: prepared.seedFiles, generation: prepared.wantsProfile, referencePaths: stagedRefs.map((item) => item.rel), agentsText, stopAfter: values['stop-after'] ?? null });
+        if (config.agent.mode === 'team') return await runTeamFlow(ctx, { task, parts, level, interactive, store, names, extra, seedFiles: prepared.seedFiles, generation: prepared.wantsProfile, referencePaths: stagedRefs.map((item) => item.rel), agentsText, stopAfter: values['stop-after'] ?? null, workId });
         return await runSingleFlow(ctx, { task, parts, level, interactive, store, names, extra, agentsText });
     } finally {
         await encodeHost?.close();
@@ -228,7 +252,7 @@ async function runSingleFlow(ctx, { task, parts, level, interactive, store, name
  * @returns {Promise<number>}
  * @ai.hint io
  */
-async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, referencePaths = [], agentsText = null, stopAfter = null }) {
+async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra, seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, workId = null, referencePaths = [], agentsText = null, stopAfter = null }) {
     const { config, renderer, values, signal, emit } = ctx;
     const client = createClientFor(config);
     const ledger = createLedgerFor(config);
@@ -239,7 +263,7 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
         client, config, ledger, task, parts, root: ctx.cwd, approvalLevel: level, interactive,
         approve: (request) => renderer.approve(request, { signal }), askUser: interactive ? (q) => renderer.ask(q, { signal }) : null,
         memory: store?.memory ?? null, projectKey: store?.projectKey ?? null, projectName: store?.projectName ?? null,
-        backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles, generation, revision, fromStep, resumeId,
+        backupDir: ctx.backupDir, extraInstructions: extra, emit, signal, seedFiles, generation, revision, fromStep, resumeId, workId,
         processTool: ctx.processTool, encodeHost: ctx.encodeHost ?? null, referencePaths,
         onMaxTurns: turnExtender(renderer, config, signal),
         agentsText, stopAfter,
@@ -301,8 +325,16 @@ async function runTeamFlow(ctx, { task, parts, level, interactive, store, extra,
  */
 export async function resumeLocal(ctx, { revision = '', stepToken = null } = {}) {
     const note = String(revision ?? '').trim();
-    const found = await findLatestResumable(ctx.cwd, { includeDone: Boolean(note) || stepToken != null });
-    if (!found) throw new UsageError('В этом каталоге нет сохранённой работы в .tmp. Сначала запустите ai run или ai gen.');
+    // `--id <имя>` continues that one `.tmp` directory instead of the newest unfinished work.
+    const pinnedId = workIdFlag(ctx.values ?? {});
+    const found = pinnedId
+        ? await loadWork(ctx.cwd, pinnedId).catch(() => null)
+        : await findLatestResumable(ctx.cwd, { includeDone: Boolean(note) || stepToken != null });
+    if (!found) {
+        throw new UsageError(pinnedId
+            ? `В .tmp/${pinnedId} нет сохранённой работы с планом. Сначала: ai run --id ${pinnedId} "…"`
+            : 'В этом каталоге нет сохранённой работы в .tmp. Сначала запустите ai run или ai gen.');
+    }
     const steps = found.plan.steps ?? [];
     const open = found.progress.cursor < steps.length || found.progress.stage === 'review' || found.progress.stage === 'fix';
     if (!open && !note && stepToken == null) {

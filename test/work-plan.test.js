@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import {
-    applyFromStep, applyPlanUpdate, briefPlan, continuationText, createProgress, expandPlan, findLatestResumable, findResumable, loadWork, parsePlanUpdate, pathsIn, recordStep, resolveResumeStep, saveWork,
+    applyFromStep, applyPlanUpdate, briefPlan, continuationText, createProgress, expandPlan, findLatestResumable, findResumable, isWorkId, loadWork, normalizeWorkId, parsePlanUpdate, pathsIn, recordStep, resolveResumeStep, saveWork,
 } from '../src/agent/work-plan.js';
 
 const base = {
@@ -196,6 +196,29 @@ test('findResumable returns the newest unfinished plan for the same task', async
         const latest = await findLatestResumable(root);
         assert.equal(latest.id, 'bbbb2222');
         assert.equal(await findLatestResumable(root, { includeDone: true }).then((work) => work.id), 'bbbb2222');
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test('a caller-chosen work name is kept and stays resumable', async () => {
+    assert.equal(normalizeWorkId('  cache-api  '), 'cache-api');
+    assert.equal(isWorkId('abcd1234'), true);
+    assert.equal(normalizeWorkId('a'.repeat(64)), 'a'.repeat(64));
+    for (const bad of ['', '   ', '../evil', '.hidden', 'run-2.', 'run-', 'a/b', `win${path.sep}path`, 'con', 'AUX', 'a'.repeat(65)]) {
+        assert.equal(normalizeWorkId(bad), null, bad);
+    }
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ai-work-named-'));
+    try {
+        const plan = expandPlan({ ...base, steps: [{ goal: 'кэш', details: '', verify: '' }] });
+        const progress = createProgress({ id: 'cache-api', task: 'добавь кеширование', plan });
+        progress.status = 'incomplete';
+        await saveWork(root, { id: 'cache-api', plan, progress });
+        assert.equal((await findLatestResumable(root)).id, 'cache-api');
+        assert.equal((await findResumable(root, 'добавь   кеширование')).id, 'cache-api');
+        const loaded = await loadWork(root, 'cache-api');
+        assert.equal(loaded.plan.id, 'cache-api');
+        await assert.rejects(() => loadWork(root, '../outside'), /Некорректное имя работы/);
     } finally {
         await rm(root, { recursive: true, force: true });
     }

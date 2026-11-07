@@ -2,18 +2,20 @@
  * @file src/agent/handoff.js
  * @module agent/handoff
  * @purpose Spill an answer into `.tmp` and choose encoder or planner.
- * @depends node:path, node:crypto, node:fs/promises
+ * @depends node:path, node:crypto, node:fs/promises, agent/paths, agent/work-plan
  * @usedBy agent/team, agent/file-commands
  * @exports ANSWER_INSTRUCTIONS, INLINE_BYTES, spillFences, stripRoute, chooseRoute, referenceLine, renderArtifactRef, openHandoff, loadHandoff, seedTextFile, readDirectory, seedDirectory
  * @ai.tags handoff, tmp
  * @ai.hint io
  * @changed 2026-10-16 Load a handoff document when a run resumes.
+ * @changed 2026-11-07 openHandoff takes the caller-chosen `.tmp` name (`--id <name>`).
  */
 
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { NOISY_DIRS, resolveInside } from './paths.js';
+import { isWorkId, normalizeWorkId } from './work-plan.js';
 
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 
@@ -163,20 +165,21 @@ export function renderArtifactRef(artifact, body) {
 }
 
 /**
- * Create `.tmp/<id>/` and an empty handoff document.
+ * Create `.tmp/<id>/` and an empty handoff document. `id` is the caller's name for this run
+ * (`--id <name>`); without it the directory gets a random eight hex id.
  * @param {string} root
- * @param {{ profile?: object | null }} [options]
+ * @param {{ id?: string | null, profile?: object | null }} [options]
  * @returns {Promise<object>}
  * @exports
  * @ai.hint io
  */
-export async function openHandoff(root, { profile = null } = {}) {
-    const id = randomBytes(4).toString('hex');
-    const relDir = `.tmp/${id}`;
-    const dir = path.join(root, '.tmp', id);
+export async function openHandoff(root, { id = null, profile = null } = {}) {
+    const workId = normalizeWorkId(id) ?? randomBytes(4).toString('hex');
+    const relDir = `.tmp/${workId}`;
+    const dir = path.join(root, '.tmp', workId);
     await mkdir(dir, { recursive: true });
     const state = {
-        id, relDir, from: 'operator', to: 'answer', route: null, text: '', raw: null, artifacts: [], commands: [], profile,
+        id: workId, relDir, from: 'operator', to: 'answer', route: null, text: '', raw: null, artifacts: [], commands: [], profile,
     };
     await saveHandoff(root, state);
     return state;
@@ -191,7 +194,7 @@ export async function openHandoff(root, { profile = null } = {}) {
  * @ai.hint io
  */
 export async function loadHandoff(root, id) {
-    if (!/^[0-9a-f]{8}$/.test(String(id ?? ''))) return null;
+    if (!isWorkId(id)) return null;
     try {
         const state = JSON.parse(await readFile(path.join(root, '.tmp', id, 'handoff.json'), 'utf8'));
         if (!state || state.id !== id || !Array.isArray(state.artifacts)) return null;

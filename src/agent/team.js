@@ -12,6 +12,7 @@
  * @changed 2026-10-26 Stages run from a data-driven pipeline; the plan and the config choose the order.
  * @changed 2026-10-31 Merged roles: extract stage runs the encoder, memory stage runs the orchestrator;
  *   the orchestrator keeps every enabled tool (the merged writer role), the writer role is gone.
+ * @changed 2026-11-07 workId pins the run's `.tmp/<id>` directory to a caller-chosen name.
  */
 
 import path from 'node:path';
@@ -45,7 +46,7 @@ import { formatWorkspace, mergeTaskDraft, scanWorkspace } from './workspace-scan
 import { SHELL_TOOL_NAMES, IMAGE_TOOL_NAMES } from './tool-specs.js';
 import { openMcpSources } from '../mcp/session.js';
 import { ANSWER_INSTRUCTIONS, chooseRoute, loadHandoff, openHandoff, readDirectory, saveHandoff, seedDirectory, seedTextFile, spillAnswer } from './handoff.js';
-import { applyFromStep, applyPlanUpdate, briefPlan, briefProgress, continuationText, createProgress, expandPlan, findResumable, loadWork, newWorkId, parsePlanUpdate, pathsIn, recordStep, revisionClause, saveWork, syncProgress } from './work-plan.js';
+import { applyFromStep, applyPlanUpdate, briefPlan, briefProgress, continuationText, createProgress, expandPlan, findResumable, loadWork, newWorkId, normalizeWorkId, parsePlanUpdate, pathsIn, recordStep, revisionClause, saveWork, syncProgress } from './work-plan.js';
 import { neutralPlan, neutralProgress, neutralSession } from './neutral.js';
 import { CommandBatchError, executeFileCommands, FILE_COMMANDS_SCHEMA } from './file-commands.js';
 import { EXTRACT_MAX_BYTES, EXTRACT_MAX_FILES, extractHandoff, hasExtractableArtifacts } from './extract.js';
@@ -160,10 +161,13 @@ export function toolNamesForRole(allNames, role, spec = null) {
 export async function runTeam({
     client, config, ledger, task, parts = [], root, approvalLevel = 'read', interactive = false, approve, askUser = null,
     memory = null, projectKey = null, projectName = null, backupDir = null, extraInstructions = null, emit = () => { }, signal,
-    seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, processTool = null, encodeHost = null,
+    seedFiles = [], generation = false, revision = '', fromStep = null, resumeId = null, workId = null, processTool = null, encodeHost = null,
     onMaxTurns = null, referencePaths = [], agentsText = null, stopAfter = null,
 }) {
     const notify = (event) => { try { emit(event); } catch { /* observer */ } };
+    // `--id <name>` pins this run to one `.tmp` directory. An unusable name is reported and dropped.
+    const pinnedId = workId == null || workId === '' ? null : normalizeWorkId(workId);
+    if (workId && !pinnedId) notify({ type: 'warning', message: `Имя работы «${workId}» не годится как каталог .tmp; выбран случайный id.` });
     const roles = createRoleRunner({ client, config, ledger, emit, signal, root, task });
     const ctx = createSharedContext({ task, root });
     let effectiveAgentsText = agentsText;
@@ -481,9 +485,12 @@ export async function runTeam({
         let plan = null;
         let progress = null;
         let architecture = null;
+        // A pinned `--id` directory is this run's own: it does not pick up an unfinished plan that
+        // merely carries the same task text.
+        const autoResume = !resumeId && !pinnedId && config.agent.resume !== false;
         const resumedWork = resumeId
             ? await loadWork(root, resumeId).catch(() => null)
-            : (config.agent.resume !== false ? await findResumable(root, task) : null);
+            : (autoResume ? await findResumable(root, task) : null);
         if (resumeId && !resumedWork) throw new Error(`План .tmp/${resumeId} не прочитан.`);
         /** Put the short plan and the latest reports into the shared context. Bodies stay in `.tmp`. */
         const publish = () => {
@@ -818,7 +825,7 @@ export async function runTeam({
                 id: 'answer',
                 run: async () => {
                     if (!resumedWork && config.agent.chain !== false) {
-                        handoff = await openHandoff(root);
+                        handoff = await openHandoff(root, { id: pinnedId });
                         for (const file of seedFiles) {
                             const seeded = await seedTextFile({ root, state: handoff, file, maxBytes: config.limits.maxFileReadBytes });
                             if (!seeded) await seedDirectory({ root, state: handoff, file, depth: 2, mode: 'tree' });
@@ -966,7 +973,7 @@ export async function runTeam({
                                 needsReview: false, imageNotes: null, risks: [], fileActions: [], taskMap: [],
                             });
                             const expanded = lists(expandPlan(drafted, { maxSteps: 1, splitFiles: false }));
-                            bind(expanded, createProgress({ id: handoff?.id ?? newWorkId(), task, plan: expanded }));
+                            bind(expanded, createProgress({ id: handoff?.id ?? pinnedId ?? newWorkId(), task, plan: expanded }));
                             await persist('running');
                             showPlan();
                         }
@@ -991,7 +998,7 @@ export async function runTeam({
                         drafted.steps = drafted.steps.slice(0, stepLimit);
                         if (!drafted.steps.length) drafted.steps = [{ goal: task, details: 'Complete the task as described.', verify: 'Re-read the result.', complexity: drafted.complexity === 'trivial' || drafted.complexity === 'complex' || drafted.complexity === 'normal' ? drafted.complexity : 'normal' }];
                         const expanded = lists(expandPlan(drafted, { maxSteps: stepLimit, splitFiles: !generation }));
-                        const id = handoff?.id ?? newWorkId();
+                        const id = handoff?.id ?? pinnedId ?? newWorkId();
                         bind(expanded, createProgress({ id, task, plan: expanded }));
                         // The planner may disagree with the classifier. Its own complexity, and each step's
                         // own complexity, now drive the model rung for every step.
