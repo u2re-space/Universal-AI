@@ -6,6 +6,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import {
+    PORTRAIT_SIZES, SQUARE_SIZES, LANDSCAPE_SIZES,
     IMAGE_SIZES, VECTOR_RATIOS, IMAGE_SIZES_BY_RESOLUTION, imageModelProfile,
     RIVERFLOW, RIVERFLOW_RATIOS, RIVERFLOW_RESOLUTIONS, MIN_IMAGE_PIXELS, MAX_IMAGE_PIXELS, MAX_IMAGE_EDGE, MAX_IMAGE_RATIO,
     GPT_IMAGE_25, GPT_IMAGE_26, PROXY_IMAGE_MODEL, PROXY_IMAGE_EDIT_MODEL, PROXY_VECTOR_MODEL, PROXY_RIVERFLOW_MODEL
@@ -186,15 +187,18 @@ export function getAspectDifference(a, b) {
     return Math.abs(Math.log((a.width / a.height) / (b.width / b.height)));
 }
 
-export function inferResolution({ width, height }) {
+// TODO: add accounting MAX pixels for don't allow overflow (in 2k or 4k)
+export function inferResolution({ width, height }, model = null) {
     const maxSide = Math.max(width, height);
+    const profile = imageModelProfile(model);//model ? imageModelProfile(model) : null;
 
-    if (maxSide <= 512) return '512';
+    if (maxSide <= 512 && (profile?.minPixels <= (512*512) || !profile?.minPixels)) return '512';
     if (maxSide <= 1024) return '1k';
     if (maxSide <= 2048) return '2k';
+    if (maxSide > 2048 && maxSide < 8192) return '4k';
 
     // 4k — максимальный уровень; запросы больше него попадут в 4k.
-    return '4k';
+    return maxSide > 2048 ? '4k' : '1k';
 }
 
 /**
@@ -207,12 +211,12 @@ export function inferResolution({ width, height }) {
  * @returns {string|null}
  * @ai.hint pure
  */
-export function tierFromToken(value) {
+export function tierFromToken(value, model = null) {
     const token = String(value ?? '').trim().toLowerCase();
     if (!token) return null;
     if (token === '512') return '512';
     if (/^\d+k$/.test(token)) return IMAGE_SIZES_BY_RESOLUTION[token] ? token : null;
-    if (/^\d+$/.test(token)) return inferResolution({ width: Number(token), height: Number(token) });
+    if (/^\d+$/.test(token)) return inferResolution({ width: Number(token), height: Number(token) }, model);
     return null;
 }
 
@@ -225,15 +229,16 @@ export function tierFromToken(value) {
  * @returns {string|null}
  * @ai.hint pure
  */
-export function presetImageSize(value) {
+export function presetImageSize(value, resolution = null, model = null) {
     if (IMAGE_SIZES.includes(value)) return value;
-    if (value === 'portrait') return '1024x1536';
-    if (value === 'landscape') return '1536x1024';
-    if (value === 'square') return '1024x1024';
+    if (value === 'portrait') return PORTRAIT_SIZES[resolution || "1k"];
+    if (value === 'landscape') return LANDSCAPE_SIZES[resolution || "1k"];
+    if (value === 'square') return SQUARE_SIZES[resolution || "1k"];
     const parsed = parseImageSize(value);
     if (!parsed) return value;
-    if (parsed.width === parsed.height) return '1024x1024';
-    return parsed.height > parsed.width ? '1024x1536' : '1536x1024';
+    resolution ||= inferResolution(parsed, model) || "1k";
+    if (Math.max(parsed.width / parsed.height, parsed.height / parsed.width) < 1.005) return SQUARE_SIZES[resolution || "1k"];
+    return parsed.height > parsed.width ? PORTRAIT_SIZES[resolution || "1k"] : LANDSCAPE_SIZES[resolution || "1k"];
 }
 
 /**
@@ -252,7 +257,7 @@ export function presetImageSize(value) {
  * @exports
  * @ai.hint pure
  */
-export function normalizeImageSize(size, resolution = null) {
+export function normalizeImageSize(size, resolution = null, model = null) {
     const value = String(size ?? '').trim().toLowerCase();
     if (!value || value === 'auto') return null;
 
@@ -263,15 +268,15 @@ export function normalizeImageSize(size, resolution = null) {
     else if (value === 'square') requested = { width: 1, height: 1 };
     else {
         isOrientationWord = false;
-        requested = parseImageSize(value) || (tierFromToken(value) ? { width: 1, height: 1 } : null);
+        requested = parseImageSize(value) || (tierFromToken(value, model) ? { width: 1, height: 1 } : null);
         // Неизвестное значение оставляем без изменений.
         if (!requested) return value;
     }
 
-    const resolutionKey = tierFromToken(resolution) || tierFromToken(value)
-        || (isOrientationWord ? '1k' : inferResolution(requested));
+    const resolutionKey = tierFromToken(resolution, model) || tierFromToken(value, model)
+        || (isOrientationWord ? '1k' : inferResolution(requested, model));
     const supportedSizes = IMAGE_SIZES_BY_RESOLUTION[resolutionKey];
-    if (!supportedSizes) return presetImageSize(value);
+    if (!supportedSizes) return presetImageSize(value, resolution, model);
 
     const candidates = supportedSizes.map((size) => ({
         size,
@@ -380,10 +385,10 @@ export function imageRequestSize(size, model, resolution = null) {
     }
     // A family that serves tiers keeps the tier token: the gateway reads it as `resolution`, and
     // unfolding `2K` into `2048x2048` would move the request out of the field the model is tuned by.
-    if (caps.resolutionTiers && tierFromToken(value)) return tierFromToken(value).toUpperCase();
+    if (caps.resolutionTiers && tierFromToken(value, model)) return tierFromToken(value, model).toUpperCase();
     // A family without tiers must not be sent a tier frame it does not serve.
-    if (!caps.resolutionTiers && !tierFromToken(resolution)) return presetImageSize(value);
-    return normalizeImageSize(value, resolution);
+    if (!caps.resolutionTiers && !tierFromToken(resolution, model)) return presetImageSize(value, resolution, model);
+    return normalizeImageSize(value, resolution, model);
 }
 
 /**
@@ -404,7 +409,7 @@ export function imageSizeFields(size, model, resolution = null) {
     const value = String(size ?? '').trim().toLowerCase();
     const caps = imageModelProfile(model);
     // An explicitly requested tier is the `resolution` field even when no frame was named.
-    const explicitTier = caps.resolutionTiers ? tierFromToken(resolution) : null;
+    const explicitTier = caps.resolutionTiers ? tierFromToken(resolution, model) : null;
     if (!value || value === 'auto') return explicitTier ? { resolution: explicitTier.toUpperCase() } : {};
     if (caps.resolutionTiers) {
         if (/^\d+\s*x\s*\d+$/.test(value)) return { size: value.replace(/\s+/g, '') };
@@ -417,7 +422,7 @@ export function imageSizeFields(size, model, resolution = null) {
         }
         // A tier named on its own — `512`, `2K`, or the pixel count `2048` — is the `resolution`
         // field, never `size`: a gateway that has no such frame drops the field and answers square.
-        const tier = tierFromToken(value);
+        const tier = tierFromToken(value, model);
         if (tier) return { resolution: tier.toUpperCase() };
     }
     const frame = imageRequestSize(value, model, resolution);
@@ -543,7 +548,7 @@ export function imageSizeAttempts(size, model, resolution = null) {
         const ratio = nearestRiverflowRatio(initial);
         if (ratio && !attempts.includes(ratio)) attempts.push(ratio);
     } else {
-        const preset = presetImageSize(initial);
+        const preset = presetImageSize(initial, resolution, model);
         if (preset && !attempts.includes(preset)) attempts.push(preset);
     }
     if (profile.omitSizeOnReject) attempts.push(null);

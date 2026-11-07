@@ -268,6 +268,27 @@ export const IMAGE_SIZES = Object.freeze(['1024x1024', '1024x1536', '1536x1024']
 export const VECTOR_RATIOS = Object.freeze(['1:1', '4:3', '3:4', '16:9', '9:16', 'auto']);
 
 
+export const PORTRAIT_SIZES = {
+    "512": "384x512",
+    "1k":  "768x1024",
+    "2k": "1536x2048",
+    "4k": "3072x4096"
+}
+
+export const LANDSCAPE_SIZES = {
+    "512": "512x384",
+    "1k": "1024x768",
+    "2k": "2048x1536",
+    "4k": "4096x3072"
+}
+
+export const SQUARE_SIZES = {
+    "512": "512x512",
+    "1k": "1024x1024",
+    "2k": "2048x2048",
+    "4k": "4096x4096"
+}
+
 /**
  * Frame limits of one model, read from its profile. Kept as functions because the call sites ask
  * for a limit by model id; the numbers themselves live in `IMAGE_MODEL_PROFILES`.
